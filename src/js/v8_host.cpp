@@ -1507,6 +1507,11 @@ Error.prepareStackTrace = function(err, frames) {
                                                  [[maybe_unused]] v8::Local<v8::Context> ctx,
                                                  v8::Local<v8::Promise> p, int max_pumps = 2048) {
       using clock = std::chrono::steady_clock;
+      // Drain queued microtasks at least once even if the module promise is
+      // already fulfilled — synchronous top-level code may have queued work
+      // (open() upgradeneeded, setTimeout(0), …) that won't otherwise run if
+      // there is no event loop pump.
+      iso->PerformMicrotaskCheckpoint();
       auto state = p->State();
       int pumps = 0;
       const auto deadline = clock::now() + std::chrono::seconds(1);
