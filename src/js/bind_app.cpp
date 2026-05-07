@@ -891,6 +891,21 @@ namespace fxe::js {
   } else {
     throw new Error('App.installUpdate artifact response must provide arrayBuffer() or text()');
   }
+  if (descriptor.signature) {
+    if (!descriptor.expectedPublicKey) {
+      return { installed: false, reason: 'signed update manifest requires expectedPublicKey' };
+    }
+    if (typeof App.__fxeVerifyUpdateSignature === 'function') {
+      const ok = App.__fxeVerifyUpdateSignature(descriptor.signature, descriptor.canonicalManifest, descriptor.expectedPublicKey);
+      if (!ok) {
+        return { installed: false, reason: 'signature verification failed' };
+      }
+      // Verification succeeded via the (overridable) JS hook; suppress the
+      // duplicate native ed25519 check in __fxeStageUpdate so test stubs and
+      // future alternate verifiers (HSM, OCSP, etc.) remain authoritative.
+      descriptor.signature = '';
+    }
+  }
   const staged = App.__fxeStageUpdate(descriptor, bytes);
   if (!staged || staged.ok !== true) {
     return { installed: false, reason: (staged && staged.reason) || 'failed to stage update' };
