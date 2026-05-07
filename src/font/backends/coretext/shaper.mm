@@ -27,10 +27,17 @@ namespace fxe::font {
       [[nodiscard]] std::vector<ShapeRun> shape(Face& face, std::string_view utf8,
                                                 const ShapeOptions& opts) override {
         std::vector<ShapeRun> out;
-        if (utf8.empty()) return out;
+        auto append_empty = [&]() {
+          ShapeRun r{};
+          r.direction = opts.direction;
+          r.face = &face;
+          out.push_back(std::move(r));
+          return std::move(out);
+        };
+        if (utf8.empty()) return append_empty();
 
         CTFontRef ct = static_cast<CTFontRef>(face.native_handle());
-        if (!ct) return out;
+        if (!ct) return append_empty();
 
         // Apply variations on the face if requested. CoreText handles axes
         // through the Face::set_variations API; the shaper itself is stateless.
@@ -43,7 +50,7 @@ namespace fxe::font {
                                                    reinterpret_cast<const UInt8*>(utf8.data()),
                                                    static_cast<CFIndex>(utf8.size()),
                                                    kCFStringEncodingUTF8, false);
-        if (!text) return out;
+        if (!text) return append_empty();
 
         // Build attributes: just the font for the simple case. Feature flags
         // are encoded as an array of dicts with `kCTFontOpenTypeFeatureTag`/`-Value`.
@@ -85,11 +92,11 @@ namespace fxe::font {
         CFAttributedStringRef attrText = CFAttributedStringCreate(nullptr, text, attrs);
         CFRelease(text);
         CFRelease(attrs);
-        if (!attrText) return out;
+        if (!attrText) return append_empty();
 
         CTLineRef line = CTLineCreateWithAttributedString(attrText);
         CFRelease(attrText);
-        if (!line) return out;
+        if (!line) return append_empty();
 
         CFArrayRef runs = CTLineGetGlyphRuns(line);
         const CFIndex run_count = CFArrayGetCount(runs);
@@ -131,6 +138,18 @@ namespace fxe::font {
           srun.direction = opts.direction;
           srun.face = run_face;
           srun.glyphs.reserve(static_cast<std::size_t>(glyph_count));
+          // CTRun positions are absolute within the parent CTLine, not the
+          // run. For the first run that's harmless (line starts at x=0), but
+          // for subsequent runs (e.g. the emoji run after "Welcome back ")
+          // the first glyph's `pos.x` already encodes ~130px of leading text.
+          // Treating that as an x_offset would push the glyph 130px past the
+          // pen. Subtract the run-local origin so per-glyph offsets stay
+          // relative to the start of THIS run; the renderer is responsible
+          // for advancing pen across runs via the per-glyph `x_advance`.
+          const float run_origin_x =
+              glyph_count > 0 ? static_cast<float>(positions[0].x) : 0.0f;
+          const float run_origin_y =
+              glyph_count > 0 ? static_cast<float>(positions[0].y) : 0.0f;
           for (CFIndex j = 0; j < glyph_count; ++j) {
             ShapedGlyph g{};
             g.glyph_id = glyphs[static_cast<std::size_t>(j)];
@@ -140,14 +159,14 @@ namespace fxe::font {
             float prev_y = 0.0f;
             if (j > 0) {
               const auto& p = positions[static_cast<std::size_t>(j - 1)];
-              prev_x = static_cast<float>(p.x)
+              prev_x = static_cast<float>(p.x) - run_origin_x
                        + static_cast<float>(advances[static_cast<std::size_t>(j - 1)].width);
-              prev_y = static_cast<float>(p.y)
+              prev_y = static_cast<float>(p.y) - run_origin_y
                        + static_cast<float>(advances[static_cast<std::size_t>(j - 1)].height);
             }
             const auto& pos = positions[static_cast<std::size_t>(j)];
-            g.x_offset = static_cast<float>(pos.x) - prev_x;
-            g.y_offset = static_cast<float>(pos.y) - prev_y;
+            g.x_offset = (static_cast<float>(pos.x) - run_origin_x) - prev_x;
+            g.y_offset = (static_cast<float>(pos.y) - run_origin_y) - prev_y;
             g.cluster = static_cast<std::uint32_t>(indices[static_cast<std::size_t>(j)]);
             srun.glyphs.push_back(g);
             srun.total_advance += g.x_advance;
@@ -156,6 +175,7 @@ namespace fxe::font {
         }
 
         CFRelease(line);
+        if (out.empty()) return append_empty();
         return out;
       }
 

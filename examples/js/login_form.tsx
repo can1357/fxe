@@ -32,7 +32,7 @@ const s = StyleSheet.create({
   railWordmark: { height: 34, color: 0xf3ecdeff, fontSize: 28 },
   railBody: { color: 0x9ca8baff, fontSize: 13, lineHeight: 18 },
   railBadge: {
-    width: 78,
+    width: 106,
     height: 26,
     marginTop: 10,
     alignItems: 'center',
@@ -53,8 +53,8 @@ const s = StyleSheet.create({
     borderColor: 0x384255ff,
     backgroundColor: 0x1a2130ff,
   },
-  button: { width: 308, height: 42, marginTop: 8, backgroundColor: 0xd8b66aff },
-  buttonText: { color: 0x17130aff, fontSize: 15 },
+  button: { width: 308, height: 50, marginTop: 10, backgroundColor: 0xd8b66aff },
+  buttonText: { color: 0x17130aff, fontSize: 16 },
   foot: { height: 18, color: 0xd8b66aff, fontSize: 12 },
 });
 
@@ -81,11 +81,11 @@ function LoginForm(): Node {
             A compact native login surface tuned for keyboard-first workflows.
           </Text>
           <View style={s.railBadge}>
-            <Text style={s.railBadgeText}>ENCRYPTED</Text>
+            <Text style={s.railBadgeText}>🔒 ENCRYPTED</Text>
           </View>
         </View>
         <View style={s.panel}>
-          <Text style={s.title}>Welcome back</Text>
+          <Text style={s.title}>Welcome back 👋</Text>
           <Text style={s.copy}>
             Continue to your workspace with the credentials you use every day.
           </Text>
