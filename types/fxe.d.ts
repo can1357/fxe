@@ -2493,13 +2493,43 @@ declare module 'fxe:ipc' {
 // === fxe:ipc end ===
 // === node:net compatibility begin ===
 declare module 'node:net' {
-  export interface Server {
+  export class Socket {
+    write(data: string | ArrayBufferView | ArrayBuffer, callback?: (err?: Error) => void): boolean;
+    end(data?: string | ArrayBufferView | ArrayBuffer): this;
+    destroy(error?: Error): this;
+    connect(path: string, callback?: () => void): this;
+    connect(options: { host?: string; port: number; path?: string }, callback?: () => void): this;
+    on(event: string, listener: (...args: unknown[]) => void): this;
+    once(event: string, listener: (...args: unknown[]) => void): this;
+    off(event: string, listener: (...args: unknown[]) => void): this;
+  }
+  export class Server {
     listen(path: string, callback?: () => void): this;
     listen(options: { path: string }, callback?: () => void): this;
+    listen(port: number, host?: string, callback?: () => void): this;
     address(): { address: string; family: string; port: number } | string | null;
+    close(callback?: () => void): this;
+    on(event: string, listener: (...args: unknown[]) => void): this;
   }
   export function connect(path: string, callback?: () => void): Socket;
+  export function connect(port: number, host?: string, callback?: () => void): Socket;
   export function createConnection(path: string, callback?: () => void): Socket;
+  export function createConnection(port: number, host?: string, callback?: () => void): Socket;
+  export function createServer(connectionListener?: (socket: Socket) => void): Server;
+  export function isIP(input: string): 0 | 4 | 6;
+  export function isIPv4(input: string): boolean;
+  export function isIPv6(input: string): boolean;
+  const _default: {
+    Socket: typeof Socket;
+    Server: typeof Server;
+    connect: typeof connect;
+    createConnection: typeof createConnection;
+    createServer: typeof createServer;
+    isIP: typeof isIP;
+    isIPv4: typeof isIPv4;
+    isIPv6: typeof isIPv6;
+  };
+  export default _default;
 }
 // === node:net compatibility end ===
 // === node:crypto compatibility begin ===

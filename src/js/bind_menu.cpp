@@ -1,5 +1,3 @@
-#define V8_COMPRESS_POINTERS 1
-
 #include "bind_menu.hpp"
 #include "../os/os.hpp"
 

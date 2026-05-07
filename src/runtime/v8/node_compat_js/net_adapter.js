@@ -101,7 +101,7 @@ const errorFrom = (result, prefix) => {
   return err;
 };
 
-export class Socket extends Emitter {
+class Socket extends Emitter {
   constructor(fd = undefined, nativeBacking = undefined) {
     super();
     this._fd = fd;
@@ -183,7 +183,7 @@ export class Socket extends Emitter {
   setKeepAlive() { return this; }
 }
 
-export class Server extends Emitter {
+class Server extends Emitter {
   constructor(connectionListener) {
     super();
     this._fd = undefined;
@@ -236,6 +236,7 @@ export class Server extends Emitter {
     return this;
   }
 }
+export { Socket, Server };
 
 export const createConnection = (...args) => new Socket().connect(...args);
 export const connect = createConnection;

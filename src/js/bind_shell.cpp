@@ -1,5 +1,3 @@
-#define V8_COMPRESS_POINTERS 1
-
 #include "bind_shell.hpp"
 #include "../os/os.hpp"
 #include "runtime/capabilities.hpp"

@@ -619,7 +619,7 @@ namespace fxe::js {
     Local<Object> wrap_key_range(Isolate* iso, Local<Context> ctx, key_range range) {
       auto inst = new_instance_from(iso, ctx, tpl_for(iso).key_range_tpl);
       auto* state = new key_range(std::move(range));
-      inst->SetInternalField(0, make_external<key_range>(iso, state));
+      inst->SetAlignedPointerInInternalField(0, state, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
       p->SetWeak(state, key_range_finalizer, WeakCallbackType::kParameter);
       // Mirror key fields as JS-visible properties.
@@ -643,7 +643,7 @@ namespace fxe::js {
     key_range* unwrap_key_range(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return unwrap_external<key_range>(obj->GetInternalField(0));
+      return static_cast<key_range*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     void key_range_only(const FunctionCallbackInfo<Value>& info) {
@@ -827,7 +827,7 @@ namespace fxe::js {
         st->source.Reset(iso, source);
       if (!transaction.IsEmpty())
         st->transaction.Reset(iso, transaction);
-      inst->SetInternalField(0, make_external<request_state>(iso, st));
+      inst->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
       (void)inst->Set(ctx, s(iso, "result"), Undefined(iso));
       (void)inst->Set(ctx, s(iso, "error"), Null(iso));
       (void)inst->Set(ctx, s(iso, "readyState"), s(iso, "pending"));
@@ -847,7 +847,7 @@ namespace fxe::js {
     request_state* unwrap_request(Local<Object> req) {
       if (req.IsEmpty() || req->InternalFieldCount() < 1)
         return nullptr;
-      return unwrap_external<request_state>(req->GetInternalField(0));
+      return static_cast<request_state*>(req->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     void resolve_request(Isolate* iso, Local<Context> ctx, Local<Object> req,
@@ -941,7 +941,8 @@ namespace fxe::js {
     transaction_state* unwrap_tx(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return unwrap_external<transaction_state>(obj->GetInternalField(0));
+      return static_cast<transaction_state*>(
+          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     bool tx_begin(transaction_state* tx, std::string& err) {
@@ -1005,7 +1006,7 @@ namespace fxe::js {
       st->mode = mode;
       st->self.Reset(iso, inst);
       st->self.SetWeak(st, tx_finalizer, WeakCallbackType::kParameter);
-      inst->SetInternalField(0, make_external<transaction_state>(iso, st));
+      inst->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
       auto names = Array::New(iso, static_cast<int>(store_names.size()));
       for (size_t i = 0; i < store_names.size(); ++i)
         (void)names->Set(ctx, static_cast<uint32_t>(i), s(iso, store_names[i]));
@@ -1046,7 +1047,7 @@ namespace fxe::js {
     store_handle* unwrap_store(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return unwrap_external<store_handle>(obj->GetInternalField(0));
+      return static_cast<store_handle*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     Local<Object> create_object_store_handle(Isolate* iso, Local<Context> ctx,
@@ -1057,7 +1058,7 @@ namespace fxe::js {
       h->db = std::move(db);
       h->tx.Reset(iso, tx_obj);
       h->name = name;
-      inst->SetInternalField(0, make_external<store_handle>(iso, h));
+      inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
       p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
       auto& meta = h->db->stores.at(name);
@@ -1085,7 +1086,7 @@ namespace fxe::js {
       h->name = store;
       h->index_name = index;
       h->is_index = true;
-      inst->SetInternalField(0, make_external<store_handle>(iso, h));
+      inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
       p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
       auto& smeta = h->db->stores.at(store);
@@ -1901,7 +1902,7 @@ namespace fxe::js {
     cursor_state* unwrap_cursor(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return unwrap_external<cursor_state>(obj->GetInternalField(0));
+      return static_cast<cursor_state*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     // Step the cursor; on row, sets the JS-visible key/primaryKey/value props
@@ -2174,7 +2175,7 @@ namespace fxe::js {
       st->index_name = h->index_name;
       st->source.Reset(iso, info.This());
       st->tx.Reset(iso, h->tx.Get(iso));
-      cursor->SetInternalField(0, make_external<cursor_state>(iso, st));
+      cursor->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, cursor);
       p->SetWeak(st, cursor_finalizer, WeakCallbackType::kParameter);
       (void)cursor->Set(ctx, s(iso, "source"), info.This());
@@ -2264,7 +2265,7 @@ namespace fxe::js {
     database_handle* unwrap_database(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return unwrap_external<database_handle>(obj->GetInternalField(0));
+      return static_cast<database_handle*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     Local<Object> create_database_handle(Isolate* iso, Local<Context> ctx,
@@ -2273,7 +2274,7 @@ namespace fxe::js {
       auto* h = new database_handle();
       h->db = db;
       h->db->open_connections += 1;
-      inst->SetInternalField(0, make_external<database_handle>(iso, h));
+      inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
       p->SetWeak(h, database_finalizer, WeakCallbackType::kParameter);
       (void)inst->Set(ctx, s(iso, "name"), s(iso, db->name));
@@ -2712,7 +2713,7 @@ namespace fxe::js {
     // IDBKeyRange constructor (no instances directly; static factories return wrapped).
     auto kr_ctor = FunctionTemplate::New(iso);
     kr_ctor->SetClassName(s(iso, "IDBKeyRange"));
-    kr_ctor->InstanceTemplate()->SetInternalFieldCount(1);
+    kr_ctor->InstanceTemplate()->SetInternalFieldCount(2);
     kr_ctor->PrototypeTemplate()->Set(iso, "includes",
                                       FunctionTemplate::New(iso, key_range_includes));
     kr_ctor->Set(iso, "only", FunctionTemplate::New(iso, key_range_only));
@@ -2725,18 +2726,18 @@ namespace fxe::js {
     // IDBRequest / IDBOpenDBRequest
     auto req_tpl = FunctionTemplate::New(iso);
     req_tpl->SetClassName(s(iso, "IDBRequest"));
-    req_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    req_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     tpl_for(iso).request_tpl.Reset(iso, req_tpl);
     auto open_tpl = FunctionTemplate::New(iso);
     open_tpl->SetClassName(s(iso, "IDBOpenDBRequest"));
-    open_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    open_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     open_tpl->Inherit(req_tpl);
     tpl_for(iso).open_request_tpl.Reset(iso, open_tpl);
 
     // IDBDatabase
     auto db_tpl = FunctionTemplate::New(iso);
     db_tpl->SetClassName(s(iso, "IDBDatabase"));
-    db_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    db_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     db_tpl->PrototypeTemplate()->Set(iso, "createObjectStore",
                                      FunctionTemplate::New(iso, database_create_object_store));
     db_tpl->PrototypeTemplate()->Set(iso, "deleteObjectStore",
@@ -2749,7 +2750,7 @@ namespace fxe::js {
     // IDBTransaction
     auto tx_tpl = FunctionTemplate::New(iso);
     tx_tpl->SetClassName(s(iso, "IDBTransaction"));
-    tx_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    tx_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     tx_tpl->PrototypeTemplate()->Set(iso, "objectStore", FunctionTemplate::New(iso, tx_object_store));
     tx_tpl->PrototypeTemplate()->Set(iso, "commit", FunctionTemplate::New(iso, tx_commit));
     tx_tpl->PrototypeTemplate()->Set(iso, "abort", FunctionTemplate::New(iso, tx_abort));
@@ -2758,7 +2759,7 @@ namespace fxe::js {
     // IDBObjectStore
     auto store_tpl = FunctionTemplate::New(iso);
     store_tpl->SetClassName(s(iso, "IDBObjectStore"));
-    store_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    store_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     store_tpl->PrototypeTemplate()->Set(iso, "put", FunctionTemplate::New(iso, store_put));
     store_tpl->PrototypeTemplate()->Set(iso, "add", FunctionTemplate::New(iso, store_add));
     store_tpl->PrototypeTemplate()->Set(iso, "get", FunctionTemplate::New(iso, store_get));
@@ -2784,7 +2785,7 @@ namespace fxe::js {
     // IDBIndex (subset of object store ops)
     auto idx_tpl = FunctionTemplate::New(iso);
     idx_tpl->SetClassName(s(iso, "IDBIndex"));
-    idx_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    idx_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     idx_tpl->PrototypeTemplate()->Set(iso, "get", FunctionTemplate::New(iso, store_get));
     idx_tpl->PrototypeTemplate()->Set(iso, "getKey", FunctionTemplate::New(iso, store_get_key));
     idx_tpl->PrototypeTemplate()->Set(iso, "getAll", FunctionTemplate::New(iso, store_get_all));
@@ -2800,7 +2801,7 @@ namespace fxe::js {
     // IDBCursor / IDBCursorWithValue
     auto cur_tpl = FunctionTemplate::New(iso);
     cur_tpl->SetClassName(s(iso, "IDBCursor"));
-    cur_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    cur_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     cur_tpl->PrototypeTemplate()->Set(iso, "continue", FunctionTemplate::New(iso, cursor_continue));
     cur_tpl->PrototypeTemplate()->Set(iso, "advance", FunctionTemplate::New(iso, cursor_advance));
     cur_tpl->PrototypeTemplate()->Set(iso, "update", FunctionTemplate::New(iso, cursor_update));
@@ -2809,7 +2810,7 @@ namespace fxe::js {
 
     auto cwv_tpl = FunctionTemplate::New(iso);
     cwv_tpl->SetClassName(s(iso, "IDBCursorWithValue"));
-    cwv_tpl->InstanceTemplate()->SetInternalFieldCount(1);
+    cwv_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     cwv_tpl->Inherit(cur_tpl);
     tpl_for(iso).cursor_with_value_tpl.Reset(iso, cwv_tpl);
 

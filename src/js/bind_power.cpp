@@ -1,5 +1,3 @@
-#define V8_COMPRESS_POINTERS 1
-
 #include "bind_power.hpp"
 #include "../../include/fxe/power.hpp"
 #include "../os/os.hpp"

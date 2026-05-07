@@ -10,8 +10,6 @@
 //   _stream_readable, _stream_transform, _stream_wrap, _stream_writable.
 // - Deferred on unenv until native parity work lands: async_hooks, inspector,
 //   inspector/promises, readline, readline/promises, repl, v8, vm, wasi, zlib.
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
 
 #include "node_compat.hpp"
 #if FXE_HAS_NATIVE_TLS_HTTP2_DEPS

@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // JS bindings for a Node.js-compatible subset of `fs`. Sync variants do the
 // work inline; async variants do the same work and resolve the returned
 // Promise immediately (no thread pool yet — semantics are correct, latency

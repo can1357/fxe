@@ -1,5 +1,3 @@
-#define V8_COMPRESS_POINTERS 1
-
 // JS bindings for the OS dialog shims. Every entry returns a Promise so JS
 // callers can await results uniformly even though the macOS implementation is
 // synchronous-modal under the hood.

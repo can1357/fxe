@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression is enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // Performance.timeline implementation. See bind_performance.hpp.
 //
 // State model: a single process-global `mark_store` keyed by name. Each entry

@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // JS bindings for the `Font` namespace.
 //
 // The engine uses one process-wide default font, but that font now owns a

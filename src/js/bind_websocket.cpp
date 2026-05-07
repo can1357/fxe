@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // JS WebSocket binding.
 //
 // Each `new WebSocket(url, protocols?)` spawns a worker thread inside

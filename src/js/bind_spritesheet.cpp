@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // JS bindings for the `Spritesheet` global. Wraps fxe::spritesheet, retaining
 // shared_ptr refs to source images so an Image.dispose() after add() does not
 // invalidate sheet data.

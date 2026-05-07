@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox-off in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // V8 platform / isolate / context lifecycle and the script entry points.
 //
 // Single isolate per host instance, single thread of execution. Every entry

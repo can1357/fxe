@@ -47,4 +47,8 @@ if(V8_FOUND AND NOT TARGET V8::V8)
             "${V8_LIBBASE_LIBRARY}"
             "${V8_LIBPLATFORM_LIBRARY}"
     )
+    # Match the ABI of the V8 build we link against (brew/vendored both ship
+    # libv8 with pointer compression enabled). Propagated to every consumer so
+    # individual TUs no longer need to redefine V8_COMPRESS_POINTERS.
+    target_compile_definitions(V8::V8 INTERFACE V8_COMPRESS_POINTERS=1)
 endif()

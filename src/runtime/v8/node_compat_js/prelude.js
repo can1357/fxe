@@ -270,7 +270,21 @@
         if (value instanceof ArrayBuffer) return new Buffer(value);
         return new Buffer(value ?? 0);
       }
-      static alloc(size, fill = 0) { const b = new Buffer(size); b.fill(fill); return b; }
+      static alloc(size, fill = 0) {
+        const b = new Buffer(size);
+        if (typeof fill === 'string' && fill.length > 0) {
+          const bytes = utf8Encode(fill);
+          if (bytes.length === 0) return b;
+          for (let i = 0; i < b.length; ++i) b[i] = bytes[i % bytes.length];
+        } else if (Buffer.isBuffer(fill) || ArrayBuffer.isView(fill)) {
+          const bytes = Buffer.isBuffer(fill) ? fill : new Uint8Array(fill.buffer, fill.byteOffset, fill.byteLength);
+          if (bytes.length === 0) return b;
+          for (let i = 0; i < b.length; ++i) b[i] = bytes[i % bytes.length];
+        } else {
+          b.fill(Number(fill) || 0);
+        }
+        return b;
+      }
       static allocUnsafe(size) { return new Buffer(Number(size) || 0); }
       static isBuffer(value) { return value instanceof Buffer; }
       static concat(list, totalLength = undefined) {

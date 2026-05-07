@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox-off in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // Same-isolate IPC bindings implementing the `fxe:ipc` synthetic ES module.
 
 #include "bind_ipc.hpp"

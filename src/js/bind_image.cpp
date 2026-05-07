@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // JS bindings for the `Image` namespace and ImageHandle wrapper. ImageHandle
 // owns RGBA8 pixel data via std::shared_ptr<texture_data>, so handing the
 // underlying buffer to a Spritesheet keeps it alive even after the JS handle

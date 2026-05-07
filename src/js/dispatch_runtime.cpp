@@ -6,8 +6,6 @@
 // that need an active host. The first time a host is constructed, the
 // registration helper runs.
 
-// Match brew V8 ABI: pointer compression + sandbox-off in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
 
 #include "../debug/dispatch.hpp"
 

@@ -1,5 +1,3 @@
-#define V8_COMPRESS_POINTERS 1
-
 // Extras for the JS `App` global. The base `App` (run/quit/windows) is
 // installed in bind_window.cpp. We mutate the live global object in
 // install_app_extras_to() to layer on the OS-shim methods so we don't fight

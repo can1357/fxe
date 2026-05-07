@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 #include "bind_blob.hpp"
 
 #include <fxe/js_bindings.hpp>

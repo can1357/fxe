@@ -1,5 +1,3 @@
-#define V8_COMPRESS_POINTERS 1
-
 // JS Notification class. `new Notification({title, body, icon}).show()`
 // returns a Promise that resolves when the user clicks. `Notification.permission`
 // is always "granted"; requestPermission() resolves to "granted".

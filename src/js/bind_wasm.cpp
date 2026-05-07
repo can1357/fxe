@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // JS bindings to install WebAssembly streaming compilation. V8 already
 // exposes the synchronous WebAssembly.* surface — compile, instantiate,
 // validate, Module, Instance, Memory, Table, Global, CompileError,

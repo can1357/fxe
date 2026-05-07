@@ -1,6 +1,3 @@
-// Match brew V8 ABI: pointer compression + sandbox-off in libv8.dylib.
-#define V8_COMPRESS_POINTERS 1
-
 // JS bindings implementing the `fxe:sqlite` synthetic ES module.
 //
 // Surface (mirrors Bun's `bun:sqlite`):

@@ -1,5 +1,3 @@
-#define V8_COMPRESS_POINTERS 1
-
 #include "bind_global_shortcut.hpp"
 #include "../os/os.hpp"
 
