@@ -482,13 +482,14 @@ namespace {
     for (const auto& node : tree) {
       if (!node.is_object())
         continue;
-      if (!node.contains("type") || !node.at("type").is_string())
-        continue;
-      if (node.at("type").get<std::string>() != "component")
-        continue;
-      if (!node.contains("displayName") || !node.at("displayName").is_string())
-        continue;
-      if (node.at("displayName").get<std::string>() == display_name)
+      if (node.contains("type") && node.at("type").is_string() &&
+          node.at("type").get<std::string>() == "component" && node.contains("displayName") &&
+          node.at("displayName").is_string() &&
+          node.at("displayName").get<std::string>() == display_name) {
+        return true;
+      }
+      if (node.contains("children") && node.at("children").is_array() &&
+          snapshot_has_component(node.at("children"), display_name))
         return true;
     }
     return false;

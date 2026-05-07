@@ -2515,6 +2515,88 @@ namespace fxe::js {
       return st;
     }
 
+    // Deferred open() completion: ensures req.onupgradeneeded / onsuccess /
+    // onerror listeners installed by user code after open() returns are seen
+    // before the upgrade flow fires.
+    struct open_completion {
+      Global<Object> req;
+      std::shared_ptr<database_state> db;
+      int64_t requested_version = 0;
+      bool needs_upgrade = false;
+    };
+
+    void open_completion_callback(void* data) {
+      std::unique_ptr<open_completion> p(static_cast<open_completion*>(data));
+      auto* iso = Isolate::GetCurrent();
+      Isolate::Scope is(iso);
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      Context::Scope cs(ctx);
+      auto req = p->req.Get(iso);
+      if (p->needs_upgrade) {
+        TryCatch tc(iso);
+        std::vector<std::string> empty;
+        auto tx = create_transaction(iso, ctx, p->db, empty, "versionchange");
+        if (tc.HasCaught()) {
+          reject_request(iso, ctx, req, tc.Exception());
+          return;
+        }
+        auto db_obj = create_database_handle(iso, ctx, p->db);
+        (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), tx);
+        sqlite3_stmt* upd = nullptr;
+        sqlite3_prepare_v2(p->db->db, "UPDATE __meta SET user_version=?1", -1, &upd, nullptr);
+        sqlite3_bind_int64(upd, 1, p->requested_version);
+        sqlite3_step(upd);
+        sqlite3_finalize(upd);
+        int64_t old_version = p->db->version;
+        p->db->version = p->requested_version;
+        (void)db_obj->Set(ctx, s(iso, "version"),
+                           Number::New(iso, static_cast<double>(p->requested_version)));
+        auto evt = Object::New(iso);
+        set_str(ctx, evt, "type", "upgradeneeded");
+        (void)evt->Set(ctx, s(iso, "target"), req);
+        (void)evt->Set(ctx, s(iso, "oldVersion"),
+                        Number::New(iso, static_cast<double>(old_version)));
+        (void)evt->Set(ctx, s(iso, "newVersion"),
+                        Number::New(iso, static_cast<double>(p->requested_version)));
+        (void)req->Set(ctx, s(iso, "result"), db_obj);
+        (void)req->Set(ctx, s(iso, "transaction"), tx);
+        invoke_listener(iso, ctx, req, "onupgradeneeded", evt);
+        if (tc.HasCaught()) {
+          // User handler threw; abort the tx and surface the error.
+          auto* tx_st = unwrap_tx(tx);
+          tx_abort_internal(iso, ctx, tx, tx_st);
+          (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), Undefined(iso));
+          reject_request(iso, ctx, req, tc.Exception());
+          return;
+        }
+        auto* tx_st = unwrap_tx(tx);
+        tx_commit_internal(iso, ctx, tx, tx_st);
+        (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), Undefined(iso));
+        if (tx_st && tx_st->errored) {
+          reject_request(iso, ctx, req,
+                         make_dom_error(iso, "AbortError",
+                                        "versionchange transaction aborted"));
+          return;
+        }
+        resolve_request(iso, ctx, req, db_obj);
+      } else {
+        auto db_obj = create_database_handle(iso, ctx, p->db);
+        resolve_request(iso, ctx, req, db_obj);
+      }
+    }
+
+    void schedule_open(Isolate* iso, Local<Object> req,
+                       std::shared_ptr<database_state> db,
+                       int64_t requested_version, bool needs_upgrade) {
+      auto* p = new open_completion();
+      p->req.Reset(iso, req);
+      p->db = std::move(db);
+      p->requested_version = requested_version;
+      p->needs_upgrade = needs_upgrade;
+      iso->EnqueueMicrotask(&open_completion_callback, p);
+    }
+
     void factory_open(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
@@ -2549,46 +2631,8 @@ namespace fxe::js {
         info.GetReturnValue().Set(req);
         return;
       }
-      if (requested_version > db->version) {
-        // Run upgrade synchronously inside a versionchange transaction.
-        std::vector<std::string> empty;
-        auto tx = create_transaction(iso, ctx, db, empty, "versionchange");
-        auto db_obj = create_database_handle(iso, ctx, db);
-        // Stash active tx on db so createObjectStore can find it.
-        (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), tx);
-        // Update version-marked metadata.
-        sqlite3_stmt* upd = nullptr;
-        sqlite3_prepare_v2(db->db, "UPDATE __meta SET user_version=?1", -1, &upd, nullptr);
-        sqlite3_bind_int64(upd, 1, requested_version);
-        sqlite3_step(upd);
-        sqlite3_finalize(upd);
-        int64_t old_version = db->version;
-        db->version = requested_version;
-        (void)db_obj->Set(ctx, s(iso, "version"),
-                           Number::New(iso, static_cast<double>(requested_version)));
-        // Build upgradeneeded event.
-        auto evt = Object::New(iso);
-        set_str(ctx, evt, "type", "upgradeneeded");
-        (void)evt->Set(ctx, s(iso, "target"), req);
-        (void)evt->Set(ctx, s(iso, "oldVersion"),
-                        Number::New(iso, static_cast<double>(old_version)));
-        (void)evt->Set(ctx, s(iso, "newVersion"),
-                        Number::New(iso, static_cast<double>(requested_version)));
-        // Make req.result point at db so the user code's onupgradeneeded handler can
-        // call event.target.result.createObjectStore(...).
-        (void)req->Set(ctx, s(iso, "result"), db_obj);
-        (void)req->Set(ctx, s(iso, "transaction"), tx);
-        invoke_listener(iso, ctx, req, "onupgradeneeded", evt);
-        // Commit the versionchange tx.
-        auto* tx_st = unwrap_tx(tx);
-        tx_commit_internal(iso, ctx, tx, tx_st);
-        // Clear active tx pointer.
-        (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), Undefined(iso));
-        schedule_resolve(iso, req, db_obj);
-      } else {
-        auto db_obj = create_database_handle(iso, ctx, db);
-        schedule_resolve(iso, req, db_obj);
-      }
+      bool needs_upgrade = (requested_version > db->version);
+      schedule_open(iso, req, db, requested_version, needs_upgrade);
       info.GetReturnValue().Set(req);
     }
 
