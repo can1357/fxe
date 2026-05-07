@@ -150,7 +150,7 @@ namespace fxe::font {
       }
 
       [[nodiscard]] Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color,
-                                       Hint /*hint*/) override {
+                                       Hint /*hint*/, float subpixel_x = 0.0f) override {
         Glyph g{};
         if (glyph_id == 0) return g;
         const CGGlyph cg = static_cast<CGGlyph>(glyph_id);
@@ -161,12 +161,20 @@ namespace fxe::font {
         g.advance_x = static_cast<float>(adv.width);
         if (bbox.size.width <= 0 || bbox.size.height <= 0) return g;
 
+        // Clamp `subpixel_x` to [0, 1) — the cache quantises into 4 bins so
+        // anything outside that range is a miscount on the caller's side.
+        if (!std::isfinite(subpixel_x) || subpixel_x < 0.0f) subpixel_x = 0.0f;
+        if (subpixel_x >= 1.0f) subpixel_x -= std::floor(subpixel_x);
+
         // Pad the bbox by 1 pixel on every side to avoid clipping antialiased
-        // edges when the glyph extends slightly outside its reported box.
+        // edges when the glyph extends slightly outside its reported box. We
+        // also widen the right edge by 1 extra pixel so a non-zero
+        // `subpixel_x` shift cannot push fringe pixels past the bitmap.
         const int pad = 1;
         const int x0 = static_cast<int>(std::floor(bbox.origin.x)) - pad;
         const int y0 = static_cast<int>(std::floor(bbox.origin.y)) - pad;
-        const int x1 = static_cast<int>(std::ceil(bbox.origin.x + bbox.size.width)) + pad;
+        const int x1 = static_cast<int>(std::ceil(bbox.origin.x + bbox.size.width)) + pad
+                       + (subpixel_x > 0.0f ? 1 : 0);
         const int y1 = static_cast<int>(std::ceil(bbox.origin.y + bbox.size.height)) + pad;
         const std::uint32_t w = static_cast<std::uint32_t>(std::max(1, x1 - x0));
         const std::uint32_t h = static_cast<std::uint32_t>(std::max(1, y1 - y0));
@@ -198,13 +206,24 @@ namespace fxe::font {
         CGContextSetShouldSmoothFonts(ctx, true);
         CGContextSetAllowsFontSubpixelPositioning(ctx, true);
         CGContextSetShouldSubpixelPositionFonts(ctx, true);
-        CGContextSetAllowsFontSubpixelQuantization(ctx, true);
-        CGContextSetShouldSubpixelQuantizeFonts(ctx, true);
+        // Quantization snaps the drawing position to the nearest pixel (or a
+        // very coarse fraction of one) even when sub-pixel positioning is on,
+        // which collapses the per-bin bitmaps the cache asks for back into
+        // identical renderings. Ghostty turns it off for the same reason —
+        // we own the per-bin position quantisation in `glyph_cache.cpp`, so
+        // CoreText must honour the fractional offset we hand it.
+        CGContextSetAllowsFontSubpixelQuantization(ctx, false);
+        CGContextSetShouldSubpixelQuantizeFonts(ctx, false);
         if (!color_glyph) {
           CGContextSetGrayFillColor(ctx, 1.0, 1.0);
         }
 
-        CGPoint pos{static_cast<CGFloat>(-x0), static_cast<CGFloat>(-y0)};
+        // Bake the requested sub-pixel shift directly into the rendered
+        // bitmap. With quantisation off CoreText preserves the fractional
+        // pen offset, so each of the four bins yields a visibly distinct
+        // hinted glyph — exactly what the cache wants stored.
+        CGPoint pos{static_cast<CGFloat>(-x0) + static_cast<CGFloat>(subpixel_x),
+                    static_cast<CGFloat>(-y0)};
         CTFontDrawGlyphs(font_, &cg, &pos, 1, ctx);
         CGContextRelease(ctx);
 

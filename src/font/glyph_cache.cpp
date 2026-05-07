@@ -43,6 +43,11 @@ namespace fxe::font {
     if (subpixel_x >= 1.0f)
       subpixel_x -= std::floor(subpixel_x);
     const std::uint8_t sub_bin = static_cast<std::uint8_t>(subpixel_x * 4.0f) & 0x3;
+    // Snap the actual sub-pixel offset we hand to the rasteriser to the
+    // centre of the chosen bin so each cache entry is rendered at a
+    // consistent fractional position regardless of which fractional input
+    // landed in it.
+    const float bin_subpixel = static_cast<float>(sub_bin) * 0.25f;
 
     GlyphKey k{};
     k.face_id = face.id();
@@ -54,7 +59,7 @@ namespace fxe::font {
     if (auto it = impl_->cache.find(k); it != impl_->cache.end())
       return it->second;
 
-    Glyph g = face.render_glyph(glyph_id, impl_->mask, impl_->color, hint);
+    Glyph g = face.render_glyph(glyph_id, impl_->mask, impl_->color, hint, bin_subpixel);
     auto [it, _] = impl_->cache.emplace(k, g);
     return it->second;
   }

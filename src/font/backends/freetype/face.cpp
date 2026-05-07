@@ -150,8 +150,8 @@ namespace fxe::font {
         FT_Done_MM_Var(face_->glyph->library, var);
       }
 
-      [[nodiscard]] Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color,
-                                       Hint hint) override {
+      [[nodiscard]] Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color, Hint hint,
+                                       float subpixel_x = 0.0f) override {
         Glyph out{};
         if (glyph_id == 0)
           return out;
@@ -161,6 +161,18 @@ namespace fxe::font {
         const bool color_glyph = has_color();
         if (color_glyph)
           load_flags |= FT_LOAD_COLOR;
+
+        // Sub-pixel positioning: FreeType expresses the pen as a 26.6 fixed-
+        // point delta. Convert the [0, 1) px shift the cache hands us into
+        // 26.6 (× 64) and apply it before loading. Variable fonts and color
+        // emoji ignore this shift; mono-mask faces honour it via the hinter.
+        FT_Vector shift{};
+        if (std::isfinite(subpixel_x) && subpixel_x > 0.0f) {
+          float clamped = subpixel_x;
+          if (clamped >= 1.0f) clamped -= std::floor(clamped);
+          shift.x = static_cast<FT_Pos>(std::lround(clamped * 64.0f));
+        }
+        FT_Set_Transform(face_, nullptr, &shift);
 
         if (FT_Load_Glyph(face_, static_cast<FT_UInt>(glyph_id), load_flags) != 0)
           return out;

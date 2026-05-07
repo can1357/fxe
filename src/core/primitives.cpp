@@ -1338,8 +1338,18 @@ namespace fxe::primitives {
       auto& cache = font::shared_glyph_cache();
       const float inv_dpr = dpr > 0.0f ? 1.0f / dpr : 1.0f;
       for (const auto& sg : run.glyphs) {
-        const float pen_fb_floor = std::floor(pen_fb.x);
-        const float sub_fb = pen_fb.x - pen_fb_floor;
+        // Quantise the current pen position into a (whole-pixel, sub-pixel
+        // bin) pair using round-to-nearest, not floor. The cache stores one
+        // bitmap per quarter-pixel bin; floor would map e.g. pen=5.99 to
+        // (5, bin 3 = 0.75) — which paints 0.24 px to the *left* of where
+        // the glyph actually wants to land. Rounding to the nearest quarter
+        // pixel keeps the per-glyph error bounded by ⅛ px and matches the
+        // approach used by Skia / Ghostty for sub-pixel glyph positioning.
+        const float quarters_f = pen_fb.x * 4.0f;
+        const float quarters_r = std::nearbyint(quarters_f);
+        const float pen_fb_floor = std::floor(quarters_r * 0.25f);
+        const float bin_index = quarters_r - pen_fb_floor * 4.0f; // 0..3
+        const float sub_fb = bin_index * 0.25f;
         const auto& g = cache.lookup(face, sg.glyph_id, sub_fb);
         if (g.width > 0 && g.height > 0) {
           const float quad_fb_x = pen_fb_floor + g.offset_x + sg.x_offset;

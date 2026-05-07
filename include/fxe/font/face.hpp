@@ -78,8 +78,18 @@ namespace fxe::font {
     // Renders glyph `glyph_id` into `atlas` and returns the resulting
     // record. Returns a zero-sized Glyph if rendering failed or the glyph
     // is empty (e.g. space).
+    //
+    // `subpixel_x` is a horizontal sub-pixel offset in pixel units, in
+    // the half-open interval [0, 1). Backends that support sub-pixel
+    // positioning (e.g. CoreText, FreeType with hinting) should bake the
+    // shift into the rasterised bitmap so that drawing the result at an
+    // integer pen position reproduces the requested sub-pixel placement.
+    // Backends that ignore it produce identical output regardless and
+    // simply waste one cache slot per bin — still correct, just less
+    // crisp during shaped text with fractional advances (kerning, etc.).
     [[nodiscard]] virtual Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color,
-                                             Hint hint = Hint::full) = 0;
+                                             Hint hint = Hint::full,
+                                             float subpixel_x = 0.0f) = 0;
 
     // Backend handle. For FT-backed faces this is `FT_Face`; for CT it's
     // `CTFontRef`. Returned as void* so headers stay free of FT/CT.
