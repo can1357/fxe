@@ -68,6 +68,7 @@ namespace fxe::runtime {
       return 0;
     }
     run_pump_callbacks();
+    drain_posted_callbacks();
     const int rc = uv_run(&loop_, UV_RUN_NOWAIT);
     run_microtask_checkpoint();
     return rc;

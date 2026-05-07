@@ -1700,6 +1700,62 @@ namespace fxe::js {
         w->close();
     }
 
+    // Re-entrancy guard for `drive_redraw_now`. Refresh callbacks can fire
+    // while we are already inside the run loop's render pass; we must not
+    // recurse.
+    bool g_redraw_pump_in_progress = false;
+
+    // Pump one full render iteration synchronously. This mirrors the body of
+    // `app_run_loop`'s while(true) without the blocking `wait_events`. Used
+    // as the per-window `redraw_handler` so live resize stays smooth: macOS
+    // Cocoa keeps `glfwWaitEvents` parked inside its modal resize loop, but
+    // it still fires our framebuffer-size + window-refresh callbacks — which
+    // call this directly, so the user sees fresh frames while dragging.
+    template <typename InvokeOnFrame>
+    void drive_redraw_now(Isolate* iso, Local<Context> ctx, InvokeOnFrame&& invoke_on_frame) {
+      if (g_redraw_pump_in_progress)
+        return;
+      auto* h = host_for_isolate(iso);
+      if (!h)
+        return;
+      g_redraw_pump_in_progress = true;
+      struct guard {
+        bool& f;
+        ~guard() {
+          f = false;
+        }
+      } _g{g_redraw_pump_in_progress};
+
+      auto wins = h->windows();
+      for (auto* w : wins)
+        dispatch_pending_events(iso, ctx, w);
+      {
+        TryCatch tc(iso);
+        fxe::js::drain_due_timers(iso);
+        if (tc.HasCaught())
+          tc.Reset();
+      }
+      iso->PerformMicrotaskCheckpoint();
+      {
+        TryCatch tc(iso);
+        fxe::js::drain_animation_frames(iso);
+        if (tc.HasCaught())
+          tc.Reset();
+      }
+      iso->PerformMicrotaskCheckpoint();
+      fxe::js::bind_fetch::pump(iso);
+      fxe::js::bind_websocket::pump(iso);
+      fxe::os::pump_main_thread_dispatches();
+#if FXE_HAS_LIBUV
+      fxe::runtime::pump_nonblocking();
+#endif
+      wins = h->windows();
+      for (auto* w : wins) {
+        if (w->take_redraw_request())
+          (void)invoke_on_frame(w);
+      }
+    }
+
     // Centralised multi-window event loop. Snapshots the host's window
     // registry every iteration so windows opened/closed during a callback are
     // picked up safely. Re-entrant calls (from a second Window.run while the
@@ -1748,12 +1804,16 @@ namespace fxe::js {
       pump_debug_for_isolate(iso);
 
       // Initial paint pass — invoke onFrame for every window whose dirty bit
-      // is set (the freshly-created ones start dirty).
+      // is set (the freshly-created ones start dirty). Also wires the live-
+      // resize redraw handler so refresh callbacks during a Cocoa modal
+      // resize loop drive a real frame instead of dropping silently.
       {
         auto wins = h->windows();
         for (auto* w : wins) {
           if (w->should_close())
             continue;
+          w->set_redraw_handler(
+              [iso, ctx, &invoke_on_frame] { drive_redraw_now(iso, ctx, invoke_on_frame); });
           if (w->take_redraw_request())
             (void)invoke_on_frame(w);
         }
@@ -1780,6 +1840,13 @@ namespace fxe::js {
           for (auto* w : wins)
             w->post_redraw();
 
+        // Ensure newly-created windows pick up the live-resize redraw handler
+        // immediately. set_redraw_handler is idempotent, so re-binding existing
+        // windows costs only a copy.
+        for (auto* w : wins) {
+          w->set_redraw_handler(
+              [iso, ctx, &invoke_on_frame] { drive_redraw_now(iso, ctx, invoke_on_frame); });
+        }
         // Re-snapshot in case windows were closed/created during the wait.
         wins = h->windows();
         for (auto* w : wins)
@@ -1829,6 +1896,11 @@ namespace fxe::js {
           std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
       }
+
+      // Detach the live-resize redraw handler before the captured lambda's
+      // referenced stack frame goes out of scope.
+      for (auto* w : h->windows())
+        w->set_redraw_handler({});
 
       // Drop strong refs the JS bindings stashed for the run loop's lifetime.
       for (auto& [w, hh] : holder_map()) {

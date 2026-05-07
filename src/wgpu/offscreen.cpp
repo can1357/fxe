@@ -412,7 +412,7 @@ namespace fxe {
         ubo_desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         ubo_ = device_.CreateBuffer(&ubo_desc);
 
-        std::array<wgpu::BindGroupLayoutEntry, 7> bgl_entries{};
+        std::array<wgpu::BindGroupLayoutEntry, 8> bgl_entries{};
         bgl_entries[0].binding = 0;
         bgl_entries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
         bgl_entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
@@ -432,6 +432,10 @@ namespace fxe {
         bgl_entries[6].visibility = wgpu::ShaderStage::Fragment;
         bgl_entries[6].texture.sampleType = wgpu::TextureSampleType::Float;
         bgl_entries[6].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        // Nearest sampler dedicated to the font mask page (matches main.wgsl).
+        bgl_entries[7].binding = 7;
+        bgl_entries[7].visibility = wgpu::ShaderStage::Fragment;
+        bgl_entries[7].sampler.type = wgpu::SamplerBindingType::NonFiltering;
         wgpu::BindGroupLayoutDescriptor bgl_desc{};
         bgl_desc.label = "fxe-offscreen-bgl";
         bgl_desc.entryCount = bgl_entries.size();
@@ -446,6 +450,15 @@ namespace fxe {
         sampler_desc.addressModeU = wgpu::AddressMode::ClampToEdge;
         sampler_desc.addressModeV = wgpu::AddressMode::ClampToEdge;
         atlas_sampler_ = device_.CreateSampler(&sampler_desc);
+        // Nearest sampler dedicated to the font mask page (matches main.wgsl @binding(7)).
+        wgpu::SamplerDescriptor mask_desc{};
+        mask_desc.label = "fxe-offscreen-mask-sampler";
+        mask_desc.minFilter = wgpu::FilterMode::Nearest;
+        mask_desc.magFilter = wgpu::FilterMode::Nearest;
+        mask_desc.mipmapFilter = wgpu::MipmapFilterMode::Nearest;
+        mask_desc.addressModeU = wgpu::AddressMode::ClampToEdge;
+        mask_desc.addressModeV = wgpu::AddressMode::ClampToEdge;
+        mask_sampler_ = device_.CreateSampler(&mask_desc);
         create_default_atlas();
         bind_group_ = create_bind_group(ubo_, "fxe-offscreen-bg");
 
@@ -494,7 +507,7 @@ namespace fxe {
       }
 
       wgpu::BindGroup create_bind_group(const wgpu::Buffer& ubo, const char* label) {
-        std::array<wgpu::BindGroupEntry, 7> entries{};
+        std::array<wgpu::BindGroupEntry, 8> entries{};
         entries[0].binding = 0;
         entries[0].buffer = ubo;
         entries[0].size = kUboBytes;
@@ -510,6 +523,8 @@ namespace fxe {
         entries[5].sampler = atlas_sampler_;
         entries[6].binding = 6;
         entries[6].textureView = blur_capture_view_ ? blur_capture_view_ : atlas_view_;
+        entries[7].binding = 7;
+        entries[7].sampler = mask_sampler_;
         wgpu::BindGroupDescriptor bg_desc{};
         bg_desc.label = label;
         bg_desc.layout = bgl_;
@@ -849,6 +864,7 @@ namespace fxe {
       wgpu::Texture atlas_texture_;
       wgpu::TextureView atlas_view_;
       wgpu::Sampler atlas_sampler_;
+      wgpu::Sampler mask_sampler_;
       bool atlas_dirty_ = false;
       texture_id synced_default_atlas_id_ = null_texture;
       u32 synced_default_atlas_w_ = 0;
