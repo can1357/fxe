@@ -88,8 +88,7 @@ namespace fxe::font {
     // simply waste one cache slot per bin — still correct, just less
     // crisp during shaped text with fractional advances (kerning, etc.).
     [[nodiscard]] virtual Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color,
-                                             Hint hint = Hint::full,
-                                             float subpixel_x = 0.0f) = 0;
+                                             Hint hint = Hint::full, float subpixel_x = 0.0f) = 0;
 
     // Backend handle. For FT-backed faces this is `FT_Face`; for CT it's
     // `CTFontRef`. Returned as void* so headers stay free of FT/CT.
@@ -121,7 +120,6 @@ namespace fxe::font {
   // reference to the CTFont so the caller may release theirs after the
   // call. Used internally by the shaper to honour multi-font runs (text
   // mixed with emoji, CJK fallback, etc.).
-  [[nodiscard]] std::unique_ptr<Face> make_face_from_ctfont(void* ct_font_ref,
-                                                           float pixel_size);
+  [[nodiscard]] std::unique_ptr<Face> make_face_from_ctfont(void* ct_font_ref, float pixel_size);
 
 } // namespace fxe::font

@@ -26,6 +26,23 @@ namespace fxe::js {
   inline constexpr u32 TAG_RENDERER = 0x52454E44u;       // 'REND'
   inline constexpr u32 TAG_WINDOW = 0x57494E44u;         // 'WIND'
 
+  // Process-level overrides installed by fxe_run before user code executes.
+  // Bindings apply only fields whose override_* bit is set so programmatic
+  // options remain authoritative unless the runner explicitly requests a cutover.
+  struct runner_render_overrides {
+    bool override_vsync = false;
+    bool vsync = true;
+    bool override_multisample_count = false;
+    u32 multisample_count = 4;
+    bool override_bloom = false;
+    bool enable_bloom = true;
+    bool override_fps = false;
+    double fps = 0.0;
+    bool show_fps_counter = false;
+  };
+
+  void set_runner_render_overrides(const runner_render_overrides& overrides) noexcept;
+  [[nodiscard]] const runner_render_overrides& get_runner_render_overrides() noexcept;
   // Each install_*_template registers a constructor (or namespace) on the supplied
   // isolate-global template. They MUST be idempotent per isolate.
   void install_command_buffer_template(v8::Isolate*, v8::Local<v8::ObjectTemplate> global);

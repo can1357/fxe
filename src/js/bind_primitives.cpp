@@ -13,7 +13,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <v8.h>
 #include <vector>
@@ -844,6 +846,244 @@ namespace fxe::js {
                               primitives::line_cap::butt, depth);
     }
 
+    struct wrapped_text_native {
+      std::vector<std::string> lines;
+      std::vector<u32> starts;
+      float width = 0.0f;
+      float height = 0.0f;
+      float line_height = 0.0f;
+    };
+
+    bool is_ascii(std::string_view text) {
+      return std::all_of(text.begin(), text.end(),
+                         [](unsigned char c) { return c <= static_cast<unsigned char>(0x7f); });
+    }
+
+    bool is_ascii_space(char c) {
+      return c == ' ' || c == '\f' || c == '\n' || c == '\r' || c == '\t' || c == '\v';
+    }
+
+    float measured_text_width(std::string_view text, float pt, float letter_spacing) {
+      if (text.empty())
+        return 0.0f;
+      auto v = primitives::calc_text(std::string(text), get_font_info(), pt);
+      return v.x + std::max(0.0f, static_cast<float>(text.size() - 1) * letter_spacing);
+    }
+
+    void push_wrapped_line(wrapped_text_native& out, std::string line, u32 start, float pt,
+                           float letter_spacing) {
+      out.width = std::max(out.width, measured_text_width(line, pt, letter_spacing));
+      out.starts.push_back(start);
+      out.lines.push_back(std::move(line));
+    }
+
+    std::vector<std::string> break_long_word_native(std::string_view word, float pt,
+                                                    float letter_spacing, float limit) {
+      std::vector<std::string> out;
+      std::string buffer;
+      for (char ch : word) {
+        std::string next = buffer;
+        next.push_back(ch);
+        if (measured_text_width(next, pt, letter_spacing) <= limit + 0.5f || buffer.empty()) {
+          buffer = std::move(next);
+        } else {
+          out.push_back(std::move(buffer));
+          buffer.assign(1, ch);
+        }
+      }
+      if (!buffer.empty())
+        out.push_back(std::move(buffer));
+      return out;
+    }
+
+    wrapped_text_native wrap_text_native(std::string_view text, float pt, float letter_spacing,
+                                         float max_width, float line_height, bool break_words) {
+      wrapped_text_native out;
+      const bool constrained = std::isfinite(max_width) && max_width > 0.0f;
+      const float limit = constrained ? max_width : std::numeric_limits<float>::infinity();
+      const std::string probe = text.empty() ? std::string("M") : std::string(text);
+      const auto base = primitives::calc_text(probe, get_font_info(), pt);
+      out.line_height = std::isnan(line_height) ? base.y : line_height;
+      if (text.empty()) {
+        push_wrapped_line(out, "", 0, pt, letter_spacing);
+        out.height = out.line_height;
+        return out;
+      }
+
+      usize paragraph_start = 0;
+      while (paragraph_start <= text.size()) {
+        usize paragraph_end = paragraph_start;
+        while (paragraph_end < text.size() && text[paragraph_end] != '\n')
+          ++paragraph_end;
+        const std::string_view paragraph =
+            text.substr(paragraph_start, paragraph_end - paragraph_start);
+        if (paragraph.empty()) {
+          push_wrapped_line(out, "", static_cast<u32>(paragraph_start), pt, letter_spacing);
+        } else if (!constrained) {
+          push_wrapped_line(out, std::string(paragraph), static_cast<u32>(paragraph_start), pt,
+                            letter_spacing);
+        } else {
+          std::string current;
+          usize current_start = paragraph_start;
+          usize i = 0;
+          while (i < paragraph.size()) {
+            while (i < paragraph.size() && is_ascii_space(paragraph[i]))
+              ++i;
+            if (i >= paragraph.size())
+              break;
+            const usize word_begin = i;
+            while (i < paragraph.size() && !is_ascii_space(paragraph[i]))
+              ++i;
+            std::string word(paragraph.substr(word_begin, i - word_begin));
+            const usize word_start = paragraph_start + word_begin;
+            const std::string candidate = current.empty() ? word : current + " " + word;
+            if (measured_text_width(candidate, pt, letter_spacing) <= limit + 0.5f) {
+              if (current.empty())
+                current_start = word_start;
+              current = candidate;
+              continue;
+            }
+            if (!current.empty()) {
+              push_wrapped_line(out, current, static_cast<u32>(current_start), pt, letter_spacing);
+              current.clear();
+            }
+            if (break_words && measured_text_width(word, pt, letter_spacing) > limit + 0.5f &&
+                word.size() > 1) {
+              auto pieces = break_long_word_native(word, pt, letter_spacing, limit);
+              usize piece_start = word_start;
+              for (usize p = 0; p + 1 < pieces.size(); ++p) {
+                push_wrapped_line(out, pieces[p], static_cast<u32>(piece_start), pt,
+                                  letter_spacing);
+                piece_start += pieces[p].size();
+              }
+              word = pieces.empty() ? std::string{} : pieces.back();
+              current_start = piece_start;
+            } else {
+              current_start = word_start;
+            }
+            current = std::move(word);
+          }
+          if (!current.empty()) {
+            push_wrapped_line(out, current, static_cast<u32>(current_start), pt, letter_spacing);
+          } else if (out.lines.empty()) {
+            push_wrapped_line(out, "", static_cast<u32>(paragraph_start), pt, letter_spacing);
+          }
+        }
+        if (paragraph_end == text.size())
+          break;
+        paragraph_start = paragraph_end + 1;
+      }
+      if (out.lines.empty())
+        push_wrapped_line(out, "", 0, pt, letter_spacing);
+      out.height = out.line_height * static_cast<float>(out.lines.size());
+      return out;
+    }
+
+    Local<Object> wrapped_text_to_object(Isolate* iso, Local<Context> ctx,
+                                         const wrapped_text_native& wrapped) {
+      auto obj = Object::New(iso);
+      auto lines = Array::New(iso, static_cast<int>(wrapped.lines.size()));
+      for (usize i = 0; i < wrapped.lines.size(); ++i) {
+        (void)lines->Set(ctx, static_cast<u32>(i),
+                         String::NewFromUtf8(iso, wrapped.lines[i].c_str(), NewStringType::kNormal,
+                                             static_cast<int>(wrapped.lines[i].size()))
+                             .ToLocalChecked());
+      }
+      auto starts = Array::New(iso, static_cast<int>(wrapped.starts.size()));
+      for (usize i = 0; i < wrapped.starts.size(); ++i) {
+        (void)starts->Set(ctx, static_cast<u32>(i),
+                          Integer::NewFromUnsigned(iso, wrapped.starts[i]));
+      }
+      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "lines"), lines);
+      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "width"),
+                     Number::New(iso, static_cast<double>(wrapped.width)));
+      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "height"),
+                     Number::New(iso, static_cast<double>(wrapped.height)));
+      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "lineHeight"),
+                     Number::New(iso, static_cast<double>(wrapped.line_height)));
+      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "lineStartIndices"), starts);
+      return obj;
+    }
+
+    void p_wrapTextNative(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      const auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      if (!is_ascii(text)) {
+        info.GetReturnValue().Set(Null(iso));
+        return;
+      }
+      const float pt = info.Length() >= 2 ? float(num(ctx, info[1], 16.0)) : 16.0f;
+      const float letter_spacing = info.Length() >= 3 ? float(num(ctx, info[2], 0.0)) : 0.0f;
+      const float max_width =
+          info.Length() >= 4 ? float(num(ctx, info[3], std::numeric_limits<double>::infinity()))
+                             : std::numeric_limits<float>::infinity();
+      const float line_height = info.Length() >= 5 && info[4]->IsNumber()
+                                    ? float(num(ctx, info[4]))
+                                    : std::numeric_limits<float>::quiet_NaN();
+      const bool break_words = info.Length() >= 6 && info[5]->BooleanValue(iso);
+      const auto wrapped =
+          wrap_text_native(text, pt, letter_spacing, max_width, line_height, break_words);
+      info.GetReturnValue().Set(wrapped_text_to_object(iso, ctx, wrapped));
+    }
+
+    void p_xAtGlyphIndexNative(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      const auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      if (!is_ascii(text)) {
+        info.GetReturnValue().Set(Null(iso));
+        return;
+      }
+      const float pt = info.Length() >= 2 ? float(num(ctx, info[1], 16.0)) : 16.0f;
+      const float letter_spacing = info.Length() >= 3 ? float(num(ctx, info[2], 0.0)) : 0.0f;
+      const double idx_value = info.Length() >= 4 ? num(ctx, info[3], 0.0) : 0.0;
+      const auto clamped = static_cast<usize>(
+          std::max(0.0, std::min(std::trunc(idx_value), static_cast<double>(text.size()))));
+      const float x =
+          measured_text_width(std::string_view(text).substr(0, clamped), pt, letter_spacing);
+      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(x)));
+    }
+
+    void p_glyphIndexAtNative(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      const auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      if (!is_ascii(text)) {
+        info.GetReturnValue().Set(Null(iso));
+        return;
+      }
+      const float pt = info.Length() >= 2 ? float(num(ctx, info[1], 16.0)) : 16.0f;
+      const float letter_spacing = info.Length() >= 3 ? float(num(ctx, info[2], 0.0)) : 0.0f;
+      const double x = info.Length() >= 4 ? num(ctx, info[3], 0.0) : 0.0;
+      if (text.empty() || x <= 0.0) {
+        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, 0));
+        return;
+      }
+      if (!std::isfinite(x)) {
+        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, static_cast<u32>(text.size())));
+        return;
+      }
+      usize lo = 0;
+      usize hi = text.size();
+      while (lo < hi) {
+        const usize mid = (lo + hi) / 2;
+        const float left =
+            measured_text_width(std::string_view(text).substr(0, mid), pt, letter_spacing);
+        const float right =
+            measured_text_width(std::string_view(text).substr(0, mid + 1), pt, letter_spacing);
+        const double boundary = (static_cast<double>(left) + static_cast<double>(right)) / 2.0;
+        if (x < boundary)
+          hi = mid;
+        else
+          lo = mid + 1;
+      }
+      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, static_cast<u32>(lo)));
+    }
+
     void p_calcText(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -1172,6 +1412,9 @@ namespace fxe::js {
     P("drawRectRounded", p_drawRectRounded);
     P("drawText", p_drawText);
     P("calcText", p_calcText);
+    P("wrapTextNative", p_wrapTextNative);
+    P("xAtGlyphIndexNative", p_xAtGlyphIndexNative);
+    P("glyphIndexAtNative", p_glyphIndexAtNative);
     P("linearGradient", p_linearGradient);
     P("radialGradient", p_radialGradient);
     P("conicGradient", p_conicGradient);

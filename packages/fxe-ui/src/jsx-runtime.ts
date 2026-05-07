@@ -101,6 +101,7 @@ function createElement<P extends ElementProps>(
       const classType = type as unknown as ClassComponentType<P>;
       return {
         type: 'component',
+        componentType: type,
         render: (raw: unknown) => renderClassComponent(classType, raw as P),
         props: componentProps,
         displayName: type.name || 'JSXClassComponent',
@@ -110,6 +111,7 @@ function createElement<P extends ElementProps>(
     const functionType = type as FunctionComponentType<P>;
     return {
       type: 'component',
+      componentType: type,
       render: (raw: unknown) => functionType(raw as P),
       props: componentProps,
       displayName: type.name || 'JSXComponent',

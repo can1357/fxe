@@ -6,7 +6,6 @@
 // that need an active host. The first time a host is constructed, the
 // registration helper runs.
 
-
 #include "../debug/dispatch.hpp"
 
 #include <fxe/debug.hpp>
@@ -194,9 +193,10 @@ namespace fxe::js {
       json out{json::object()};
       try {
         out["profile"] = json::parse(result.profile_json);
-      } catch (const nlohmann::json::parse_error&) {
-        throw dispatch_error{err_code::internal, "CPU profile serialization returned invalid JSON",
-                             ""};
+      } catch (const std::exception& e) {
+        throw dispatch_error{
+            err_code::internal,
+            std::string("CPU profile serialization returned invalid JSON: ") + e.what(), ""};
       }
       return out;
     }

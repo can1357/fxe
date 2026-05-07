@@ -110,7 +110,9 @@ if(NOT FXE_MINIAUDIO_INCLUDE_DIR)
     FetchContent_MakeAvailable(miniaudio)
     set(FXE_MINIAUDIO_INCLUDE_DIR
         "${miniaudio_SOURCE_DIR}"
-        CACHE PATH "miniaudio include directory" FORCE
+        CACHE PATH
+        "miniaudio include directory"
+        FORCE
     )
 endif()
 if(NOT EXISTS "${FXE_MINIAUDIO_INCLUDE_DIR}/miniaudio.h")
@@ -183,7 +185,8 @@ if(NOT DEFINED FXE_FONT_BACKEND OR FXE_FONT_BACKEND STREQUAL "")
     endif()
     set(FXE_FONT_BACKEND
         "${_fxe_font_default}"
-        CACHE STRING "Font backend (one of: ${_FXE_FONT_BACKENDS})"
+        CACHE STRING
+        "Font backend (one of: ${_FXE_FONT_BACKENDS})"
     )
 endif()
 set_property(CACHE FXE_FONT_BACKEND PROPERTY STRINGS ${_FXE_FONT_BACKENDS})

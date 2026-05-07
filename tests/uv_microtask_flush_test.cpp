@@ -131,6 +131,65 @@ namespace {
 
     isolate->Dispose();
   }
+
+  void test_posted_callback_flushes_v8_microtasks_in_same_pump() {
+    std::size_t checkpoint_id = 0;
+
+    auto allocator = std::unique_ptr<v8::ArrayBuffer::Allocator>(
+        v8::ArrayBuffer::Allocator::NewDefaultAllocator());
+    v8::Isolate::CreateParams params;
+    params.array_buffer_allocator = allocator.get();
+    auto* isolate = v8::Isolate::New(params);
+
+    {
+      v8::Isolate::Scope isolate_scope(isolate);
+      v8::HandleScope handle_scope(isolate);
+      auto ctx = v8::Context::New(isolate);
+      v8::Context::Scope context_scope(ctx);
+      v8::Global<v8::Context> context_global(isolate, ctx);
+
+      checkpoint_id = fxe::runtime::uv_loop_runtime::instance().register_microtask_checkpoint(
+          [isolate, &context_global] {
+            v8::Isolate::Scope isolate_scope(isolate);
+            v8::HandleScope handle_scope(isolate);
+            auto local_ctx = context_global.Get(isolate);
+            v8::Context::Scope context_scope(local_ctx);
+            isolate->PerformMicrotaskCheckpoint();
+          });
+      CHECK(checkpoint_id != 0);
+
+      auto resolver = v8::Promise::Resolver::New(ctx).ToLocalChecked();
+      v8::Global<v8::Promise::Resolver> resolver_global(isolate, resolver);
+      CHECK(ctx->Global()
+                ->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "p"), resolver->GetPromise())
+                .FromMaybe(false));
+
+      auto source = v8::String::NewFromUtf8Literal(
+          isolate, "globalThis.thenRan = false; p.then(() => { globalThis.thenRan = true; });");
+      auto script = v8::Script::Compile(ctx, source).ToLocalChecked();
+      CHECK(!script->Run(ctx).IsEmpty());
+      CHECK(!global_bool(isolate, ctx, "thenRan"));
+
+      CHECK(fxe::runtime::uv_loop_runtime::instance().try_post(
+          [isolate, &context_global, &resolver_global] {
+            v8::Isolate::Scope isolate_scope(isolate);
+            v8::HandleScope handle_scope(isolate);
+            auto local_ctx = context_global.Get(isolate);
+            v8::Context::Scope context_scope(local_ctx);
+            auto local_resolver = resolver_global.Get(isolate);
+            CHECK(local_resolver->Resolve(local_ctx, v8::True(isolate)).FromMaybe(false));
+          }));
+
+      CHECK(fxe::runtime::uv_loop_runtime::instance().pump_nowait() >= 0);
+      CHECK(global_bool(isolate, ctx, "thenRan"));
+
+      fxe::runtime::uv_loop_runtime::instance().unregister_microtask_checkpoint(checkpoint_id);
+      resolver_global.Reset();
+      context_global.Reset();
+    }
+
+    isolate->Dispose();
+  }
 #else
   void test_no_libuv_stub() {
     CHECK(fxe::runtime::default_loop() == nullptr);
@@ -143,6 +202,7 @@ int main(int argc, char** argv) {
 
 #if FXE_HAS_LIBUV
   test_libuv_timer_flushes_v8_microtasks_in_same_pump();
+  test_posted_callback_flushes_v8_microtasks_in_same_pump();
   fxe::runtime::shutdown_loop();
 #else
   test_no_libuv_stub();

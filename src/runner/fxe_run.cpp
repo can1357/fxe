@@ -2,7 +2,9 @@
 //
 // Usage:
 //   fxe_run [--debug[=PORT]] [--debug-host=ADDR] [--debug-pause]
-//           [--debug-keepalive] [--screenshot[=PATH]] [--screenshot-delay=MS]
+//           [--debug-keepalive] [--vsync|--no-vsync] [--fps-limit=N]
+//           [--msaa=N] [--bloom|--no-bloom] [--show-fps]
+//           [--screenshot[=PATH]] [--screenshot-delay=MS]
 //           [--screenshot-frames=N] [--screenshot-size=WxH]
 //           [--screenshot-format=png|jpeg] [--screenshot-quality=N]
 //           [--screenshot-stay] <script.js> [more.js ...]
@@ -15,6 +17,15 @@
 // --debug-keepalive    After the script ends, keep the debug server up so a
 //                      client can keep poking the runtime.
 //
+//
+// --vsync / --no-vsync  Override Renderer(..., { vsync }) for every renderer
+//                       created by the script.
+// --fps-limit=N         Override Window.run/App.run fps. N <= 0 forces the
+//                       loop to stay event-driven.
+// --msaa=N              Override Renderer multisampleCount (0/1 disable MSAA).
+// --bloom / --no-bloom  Override Renderer enableBloom.
+// --show-fps            Draw a small top-left FPS counter before each
+//                       Renderer.endFrame().
 // --screenshot[=PATH]  Render the script, capture the framebuffer once a
 //                      frame has been presented, write it to PATH (default
 //                      screenshot.png), then close the window so the script
@@ -49,6 +60,7 @@
 //                    location baked into FXE_V8_ICUDTL_PATH.
 
 #include <fxe/debug.hpp>
+#include <fxe/js_bindings.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_host.hpp>
@@ -57,8 +69,8 @@
 #include "../audio/audio.hpp"
 #include "../debug/screenshot.hpp"
 
-#include "../runtime/bundle_loader.hpp"
 #include "../js/bind_process.hpp"
+#include "../runtime/bundle_loader.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -66,6 +78,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -100,11 +113,12 @@ namespace {
   void usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [--debug[=PORT]] [--debug-host=ADDR] [--debug-pause]\n"
-                 "          [--debug-keepalive] [--screenshot[=PATH]]\n"
-                 "          [--screenshot-delay=MS] [--screenshot-frames=N]\n"
-                 "          [--screenshot-size=WxH] [--screenshot-format=png|jpeg]\n"
-                 "          [--screenshot-quality=N] [--screenshot-stay]\n"
-                 "          <script.js> [more.js ...]\n"
+                 "          [--debug-keepalive] [--vsync|--no-vsync] [--fps-limit=N]\n"
+                 "          [--msaa=N] [--bloom|--no-bloom] [--show-fps]\n"
+                 "          [--screenshot[=PATH]] [--screenshot-delay=MS]\n"
+                 "          [--screenshot-frames=N] [--screenshot-size=WxH]\n"
+                 "          [--screenshot-format=png|jpeg] [--screenshot-quality=N]\n"
+                 "          [--screenshot-stay] <script.js> [more.js ...]\n"
                  "\n"
                  "  Runs the supplied JavaScript files through fxe's embedded V8.\n"
                  "  Use `import { Window, Renderer, Primitives } from 'fxe';`\n"
@@ -115,6 +129,14 @@ namespace {
                  "  --debug-host=ADDR      Bind address (default 127.0.0.1).\n"
                  "  --debug-pause          Pause before the first instruction.\n"
                  "  --debug-keepalive      Keep the server alive after script exit.\n"
+                 "\n"
+                 "  --vsync / --no-vsync  Override Renderer vsync for all renderers.\n"
+                 "  --fps-limit=N         Override Window.run/App.run cadence.\n"
+                 "                          N <= 0 leaves the loop event-driven.\n"
+                 "  --msaa=N              Override Renderer multisampleCount.\n"
+                 "                          Use 0 or 1 to disable MSAA.\n"
+                 "  --bloom / --no-bloom  Override Renderer enableBloom.\n"
+                 "  --show-fps            Draw a top-left FPS counter overlay.\n"
                  "\n"
                  "  --watch                Watch the entry script's directory and\n"
                  "                          re-eval changed .ts/.js/.json modules.\n"
@@ -157,6 +179,8 @@ namespace {
     bool screenshot_exit_after = true; // close window once captured
     bool show_usage = false;
     bool watch = false;
+
+    fxe::js::runner_render_overrides render_overrides;
   };
 
   bool starts_with(std::string_view s, std::string_view p) {
@@ -184,6 +208,34 @@ namespace {
         o.debug_pause = true;
       } else if (a == "--debug-keepalive") {
         o.debug_keepalive = true;
+      } else if (a == "--vsync") {
+        o.render_overrides.override_vsync = true;
+        o.render_overrides.vsync = true;
+      } else if (a == "--no-vsync") {
+        o.render_overrides.override_vsync = true;
+        o.render_overrides.vsync = false;
+      } else if (starts_with(a, "--fps-limit=")) {
+        o.render_overrides.override_fps = true;
+        o.render_overrides.fps = std::stod(std::string(a.substr(12)));
+      } else if (starts_with(a, "--fps=")) {
+        o.render_overrides.override_fps = true;
+        o.render_overrides.fps = std::stod(std::string(a.substr(6)));
+      } else if (starts_with(a, "--msaa=")) {
+        o.render_overrides.override_multisample_count = true;
+        o.render_overrides.multisample_count =
+            static_cast<u32>(std::stoul(std::string(a.substr(7))));
+      } else if (starts_with(a, "--samples=")) {
+        o.render_overrides.override_multisample_count = true;
+        o.render_overrides.multisample_count =
+            static_cast<u32>(std::stoul(std::string(a.substr(10))));
+      } else if (a == "--bloom") {
+        o.render_overrides.override_bloom = true;
+        o.render_overrides.enable_bloom = true;
+      } else if (a == "--no-bloom") {
+        o.render_overrides.override_bloom = true;
+        o.render_overrides.enable_bloom = false;
+      } else if (a == "--show-fps") {
+        o.render_overrides.show_fps_counter = true;
       } else if (a == "--watch") {
         o.watch = true;
       } else if (a == "--screenshot") {
@@ -435,6 +487,7 @@ namespace {
           mtimes.emplace(path, stamp);
           continue;
         }
+
         if (it->second == stamp)
           continue;
         it->second = stamp;
@@ -447,6 +500,39 @@ namespace {
     }
   };
 
+  constexpr const char* kFpsCounterScript = R"JS(
+(() => {
+  if (globalThis.__fxeRunnerFpsCounterInstalled) return;
+  globalThis.__fxeRunnerFpsCounterInstalled = true;
+  const Renderer = globalThis.Renderer;
+  const Primitives = globalThis.Primitives;
+  if (!Renderer || !Renderer.prototype || !Primitives) return;
+  const originalEndFrame = Renderer.prototype.endFrame;
+  if (typeof originalEndFrame !== 'function') return;
+
+  let windowStart = Date.now();
+  let frames = 0;
+  let label = 'FPS --';
+
+  Renderer.prototype.endFrame = function fxeRunnerFpsEndFrame(...args) {
+    const now = Date.now();
+    frames += 1;
+    const elapsed = now - windowStart;
+    if (elapsed >= 250) {
+      label = 'FPS ' + Math.round((frames * 1000) / elapsed);
+      frames = 0;
+      windowStart = now;
+    }
+    try {
+      Primitives.fillRect(this, 8, 8, 84, 24, 0, 0x000000cc);
+      Primitives.drawText(this, 12, 12, 0, label, 14, 0xffffffff);
+    } catch (_) {
+      // The overlay must never change app behavior if rendering is mid-teardown.
+    }
+    return originalEndFrame.apply(this, args);
+  };
+})();
+)JS";
   // Combined trampoline: drains the debug server (if any) and then steps the
   // screenshot watchdog. Both attach through the host's single pump slot.
   struct combined_pump {
@@ -476,7 +562,14 @@ int main(int argc, char** argv) {
   fxe::runtime::mount_bundle_from_argv0(argv[0]);
   fxe::js::set_host_argv(std::vector<std::string>(argv, argv + argc));
 
-  cli_options opts = parse_args(argc, argv);
+  cli_options opts;
+  try {
+    opts = parse_args(argc, argv);
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "fxe_run: invalid flag value: %s\n", e.what());
+    usage(argv[0]);
+    return 64;
+  }
   if (opts.show_usage || opts.scripts.empty()) {
     usage(argv[0]);
     return opts.show_usage ? 0 : 64;
@@ -488,6 +581,8 @@ int main(int argc, char** argv) {
   int status = 0;
   {
     fxe::js::host host;
+
+    fxe::js::set_runner_render_overrides(opts.render_overrides);
 
     // ----- Debug server -----------------------------------------------------
     std::unique_ptr<fxe::debug::server> debug_srv;
@@ -583,13 +678,23 @@ int main(int argc, char** argv) {
     }
     host.attach_debug_pump(&combined_pump_trampoline, &combined_paused_trampoline, &pump_state);
 
-    // ----- Script execution -------------------------------------------------
-    for (auto& s : opts.scripts) {
-      auto r = host.run_file(s);
+    if (opts.render_overrides.show_fps_counter) {
+      auto r = host.run_script(kFpsCounterScript, "<fxe-runner-fps-counter>");
       if (!r.ok) {
-        std::fprintf(stderr, "fxe_run: %s: %s\n", s.c_str(), r.message.c_str());
+        std::fprintf(stderr, "fxe_run: --show-fps: %s\n", r.message.c_str());
         status = 1;
-        break;
+      }
+    }
+
+    // ----- Script execution -------------------------------------------------
+    if (status == 0) {
+      for (auto& s : opts.scripts) {
+        auto r = host.run_file(s);
+        if (!r.ok) {
+          std::fprintf(stderr, "fxe_run: %s: %s\n", s.c_str(), r.message.c_str());
+          status = 1;
+          break;
+        }
       }
     }
 

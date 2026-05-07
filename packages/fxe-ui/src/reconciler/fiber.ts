@@ -96,6 +96,8 @@ interface ComponentMemo {
   areEqual: (prev: unknown, next: unknown) => boolean;
 }
 
+type ComponentIdentity = object;
+
 export interface Context<T> {
   readonly defaultValue: T;
   readonly Provider: (props: { key?: string; value: T; children?: BoundaryChild }) => Node;
@@ -131,6 +133,7 @@ export type Node =
   | { type: 'draw'; props: DrawProps; key?: string }
   | {
       type: 'component';
+      componentType?: ComponentIdentity;
       render: (props: unknown) => Node;
       props: unknown;
       displayName?: string;
@@ -154,8 +157,10 @@ export function Component<P>(
   render: (props: P) => Node,
   displayName?: string,
 ): (props: P & { key?: string }) => Node {
+  const componentType: ComponentIdentity = {};
   const factory = (props: P & { key?: string }): Node => ({
     type: 'component',
+    componentType,
     render: (raw: unknown) => render(raw as P),
     props,
     displayName,
@@ -886,6 +891,15 @@ function isDuplicateKeyDiagnostic(error: unknown): boolean {
   return error instanceof Error && error.message.startsWith('fxe-ui: duplicate key ');
 }
 
+function sameNodeIdentity(prev: Node | null, next: Node): boolean {
+  if (!prev) return true;
+  if (prev.type !== next.type) return false;
+  if (prev.type === 'component' && next.type === 'component') {
+    return (prev.componentType ?? prev.render) === (next.componentType ?? next.render);
+  }
+  return true;
+}
+
 function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
   const liveKeys = new Set<string>();
   const ordered: Fiber[] = [];
@@ -895,6 +909,11 @@ function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
     if (isDevMode() && liveKeys.has(k)) throw duplicateKeyError(k, parent);
     liveKeys.add(k);
     let f = parent.children.get(k);
+    if (f && !sameNodeIdentity(f.node, nodes[i])) {
+      unmountFiber(f);
+      f = newFiber(k, parent);
+      parent.children.set(k, f);
+    }
     if (!f) {
       f = newFiber(k, parent);
       parent.children.set(k, f);

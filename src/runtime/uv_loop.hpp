@@ -9,6 +9,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -56,6 +57,12 @@ namespace fxe::runtime {
     void unregister_pump_callback(std::size_t id) noexcept;
     void run_pump_callbacks() noexcept;
     void run_microtask_checkpoint() noexcept;
+
+    // Thread-safe internal error sink for scheduler callback failures. Returned
+    // messages include callback-site identity ("pump", "posted", "microtask").
+    void report_error(std::string message);
+    std::vector<std::string> drain_errors();
+    bool try_post(pump_callback cb);
     void post(pump_callback cb);
     void shutdown() noexcept;
     void drain_posted_callbacks() noexcept;
@@ -78,6 +85,8 @@ namespace fxe::runtime {
     std::deque<pump_callback> work_;
 #endif
     int init_status_ = 0;
+    std::mutex errors_mu_;
+    std::vector<std::string> errors_;
     std::mutex callbacks_mu_;
     std::vector<std::pair<std::size_t, pump_callback>> callbacks_;
     std::size_t next_callback_id_ = 1;
@@ -88,6 +97,9 @@ namespace fxe::runtime {
 
 #if FXE_HAS_LIBUV
   uv_loop_t* default_loop();
+  // Handle lifetime contract: background bookkeeping handles are unref'd at
+  // creation; handles representing user-visible work stay ref'd while active
+  // and are unref'd or closed on completion.
   void unref_by_default(uv_handle_t* handle) noexcept;
   void set_handle_ref(uv_handle_t* handle, bool ref) noexcept;
   void pump_nonblocking();

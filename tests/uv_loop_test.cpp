@@ -3,7 +3,10 @@
 #include <atomic>
 #include <cstdio>
 #include <functional>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace {
   int g_pass = 0;
@@ -36,6 +39,15 @@ namespace {
     bool fired = false;
     bool closed = false;
   };
+
+  bool has_error_containing(const std::vector<std::string>& errors, const char* a, const char* b) {
+    for (const auto& error : errors) {
+      if (error.find(a) != std::string::npos && error.find(b) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   void test_default_loop_and_timer() {
     auto* loop = fxe::runtime::default_loop();
@@ -86,6 +98,71 @@ namespace {
     fxe::runtime::pump_nonblocking();
     CHECK(calls.load(std::memory_order_relaxed) == 1);
   }
+
+  void test_error_sink_reports_callback_failures() {
+    auto& runtime = fxe::runtime::uv_loop_runtime::instance();
+    (void)runtime.drain_errors();
+
+    CHECK(runtime.try_post([] { throw std::runtime_error("boom"); }));
+    (void)runtime.pump_nowait();
+    auto errors = runtime.drain_errors();
+    CHECK(has_error_containing(errors, "posted", "boom"));
+    CHECK(runtime.drain_errors().empty());
+
+    const std::size_t id =
+        runtime.register_microtask_checkpoint([] { throw std::runtime_error("micro-boom"); });
+    CHECK(id != 0);
+    (void)runtime.pump_nowait();
+    runtime.unregister_microtask_checkpoint(id);
+    errors = runtime.drain_errors();
+    CHECK(has_error_containing(errors, "microtask", "micro-boom"));
+    CHECK(runtime.drain_errors().empty());
+  }
+
+  void test_ref_unref_contract() {
+    auto* loop = fxe::runtime::default_loop();
+    CHECK(loop != nullptr);
+    if (loop == nullptr) {
+      return;
+    }
+
+    struct close_state {
+      bool idle_closed = false;
+      bool timer_closed = false;
+    } state;
+
+    uv_idle_t idle{};
+    idle.data = &state;
+    CHECK(uv_idle_init(loop, &idle) == 0);
+    fxe::runtime::unref_by_default(reinterpret_cast<uv_handle_t*>(&idle));
+    CHECK(uv_idle_start(&idle, [](uv_idle_t*) {}) == 0);
+    CHECK(uv_run(loop, UV_RUN_NOWAIT) == 0);
+    uv_idle_stop(&idle);
+    uv_close(reinterpret_cast<uv_handle_t*>(&idle), [](uv_handle_t* handle) {
+      static_cast<close_state*>(handle->data)->idle_closed = true;
+    });
+
+    uv_timer_t timer{};
+    timer.data = &state;
+    CHECK(uv_timer_init(loop, &timer) == 0);
+    fxe::runtime::set_handle_ref(reinterpret_cast<uv_handle_t*>(&timer), true);
+    CHECK(uv_timer_start(&timer, [](uv_timer_t*) {}, 60000, 0) == 0);
+    CHECK(uv_run(loop, UV_RUN_NOWAIT) != 0);
+    uv_timer_stop(&timer);
+    fxe::runtime::set_handle_ref(reinterpret_cast<uv_handle_t*>(&timer), false);
+    uv_close(reinterpret_cast<uv_handle_t*>(&timer), [](uv_handle_t* handle) {
+      static_cast<close_state*>(handle->data)->timer_closed = true;
+    });
+
+    CHECK(pump_until([&] { return state.idle_closed && state.timer_closed; }));
+  }
+
+  void test_post_after_shutdown_is_refused() {
+    auto& runtime = fxe::runtime::uv_loop_runtime::instance();
+    fxe::runtime::shutdown_loop();
+    CHECK(!runtime.try_post([] {}));
+    runtime.post([] {});
+  }
 #else
   void test_no_libuv_stubs() {
     CHECK(fxe::runtime::default_loop() == nullptr);
@@ -106,7 +183,9 @@ int main() {
   test_default_loop_and_timer();
   test_post_to_loop();
   test_registered_pump_callback_routes_through_public_pump();
-  fxe::runtime::shutdown_loop();
+  test_error_sink_reports_callback_failures();
+  test_ref_unref_contract();
+  test_post_after_shutdown_is_refused();
   CHECK(fxe::runtime::default_loop() == nullptr);
 #else
   test_no_libuv_stubs();

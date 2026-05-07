@@ -1,5 +1,7 @@
 // @ts-ignore FXE synthetic package
 import { glyphIndexAt, wrapText, xAtGlyphIndex } from 'fxe-ui';
+// @ts-ignore FXE synthetic package
+import { Primitives } from 'fxe';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 
@@ -12,6 +14,50 @@ test('wrapText keeps short text on a single line', () => {
   assertEqual(result.lines[0], 'hello');
   assert(result.width > 0, 'width should be measured');
   assert(result.height >= result.lineHeight, 'height should cover one line');
+});
+
+test('native text helpers handle ASCII fast path and decline Unicode', () => {
+  const ascii = Primitives.wrapTextNative('native text path', 16, 0, 80, undefined, false);
+  assert(ascii !== null, 'ASCII text should use native wrapping');
+  assert(ascii.lines.length >= 1, 'native wrapper should return at least one line');
+  assertEqual(ascii.lines.join(' '), 'native text path');
+  assertEqual(Primitives.wrapTextNative('héllo', 16, 0, 80, undefined, false), null);
+  assertEqual(Primitives.xAtGlyphIndexNative('héllo', 16, 0, 2), null);
+  assertEqual(Primitives.glyphIndexAtNative('héllo', 16, 0, 12), null);
+});
+
+test('fxe-ui text helpers call native primitive fast paths', () => {
+  const originalWrap = Primitives.wrapTextNative;
+  const originalX = Primitives.xAtGlyphIndexNative;
+  const originalGlyph = Primitives.glyphIndexAtNative;
+  let wrapCalls = 0;
+  let xCalls = 0;
+  let glyphCalls = 0;
+  try {
+    Primitives.wrapTextNative = (...args) => {
+      wrapCalls++;
+      return originalWrap(...args);
+    };
+    Primitives.xAtGlyphIndexNative = (...args) => {
+      xCalls++;
+      return originalX(...args);
+    };
+    Primitives.glyphIndexAtNative = (...args) => {
+      glyphCalls++;
+      return originalGlyph(...args);
+    };
+
+    wrapText('native path through fxe-ui', { fontSize: 16 }, { maxWidth: 120 });
+    xAtGlyphIndex('native', { fontSize: 16 }, 3);
+    glyphIndexAt('native', { fontSize: 16 }, 12);
+  } finally {
+    Primitives.wrapTextNative = originalWrap;
+    Primitives.xAtGlyphIndexNative = originalX;
+    Primitives.glyphIndexAtNative = originalGlyph;
+  }
+  assertEqual(wrapCalls, 1);
+  assertEqual(xCalls, 1);
+  assertEqual(glyphCalls, 1);
 });
 
 test('wrapText breaks on word boundaries when constrained', () => {

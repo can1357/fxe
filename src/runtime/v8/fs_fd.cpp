@@ -109,9 +109,18 @@ namespace fxe::runtime {
 
     Local<Value> make_errno_error(Isolate* iso, Local<Context> ctx, int err, const char* syscall,
                                   std::string_view path = {}) {
+      std::string code = errno_code(err);
+      std::string detail = std::strerror(err);
+#if FXE_HAS_LIBUV
+      const int uv_status = uv_translate_sys_error(err);
+      code = uv_err_name(uv_status);
+      detail = uv_strerror(uv_status);
+#endif
       std::string message = syscall;
       message += ": ";
-      message += std::strerror(err);
+      message += code;
+      message += ": ";
+      message += detail;
       if (!path.empty()) {
         message += " '";
         message.append(path);
@@ -119,12 +128,35 @@ namespace fxe::runtime {
       }
       auto out = Exception::Error(str(iso, message)).As<Object>();
       set_number(ctx, out, "errno", err);
-      set_string(ctx, out, "code", errno_code(err));
+      set_string(ctx, out, "code", code);
       set_string(ctx, out, "syscall", syscall);
       if (!path.empty())
         set_string(ctx, out, "path", path);
       return out;
     }
+
+#if FXE_HAS_LIBUV
+    Local<Value> make_uv_error(Isolate* iso, Local<Context> ctx, int status, const char* syscall,
+                               std::string_view path = {}) {
+      std::string message = syscall;
+      message += ": ";
+      message += uv_err_name(status);
+      message += ": ";
+      message += uv_strerror(status);
+      if (!path.empty()) {
+        message += " '";
+        message.append(path);
+        message.push_back('\'');
+      }
+      auto out = Exception::Error(str(iso, message)).As<Object>();
+      set_number(ctx, out, "errno", status);
+      set_string(ctx, out, "code", uv_err_name(status));
+      set_string(ctx, out, "syscall", syscall);
+      if (!path.empty())
+        set_string(ctx, out, "path", path);
+      return out;
+    }
+#endif
 
     void throw_errno_error(Isolate* iso, Local<Context> ctx, int err, const char* syscall,
                            std::string_view path = {}) {
@@ -551,6 +583,7 @@ namespace fxe::runtime {
       std::int64_t count = 0;
       stat_result stat;
       int err = 0;
+      int uv_status = 0;
     };
 
     void run_job(async_job* job) {
@@ -615,6 +648,13 @@ namespace fxe::runtime {
             ctx, make_errno_error(iso, ctx, job->err, syscall_for(job->kind), job->path));
         return;
       }
+#if FXE_HAS_LIBUV
+      if (job->uv_status < 0) {
+        (void)resolver->Reject(
+            ctx, make_uv_error(iso, ctx, job->uv_status, syscall_for(job->kind), job->path));
+        return;
+      }
+#endif
       Local<Value> value = Undefined(iso);
       switch (job->kind) {
       case async_kind::open:
@@ -650,8 +690,11 @@ namespace fxe::runtime {
       run_job(static_cast<async_job*>(req->data));
     }
 
-    void after_work_cb(uv_work_t* req, int) {
-      finish_job(std::unique_ptr<async_job>(static_cast<async_job*>(req->data)));
+    void after_work_cb(uv_work_t* req, int status) {
+      auto* job = static_cast<async_job*>(req->data);
+      if (status < 0)
+        job->uv_status = status;
+      finish_job(std::unique_ptr<async_job>(job));
     }
 #endif
 
@@ -666,11 +709,13 @@ namespace fxe::runtime {
 #if FXE_HAS_LIBUV
       if (auto* loop = fxe::runtime::default_loop()) {
         job->req.data = job.get();
-        if (uv_queue_work(loop, &job->req, work_cb, after_work_cb) == 0) {
+        const int rc = uv_queue_work(loop, &job->req, work_cb, after_work_cb);
+        if (rc == 0) {
           (void)job.release();
           info.GetReturnValue().Set(promise);
           return;
         }
+        job->uv_status = rc;
       }
 #endif
       run_job(job.get());

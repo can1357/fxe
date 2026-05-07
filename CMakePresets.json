@@ -46,6 +46,16 @@
         "FXE_ENABLE_WGPU": "ON",
         "FXE_ENABLE_NODE_COMPAT": "ON"
       }
+    },
+    {
+      "name": "release-v8-wgpu",
+      "displayName": "Release + embedded V8 + Dawn/WebGPU",
+      "inherits": "release",
+      "cacheVariables": {
+        "FXE_ENABLE_V8": "ON",
+        "FXE_ENABLE_WGPU": "ON",
+        "FXE_ENABLE_NODE_COMPAT": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -53,7 +63,8 @@
     { "name": "release",  "configurePreset": "release" },
     { "name": "dev-wgpu", "configurePreset": "dev-wgpu" },
     { "name": "dev-v8",   "configurePreset": "dev-v8" },
-    { "name": "dev-v8-wgpu", "configurePreset": "dev-v8-wgpu" }
+    { "name": "dev-v8-wgpu", "configurePreset": "dev-v8-wgpu" },
+    { "name": "release-v8-wgpu", "configurePreset": "release-v8-wgpu" }
   ],
   "testPresets": [
     {
@@ -83,6 +94,12 @@
     {
       "name": "dev-v8-wgpu",
       "configurePreset": "dev-v8-wgpu",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    },
+    {
+      "name": "release-v8-wgpu",
+      "configurePreset": "release-v8-wgpu",
       "output": { "outputOnFailure": true },
       "execution": { "stopOnFailure": false }
     }

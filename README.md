@@ -131,7 +131,7 @@ mount(<App />, new Window({ width: 480, height: 320, title: "counter" }));
 
 ## Quick start
 
-> Requires a `dev-v8-wgpu` build of FXE (V8 + Dawn). See
+> Requires a `dev` or `release` build of FXE (V8 + Dawn). See
 > [Building from source](#building-from-source).
 
 Save the counter snippet above as `examples/js/counter.tsx`, then:
@@ -142,6 +142,17 @@ just ts counter
 
 `just ts <name>` resolves `examples/js/<name>.{ts,tsx,mts,cts,js}`, builds the
 runtime if needed, and runs your script under `fxe_run`.
+
+Runner rendering overrides are available for app-level QA and profiling:
+
+```sh
+./build/dev-v8-wgpu/fxe_run --no-vsync --fps-limit=120 --msaa=1 --show-fps examples/js/hello.ts
+```
+
+`--vsync` / `--no-vsync`, `--fps-limit=N`, `--msaa=N` (or `--samples=N`), and
+`--bloom` / `--no-bloom` override the corresponding renderer/run-loop defaults
+for every renderer the script creates. `--show-fps` draws a small FPS counter
+overlay before each `Renderer.endFrame()`.
 
 For a plain (non-JSX) starter:
 
@@ -300,31 +311,31 @@ repository pins an in-tree vcpkg checkout under `./vcpkg/`.
 
 ```sh
 just bootstrap                      # one-time: build in-tree vcpkg
-just build dev-v8-wgpu              # full runtime (V8 + Dawn)
-just test  dev-v8-wgpu              # run CTest for the preset
+just build release                  # full runtime, optimized (V8 + Dawn)
+just test  release                  # run CTest for the preset
 just ts hello                       # build + run examples/js/hello.ts
 ```
 
 Direct CMake equivalents:
 
 ```sh
-cmake --preset dev-v8-wgpu
-cmake --build --preset dev-v8-wgpu
-ctest --preset dev-v8-wgpu --output-on-failure
-./build/dev-v8-wgpu/fxe_run examples/js/hello.ts
+cmake --preset release
+cmake --build --preset release
+ctest --preset release --output-on-failure
+./build/release/fxe_run examples/js/hello.ts
 ```
 
 Run `just doctor` to check for required and optional tooling.
 
 ### Build presets
 
-| Preset        | Includes                               |
-| ------------- | -------------------------------------- |
-| `dev`         | Core only (no V8, no Dawn)             |
-| `dev-wgpu`    | + Dawn / WebGPU                        |
-| `dev-v8`      | + Embedded V8                          |
-| `dev-v8-wgpu` | Full runtime (V8 + Dawn + node compat) |
-| `release`     | Optimized release build                |
+| Preset        | Build type | Notes                                            |
+| ------------- | ---------- | ------------------------------------------------ |
+| `dev`         | Debug      | Full runtime (V8 + Dawn + node compat)           |
+| `release`     | Release    | Full runtime, optimized                          |
+| `dev-wgpu`    | Debug      | Legacy alias — same as `dev`                     |
+| `dev-v8`      | Debug      | Legacy alias — same as `dev`                     |
+| `dev-v8-wgpu` | Debug      | Legacy alias — same as `dev`                     |
 
 ### External dependencies
 
@@ -343,10 +354,10 @@ nlohmann/json, miniaudio) are fetched automatically when
 
 | Option                        | Default | Effect                                                |
 | ----------------------------- | ------- | ----------------------------------------------------- |
-| `FXE_ENABLE_WGPU`             | OFF     | Build Dawn/WebGPU backend                             |
-| `FXE_ENABLE_V8`               | OFF     | Build embedded V8 host + JS bindings                  |
-| `FXE_ENABLE_NODE_COMPAT`      | OFF     | Vendor unenv assets for `node:*` shims                |
-| `FXE_ENABLE_NATIVE_TLS_HTTP2` | OFF     | Native HTTPS/HTTP2 via mbedTLS + nghttp2              |
+| `FXE_ENABLE_WGPU`             | ON      | Build Dawn/WebGPU backend                             |
+| `FXE_ENABLE_V8`               | ON      | Build embedded V8 host + JS bindings                  |
+| `FXE_ENABLE_NODE_COMPAT`      | ON      | Vendor unenv assets for `node:*` shims                |
+| `FXE_ENABLE_NATIVE_TLS_HTTP2` | ON      | Native HTTPS/HTTP2 via mbedTLS + nghttp2              |
 | `FXE_FONT_BACKEND`            | auto    | `freetype`, `coretext`, `coretext_harfbuzz`, …        |
 | `FXE_BUILD_EXAMPLES`          | ON      | Build native C++ examples                             |
 | `FXE_BUILD_TESTS`             | ON      | Build CTest targets                                   |

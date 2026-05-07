@@ -739,7 +739,7 @@ declare namespace FXE {
         features?: ReadonlyArray<string | readonly [string, number]>;
         /**
          * OpenType variation axes. Keys are 4-char axis tags
-         * (e.g. `wght`, `wdth`) mapped to numeric values.
+         * (e.g. `wght`, `width`) mapped to numeric values.
          */
         variations?: { readonly [axisTag: string]: number };
       },
@@ -804,6 +804,32 @@ declare namespace FXE {
       screenHeight: number,
     ): void;
     calcText(text: string, pointSize?: number): [number, number];
+    wrapTextNative(
+      text: string,
+      pointSize?: number,
+      letterSpacing?: number,
+      maxWidth?: number,
+      lineHeight?: number,
+      breakWords?: boolean,
+    ): {
+      lines: string[];
+      width: number;
+      height: number;
+      lineHeight: number;
+      lineStartIndices: number[];
+    } | null;
+    xAtGlyphIndexNative(
+      text: string,
+      pointSize?: number,
+      letterSpacing?: number,
+      index?: number,
+    ): number | null;
+    glyphIndexAtNative(
+      text: string,
+      pointSize?: number,
+      letterSpacing?: number,
+      x?: number,
+    ): number | null;
     blurRect(
       cb: CommandBuffer | Renderer,
       x: number,
@@ -3059,8 +3085,12 @@ interface IDBKeyRangeCtor {
   only(value: IDBValidKey): IDBKeyRange;
   lowerBound(lower: IDBValidKey, open?: boolean): IDBKeyRange;
   upperBound(upper: IDBValidKey, open?: boolean): IDBKeyRange;
-  bound(lower: IDBValidKey, upper: IDBValidKey, lowerOpen?: boolean,
-        upperOpen?: boolean): IDBKeyRange;
+  bound(
+    lower: IDBValidKey,
+    upper: IDBValidKey,
+    lowerOpen?: boolean,
+    upperOpen?: boolean,
+  ): IDBKeyRange;
 }
 declare const IDBKeyRange: IDBKeyRangeCtor;
 

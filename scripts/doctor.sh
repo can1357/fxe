@@ -123,7 +123,6 @@ probe optional ruff || true
 probe optional shfmt || true
 probe optional shellcheck || true
 probe optional gersemi || true
-probe optional typos || true
 probe_any optional 'watcher' watchexec fswatch entr
 # tint may be supplied via FXE_WGSL_VALIDATOR env var.
 if [ -n "${FXE_WGSL_VALIDATOR:-}" ] && [ -x "$FXE_WGSL_VALIDATOR" ]; then
@@ -144,7 +143,6 @@ if [ ${#optional_missing[@]} -gt 0 ]; then
       shfmt) printf '  shfmt      → brew install shfmt\n' ;;
       shellcheck) printf '  shellcheck → brew install shellcheck\n' ;;
       gersemi) printf '  gersemi    → pipx install gersemi  |  pip install gersemi\n' ;;
-      typos) printf '  typos      → brew install typos-cli  |  cargo install typos-cli\n' ;;
       watcher) printf '  watcher    → brew install watchexec (preferred) | brew install fswatch\n' ;;
       tint) printf '  tint       → build dawn (https://dawn.googlesource.com/dawn) and set FXE_WGSL_VALIDATOR\n' ;;
     esac

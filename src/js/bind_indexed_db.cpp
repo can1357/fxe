@@ -3,9 +3,9 @@
 // Each database lives in `${userData}/idb/<safe(name)>.sqlite3`. The schema is:
 //   __meta(schema_version INTEGER, user_version INTEGER, name TEXT)
 //   __stores(name TEXT PRIMARY KEY, key_path TEXT, auto_increment INTEGER, auto_seq INTEGER)
-//   __indexes(store TEXT, name TEXT, key_path TEXT, is_unique INTEGER, is_multi INTEGER, PRIMARY KEY(store, name))
-//   store_<name>(k BLOB PRIMARY KEY, v BLOB NOT NULL)
-//   idx_<store>_<name>(ik BLOB, pk BLOB, PRIMARY KEY(ik, pk))
+//   __indexes(store TEXT, name TEXT, key_path TEXT, is_unique INTEGER, is_multi INTEGER, PRIMARY
+//   KEY(store, name)) store_<name>(k BLOB PRIMARY KEY, v BLOB NOT NULL) idx_<store>_<name>(ik BLOB,
+//   pk BLOB, PRIMARY KEY(ik, pk))
 //
 // Keys are encoded with a binary-comparable scheme (0x10=number, 0x20=Date,
 // 0x30=string, 0x40=binary) so SQLite's default BLOB ordering matches IDB key
@@ -28,8 +28,8 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -95,8 +95,7 @@ namespace fxe::js {
       return err;
     }
 
-    template <typename T>
-    T* unwrap_external(Local<Data> v) {
+    template <typename T> T* unwrap_external(Local<Data> v) {
       if (v.IsEmpty() || !v->IsValue())
         return nullptr;
       auto val = v.As<Value>();
@@ -105,8 +104,7 @@ namespace fxe::js {
       return static_cast<T*>(val.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
     }
 
-    template <typename T>
-    Local<External> make_external(Isolate* iso, T* ptr) {
+    template <typename T> Local<External> make_external(Isolate* iso, T* ptr) {
       return External::New(iso, ptr, v8::kExternalPointerTypeTagDefault);
     }
 
@@ -215,8 +213,7 @@ namespace fxe::js {
           out.push_back(0x00);
           return true;
         }
-        encode_byte_run(reinterpret_cast<const uint8_t*>(*u), static_cast<size_t>(u.length()),
-                        out);
+        encode_byte_run(reinterpret_cast<const uint8_t*>(*u), static_cast<size_t>(u.length()), out);
         return true;
       }
       if (v->IsArrayBuffer() || v->IsArrayBufferView()) {
@@ -316,7 +313,7 @@ namespace fxe::js {
     // Inject a value at keypath into obj. Used to write the auto-increment key
     // back into the value before serialisation.
     bool inject_key_path(Isolate* iso, Local<Object> obj, std::string_view path,
-                        Local<Value> value) {
+                         Local<Value> value) {
       auto ctx = iso->GetCurrentContext();
       if (path.empty())
         return false;
@@ -346,20 +343,20 @@ namespace fxe::js {
 
     bool serialize_value(Isolate* iso, Local<Context> ctx, Local<Value> v,
                          std::vector<uint8_t>& out, std::string& err) {
-      ValueSerializer ser(iso);
-      ser.WriteHeader();
-      if (!ser.WriteValue(ctx, v).FromMaybe(false)) {
+      ValueSerializer set(iso);
+      set.WriteHeader();
+      if (!set.WriteValue(ctx, v).FromMaybe(false)) {
         err = "value could not be structured-cloned";
         return false;
       }
-      auto pair = ser.Release();
+      auto pair = set.Release();
       out.assign(pair.first, pair.first + pair.second);
       free(pair.first);
       return true;
     }
 
     MaybeLocal<Value> deserialize_value(Isolate* iso, Local<Context> ctx, const uint8_t* data,
-                                         size_t len) {
+                                        size_t len) {
       ValueDeserializer deser(iso, data, len);
       if (!deser.ReadHeader(ctx).FromMaybe(false))
         return MaybeLocal<Value>();
@@ -510,10 +507,9 @@ namespace fxe::js {
 
       // Load indexes.
       sqlite3_stmt* li = nullptr;
-      if (sqlite3_prepare_v2(
-              st->db,
-              "SELECT store, name, key_path, is_unique, is_multi FROM __indexes", -1, &li,
-              nullptr) != SQLITE_OK) {
+      if (sqlite3_prepare_v2(st->db,
+                             "SELECT store, name, key_path, is_unique, is_multi FROM __indexes", -1,
+                             &li, nullptr) != SQLITE_OK) {
         err = sqlite3_errmsg(st->db);
         return false;
       }
@@ -591,7 +587,9 @@ namespace fxe::js {
       static std::unordered_map<Isolate*, idb_templates> table;
       return table;
     }
-    idb_templates& tpl_for(Isolate* iso) { return templates_table()[iso]; }
+    idb_templates& tpl_for(Isolate* iso) {
+      return templates_table()[iso];
+    }
 
     Local<Object> new_instance_from(Isolate* iso, Local<Context> ctx, Global<FunctionTemplate>& tpl,
                                     int internal_count = 1) {
@@ -643,7 +641,8 @@ namespace fxe::js {
     key_range* unwrap_key_range(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<key_range*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<key_range*>(
+          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     void key_range_only(const FunctionCallbackInfo<Value>& info) {
@@ -778,8 +777,8 @@ namespace fxe::js {
 
     struct request_state {
       request_kind kind = request_kind::generic;
-      Global<Object> self;       // the JS request object
-      Global<Object> source;     // source (store / index / null)
+      Global<Object> self;        // the JS request object
+      Global<Object> source;      // source (store / index / null)
       Global<Object> transaction; // transaction (or empty)
       Global<Value> result;
       Global<Value> error;
@@ -790,8 +789,8 @@ namespace fxe::js {
       delete info.GetParameter();
     }
 
-    void invoke_listener(Isolate* iso, Local<Context> ctx, Local<Object> req,
-                          const char* prop_name, Local<Value> arg) {
+    void invoke_listener(Isolate* iso, Local<Context> ctx, Local<Object> req, const char* prop_name,
+                         Local<Value> arg) {
       Local<Value> handler;
       if (!req->Get(ctx, s(iso, prop_name)).ToLocal(&handler))
         return;
@@ -808,7 +807,7 @@ namespace fxe::js {
     }
 
     void make_event(Isolate* iso, Local<Context> ctx, Local<Object> req, const char* type,
-                     Local<Object>& out) {
+                    Local<Object>& out) {
       auto evt = Object::New(iso);
       set_str(ctx, evt, "type", type);
       (void)evt->Set(ctx, s(iso, "target"), req);
@@ -816,8 +815,9 @@ namespace fxe::js {
     }
 
     Local<Object> create_request(Isolate* iso, Local<Context> ctx, request_kind kind,
-                                  Local<Object> source, Local<Object> transaction) {
-      auto& tpl_ref = (kind == request_kind::open) ? tpl_for(iso).open_request_tpl : tpl_for(iso).request_tpl;
+                                 Local<Object> source, Local<Object> transaction) {
+      auto& tpl_ref =
+          (kind == request_kind::open) ? tpl_for(iso).open_request_tpl : tpl_for(iso).request_tpl;
       auto inst = new_instance_from(iso, ctx, tpl_ref);
       auto* st = new request_state();
       st->kind = kind;
@@ -831,10 +831,10 @@ namespace fxe::js {
       (void)inst->Set(ctx, s(iso, "result"), Undefined(iso));
       (void)inst->Set(ctx, s(iso, "error"), Null(iso));
       (void)inst->Set(ctx, s(iso, "readyState"), s(iso, "pending"));
-      (void)inst->Set(ctx, s(iso, "source"), source.IsEmpty() ? Local<Value>(Null(iso))
-                                                              : source.As<Value>());
+      (void)inst->Set(ctx, s(iso, "source"),
+                      source.IsEmpty() ? Local<Value>(Null(iso)) : source.As<Value>());
       (void)inst->Set(ctx, s(iso, "transaction"),
-                       transaction.IsEmpty() ? Local<Value>(Null(iso)) : transaction.As<Value>());
+                      transaction.IsEmpty() ? Local<Value>(Null(iso)) : transaction.As<Value>());
       (void)inst->Set(ctx, s(iso, "onsuccess"), Null(iso));
       (void)inst->Set(ctx, s(iso, "onerror"), Null(iso));
       if (kind == request_kind::open) {
@@ -847,11 +847,11 @@ namespace fxe::js {
     request_state* unwrap_request(Local<Object> req) {
       if (req.IsEmpty() || req->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<request_state*>(req->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<request_state*>(
+          req->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
-    void resolve_request(Isolate* iso, Local<Context> ctx, Local<Object> req,
-                          Local<Value> result) {
+    void resolve_request(Isolate* iso, Local<Context> ctx, Local<Object> req, Local<Value> result) {
       (void)req->Set(ctx, s(iso, "result"), result);
       (void)req->Set(ctx, s(iso, "readyState"), s(iso, "done"));
       Local<Object> evt;
@@ -883,11 +883,11 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto req = p->req.Get(iso);
       if (p->success) {
-        resolve_request(iso, ctx, req, p->result.IsEmpty() ? Local<Value>(Undefined(iso))
-                                                            : p->result.Get(iso));
+        resolve_request(iso, ctx, req,
+                        p->result.IsEmpty() ? Local<Value>(Undefined(iso)) : p->result.Get(iso));
       } else {
-        reject_request(iso, ctx, req, p->error.IsEmpty() ? Local<Value>(Undefined(iso))
-                                                          : p->error.Get(iso));
+        reject_request(iso, ctx, req,
+                       p->error.IsEmpty() ? Local<Value>(Undefined(iso)) : p->error.Get(iso));
       }
       delete p;
     }
@@ -912,9 +912,9 @@ namespace fxe::js {
 
     struct transaction_state {
       std::shared_ptr<database_state> db;
-      std::string mode;        // "readonly" | "readwrite" | "versionchange"
-      bool active = false;     // BEGIN issued, no COMMIT/ROLLBACK yet
-      bool finished = false;   // COMMIT or ROLLBACK done
+      std::string mode;      // "readonly" | "readwrite" | "versionchange"
+      bool active = false;   // BEGIN issued, no COMMIT/ROLLBACK yet
+      bool finished = false; // COMMIT or ROLLBACK done
       bool errored = false;
       std::vector<std::string> store_names;
       Global<Promise::Resolver> done_resolver;
@@ -946,9 +946,9 @@ namespace fxe::js {
     }
 
     bool tx_begin(transaction_state* tx, std::string& err) {
-      const char* sql = (tx->mode == "readonly") ? "BEGIN DEFERRED"
-                                                  : (tx->mode == "versionchange") ? "BEGIN EXCLUSIVE"
-                                                                                  : "BEGIN IMMEDIATE";
+      const char* sql = (tx->mode == "readonly")        ? "BEGIN DEFERRED"
+                        : (tx->mode == "versionchange") ? "BEGIN EXCLUSIVE"
+                                                        : "BEGIN IMMEDIATE";
       if (!exec_sql(tx->db.get(), sql, err))
         return false;
       tx->active = true;
@@ -956,7 +956,7 @@ namespace fxe::js {
     }
 
     void tx_commit_internal(Isolate* iso, Local<Context> ctx, Local<Object> tx_obj,
-                             transaction_state* tx) {
+                            transaction_state* tx) {
       if (!tx || !tx->active || tx->finished)
         return;
       std::string err;
@@ -980,7 +980,7 @@ namespace fxe::js {
     }
 
     void tx_abort_internal(Isolate* iso, Local<Context> ctx, Local<Object> tx_obj,
-                            transaction_state* tx) {
+                           transaction_state* tx) {
       if (!tx || tx->finished)
         return;
       if (tx->active) {
@@ -996,9 +996,9 @@ namespace fxe::js {
     }
 
     Local<Object> create_transaction(Isolate* iso, Local<Context> ctx,
-                                      std::shared_ptr<database_state> db,
-                                      const std::vector<std::string>& store_names,
-                                      const std::string& mode) {
+                                     std::shared_ptr<database_state> db,
+                                     const std::vector<std::string>& store_names,
+                                     const std::string& mode) {
       auto inst = new_instance_from(iso, ctx, tpl_for(iso).transaction_tpl);
       auto* st = new transaction_state();
       st->db = std::move(db);
@@ -1033,7 +1033,7 @@ namespace fxe::js {
 
     struct store_handle {
       std::shared_ptr<database_state> db;
-      Global<Object> tx;       // owning transaction
+      Global<Object> tx; // owning transaction
       std::string name;
       // index mode (when accessed via store.index(...))
       std::string index_name;
@@ -1047,12 +1047,13 @@ namespace fxe::js {
     store_handle* unwrap_store(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<store_handle*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<store_handle*>(
+          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     Local<Object> create_object_store_handle(Isolate* iso, Local<Context> ctx,
-                                              std::shared_ptr<database_state> db,
-                                              Local<Object> tx_obj, const std::string& name) {
+                                             std::shared_ptr<database_state> db,
+                                             Local<Object> tx_obj, const std::string& name) {
       auto inst = new_instance_from(iso, ctx, tpl_for(iso).object_store_tpl);
       auto* h = new store_handle();
       h->db = std::move(db);
@@ -1064,8 +1065,7 @@ namespace fxe::js {
       auto& meta = h->db->stores.at(name);
       (void)inst->Set(ctx, s(iso, "name"), s(iso, name));
       (void)inst->Set(ctx, s(iso, "keyPath"),
-                       meta.key_path ? s(iso, *meta.key_path).As<Value>()
-                                       : Local<Value>(Null(iso)));
+                      meta.key_path ? s(iso, *meta.key_path).As<Value>() : Local<Value>(Null(iso)));
       (void)inst->Set(ctx, s(iso, "autoIncrement"), Boolean::New(iso, meta.auto_increment));
       auto idx_names = Array::New(iso, static_cast<int>(meta.indexes.size()));
       uint32_t k = 0;
@@ -1077,8 +1077,8 @@ namespace fxe::js {
     }
 
     Local<Object> create_index_handle(Isolate* iso, Local<Context> ctx,
-                                       std::shared_ptr<database_state> db, Local<Object> tx_obj,
-                                       const std::string& store, const std::string& index) {
+                                      std::shared_ptr<database_state> db, Local<Object> tx_obj,
+                                      const std::string& store, const std::string& index) {
       auto inst = new_instance_from(iso, ctx, tpl_for(iso).index_tpl);
       auto* h = new store_handle();
       h->db = std::move(db);
@@ -1116,8 +1116,9 @@ namespace fxe::js {
     }
 
     // Index population on put. Builds index rows for any indexes on the store.
-    void update_indexes_for_put(database_state* db, store_meta& meta, const std::vector<uint8_t>& pk,
-                                Local<Value> value, Isolate* iso, std::string& err) {
+    void update_indexes_for_put(database_state* db, store_meta& meta,
+                                const std::vector<uint8_t>& pk, Local<Value> value, Isolate* iso,
+                                std::string& err) {
       // Delete any existing index rows for this primary key first.
       for (auto& [_, imeta] : meta.indexes) {
         std::string del = "DELETE FROM idx_" + meta.name + "_" + imeta.name + " WHERE pk=?1";
@@ -1167,8 +1168,8 @@ namespace fxe::js {
       }
     }
 
-    void delete_indexes_for_pk(database_state* db, store_meta& meta,
-                                 const std::vector<uint8_t>& pk, std::string& err) {
+    void delete_indexes_for_pk(database_state* db, store_meta& meta, const std::vector<uint8_t>& pk,
+                               std::string& err) {
       for (auto& [_, imeta] : meta.indexes) {
         std::string del = "DELETE FROM idx_" + meta.name + "_" + imeta.name + " WHERE pk=?1";
         sqlite3_stmt* stmt = nullptr;
@@ -1297,11 +1298,10 @@ namespace fxe::js {
       int rc = sqlite3_step(stmt);
       sqlite3_finalize(stmt);
       if (rc == SQLITE_CONSTRAINT) {
-        auto req = create_request(iso, ctx, request_kind::generic, info.This(),
-                                  h->tx.Get(iso));
-        schedule_reject(iso, req,
-                        make_dom_error(iso, "ConstraintError",
-                                       "ConstraintError: key already exists"));
+        auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
+        schedule_reject(
+            iso, req,
+            make_dom_error(iso, "ConstraintError", "ConstraintError: key already exists"));
         info.GetReturnValue().Set(req);
         return;
       }
@@ -1316,13 +1316,17 @@ namespace fxe::js {
       if (!ierr.empty())
         schedule_reject(iso, req, make_dom_error(iso, "ConstraintError", ierr));
       else
-        schedule_resolve(iso, req, derived_key.IsEmpty() ? Local<Value>(Undefined(iso))
-                                                          : derived_key);
+        schedule_resolve(iso, req,
+                         derived_key.IsEmpty() ? Local<Value>(Undefined(iso)) : derived_key);
       info.GetReturnValue().Set(req);
     }
 
-    void store_put(const FunctionCallbackInfo<Value>& info) { store_put_or_add(info, true); }
-    void store_add(const FunctionCallbackInfo<Value>& info) { store_put_or_add(info, false); }
+    void store_put(const FunctionCallbackInfo<Value>& info) {
+      store_put_or_add(info, true);
+    }
+    void store_add(const FunctionCallbackInfo<Value>& info) {
+      store_put_or_add(info, false);
+    }
 
     // Fetch a single row by key. Returns the deserialised value or undefined.
     void store_get(const FunctionCallbackInfo<Value>& info) {
@@ -1343,8 +1347,10 @@ namespace fxe::js {
 
       std::string sql;
       if (h->is_index) {
-        sql = "SELECT v FROM store_" + h->name + " AS s "
-              "INNER JOIN idx_" + h->name + "_" + h->index_name + " AS i ON s.k = i.pk WHERE";
+        sql = "SELECT v FROM store_" + h->name +
+              " AS s "
+              "INNER JOIN idx_" +
+              h->name + "_" + h->index_name + " AS i ON s.k = i.pk WHERE";
       } else {
         sql = "SELECT v FROM store_" + h->name + " WHERE";
       }
@@ -1798,9 +1804,8 @@ namespace fxe::js {
             std::string drop_err;
             exec_sql(h->db.get(), drop.c_str(), drop_err);
             sqlite3_stmt* del = nullptr;
-            sqlite3_prepare_v2(h->db->db,
-                               "DELETE FROM __indexes WHERE store=?1 AND name=?2", -1, &del,
-                               nullptr);
+            sqlite3_prepare_v2(h->db->db, "DELETE FROM __indexes WHERE store=?1 AND name=?2", -1,
+                               &del, nullptr);
             sqlite3_bind_text(del, 1, h->name.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(del, 2, name.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_step(del);
@@ -1845,8 +1850,8 @@ namespace fxe::js {
       std::string err;
       exec_sql(h->db.get(), drop.c_str(), err);
       sqlite3_stmt* del = nullptr;
-      sqlite3_prepare_v2(h->db->db, "DELETE FROM __indexes WHERE store=?1 AND name=?2", -1,
-                         &del, nullptr);
+      sqlite3_prepare_v2(h->db->db, "DELETE FROM __indexes WHERE store=?1 AND name=?2", -1, &del,
+                         nullptr);
       sqlite3_bind_text(del, 1, h->name.c_str(), -1, SQLITE_TRANSIENT);
       sqlite3_bind_text(del, 2, name.c_str(), -1, SQLITE_TRANSIENT);
       sqlite3_step(del);
@@ -1872,24 +1877,25 @@ namespace fxe::js {
         throw_msg(iso, "NotFoundError: index does not exist", "NotFoundError");
         return;
       }
-      info.GetReturnValue().Set(create_index_handle(iso, ctx, h->db, h->tx.Get(iso), h->name, name));
+      info.GetReturnValue().Set(
+          create_index_handle(iso, ctx, h->db, h->tx.Get(iso), h->name, name));
     }
 
     // ============================== Cursors ==============================
 
     struct cursor_state {
       std::shared_ptr<database_state> db;
-      Global<Object> source;     // store or index
+      Global<Object> source; // store or index
       Global<Object> tx;
-      Global<Object> request;    // the IDBRequest that opened the cursor
+      Global<Object> request; // the IDBRequest that opened the cursor
       sqlite3_stmt* stmt = nullptr;
-      bool has_value = false;    // cursor is IDBCursorWithValue
+      bool has_value = false; // cursor is IDBCursorWithValue
       bool exhausted = false;
       bool is_index = false;
       std::string store_name;
       std::string index_name;
-      std::vector<uint8_t> last_pk;     // for update/delete
-      std::vector<uint8_t> last_ik;     // for index cursors
+      std::vector<uint8_t> last_pk; // for update/delete
+      std::vector<uint8_t> last_ik; // for index cursors
     };
 
     void cursor_finalizer(const WeakCallbackInfo<cursor_state>& info) {
@@ -1902,14 +1908,14 @@ namespace fxe::js {
     cursor_state* unwrap_cursor(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<cursor_state*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<cursor_state*>(
+          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     // Step the cursor; on row, sets the JS-visible key/primaryKey/value props
     // on the cursor object and resolves the request with the cursor; on done,
     // resolves with null.
-    void cursor_step(Isolate* iso, Local<Context> ctx, Local<Object> cursor_obj,
-                      cursor_state* st) {
+    void cursor_step(Isolate* iso, Local<Context> ctx, Local<Object> cursor_obj, cursor_state* st) {
       if (st->exhausted || !st->stmt) {
         auto req = st->request.Get(iso);
         schedule_resolve(iso, req, Null(iso));
@@ -1968,8 +1974,10 @@ namespace fxe::js {
         return;
       }
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull()) {
-        throw_msg(iso, "cursor.continue(key) is not supported in v1; use store.openCursor with a IDBKeyRange",
-                  "NotSupportedError");
+        throw_msg(
+            iso,
+            "cursor.continue(key) is not supported in v1; use store.openCursor with a IDBKeyRange",
+            "NotSupportedError");
         return;
       }
       cursor_step(iso, ctx, info.This(), st);
@@ -2085,8 +2093,7 @@ namespace fxe::js {
       std::string sql = "DELETE FROM store_" + st->store_name + " WHERE k=?1";
       sqlite3_stmt* del = nullptr;
       if (sqlite3_prepare_v2(st->db->db, sql.c_str(), -1, &del, nullptr) != SQLITE_OK) {
-        schedule_reject(iso, req,
-                         make_dom_error(iso, "UnknownError", sqlite3_errmsg(st->db->db)));
+        schedule_reject(iso, req, make_dom_error(iso, "UnknownError", sqlite3_errmsg(st->db->db)));
         info.GetReturnValue().Set(req);
         return;
       }
@@ -2094,8 +2101,7 @@ namespace fxe::js {
       int rc = sqlite3_step(del);
       sqlite3_finalize(del);
       if (rc != SQLITE_DONE)
-        schedule_reject(iso, req,
-                         make_dom_error(iso, "UnknownError", sqlite3_errmsg(st->db->db)));
+        schedule_reject(iso, req, make_dom_error(iso, "UnknownError", sqlite3_errmsg(st->db->db)));
       else
         schedule_resolve(iso, req, Undefined(iso));
       info.GetReturnValue().Set(req);
@@ -2214,7 +2220,10 @@ namespace fxe::js {
       std::string name = utf8(iso, info[0]);
       bool found = false;
       for (auto& sn : tx->store_names)
-        if (sn == name) { found = true; break; }
+        if (sn == name) {
+          found = true;
+          break;
+        }
       if (!found) {
         throw_msg(iso, "NotFoundError: store not in transaction's scope", "NotFoundError");
         return;
@@ -2265,11 +2274,12 @@ namespace fxe::js {
     database_handle* unwrap_database(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<database_handle*>(obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<database_handle*>(
+          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     Local<Object> create_database_handle(Isolate* iso, Local<Context> ctx,
-                                          std::shared_ptr<database_state> db) {
+                                         std::shared_ptr<database_state> db) {
       auto inst = new_instance_from(iso, ctx, tpl_for(iso).database_tpl);
       auto* h = new database_handle();
       h->db = db;
@@ -2338,8 +2348,7 @@ namespace fxe::js {
           auto_inc = v->BooleanValue(iso);
       }
       // SQL: create store table + meta row.
-      std::string ddl =
-          "CREATE TABLE store_" + name + " (k BLOB PRIMARY KEY, v BLOB NOT NULL)";
+      std::string ddl = "CREATE TABLE store_" + name + " (k BLOB PRIMARY KEY, v BLOB NOT NULL)";
       std::string err;
       if (!exec_sql(h->db.get(), ddl.c_str(), err)) {
         throw_msg(iso, err);
@@ -2488,7 +2497,7 @@ namespace fxe::js {
     // ============================== IDBFactory ==============================
 
     std::shared_ptr<database_state> open_database(Isolate* iso, std::string name,
-                                                    std::string& err) {
+                                                  std::string& err) {
       auto& reg = registry_table()[iso];
       auto it = reg.by_name.find(name);
       if (it != reg.by_name.end())
@@ -2551,14 +2560,14 @@ namespace fxe::js {
         int64_t old_version = p->db->version;
         p->db->version = p->requested_version;
         (void)db_obj->Set(ctx, s(iso, "version"),
-                           Number::New(iso, static_cast<double>(p->requested_version)));
+                          Number::New(iso, static_cast<double>(p->requested_version)));
         auto evt = Object::New(iso);
         set_str(ctx, evt, "type", "upgradeneeded");
         (void)evt->Set(ctx, s(iso, "target"), req);
         (void)evt->Set(ctx, s(iso, "oldVersion"),
-                        Number::New(iso, static_cast<double>(old_version)));
+                       Number::New(iso, static_cast<double>(old_version)));
         (void)evt->Set(ctx, s(iso, "newVersion"),
-                        Number::New(iso, static_cast<double>(p->requested_version)));
+                       Number::New(iso, static_cast<double>(p->requested_version)));
         (void)req->Set(ctx, s(iso, "result"), db_obj);
         (void)req->Set(ctx, s(iso, "transaction"), tx);
         invoke_listener(iso, ctx, req, "onupgradeneeded", evt);
@@ -2575,8 +2584,7 @@ namespace fxe::js {
         (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), Undefined(iso));
         if (tx_st && tx_st->errored) {
           reject_request(iso, ctx, req,
-                         make_dom_error(iso, "AbortError",
-                                        "versionchange transaction aborted"));
+                         make_dom_error(iso, "AbortError", "versionchange transaction aborted"));
           return;
         }
         resolve_request(iso, ctx, req, db_obj);
@@ -2586,8 +2594,7 @@ namespace fxe::js {
       }
     }
 
-    void schedule_open(Isolate* iso, Local<Object> req,
-                       std::shared_ptr<database_state> db,
+    void schedule_open(Isolate* iso, Local<Object> req, std::shared_ptr<database_state> db,
                        int64_t requested_version, bool needs_upgrade) {
       auto* p = new open_completion();
       p->req.Reset(iso, req);
@@ -2626,8 +2633,7 @@ namespace fxe::js {
       if (requested_version < db->version) {
         schedule_reject(
             iso, req,
-            make_dom_error(iso, "VersionError",
-                            "VersionError: requested version < existing"));
+            make_dom_error(iso, "VersionError", "VersionError: requested version < existing"));
         info.GetReturnValue().Set(req);
         return;
       }
@@ -2795,7 +2801,8 @@ namespace fxe::js {
     auto tx_tpl = FunctionTemplate::New(iso);
     tx_tpl->SetClassName(s(iso, "IDBTransaction"));
     tx_tpl->InstanceTemplate()->SetInternalFieldCount(2);
-    tx_tpl->PrototypeTemplate()->Set(iso, "objectStore", FunctionTemplate::New(iso, tx_object_store));
+    tx_tpl->PrototypeTemplate()->Set(iso, "objectStore",
+                                     FunctionTemplate::New(iso, tx_object_store));
     tx_tpl->PrototypeTemplate()->Set(iso, "commit", FunctionTemplate::New(iso, tx_commit));
     tx_tpl->PrototypeTemplate()->Set(iso, "abort", FunctionTemplate::New(iso, tx_abort));
     tpl_for(iso).transaction_tpl.Reset(iso, tx_tpl);
@@ -2808,8 +2815,7 @@ namespace fxe::js {
     store_tpl->PrototypeTemplate()->Set(iso, "add", FunctionTemplate::New(iso, store_add));
     store_tpl->PrototypeTemplate()->Set(iso, "get", FunctionTemplate::New(iso, store_get));
     store_tpl->PrototypeTemplate()->Set(iso, "getKey", FunctionTemplate::New(iso, store_get_key));
-    store_tpl->PrototypeTemplate()->Set(iso, "getAll",
-                                        FunctionTemplate::New(iso, store_get_all));
+    store_tpl->PrototypeTemplate()->Set(iso, "getAll", FunctionTemplate::New(iso, store_get_all));
     store_tpl->PrototypeTemplate()->Set(iso, "getAllKeys",
                                         FunctionTemplate::New(iso, store_get_all_keys));
     store_tpl->PrototypeTemplate()->Set(iso, "delete", FunctionTemplate::New(iso, store_delete));
@@ -2819,7 +2825,8 @@ namespace fxe::js {
                                         FunctionTemplate::New(iso, store_create_index));
     store_tpl->PrototypeTemplate()->Set(iso, "deleteIndex",
                                         FunctionTemplate::New(iso, store_delete_index));
-    store_tpl->PrototypeTemplate()->Set(iso, "index", FunctionTemplate::New(iso, store_index_method));
+    store_tpl->PrototypeTemplate()->Set(iso, "index",
+                                        FunctionTemplate::New(iso, store_index_method));
     store_tpl->PrototypeTemplate()->Set(iso, "openCursor",
                                         FunctionTemplate::New(iso, store_open_cursor));
     store_tpl->PrototypeTemplate()->Set(iso, "openKeyCursor",

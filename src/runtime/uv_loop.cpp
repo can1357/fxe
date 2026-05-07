@@ -1,4 +1,7 @@
 #include "runtime/uv_loop.hpp"
+#include <exception>
+#include <string>
+#include <utility>
 
 #if FXE_HAS_LIBUV
 #include <uv.h>
@@ -6,11 +9,26 @@
 
 namespace fxe::runtime {
 
+  namespace {
+    std::string callback_error_message(const char* site, const std::exception& e) {
+      std::string message = site;
+      message += " callback threw: ";
+      message += e.what();
+      return message;
+    }
+
+    std::string callback_error_message(const char* site) {
+      std::string message = site;
+      message += " callback threw unknown exception";
+      return message;
+    }
+  } // namespace
+
 #if FXE_HAS_LIBUV
   namespace {
     void close_if_open(uv_handle_t* handle, void*) noexcept {
-      if (!uv_is_closing(handle)) {
-        uv_close(handle, nullptr);
+      if (handle != nullptr && !uv_is_closing(handle)) {
+        uv_close(handle, [](uv_handle_t*) noexcept {});
       }
     }
 
@@ -69,7 +87,9 @@ namespace fxe::runtime {
     }
     run_pump_callbacks();
     drain_posted_callbacks();
+    run_microtask_checkpoint();
     const int rc = uv_run(&loop_, UV_RUN_NOWAIT);
+    drain_posted_callbacks();
     run_microtask_checkpoint();
     return rc;
 #else
@@ -135,7 +155,10 @@ namespace fxe::runtime {
     for (auto& cb : callbacks) {
       try {
         cb();
+      } catch (const std::exception& e) {
+        report_error(callback_error_message("pump", e));
       } catch (...) {
+        report_error(callback_error_message("pump"));
       }
     }
   }
@@ -175,27 +198,53 @@ namespace fxe::runtime {
     for (auto& cb : callbacks) {
       try {
         cb();
+      } catch (const std::exception& e) {
+        report_error(callback_error_message("microtask", e));
       } catch (...) {
+        report_error(callback_error_message("microtask"));
       }
     }
   }
 
-  void uv_loop_runtime::post(pump_callback cb) {
+  void uv_loop_runtime::report_error(std::string message) {
+    if (message.empty()) {
+      return;
+    }
+    std::lock_guard<std::mutex> lk(errors_mu_);
+    errors_.push_back(std::move(message));
+  }
+
+  std::vector<std::string> uv_loop_runtime::drain_errors() {
+    std::lock_guard<std::mutex> lk(errors_mu_);
+    std::vector<std::string> out;
+    out.swap(errors_);
+    return out;
+  }
+
+  bool uv_loop_runtime::try_post(pump_callback cb) {
 #if FXE_HAS_LIBUV
     if (!cb || init_status_ != 0 || !loop_ready_) {
-      return;
+      return false;
     }
     std::lock_guard<std::mutex> lk(work_mu_);
     if (stopping_.load() || closed_.load()) {
-      return;
+      // Post-shutdown work is refused intentionally: callers that need to know
+      // use try_post(), while the legacy post() API remains best-effort void.
+      return false;
     }
     work_.push_back(std::move(cb));
     if (async_ready_) {
       (void)uv_async_send(&async_);
     }
+    return true;
 #else
     (void)cb;
+    return false;
 #endif
+  }
+
+  void uv_loop_runtime::post(pump_callback cb) {
+    (void)try_post(std::move(cb));
   }
 
   void uv_loop_runtime::shutdown() noexcept {
@@ -230,7 +279,10 @@ namespace fxe::runtime {
     for (auto& cb : callbacks) {
       try {
         cb();
+      } catch (const std::exception& e) {
+        report_error(callback_error_message("posted", e));
       } catch (...) {
+        report_error(callback_error_message("posted"));
       }
     }
 #endif

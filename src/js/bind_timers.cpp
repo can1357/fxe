@@ -40,6 +40,9 @@ namespace fxe::js {
     };
 
     struct iso_state {
+      // Timers here do not own libuv timer handles. JS-visible work is ref'd
+      // by V8 Globals while present in `active`/`raf_queue` and unref'd by
+      // Reset() on clear, one-shot completion, or frame dispatch.
       uint64_t next_id = 1;
       std::unordered_map<uint64_t, std::unique_ptr<timer_entry>> active;
       std::priority_queue<heap_node, std::vector<heap_node>, std::greater<heap_node>> heap;
@@ -61,6 +64,38 @@ namespace fxe::js {
       if (!slot)
         slot = std::make_unique<iso_state>();
       return *slot;
+    }
+
+    void reset_timer_entry(timer_entry& entry) {
+      entry.fn.Reset();
+      for (auto& arg : entry.args)
+        arg.Reset();
+      entry.args.clear();
+    }
+
+    void timers_reset_for_isolate(Isolate* iso) {
+      std::unique_ptr<iso_state> state;
+      {
+        std::lock_guard<std::mutex> lk(g_states_mu);
+        auto it = g_states.find(iso);
+        if (it == g_states.end())
+          return;
+        state = std::move(it->second);
+        g_states.erase(it);
+      }
+      if (!state)
+        return;
+      for (auto& [_, entry] : state->active) {
+        if (entry)
+          reset_timer_entry(*entry);
+      }
+      state->active.clear();
+      while (!state->heap.empty())
+        state->heap.pop();
+      for (auto& [_, fn] : state->raf_queue)
+        fn.Reset();
+      state->raf_queue.clear();
+      state->raf_cancelled.clear();
     }
 
     Local<String> str(Isolate* iso, const char* s) {
@@ -188,6 +223,13 @@ namespace fxe::js {
       // If currently mid-dispatch, also record cancellation.
       s.raf_cancelled.push_back(id);
     }
+
+    struct timers_resetter_register {
+      timers_resetter_register() {
+        register_template_resetter(&timers_reset_for_isolate);
+      }
+    };
+    static timers_resetter_register s_timers_resetter_register;
   } // namespace
 
   void install_timers_global(Isolate* iso, Local<ObjectTemplate> global) {

@@ -22,10 +22,8 @@ export interface PaintTextOptions {
   caretColor?: Color;
 }
 
-function measuredWidth(text: string, style: TextStyle, fontSize: number): number {
-  if (text.length === 0) return 0;
-  const [width] = Primitives.calcText(text, fontSize);
-  return width + Math.max(0, text.length - 1) * (style.letterSpacing ?? 0);
+function measuredWidth(text: string, style: TextStyle): number {
+  return xAtGlyphIndex(text, style, text.length);
 }
 
 function alignedX(rect: LayoutResult, lineWidth: number, align: TextStyle['textAlign']): number {
@@ -71,7 +69,7 @@ export function paintText(
   for (let i = 0; i < wrapped.lines.length; i++) {
     const line = wrapped.lines[i];
     const lineStart = wrapped.lineStartIndices[i] ?? 0;
-    const lineWidth = measuredWidth(line, style, fontSize);
+    const lineWidth = measuredWidth(line, style);
     const x = alignedX(rect, lineWidth, align);
     caretBaseX = x + lineWidth;
     caretY = baseY + i * wrapped.lineHeight;
@@ -108,9 +106,9 @@ export function paintText(
   }
 
   if (!preedit?.text) return;
-  const preeditWidth = measuredWidth(preedit.text, style, fontSize);
+  const preeditWidth = measuredWidth(preedit.text, style);
   const cursor = Math.max(0, Math.min(preedit.cursor, preedit.text.length));
-  const preeditCursorWidth = measuredWidth(preedit.text.slice(0, cursor), style, fontSize);
+  const preeditCursorWidth = measuredWidth(preedit.text.slice(0, cursor), style);
   Primitives.drawText(cb, caretBaseX, caretY, 0, preedit.text, fontSize, color);
   Primitives.fillRect(
     cb,

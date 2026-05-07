@@ -256,6 +256,12 @@ namespace fxe {
         multisample_count_ =
             check_multisample_count(opts.multisample_count) ? opts.multisample_count : 1;
         bloom_enabled_ = opts.enable_bloom;
+        present_mode_ = choose_present_mode(caps, opts.vsync);
+        if (!opts.vsync && present_mode_ == wgpu::PresentMode::Fifo) {
+          std::fprintf(stderr,
+                       "fxe.wgpu: --no-vsync requested, but surface only supports FIFO present; "
+                       "presentation remains display-paced\n");
+        }
 
         build_resources();
         configure_surface(w.framebuffer_size().x, w.framebuffer_size().y);
@@ -928,7 +934,7 @@ namespace fxe {
                     wgpu::TextureUsage::CopyDst;
         cfg.width = w;
         cfg.height = h;
-        cfg.presentMode = wgpu::PresentMode::Fifo;
+        cfg.presentMode = present_mode_;
         cfg.alphaMode = alpha_mode_;
         surface_.Configure(&cfg);
 
@@ -1123,6 +1129,28 @@ namespace fxe {
         return false;
       }
 
+      static wgpu::PresentMode choose_present_mode(const wgpu::SurfaceCapabilities& caps,
+                                                   bool vsync) noexcept {
+        auto supports = [&](wgpu::PresentMode mode) noexcept {
+          for (size_t i = 0; i < caps.presentModeCount; ++i) {
+            if (caps.presentModes[i] == mode)
+              return true;
+          }
+          return false;
+        };
+        if (vsync)
+          return supports(wgpu::PresentMode::Fifo) ? wgpu::PresentMode::Fifo
+                                                   : wgpu::PresentMode::Undefined;
+        if (supports(wgpu::PresentMode::Immediate))
+          return wgpu::PresentMode::Immediate;
+        if (supports(wgpu::PresentMode::Mailbox))
+          return wgpu::PresentMode::Mailbox;
+        if (supports(wgpu::PresentMode::FifoRelaxed))
+          return wgpu::PresentMode::FifoRelaxed;
+        return supports(wgpu::PresentMode::Fifo) ? wgpu::PresentMode::Fifo
+                                                 : wgpu::PresentMode::Undefined;
+      }
+
       void capture_frame_for_blur(wgpu::CommandEncoder& encoder,
                                   const wgpu::Texture& surface_texture) {
         if (!blur_capture_texture_)
@@ -1150,6 +1178,7 @@ namespace fxe {
       wgpu::TextureFormat surface_format_ = wgpu::TextureFormat::BGRA8Unorm;
       wgpu::TextureFormat depth_format_ = wgpu::TextureFormat::Depth24Plus;
       wgpu::CompositeAlphaMode alpha_mode_ = wgpu::CompositeAlphaMode::Auto;
+      wgpu::PresentMode present_mode_ = wgpu::PresentMode::Fifo;
 
       wgpu::Buffer ubo_;
       wgpu::Buffer vbuf_;

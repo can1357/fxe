@@ -12,8 +12,8 @@
 #include "bind_timers.hpp"
 #include "os/os.hpp"
 #include "runtime/capabilities.hpp"
-#include "runtime/v8/fs_watcher.hpp"
 #include "runtime/uv_loop.hpp"
+#include "runtime/v8/fs_watcher.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -335,7 +335,6 @@ namespace fxe::js {
       }
       return arr;
     }
-
 
     std::string string_field(Isolate* iso, Local<Value> opts, const char* key,
                              std::string_view defv) {
@@ -2067,7 +2066,8 @@ namespace fxe::js {
       auto target = utf8(iso, info[0]);
       auto link_path = utf8(iso, info[1]);
       auto guarded_target = guarded_symlink_target_path(target, link_path).generic_string();
-      if (!guard_fs_async(iso, ctx, info, guarded_target) || !guard_fs_async(iso, ctx, info, link_path))
+      if (!guard_fs_async(iso, ctx, info, guarded_target) ||
+          !guard_fs_async(iso, ctx, info, link_path))
         return;
       auto work = make_work(fs_async_kind::symlink, target, "symlink");
       work->path2 = link_path;
@@ -2109,7 +2109,8 @@ namespace fxe::js {
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       auto work = make_work(fs_async_kind::access, path, "access");
-      work->mode = info.Length() >= 2 && !info[1]->IsObject() ? info[1]->Int32Value(ctx).FromMaybe(0) : 0;
+      work->mode =
+          info.Length() >= 2 && !info[1]->IsObject() ? info[1]->Int32Value(ctx).FromMaybe(0) : 0;
       auto signal = signal_from_options(iso, ctx, info, 1);
       if (signal.IsEmpty())
         signal = signal_from_options(iso, ctx, info, 2);
@@ -2173,10 +2174,10 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(rejected(
-            iso, ctx,
-            Exception::TypeError(str(iso, nofollow ? "lutimes(path, atime, mtime)"
-                                                    : "utimes(path, atime, mtime)"))));
+        info.GetReturnValue().Set(
+            rejected(iso, ctx,
+                     Exception::TypeError(str(iso, nofollow ? "lutimes(path, atime, mtime)"
+                                                            : "utimes(path, atime, mtime)"))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2223,7 +2224,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsInt32()) {
-        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError(str(iso, "lock(fd, opts?)"))));
+        info.GetReturnValue().Set(
+            rejected(iso, ctx, Exception::TypeError(str(iso, "lock(fd, opts?)"))));
         return;
       }
       auto work = make_work(fs_async_kind::lock, "", "flock");

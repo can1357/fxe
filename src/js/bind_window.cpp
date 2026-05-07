@@ -1665,6 +1665,11 @@ namespace fxe::js {
 
     bool parse_run_opts(Isolate* iso, Local<Context> ctx, Local<Value> v, run_opts& out) {
       out = {};
+      const auto& runner_overrides = get_runner_render_overrides();
+      if (runner_overrides.override_fps) {
+        out.frame_period = runner_overrides.fps > 0.0 ? 1.0 / runner_overrides.fps : 0.0;
+        return true;
+      }
       if (!v->IsObject())
         return true;
       auto opts = v.As<Object>();
@@ -1923,8 +1928,8 @@ namespace fxe::js {
         return;
       }
       run_opts opts;
-      if (info.Length() >= 2)
-        parse_run_opts(iso, ctx, info[1], opts);
+      Local<Value> opt_value = info.Length() >= 2 ? info[1] : Undefined(iso).As<Value>();
+      parse_run_opts(iso, ctx, opt_value, opts);
 
       hh->on_frame.Reset(iso, info[0].As<Function>());
       hh->self_strong.Reset(iso, info.This());
@@ -1978,8 +1983,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       run_opts opts;
-      if (info.Length() >= 1)
-        parse_run_opts(iso, ctx, info[0], opts);
+      Local<Value> opt_value = info.Length() >= 1 ? info[0] : Undefined(iso).As<Value>();
+      parse_run_opts(iso, ctx, opt_value, opts);
       app_run_loop(iso, opts.frame_period);
     }
 

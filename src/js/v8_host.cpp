@@ -12,9 +12,9 @@
 #include <fxe/v8_host.hpp>
 
 #include "../runtime/bundle_loader.hpp"
+#include "../runtime/uv_loop.hpp"
 #include "../runtime/v8/fxe_native.hpp"
 #include "../runtime/v8/node_compat.hpp"
-#include "../runtime/uv_loop.hpp"
 #include "bind_app.hpp"
 #include "bind_audio.hpp"
 #include "bind_blob.hpp"
@@ -25,6 +25,7 @@
 #include "bind_fs.hpp"
 #include "bind_global_shortcut.hpp"
 #include "bind_image.hpp"
+#include "bind_indexed_db.hpp"
 #include "bind_ipc.hpp"
 #include "bind_menu.hpp"
 #include "bind_notification.hpp"
@@ -39,7 +40,6 @@
 #include "bind_spritesheet.hpp"
 #include "bind_sqlite.hpp"
 #include "bind_storage.hpp"
-#include "bind_indexed_db.hpp"
 #include "bind_timers.hpp"
 #include "bind_tray.hpp"
 #include "bind_url.hpp"
@@ -317,6 +317,12 @@ namespace fxe::js {
     std::vector<fxe::window*> windows;
     std::vector<std::pair<fxe::window*, fxe::renderer*>> renderers;
     bool app_running = false;
+    struct uv_microtask_checkpoint_state {
+      std::mutex mu;
+      v8::Isolate* isolate = nullptr;
+      v8::Global<v8::Context> context;
+    };
+    std::shared_ptr<uv_microtask_checkpoint_state> uv_microtask_checkpoint;
     std::size_t uv_microtask_checkpoint_id = 0;
     explicit impl(host::bootstrap_mode mode);
     void record_import(std::string_view importer, std::string_view dependency);
@@ -325,6 +331,15 @@ namespace fxe::js {
     ~impl();
   };
 
+  runner_render_overrides g_runner_render_overrides;
+
+  void set_runner_render_overrides(const runner_render_overrides& overrides) noexcept {
+    g_runner_render_overrides = overrides;
+  }
+
+  const runner_render_overrides& get_runner_render_overrides() noexcept {
+    return g_runner_render_overrides;
+  }
   void dispatch_console_sink(v8::Isolate* iso, const char* level, std::string_view text) {
     auto* p = static_cast<host::impl*>(iso->GetData(kIsolateSlotHostImpl));
     if (p && p->console_sink_fn)
@@ -1583,8 +1598,8 @@ Error.prepareStackTrace = function(err, frames) {
         auto promise = eval_result.As<v8::Promise>();
         auto state = pump_until_settled(iso, ctx, promise);
         if (state == v8::Promise::kRejected) {
-          error =
-              "HMR module top-level rejection: " + console_arg_to_string(iso, ctx, promise->Result(), true);
+          error = "HMR module top-level rejection: " +
+                  console_arg_to_string(iso, ctx, promise->Result(), true);
           return false;
         }
         if (state == v8::Promise::kPending) {
@@ -1765,8 +1780,8 @@ Error.prepareStackTrace = function(err, frames) {
       auto promise = eval_result.As<v8::Promise>();
       auto state = pump_until_settled(iso, ctx, promise);
       if (state == v8::Promise::kRejected) {
-        error =
-            "HMR module top-level rejection: " + console_arg_to_string(iso, ctx, promise->Result(), true);
+        error = "HMR module top-level rejection: " +
+                console_arg_to_string(iso, ctx, promise->Result(), true);
         return v8::MaybeLocal<v8::Value>();
       }
       if (state == v8::Promise::kPending) {
@@ -1834,6 +1849,9 @@ Error.prepareStackTrace = function(err, frames) {
 
     v8::Local<v8::Context> ctx = v8::Context::New(isolate, nullptr, global);
     context.Reset(isolate, ctx);
+    uv_microtask_checkpoint = std::make_shared<uv_microtask_checkpoint_state>();
+    uv_microtask_checkpoint->isolate = isolate;
+    uv_microtask_checkpoint->context.Reset(isolate, ctx);
 
     // Force-install console.log on the freshly-created global object so it
     // overrides any embedder-injected variant.
@@ -1964,13 +1982,16 @@ Error.prepareStackTrace = function(err, frames) {
       }
 #if FXE_HAS_LIBUV
       if (!worker_mode) {
+        auto checkpoint = uv_microtask_checkpoint;
         uv_microtask_checkpoint_id =
-            fxe::runtime::uv_loop_runtime::instance().register_microtask_checkpoint([this] {
+            fxe::runtime::uv_loop_runtime::instance().register_microtask_checkpoint([checkpoint] {
+              std::lock_guard<std::mutex> lock(checkpoint->mu);
+              auto* isolate = checkpoint->isolate;
               if (isolate == nullptr)
                 return;
               v8::Isolate::Scope is(isolate);
               v8::HandleScope hs(isolate);
-              auto ctx = context.Get(isolate);
+              auto ctx = checkpoint->context.Get(isolate);
               if (!ctx.IsEmpty()) {
                 v8::Context::Scope cs(ctx);
                 isolate->PerformMicrotaskCheckpoint();
@@ -1989,6 +2010,11 @@ Error.prepareStackTrace = function(err, frames) {
         uv_microtask_checkpoint_id);
     uv_microtask_checkpoint_id = 0;
 #endif
+    if (uv_microtask_checkpoint) {
+      std::lock_guard<std::mutex> microtask_lock(uv_microtask_checkpoint->mu);
+      uv_microtask_checkpoint->context.Reset();
+      uv_microtask_checkpoint->isolate = nullptr;
+    }
     for (auto& [_, entry] : module_cache)
       entry.mod.Reset();
     module_cache.clear();
@@ -2101,8 +2127,8 @@ Error.prepareStackTrace = function(err, frames) {
       auto promise = eval_result.As<v8::Promise>();
       auto state = pump_until_settled(iso, ctx, promise);
       if (state == v8::Promise::kRejected) {
-        std::string msg =
-            "module top-level rejection: " + console_arg_to_string(iso, ctx, promise->Result(), true);
+        std::string msg = "module top-level rejection: " +
+                          console_arg_to_string(iso, ctx, promise->Result(), true);
         return {false, std::move(msg)};
       }
       if (state == v8::Promise::kPending) {

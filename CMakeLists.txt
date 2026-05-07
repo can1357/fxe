@@ -11,12 +11,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE)
 
 option(FXE_BUILD_EXAMPLES "Build fxe examples" ON)
 option(FXE_BUILD_TESTS "Build fxe tests" ON)
-option(FXE_ENABLE_WGPU "Build Dawn/WebGPU backend when Dawn is available" OFF)
-option(FXE_ENABLE_V8 "Build embedded V8 host/bindings when V8 is available" OFF)
+option(FXE_ENABLE_WGPU "Build Dawn/WebGPU backend when Dawn is available" ON)
+option(FXE_ENABLE_V8 "Build embedded V8 host/bindings when V8 is available" ON)
 option(
     FXE_ENABLE_NODE_COMPAT
     "Generate vendored unenv assets for V8 Node compatibility shims"
-    OFF
+    ON
 )
 option(
     FXE_ENABLE_LIBUV
@@ -26,7 +26,7 @@ option(
 option(
     FXE_ENABLE_NATIVE_TLS_HTTP2
     "Configure mbedTLS/nghttp2 dependencies for future native HTTPS/HTTP2 transport; does not enable HTTP/2 support"
-    OFF
+    ON
 )
 option(
     FXE_FETCH_DEPS
@@ -144,8 +144,12 @@ add_library(fxe_os STATIC ${_fxe_os_sources})
 target_include_directories(fxe_os PUBLIC src include)
 target_compile_features(fxe_os PUBLIC cxx_std_20)
 if(APPLE)
-    file(GLOB _fxe_os_platform CONFIGURE_DEPENDS
-         src/os/macos/*.cpp src/os/macos/*.mm)
+    file(
+        GLOB _fxe_os_platform
+        CONFIGURE_DEPENDS
+        src/os/macos/*.cpp
+        src/os/macos/*.mm
+    )
     target_sources(fxe_os PRIVATE ${_fxe_os_platform})
     set_source_files_properties(
         ${_fxe_os_platform}
@@ -202,7 +206,13 @@ else()
 endif()
 
 # Networking — http (libcurl optional) + websocket client.
-add_library(fxe_net STATIC src/net/cookie_jar.cpp src/net/http_client.cpp src/net/websocket_client.cpp)
+add_library(
+    fxe_net
+    STATIC
+    src/net/cookie_jar.cpp
+    src/net/http_client.cpp
+    src/net/websocket_client.cpp
+)
 target_include_directories(fxe_net PUBLIC src)
 target_compile_features(fxe_net PUBLIC cxx_std_20)
 find_package(CURL QUIET)
@@ -329,7 +339,11 @@ target_link_libraries(fxe_font PUBLIC fxe_deps)
 target_compile_features(fxe_font PUBLIC cxx_std_20)
 
 if(FXE_FONT_HAS_FREETYPE)
-    file(GLOB _fxe_font_freetype CONFIGURE_DEPENDS src/font/backends/freetype/*.cpp)
+    file(
+        GLOB _fxe_font_freetype
+        CONFIGURE_DEPENDS
+        src/font/backends/freetype/*.cpp
+    )
     target_sources(fxe_font PRIVATE ${_fxe_font_freetype})
     target_link_libraries(fxe_font PUBLIC Freetype::Freetype)
 else()
@@ -337,7 +351,11 @@ else()
 endif()
 
 if(FXE_FONT_HAS_HARFBUZZ)
-    file(GLOB _fxe_font_harfbuzz CONFIGURE_DEPENDS src/font/backends/harfbuzz/*.cpp)
+    file(
+        GLOB _fxe_font_harfbuzz
+        CONFIGURE_DEPENDS
+        src/font/backends/harfbuzz/*.cpp
+    )
     target_sources(fxe_font PRIVATE ${_fxe_font_harfbuzz})
     if(TARGET harfbuzz::harfbuzz)
         target_link_libraries(fxe_font PUBLIC harfbuzz::harfbuzz)
@@ -347,7 +365,11 @@ if(FXE_FONT_HAS_HARFBUZZ)
 endif()
 
 if(FXE_FONT_HAS_CORETEXT)
-    file(GLOB _fxe_font_coretext CONFIGURE_DEPENDS src/font/backends/coretext/*.mm)
+    file(
+        GLOB _fxe_font_coretext
+        CONFIGURE_DEPENDS
+        src/font/backends/coretext/*.mm
+    )
     target_sources(fxe_font PRIVATE ${_fxe_font_coretext})
     set_source_files_properties(
         ${_fxe_font_coretext}
@@ -355,18 +377,29 @@ if(FXE_FONT_HAS_CORETEXT)
     )
     target_link_libraries(
         fxe_font
-        PUBLIC "-framework CoreText" "-framework CoreFoundation" "-framework CoreGraphics"
+        PUBLIC
+            "-framework CoreText"
+            "-framework CoreFoundation"
+            "-framework CoreGraphics"
     )
 endif()
 
 if(FXE_FONT_HAS_FONTCONFIG)
-    file(GLOB _fxe_font_fontconfig CONFIGURE_DEPENDS src/font/backends/fontconfig/*.cpp)
+    file(
+        GLOB _fxe_font_fontconfig
+        CONFIGURE_DEPENDS
+        src/font/backends/fontconfig/*.cpp
+    )
     target_sources(fxe_font PRIVATE ${_fxe_font_fontconfig})
     target_link_libraries(fxe_font PUBLIC Fontconfig::Fontconfig)
 endif()
 
 if(FXE_FONT_HAS_WIN32_DIR)
-    file(GLOB _fxe_font_windows CONFIGURE_DEPENDS src/font/backends/windows/*.cpp)
+    file(
+        GLOB _fxe_font_windows
+        CONFIGURE_DEPENDS
+        src/font/backends/windows/*.cpp
+    )
     target_sources(fxe_font PRIVATE ${_fxe_font_windows})
 endif()
 
@@ -375,7 +408,11 @@ endif()
 if(NOT FXE_FONT_HAS_HARFBUZZ AND NOT FXE_FONT_HAS_CORETEXT)
     target_sources(fxe_font PRIVATE src/font/backends/null/shaper.cpp)
 endif()
-if(NOT FXE_FONT_HAS_FONTCONFIG AND NOT FXE_FONT_HAS_WIN32_DIR AND NOT FXE_FONT_HAS_CORETEXT)
+if(
+    NOT FXE_FONT_HAS_FONTCONFIG
+    AND NOT FXE_FONT_HAS_WIN32_DIR
+    AND NOT FXE_FONT_HAS_CORETEXT
+)
     target_sources(fxe_font PRIVATE src/font/backends/null/discover.cpp)
 endif()
 
@@ -525,7 +562,8 @@ if(FXE_ENABLE_V8)
         FetchContent_Declare(
             pathe
             URL https://registry.npmjs.org/pathe/-/pathe-2.0.3.tgz
-            URL_HASH SHA256=6e3b73bc5dbb7f8a108ff5d8459b07da04062e822c662339416525510696df36
+            URL_HASH
+                SHA256=6e3b73bc5dbb7f8a108ff5d8459b07da04062e822c662339416525510696df36
         )
         FetchContent_MakeAvailable(pathe)
         set(_fxe_unenv_root "${unenv_SOURCE_DIR}")
@@ -541,8 +579,7 @@ if(FXE_ENABLE_V8)
         add_custom_command(
             OUTPUT "${_fxe_unenv_assets_h}"
             COMMAND
-                "${CMAKE_COMMAND}"
-                -DUNENV_ROOT="${_fxe_unenv_root}"
+                "${CMAKE_COMMAND}" -DUNENV_ROOT="${_fxe_unenv_root}"
                 -DPATHE_DIST_ROOT="${_fxe_pathe_dist_root}"
                 -DOUTPUT="${_fxe_unenv_assets_h}" -DNAMESPACE="fxe::runtime"
                 -DVARIABLE="k_unenv_assets" -DDELIMITER="FXEUNENV" -P
@@ -628,14 +665,23 @@ if(FXE_ENABLE_V8)
     endforeach()
     # fs_watcher backends live under src/runtime/v8/fs_watcher/<plat>.cpp.
     if(APPLE)
-        file(GLOB _fxe_fs_watcher_source CONFIGURE_DEPENDS
-             src/runtime/v8/fs_watcher/macos.cpp)
+        file(
+            GLOB _fxe_fs_watcher_source
+            CONFIGURE_DEPENDS
+            src/runtime/v8/fs_watcher/macos.cpp
+        )
     elseif(WIN32)
-        file(GLOB _fxe_fs_watcher_source CONFIGURE_DEPENDS
-             src/runtime/v8/fs_watcher/win32.cpp)
+        file(
+            GLOB _fxe_fs_watcher_source
+            CONFIGURE_DEPENDS
+            src/runtime/v8/fs_watcher/win32.cpp
+        )
     else()
-        file(GLOB _fxe_fs_watcher_source CONFIGURE_DEPENDS
-             src/runtime/v8/fs_watcher/linux.cpp)
+        file(
+            GLOB _fxe_fs_watcher_source
+            CONFIGURE_DEPENDS
+            src/runtime/v8/fs_watcher/linux.cpp
+        )
     endif()
     # fxe_js: bindings (src/js/*.cpp) + V8-host runtime (src/runtime/v8/*.cpp,
     # plus the platform-selected fs_watcher above). The runner exec lives in
@@ -643,8 +689,11 @@ if(FXE_ENABLE_V8)
     file(GLOB _fxe_js_sources CONFIGURE_DEPENDS src/js/*.cpp)
     file(GLOB _fxe_runtime_v8_sources CONFIGURE_DEPENDS src/runtime/v8/*.cpp)
     if(FXE_ENABLE_NATIVE_TLS_HTTP2)
-        file(GLOB _fxe_runtime_v8_native CONFIGURE_DEPENDS
-             src/runtime/v8/native/*.cpp)
+        file(
+            GLOB _fxe_runtime_v8_native
+            CONFIGURE_DEPENDS
+            src/runtime/v8/native/*.cpp
+        )
         list(APPEND _fxe_runtime_v8_sources ${_fxe_runtime_v8_native})
     endif()
     add_library(
@@ -939,8 +988,8 @@ if(FXE_BUILD_TESTS)
         _entry
         IN
         ITEMS
-        "fxe_debug_tests=tests/debug_protocol_tests.cpp"
-        "fxe_debug_cdp_ws_tests=tests/debug_cdp_ws_test.cpp"
+            "fxe_debug_tests=tests/debug_protocol_tests.cpp"
+            "fxe_debug_cdp_ws_tests=tests/debug_cdp_ws_test.cpp"
     )
         string(REPLACE "=" ";" _pair "${_entry}")
         list(GET _pair 0 _name)

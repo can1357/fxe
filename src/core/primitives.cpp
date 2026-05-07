@@ -1360,8 +1360,7 @@ namespace fxe::primitives {
           // rows and produce visibly jagged baselines. Vertical sub-pixel
           // positioning is not currently baked into the cache anyway, so we
           // are not losing precision by snapping here.
-          const float quad_fb_y =
-              std::nearbyint(pen_fb.y + g.offset_y - sg.y_offset);
+          const float quad_fb_y = std::nearbyint(pen_fb.y + g.offset_y - sg.y_offset);
           const math::vec2 quad_pos{quad_fb_x * inv_dpr, quad_fb_y * inv_dpr};
           const math::vec2 quad_size{float(g.width) * inv_dpr, float(g.height) * inv_dpr};
           const math::mat4x4 m = make_screen_transform(quad_pos, quad_size, depth);

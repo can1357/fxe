@@ -250,7 +250,12 @@ test('fs extras copy symlink glob atomic access and locks', async () => {
     fs.writeFileAtomicSync(atomic, 'safe');
     assertEqual(fs.readFileSync(atomic, 'utf8'), 'safe');
     assertThrows(
-      () => fs.writeFileAtomicSync(atomic, { toString() { throw new Error('encoder failed'); } } as unknown as string),
+      () =>
+        fs.writeFileAtomicSync(atomic, {
+          toString() {
+            throw new Error('encoder failed');
+          },
+        } as unknown as string),
       /data must be string or TypedArray/,
     );
     assertDeepEqual(

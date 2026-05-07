@@ -61,7 +61,7 @@ namespace fxe::font {
     // CJK + Latin, etc.) yields one run per font segment, each with its
     // own `face` pointer the renderer should use to look up glyphs.
     [[nodiscard]] virtual std::vector<ShapeRun> shape(Face& face, std::string_view utf8,
-                                                     const ShapeOptions& opts) = 0;
+                                                      const ShapeOptions& opts) = 0;
   };
 
   [[nodiscard]] std::unique_ptr<Shaper> default_shaper();

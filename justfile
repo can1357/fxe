@@ -49,7 +49,6 @@ versions:
     @printf '  shfmt     : %s\n' "$(shfmt --version 2>/dev/null || echo missing)"
     @printf '  shellcheck: %s\n' "$(shellcheck --version 2>/dev/null | sed -n 's/^version: //p' || echo missing)"
     @printf '  gersemi   : %s\n' "$(gersemi --version 2>/dev/null | head -n1 || echo missing)"
-    @printf '  typos     : %s\n' "$(typos --version 2>/dev/null || echo missing)"
     @printf '  python    : %s\n' "$(python3 --version 2>/dev/null || echo missing)"
 
 [doc('Install/refresh dev tooling (npm devDeps + system suggestions)')]
@@ -59,7 +58,7 @@ tools-install:
     @echo
     @echo "System tools (install via your package manager if missing):"
     @echo "  required: cmake ninja clang-format python3 tsc"
-    @echo "  optional: biome ruff shfmt shellcheck gersemi typos watchexec tint"
+    @echo "  optional: biome ruff shfmt shellcheck gersemi watchexec tint"
     @echo
     @echo "Run 'just doctor' to see what's currently detected."
 
@@ -148,19 +147,9 @@ format-just:
 format-just-check:
     just --unstable --justfile '{{ justfile() }}' --fmt --check
 
-[doc('Apply typos auto-fixes (soft-skips when typos is missing)')]
-[group('format')]
-spell-fix:
-    @if command -v typos >/dev/null 2>&1; then \
-        typos --write-changes; \
-    else \
-        printf '{{ yellow }}skip:{{ reset }} typos not found (see `just doctor`)\n' >&2; \
-    fi
-
 [doc('Run every formatter (writes); skips optional tools that are missing')]
 [group('format')]
-format-all: format format-js format-py format-shell format-cmake format-just spell-fix
-
+format-all: format format-js format-py format-shell format-cmake format-just
 [doc('Lint JS/TS via biome; CI gate')]
 [group('lint')]
 [no-exit-message]
@@ -203,19 +192,9 @@ lint-shaders:
         shopt -s nullglob; \
         for f in src/wgpu/shaders/*.wgsl; do "$bin" --validate "$f"; done
 
-[doc('Spell-check sources with typos (soft-skips when missing)')]
-[group('lint')]
-[no-exit-message]
-spell *ARGS:
-    @if command -v typos >/dev/null 2>&1; then \
-        typos {{ ARGS }}; \
-    else \
-        printf '{{ yellow }}skip:{{ reset }} typos not found (see `just doctor`)\n' >&2; \
-    fi
-
 [doc('Run every linter (read-only); soft-skips optional tools')]
 [group('lint')]
-lint: lint-js lint-py lint-shell lint-shaders spell
+lint: lint-js lint-py lint-shell lint-shaders
 
 [doc('Bootstrap the in-tree vcpkg checkout (idempotent)')]
 [group('build')]
@@ -282,6 +261,14 @@ ts name='ui_demo' *ARGS: (build 'dev-v8-wgpu')
     @script=$(just --justfile '{{ justfile() }}' _resolve_js_script '{{ name }}'); \
         echo "./build/dev-v8-wgpu/fxe_run {{ ARGS }} $script"; \
         './build/dev-v8-wgpu/fxe_run' {{ ARGS }} "$script"
+
+
+[doc('Run a JS/TS example through the release V8/WebGPU fxe_run. Extra args go through to fxe_run BEFORE the script path: just js-release login_form --show-fps')]
+[group('examples')]
+js-release name='ui_demo' *ARGS: (build 'release-v8-wgpu')
+    @script=$(just --justfile '{{ justfile() }}' _resolve_js_script '{{ name }}'); \
+        echo "./build/release-v8-wgpu/fxe_run {{ ARGS }} $script"; \
+        './build/release-v8-wgpu/fxe_run' {{ ARGS }} "$script"
 
 # Resolve a JS/TS example name to a real script path under examples/js/.
 # Accepts: bare names (probe known extensions), names with extensions,

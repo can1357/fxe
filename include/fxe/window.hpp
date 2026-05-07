@@ -4,8 +4,8 @@
 
 #include <climits>
 #include <cstdint>
-#include <memory>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>

@@ -100,9 +100,10 @@ platform. The audio engine handles its own threads internally.
 
 ## Development Commands
 
-Driven by `just` (CMake under the hood). Default preset is `dev` (no V8/Dawn).
-Presets: `dev`, `release`, `dev-wgpu`, `dev-v8`, `dev-v8-wgpu` (the last
-additionally turns on `FXE_ENABLE_NODE_COMPAT`).
+Driven by `just` (CMake under the hood). The default `dev` and `release`
+presets enable the full runtime (V8 + Dawn + node compat + native TLS/HTTP2);
+the legacy `dev-wgpu`, `dev-v8`, and `dev-v8-wgpu` presets are kept as
+aliases for the same configuration.
 
 ```bash
 just bootstrap                 # one-time: build in-tree vcpkg
@@ -111,12 +112,12 @@ just build [preset] [-- args]  # alias: just b
 just test [preset]             # ctest --preset; alias: just t
 just test-core [preset]        # run fxe_core_tests directly
 just example hello_sprite      # build+run native example; alias: just r
-just ts ui_demo [-- args]      # build dev-v8-wgpu, run examples/js/ui_demo.ts
+just ts ui_demo [-- args]      # build dev preset, run examples/js/ui_demo.ts
 just debug ui_demo 9333        # run paused with debug protocol on port 9333
 just ts-check                  # tsc --noEmit -p tsconfig.json
 just format / format-check     # clang-format over tracked C++ sources; alias: just f
 just format-js / format-js-check / lint-js / fix-js      # biome over JS/TS
-just format-py / format-cmake / format-shell / spell     # optional, soft-skip
+just format-py / format-cmake / format-shell           # optional, soft-skip
 just ci                        # format-check + test + ts-check
 just ci-quick                  # format/lint/typecheck only (no build)
 just pycli ...                 # python -m fxe_debug.cli (Python debug CLI)
@@ -127,9 +128,9 @@ just doctor                    # report which dev tools are installed
 Direct CMake equivalents work too:
 
 ```bash
-cmake --preset dev-v8-wgpu && cmake --build --preset dev-v8-wgpu
-ctest --preset dev-v8-wgpu --output-on-failure
-./build/dev-v8-wgpu/fxe_run examples/js/hello.ts
+cmake --preset release && cmake --build --preset release
+ctest --preset release --output-on-failure
+./build/release/fxe_run examples/js/hello.ts
 ```
 
 ## Code Conventions & Common Patterns
@@ -242,7 +243,7 @@ mount(<App />, new Window({ width: 480, height: 320 }));
   `cli.py`)
 - `tools/fxe-pack/` — packaging tool (DMG / MSI / MSIX / AppImage / plain)
 - `.github/workflows/ci.yml` — Linux/macOS/Windows matrix; uses
-  `FXE_FETCH_DEPS=ON`, `FXE_ENABLE_WGPU=OFF` for core-only smoke
+  `FXE_FETCH_DEPS=ON`, plus `-DFXE_ENABLE_WGPU=OFF -DFXE_ENABLE_V8=OFF` for core-only smoke
 - `TODO.md` — running roadmap and per-module gap audit
 
 ## Runtime/Tooling Preferences
@@ -266,8 +267,8 @@ mount(<App />, new Window({ width: 480, height: 320 }));
   `CMAKE_PREFIX_PATH`. Not auto-fetched.
 - **libuv / mbedTLS / nghttp2:** via vcpkg manifest. `FXE_ENABLE_LIBUV` is
   `ON` by default (required for async fs/net);
-  `FXE_ENABLE_NATIVE_TLS_HTTP2` is gated `OFF` and turns on the native
-  HTTPS / HTTP/2 transport in `src/runtime/native_*.cpp`.
+  `FXE_ENABLE_NATIVE_TLS_HTTP2` is `ON` by default and enables the native
+  HTTPS / HTTP/2 transport in `src/runtime/v8/native/*.cpp`.
 - **Python:** ≥ 3.10, stdlib only. Do not add runtime dependencies to
   `clients/python/`.
 - **Biome:** JS/TS format + lint over `examples/js`, `tests`, `packages`,
@@ -329,7 +330,7 @@ drive `fxe_run` through the Python SDK rather than reading source and
 guessing. The SDK is Puppeteer-style: launch the app, attach, evaluate,
 screenshot, inject input.
 
-**Prerequisite:** `just build dev-v8-wgpu` (debug protocol + GPU backend).
+**Prerequisite:** `just build` (default `dev` preset includes V8 + Dawn).
 
 ### Quick recipes
 
@@ -529,7 +530,7 @@ easiest way to force a full layout pass into the buffer.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `LaunchError: FXE_DEBUG_PORT not detected` | binary missing or build stale | `just build dev-v8-wgpu` |
+| `LaunchError: FXE_DEBUG_PORT not detected` | binary missing or build stale | `just build dev` |
 | `ProtocolError(-32002, "V8 host not attached")` | called Runtime.* before the host loaded | wait for handshake / `await asyncio.sleep(0.05)` |
 | `ProtocolError(-32001, "capture armed; retry after the next render")` | first screenshot call | retry after a short sleep (see helper above) |
 | `ProtocolError(-32002, "window not attached")` / `"renderer not attached"` | the script hasn't run `new Window`/`new Renderer` yet | the SDK should `await page.resume()` if launched paused; otherwise wait |
@@ -548,7 +549,6 @@ full grouped recipe index.
   - `ruff` — Python format + lint (`just format-py`, `just lint-py`).
   - `shfmt` / `shellcheck` — shell formatting + linting (`just format-shell`, `just lint-shell`).
   - `gersemi` — CMake formatting (`just format-cmake`, `just format-cmake-check`).
-  - `typos` — spell check (`just spell`, `just spell-fix`).
   - `tint` — WGSL validation (`just lint-shaders`; honours `FXE_WGSL_VALIDATOR`).
   - `watchexec` / `fswatch` — `just watch <example>` rebuild loop.
 

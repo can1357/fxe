@@ -1,8 +1,8 @@
 // Greedy word-wrap helper for fxe-ui Text/View.
 //
-// FXE's `Primitives.calcText` is the only metric source available to JS — it
-// returns a (width, height) pair for the rendered glyph run at a given point
-// size. We use it to measure candidate lines and split on whitespace.
+// FXE exposes native text helpers next to the font stack. ASCII text uses that
+// bulk path to avoid repeated JS/native metric calls; non-ASCII falls back to
+// the JS path so code-unit indices stay correct for full Unicode strings.
 // Single words wider than `maxWidth` are emitted on their own line (not
 // char-broken) since natural prose rarely needs sub-word breaks; the caller
 // can opt-in by setting `breakWords: true`.
@@ -29,6 +29,41 @@ export interface WrapOptions {
   breakWords?: boolean;
 }
 
+function nativeWrapText(
+  text: string,
+  fontSize: number,
+  letterSpacing: number,
+  maxWidth: number,
+  lineHeight: number | undefined,
+  breakWords: boolean,
+): WrappedText | null {
+  return Primitives.wrapTextNative(
+    text,
+    fontSize,
+    letterSpacing,
+    maxWidth,
+    lineHeight,
+    breakWords,
+  ) as WrappedText | null;
+}
+function nativeXAtGlyphIndex(
+  text: string,
+  fontSize: number,
+  letterSpacing: number,
+  idx: number,
+): number | null {
+  return Primitives.xAtGlyphIndexNative(text, fontSize, letterSpacing, idx) as number | null;
+}
+
+function nativeGlyphIndexAt(
+  text: string,
+  fontSize: number,
+  letterSpacing: number,
+  x: number,
+): number | null {
+  return Primitives.glyphIndexAtNative(text, fontSize, letterSpacing, x) as number | null;
+}
+
 function measureLineWidth(text: string, fontSize: number, letterSpacing: number): number {
   if (text.length === 0) return 0;
   const [w] = Primitives.calcText(text, fontSize);
@@ -38,6 +73,8 @@ function measureLineWidth(text: string, fontSize: number, letterSpacing: number)
 export function xAtGlyphIndex(text: string, style: TextStyle, idx: number): number {
   const fontSize = style.fontSize ?? 16;
   const letterSpacing = style.letterSpacing ?? 0;
+  const native = nativeXAtGlyphIndex(text, fontSize, letterSpacing, idx);
+  if (native !== null) return native;
   const clamped = Math.max(0, Math.min(Math.trunc(idx), text.length));
   return measureLineWidth(text.slice(0, clamped), fontSize, letterSpacing);
 }
@@ -45,6 +82,10 @@ export function xAtGlyphIndex(text: string, style: TextStyle, idx: number): numb
 export function glyphIndexAt(text: string, style: TextStyle, x: number): number {
   if (text.length === 0 || x <= 0) return 0;
   if (!Number.isFinite(x)) return text.length;
+  const fontSize = style.fontSize ?? 16;
+  const letterSpacing = style.letterSpacing ?? 0;
+  const native = nativeGlyphIndexAt(text, fontSize, letterSpacing, x);
+  if (native !== null) return native;
   let lo = 0;
   let hi = text.length;
   while (lo < hi) {
@@ -80,6 +121,15 @@ function breakLongWord(
 export function wrapText(text: string, style: TextStyle, options: WrapOptions = {}): WrappedText {
   const fontSize = style.fontSize ?? 16;
   const letterSpacing = style.letterSpacing ?? 0;
+  const native = nativeWrapText(
+    text,
+    fontSize,
+    letterSpacing,
+    options.maxWidth ?? Number.POSITIVE_INFINITY,
+    style.lineHeight,
+    options.breakWords === true,
+  );
+  if (native !== null) return native;
   // `calcText('')` is well-defined in the FXE binding (returns height of the
   // active font), but we substitute 'M' to make sure we always get a real
   // glyph metric for empty inputs.

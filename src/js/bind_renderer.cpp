@@ -87,6 +87,13 @@ namespace fxe::js {
         if (o->Get(ctx, String::NewFromUtf8Literal(iso, "vsync")).ToLocal(&v))
           opts.vsync = v->BooleanValue(iso);
       }
+      const auto& runner_overrides = get_runner_render_overrides();
+      if (runner_overrides.override_multisample_count)
+        opts.multisample_count = runner_overrides.multisample_count;
+      if (runner_overrides.override_bloom)
+        opts.enable_bloom = runner_overrides.enable_bloom;
+      if (runner_overrides.override_vsync)
+        opts.vsync = runner_overrides.vsync;
       auto r = create_renderer(*win, opts);
       if (!r) {
         iso->ThrowException(

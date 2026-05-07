@@ -241,7 +241,11 @@ test('node:fs createReadStream emits data and end', async () => {
     assertEqual(await promise, 11);
 
     const written = join(dir, 'written.txt');
-    const { promise: finishPromise, resolve: resolveFinish, reject: rejectFinish } = Promise.withResolvers<void>();
+    const {
+      promise: finishPromise,
+      resolve: resolveFinish,
+      reject: rejectFinish,
+    } = Promise.withResolvers<void>();
     createWriteStream(written)
       .on('finish', resolveFinish)
       .on('error', rejectFinish)
