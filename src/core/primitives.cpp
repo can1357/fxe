@@ -1353,7 +1353,15 @@ namespace fxe::primitives {
         const auto& g = cache.lookup(face, sg.glyph_id, sub_fb);
         if (g.width > 0 && g.height > 0) {
           const float quad_fb_x = pen_fb_floor + g.offset_x + sg.x_offset;
-          const float quad_fb_y = pen_fb.y + g.offset_y - sg.y_offset;
+          // Snap the dest Y to the nearest framebuffer pixel. The mask page
+          // is sampled with a nearest-neighbour filter (mask atlas is rendered
+          // at framebuffer resolution and we want crisp 1:1 texels), so a
+          // fractional dest Y would land each texel between two destination
+          // rows and produce visibly jagged baselines. Vertical sub-pixel
+          // positioning is not currently baked into the cache anyway, so we
+          // are not losing precision by snapping here.
+          const float quad_fb_y =
+              std::nearbyint(pen_fb.y + g.offset_y - sg.y_offset);
           const math::vec2 quad_pos{quad_fb_x * inv_dpr, quad_fb_y * inv_dpr};
           const math::vec2 quad_size{float(g.width) * inv_dpr, float(g.height) * inv_dpr};
           const math::mat4x4 m = make_screen_transform(quad_pos, quad_size, depth);

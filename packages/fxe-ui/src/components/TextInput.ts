@@ -305,6 +305,11 @@ export const TextInput = Component((props: TextInputProps): Node => {
         minHeight: 34,
         paddingX: theme.spacing.sm,
         paddingY: theme.spacing.xs,
+        // Vertically centre the inner text rather than top-aligning it.
+        // Without this a single-line input with extra height (e.g. 38–44px)
+        // paints the glyphs flush to the top of the box, which looks awkward
+        // next to placeholder rules and adjacent labels.
+        justifyContent: 'center',
         borderWidth: 1,
         borderColor: focused ? theme.colors.primary : theme.colors.border,
         backgroundColor: theme.colors.surface,
