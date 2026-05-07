@@ -1,0 +1,9 @@
+{
+  "name": "fxe-ui",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts"
+  }
+}

@@ -1,0 +1,125 @@
+// Native TLS/HTTPS/HTTP2 adapters are host-backed without live network I/O here;
+// fetch is stubbed so callback/EventEmitter flow stays deterministic.
+// @ts-ignore FXE host-backed builtin
+
+// @ts-ignore FXE host-backed builtin
+import http2Default, { connect, constants, createSecureServer } from 'node:http2';
+import httpsDefault, { Agent, createServer, get, request } from 'node:https';
+// @ts-ignore FXE host-backed builtin
+import tlsDefault, { createSecureContext, rootCertificates, connect as tlsConnect } from 'node:tls';
+
+import { assert, assertEqual, assertThrows, delay, run, test } from './ts_harness.ts';
+
+type EventSource = {
+  on(name: string, fn: (...args: unknown[]) => void): unknown;
+};
+
+type MutableGlobal = typeof globalThis & {
+  fetch: typeof fetch;
+};
+
+const originalFetch = globalThis.fetch;
+
+function collectBody(source: EventSource): Promise<string> {
+  const { promise, resolve, reject } = Promise.withResolvers<string>();
+  const chunks: string[] = [];
+  source.on('data', (chunk: unknown) => chunks.push(String(chunk)));
+  source.on('end', () => resolve(chunks.join('')));
+  source.on('error', reject);
+  return promise;
+}
+
+function waitForError(source: EventSource): Promise<string> {
+  const { promise, resolve } = Promise.withResolvers<string>();
+  source.on('error', (error: unknown) => {
+    resolve(error instanceof Error ? error.message : String(error));
+  });
+  return promise;
+}
+
+test('node:https exposes Agent and performs callback response flow over fetch', async () => {
+  assertEqual(typeof Agent, 'function');
+  assert(httpsDefault.globalAgent instanceof Agent, 'https.globalAgent should use the Agent shim');
+  let requestedUrl = '';
+  let requestedMethod = '';
+  (globalThis as MutableGlobal).fetch = async (url: string | URL | Request, init?: RequestInit) => {
+    requestedUrl = String(url);
+    requestedMethod = String(init?.method);
+    return new Response('ok-body', {
+      status: 201,
+      statusText: 'Created',
+      headers: { 'x-contract': 'yes' },
+    });
+  };
+
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const req = request(
+    'https://example.test/path?q=1',
+    { method: 'POST' },
+    (res: EventSource & { statusCode: number; headers: Record<string, string> }) => {
+      void collectBody(res).then((body) => {
+        assertEqual(res.statusCode, 201);
+        assertEqual(res.headers['x-contract'], 'yes');
+        assertEqual(body, 'ok-body');
+        resolve();
+      }, reject);
+    },
+  );
+  req.on('error', reject);
+  req.end('payload');
+  await promise;
+  assertEqual(requestedUrl, 'https://example.test/path?q=1');
+  assertEqual(requestedMethod, 'POST');
+
+  const getReq = get('https://example.test/get');
+  getReq.on('error', reject);
+});
+
+test('node:https server APIs reject truthfully', () => {
+  assertThrows(() => createServer({}), /native TLS server implementation|not implemented yet/i);
+});
+
+test('node:http2 exposes constants and client request stream over fetch', async () => {
+  assertEqual(constants.HTTP2_HEADER_METHOD, ':method');
+  assertEqual(constants.HTTP_STATUS_OK, 200);
+  (globalThis as MutableGlobal).fetch = async () => new Response('h2-body', { status: 200 });
+
+  const session = connect('https://h2.example.test');
+  assertEqual(http2Default.connect, connect);
+  const stream = session.request({
+    [constants.HTTP2_HEADER_METHOD]: 'GET',
+    [constants.HTTP2_HEADER_PATH]: '/resource',
+  });
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  stream.on('response', (headers: unknown) => {
+    assert(
+      headers !== null && typeof headers === 'object' && constants.HTTP2_HEADER_STATUS in headers,
+      'http2 response should include :status',
+    );
+  });
+  void collectBody(stream).then((body) => {
+    assertEqual(body, 'h2-body');
+    resolve();
+  }, reject);
+  stream.on('error', reject);
+  stream.end();
+  await promise;
+  session.close();
+  assertThrows(() => createSecureServer({}), /native HTTP\/2 server implementation/i);
+});
+
+test('node:tls exposes secure context and asynchronous unavailable connect errors', async () => {
+  assertEqual(Array.isArray(rootCertificates), true);
+  assertEqual(rootCertificates.length, 0);
+  assert(createSecureContext({}) instanceof tlsDefault.SecureContext);
+  const socket = tlsConnect({ host: 'example.invalid', port: 443 });
+  const message = await waitForError(socket);
+  assert(message.includes('native TLS socket backing'));
+  await delay(1);
+});
+
+try {
+  await run();
+} finally {
+  (globalThis as MutableGlobal).fetch = originalFetch;
+}

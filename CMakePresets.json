@@ -1,0 +1,90 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "toolchainFile": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "FXE_FETCH_DEPS": "OFF"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Debug build",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "release",
+      "displayName": "Release build",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "dev-wgpu",
+      "displayName": "Debug + Dawn/WebGPU",
+      "inherits": "dev",
+      "cacheVariables": { "FXE_ENABLE_WGPU": "ON" }
+    },
+    {
+      "name": "dev-v8",
+      "displayName": "Debug + embedded V8",
+      "inherits": "dev",
+      "cacheVariables": { "FXE_ENABLE_V8": "ON" }
+    },
+    {
+      "name": "dev-v8-wgpu",
+      "displayName": "Debug + embedded V8 + Dawn/WebGPU",
+      "inherits": "dev",
+      "cacheVariables": {
+        "FXE_ENABLE_V8": "ON",
+        "FXE_ENABLE_WGPU": "ON",
+        "FXE_ENABLE_NODE_COMPAT": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev",      "configurePreset": "dev" },
+    { "name": "release",  "configurePreset": "release" },
+    { "name": "dev-wgpu", "configurePreset": "dev-wgpu" },
+    { "name": "dev-v8",   "configurePreset": "dev-v8" },
+    { "name": "dev-v8-wgpu", "configurePreset": "dev-v8-wgpu" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    },
+    {
+      "name": "dev-wgpu",
+      "configurePreset": "dev-wgpu",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    },
+    {
+      "name": "dev-v8",
+      "configurePreset": "dev-v8",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    },
+    {
+      "name": "dev-v8-wgpu",
+      "configurePreset": "dev-v8-wgpu",
+      "output": { "outputOnFailure": true },
+      "execution": { "stopOnFailure": false }
+    }
+  ]
+}

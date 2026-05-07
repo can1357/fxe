@@ -1,0 +1,45 @@
+# Build outputs
+build/
+build-*/
+cmake-build-*/
+
+# CMake/Ninja generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+*.ninja_deps
+*.ninja_log
+
+# Dependency/vendor artifacts
+vcpkg/
+vcpkg_installed/
+
+# Native binaries and objects
+*.a
+*.dylib
+*.dll
+*.exe
+*.lib
+*.o
+*.obj
+*.so
+
+# Editor/OS noise
+.DS_Store
+*.swp
+*.swo
+*.user
+*.suo
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+node_modules/
+
+__pycache__/

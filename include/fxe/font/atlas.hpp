@@ -1,0 +1,82 @@
+#pragma once
+
+// Page-tagged atlas with a shelf packer. Two variants live in any process:
+//   - a grayscale (R8) page for FT/CT alpha bitmaps.
+//   - a BGRA8 page for color emoji bitmaps.
+// The renderer uploads the two pages as separate textures; the shader picks
+// one via a flag bit on the texture id (see src/wgpu/shaders/main.wgsl).
+
+#include <cstdint>
+#include <vector>
+
+#include <fxe/font/glyph.hpp>
+#include <fxe/math.hpp>
+
+namespace fxe::font {
+
+  // Result of `Atlas::pack`. `ok=false` means the atlas grew but still couldn't
+  // accommodate the glyph (e.g. it would exceed `max_size`). Callers should
+  // discard the glyph in that case.
+  struct AtlasRegion {
+    bool ok = false;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+  };
+
+  class Atlas {
+  public:
+    Atlas() = default;
+    explicit Atlas(Format f, std::uint32_t initial_size = 256, std::uint32_t max_size = 8192);
+
+    [[nodiscard]] Format format() const noexcept {
+      return format_;
+    }
+    [[nodiscard]] math::uvec2 size() const noexcept {
+      return {width_, height_};
+    }
+    [[nodiscard]] const std::vector<std::uint8_t>& pixels() const noexcept {
+      return pixels_;
+    }
+    [[nodiscard]] std::uint32_t bytes_per_pixel() const noexcept;
+    // Atlas pages are growth-only; callers monotonically observe a generation
+    // counter to know when to re-upload to the GPU.
+    [[nodiscard]] std::uint64_t generation() const noexcept {
+      return generation_;
+    }
+
+    // Resets the atlas to an empty 1×1 page. Used by tests.
+    void clear();
+
+    // Packs an opaque rectangle into the atlas. `bytes` must be either
+    // `width*height` (grayscale) or `width*height*4` (BGRA). Returns the
+    // top-left position of the packed region.
+    [[nodiscard]] AtlasRegion pack(std::uint32_t w, std::uint32_t h,
+                                   const std::uint8_t* bytes) noexcept;
+
+    // Same as `pack`, but writes zeros. Used to reserve space ahead of an
+    // out-of-band upload (e.g. a rasterizer that wants to write its bitmap
+    // directly into the atlas memory).
+    [[nodiscard]] AtlasRegion reserve(std::uint32_t w, std::uint32_t h) noexcept;
+
+    // Direct mutable access to the pixel buffer. Callers must clamp writes to
+    // `size()`. Bumps `generation()` because the page contents change.
+    [[nodiscard]] std::uint8_t* mutable_pixels() noexcept;
+
+  private:
+    bool grow_(std::uint32_t min_w, std::uint32_t min_h) noexcept;
+    void copy_into_(std::uint32_t dst_x, std::uint32_t dst_y, std::uint32_t w, std::uint32_t h,
+                    const std::uint8_t* src) noexcept;
+
+    Format format_ = Format::grayscale;
+    std::uint32_t width_ = 0;
+    std::uint32_t height_ = 0;
+    std::uint32_t max_size_ = 8192;
+    std::uint32_t cursor_x_ = 1;
+    std::uint32_t cursor_y_ = 1;
+    std::uint32_t row_h_ = 0;
+    std::uint32_t padding_ = 1;
+    std::uint64_t generation_ = 0;
+    std::vector<std::uint8_t> pixels_;
+  };
+
+} // namespace fxe::font

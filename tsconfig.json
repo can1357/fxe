@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "fxe-ui",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": false,
+    "forceConsistentCasingInFileNames": true,
+    "types": [],
+    "lib": ["ESNext"],
+    "paths": {
+      "fxe": ["./types/fxe.d.ts"],
+      "fxe-ui": ["./types/fxe-ui.d.ts"],
+      "fxe-ui/jsx-runtime": ["./types/fxe-ui.d.ts"]
+    }
+  },
+  "include": ["examples/js/**/*.ts", "examples/js/**/*.tsx", "tests/**/*.ts", "tests/**/*.d.ts", "types/**/*.d.ts"]
+}

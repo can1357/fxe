@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - uses: extractions/setup-just@v2
+      - name: Install lint/format toolchain
+        run: sudo apt-get update && sudo apt-get install -y clang-format shellcheck
+      - run: just ci-quick
+
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - name: Install Linux headless runtime
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Configure
+        run: cmake -S . -B build -DFXE_FETCH_DEPS=ON -DFXE_ENABLE_WGPU=OFF
+      - name: Build core tests and examples
+        run: cmake --build build --config Release --target fxe_core_tests hello_triangle hello_sprite primitives_showcase
+      - name: Test core and example smoke targets
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a ctest --test-dir build -C Release --output-on-failure
+          else
+            ctest --test-dir build -C Release --output-on-failure
+          fi

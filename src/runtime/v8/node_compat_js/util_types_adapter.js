@@ -1,0 +1,13 @@
+import { types } from 'node:util';
+export const isArrayBuffer = types.isArrayBuffer;
+export const isAnyArrayBuffer = types.isAnyArrayBuffer;
+export const isArrayBufferView = types.isArrayBufferView;
+export const isTypedArray = types.isTypedArray;
+export const isUint8Array = types.isUint8Array;
+export const isDate = types.isDate;
+export const isRegExp = types.isRegExp;
+export const isMap = types.isMap;
+export const isSet = types.isSet;
+export const isPromise = types.isPromise;
+export const isNativeError = types.isNativeError;
+export default types;

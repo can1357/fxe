@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="@PRODUCT_CODE@" Name="@APP_NAME@" Language="1033" Version="@VERSION@" Manufacturer="@MANUFACTURER@" UpgradeCode="@UPGRADE_CODE@">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"/>
+    <MajorUpgrade DowngradeErrorMessage="A newer version of @APP_NAME@ is already installed."/>
+    <MediaTemplate EmbedCab="yes"/>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="@APP_NAME@">
+          <Component Id="MainExeComponent" Guid="*">
+            <File Id="MainExe" Name="@EXE_RELATIVE_PATH@" Source="@EXE_SOURCE@" KeyPath="yes"/>
+          </Component>
+@EXTRA_COMPONENTS@        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="DefaultFeature" Title="@APP_NAME@" Level="1">
+      <ComponentRef Id="MainExeComponent"/>
+@EXTRA_COMPONENT_REFS@    </Feature>
+  </Product>
+</Wix>

@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "fxe",
+  "version": "0.1.0",
+  "description": "fxe — a small WebGPU/V8-based renderer",
+  "dependencies": [
+    "glm",
+    "glfw3",
+    "stb",
+    "nlohmann-json",
+    "libuv",
+    "libsodium",
+    "mbedtls",
+    "nghttp2",
+    "freetype",
+    "harfbuzz",
+    {
+      "name": "fontconfig",
+      "platform": "linux"
+    },
+    {
+      "name": "sqlite3",
+      "default-features": false,
+      "features": ["json1", "fts5", "rtree", "math"]
+    }
+  ],
+  "builtin-baseline": "6b07d2d37301e9e7c6fcf771536d2ff6585c5912"
+}

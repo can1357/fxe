@@ -1,0 +1,1 @@
+Golden command-buffer fixtures live in tests/core_tests.cpp as deterministic FNV-1a hashes for the renderer showcase and text/sprite geometry. Pixel fixtures belong here once Dawn-backed one-frame capture is enabled.

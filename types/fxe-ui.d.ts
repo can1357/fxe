@@ -1,0 +1,702 @@
+import type {
+  CommandBuffer,
+  CursorKind,
+  Color as FxeRuntimeColor,
+  Mat4,
+  Renderer,
+  Vec4,
+  Window,
+  WindowEventMap,
+  WindowEventName,
+} from 'fxe';
+import type { Database, SQLBindings } from 'fxe:sqlite';
+
+type FxeUiLength = number | `${number}%` | 'auto';
+type FxeUiColor = number | readonly [number, number, number, number] | `#${string}`;
+
+declare module 'fxe-ui' {
+  export type Length = FxeUiLength;
+  export type Color = FxeUiColor;
+  export type RuntimeColor = FxeRuntimeColor;
+
+  export interface Constraint {
+    width?: number;
+    height?: number;
+  }
+
+  export interface LayoutStyle {
+    display?: 'flex' | 'none';
+    width?: Length;
+    height?: Length;
+    minWidth?: Length;
+    minHeight?: Length;
+    maxWidth?: Length;
+    maxHeight?: Length;
+    padding?: Length;
+    paddingX?: Length;
+    paddingY?: Length;
+    paddingTop?: Length;
+    paddingRight?: Length;
+    paddingBottom?: Length;
+    paddingLeft?: Length;
+    margin?: Length;
+    marginX?: Length;
+    marginY?: Length;
+    marginTop?: Length;
+    marginRight?: Length;
+    marginBottom?: Length;
+    marginLeft?: Length;
+    flexDirection?: 'row' | 'column' | 'row-reverse' | 'column-reverse';
+    flexWrap?: 'nowrap' | 'wrap' | 'wrap-reverse';
+    justifyContent?:
+      | 'flex-start'
+      | 'flex-end'
+      | 'center'
+      | 'space-between'
+      | 'space-around'
+      | 'space-evenly';
+    alignItems?: 'auto' | 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
+    alignSelf?: 'auto' | 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
+    alignContent?:
+      | 'auto'
+      | 'flex-start'
+      | 'flex-end'
+      | 'center'
+      | 'stretch'
+      | 'baseline'
+      | 'space-between'
+      | 'space-around'
+      | 'space-evenly';
+    flex?: number;
+    flexGrow?: number;
+    flexShrink?: number;
+    flexBasis?: Length;
+    gap?: number;
+    rowGap?: number;
+    columnGap?: number;
+    position?: 'relative' | 'absolute';
+    top?: Length;
+    right?: Length;
+    bottom?: Length;
+    left?: Length;
+    aspectRatio?: number;
+    overflow?: 'visible' | 'hidden' | 'scroll';
+  }
+
+  export interface Style extends LayoutStyle {
+    backgroundColor?: Color;
+    opacity?: number;
+    tint?: Color;
+    borderWidth?: number;
+    borderColor?: Color;
+    // Per-side borders (override borderWidth/borderColor when set)
+    borderTopWidth?: number;
+    borderRightWidth?: number;
+    borderBottomWidth?: number;
+    borderLeftWidth?: number;
+    borderTopColor?: Color;
+    borderRightColor?: Color;
+    borderBottomColor?: Color;
+    borderLeftColor?: Color;
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'none';
+    // Box shadow
+    shadowColor?: Color;
+    shadowOffsetX?: number;
+    shadowOffsetY?: number;
+    shadowBlur?: number;
+    shadowSpread?: number;
+    borderRadius?: number;
+    borderTopLeftRadius?: number;
+    borderTopRightRadius?: number;
+    borderBottomLeftRadius?: number;
+    borderBottomRightRadius?: number;
+    color?: Color;
+    fontSize?: number;
+    fontFamily?: string;
+    fontWeight?: number;
+    lineHeight?: number;
+    textAlign?: 'left' | 'center' | 'right';
+    letterSpacing?: number;
+    cursor?: CursorKind;
+    pointerEvents?: 'auto' | 'none';
+  }
+
+  export type StyleValue = Style | readonly StyleValue[] | null | undefined | false;
+
+  export interface PaintStyle {
+    backgroundColor?: RuntimeColor;
+    opacity?: number;
+    tint?: RuntimeColor;
+    borderWidth?: number;
+    borderColor?: RuntimeColor;
+    // Per-side borders (override borderWidth/borderColor when set)
+    borderTopWidth?: number;
+    borderRightWidth?: number;
+    borderBottomWidth?: number;
+    borderLeftWidth?: number;
+    borderTopColor?: RuntimeColor;
+    borderRightColor?: RuntimeColor;
+    borderBottomColor?: RuntimeColor;
+    borderLeftColor?: RuntimeColor;
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'none';
+    // Box shadow
+    shadowColor?: RuntimeColor;
+    shadowOffsetX?: number;
+    shadowOffsetY?: number;
+    shadowBlur?: number;
+    shadowSpread?: number;
+    borderRadius?: number;
+    cursor?: CursorKind;
+    pointerEvents?: 'auto' | 'none';
+  }
+
+  export interface TextStyle {
+    color?: RuntimeColor;
+    fontSize?: number;
+    fontFamily?: string;
+    fontWeight?: number;
+    lineHeight?: number;
+    textAlign?: 'left' | 'center' | 'right';
+    letterSpacing?: number;
+  }
+
+  export interface LayoutNode {
+    style?: LayoutStyle;
+    children?: readonly LayoutNode[];
+    measure?: (constraint: Constraint) => { width: number; height: number };
+    key?: string;
+  }
+
+  export interface LayoutResult {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    paddingLeft: number;
+    paddingTop: number;
+    paddingRight: number;
+    paddingBottom: number;
+    children: LayoutResult[];
+  }
+
+  export function layout(root: LayoutNode, available?: Constraint): LayoutResult;
+  export function measureText(
+    text: string,
+    fontSize?: number,
+  ): (constraint: Constraint) => { width: number; height: number };
+  export function measureImage(
+    width: number,
+    height: number,
+  ): (constraint: Constraint) => { width: number; height: number };
+
+  export interface WrappedText {
+    lines: string[];
+    width: number;
+    height: number;
+    lineHeight: number;
+    lineStartIndices: number[];
+  }
+  export interface WrapOptions {
+    maxWidth?: number;
+    breakWords?: boolean;
+  }
+  export function wrapText(text: string, style: TextStyle, options?: WrapOptions): WrappedText;
+  export function glyphIndexAt(text: string, style: TextStyle, x: number): number;
+  export function xAtGlyphIndex(text: string, style: TextStyle, idx: number): number;
+  export function parseColor(
+    value: Color | undefined,
+    fallback?: RuntimeColor,
+  ): RuntimeColor | undefined;
+  export function flattenStyle(value: StyleValue): Style;
+  export function splitStyle(value: StyleValue): {
+    layout: LayoutStyle;
+    paint: PaintStyle;
+    text: TextStyle;
+  };
+  export namespace StyleSheet {
+    function create<T extends Record<string, Style>>(
+      styles: T,
+    ): { readonly [K in keyof T]: Readonly<T[K]> };
+  }
+
+  export interface LayerProps {
+    key?: string;
+    transform?: Mat4;
+    tint?: Vec4;
+    deps?: ReadonlyArray<unknown>;
+    children: readonly Node[];
+  }
+
+  export interface DrawProps {
+    fn: (cb: CommandBuffer) => void;
+    deps?: ReadonlyArray<unknown>;
+  }
+
+  export type PropsEqual<P> = (prev: Readonly<P>, next: Readonly<P>) => boolean;
+  export type BoundaryChild = Node | readonly BoundaryChild[] | null | undefined | boolean;
+  export type TextChild =
+    | Node
+    | string
+    | number
+    | readonly TextChild[]
+    | null
+    | undefined
+    | boolean;
+
+  export interface Context<T> {
+    readonly defaultValue: T;
+    readonly Provider: (props: { key?: string; value: T; children?: BoundaryChild }) => Node;
+  }
+
+  export interface PortalProps {
+    key?: string;
+    to: CommandBuffer | Renderer;
+    children?: BoundaryChild;
+  }
+
+  export interface ErrorBoundaryProps {
+    key?: string;
+    children?: BoundaryChild;
+    fallback?: BoundaryChild | ((error: unknown) => BoundaryChild);
+    onError?: (error: unknown) => void;
+  }
+
+  export interface SuspenseProps {
+    key?: string;
+    children?: BoundaryChild;
+    fallback?: BoundaryChild;
+  }
+
+  interface ProviderNodeProps {
+    key?: string;
+    ctx: Context<unknown>;
+    value: unknown;
+    children?: BoundaryChild;
+  }
+
+  export type Node =
+    | { type: 'layer'; props: LayerProps; key?: string }
+    | { type: 'draw'; props: DrawProps; key?: string }
+    | {
+        type: 'component';
+        render: (props: unknown) => Node;
+        props: unknown;
+        displayName?: string;
+        key?: string;
+        memo?: { areEqual: (prev: unknown, next: unknown) => boolean };
+      }
+    | { type: 'provider'; props: ProviderNodeProps; key?: string }
+    | { type: 'portal'; props: PortalProps; key?: string }
+    | { type: 'error-boundary'; props: ErrorBoundaryProps; key?: string }
+    | { type: 'suspense'; props: SuspenseProps; key?: string };
+
+  export type FiberCacheHitMiss = 'hit' | 'miss' | null;
+  export interface FiberNode {
+    id: number;
+    type: string;
+    displayName: string | null;
+    key: string;
+    props: string;
+    propsSummary: string;
+    dirty: boolean;
+    lastRebuildFrame: number;
+    deps: unknown[][];
+    cacheHit: boolean | null;
+    cacheHitMiss: FiberCacheHitMiss;
+    children: FiberNode[];
+  }
+  export type DevtoolsFiberCacheHit = boolean | null;
+  export interface DevtoolsFiberNode extends FiberNode {}
+  export interface DevtoolsFiberTreeSnapshot {
+    tree: DevtoolsFiberNode[];
+  }
+  export function reconcilerSnapshot(): { tree: FiberNode[] };
+  export function snapshotFiberTree(): DevtoolsFiberTreeSnapshot;
+  export function setPaintFlash(enabled: boolean): void;
+
+  export function Layer(props: LayerProps): Node;
+  export function Draw(fn: (cb: CommandBuffer) => void, deps?: ReadonlyArray<unknown>): Node;
+  export function Component<P>(
+    render: (props: P) => Node,
+    displayName?: string,
+  ): (props: P & { key?: string }) => Node;
+  export function memo<P>(
+    component: (props: P & { key?: string }) => Node,
+    areEqual?: PropsEqual<P & { key?: string }>,
+  ): (props: P & { key?: string }) => Node;
+  export function ErrorBoundary(props: ErrorBoundaryProps): Node;
+  export function Suspense(props: SuspenseProps): Node;
+  export function Portal(props: PortalProps): Node;
+  export function createContext<T>(defaultValue: T): Context<T>;
+
+  export function useState<S>(initial: S): [S, (next: S | ((s: S) => S)) => void];
+  export function useReducer<S, A>(
+    reducer: (state: S, action: A) => S,
+    initial: S,
+  ): [S, (action: A) => void];
+  export function useReducer<S, A, I>(
+    reducer: (state: S, action: A) => S,
+    initial: I,
+    init: (initial: I) => S,
+  ): [S, (action: A) => void];
+  export function useRef<T>(initial: T): { current: T };
+  export function useId(): string;
+  export function useContext<T>(context: Context<T>): T;
+  export function useMemo<T>(fn: () => T, deps: ReadonlyArray<unknown>): T;
+  export function useEffect(fn: () => void | (() => void), deps?: ReadonlyArray<unknown>): void;
+  export function useFrame(fn: (dtMs: number) => void): void;
+  export function useEvent<K extends WindowEventName>(
+    win: Window,
+    kind: K,
+    handler: (ev: WindowEventMap[K]) => void,
+  ): void;
+  export function useTransition(): [boolean, (fn: () => void) => void];
+  export function useDeferredValue<T>(value: T): T;
+
+  export function useSyncExternalStore<T>(
+    subscribe: (cb: () => void) => () => void,
+    getSnapshot: () => T,
+  ): T;
+  export interface FetchResult<T> {
+    data: T | undefined;
+    error: unknown;
+    loading: boolean;
+  }
+  export interface WebSocketStore {
+    send: (data: string | ArrayBuffer | ArrayBufferView) => void;
+    lastMessage: unknown;
+    readyState: number;
+  }
+  export function useSqliteQuery<T>(db: Database, sql: string, params?: SQLBindings): T[];
+  export function useFetch<T>(url: string, init?: RequestInit): FetchResult<T>;
+  export function useWebSocket(url: string): WebSocketStore;
+  export type AnimatedOutput = number | string;
+
+  export type AnimatedListener<T extends AnimatedOutput> = (value: T) => void;
+  export type ExtrapolateMode = 'extend' | 'clamp' | 'identity';
+  export interface InterpolationConfig<T extends AnimatedOutput = AnimatedOutput> {
+    inputRange: readonly number[];
+    outputRange: readonly T[];
+    extrapolate?: ExtrapolateMode;
+  }
+  export class AnimatedValue<T extends AnimatedOutput = number> {
+    current: T;
+    constructor(initial: AnimatedOutput);
+    setValue(value: T): void;
+    getValue(): T;
+    addListener(fn: AnimatedListener<T>): () => void;
+    interpolate<U extends AnimatedOutput>(config: InterpolationConfig<U>): AnimatedValue<U>;
+  }
+  export type EasingName = 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
+  export type EasingFunction = (t: number) => number;
+  export type Easing = EasingName | EasingFunction;
+  export interface TimingAnimationConfig {
+    to: number;
+    duration: number;
+    easing?: Easing;
+    delay?: number;
+  }
+  export interface SpringAnimationConfig {
+    to: number;
+    stiffness?: number;
+    damping?: number;
+    mass?: number;
+    restThreshold?: number;
+  }
+  export interface AnimationEndResult {
+    finished: boolean;
+  }
+  export type AnimationEndCallback = (result: AnimationEndResult) => void;
+  export interface CompositeAnimation {
+    start(cb?: AnimationEndCallback): void;
+    stop(): void;
+  }
+  export function timing(
+    value: AnimatedValue<number>,
+    config: TimingAnimationConfig,
+  ): CompositeAnimation;
+  export function spring(
+    value: AnimatedValue<number>,
+    config: SpringAnimationConfig,
+  ): CompositeAnimation;
+  export const Animated: {
+    readonly Value: new (initial: number) => AnimatedValue<number>;
+    readonly timing: typeof timing;
+    readonly spring: typeof spring;
+  };
+  export function useAnimatedValue(initial: number): AnimatedValue<number>;
+
+  export interface FrameLoopOptions {
+    requestAnimationFrame?: (fn: (timeMs: number) => void) => unknown;
+    cancelAnimationFrame?: (id: unknown) => void;
+  }
+  export type FrameLoopDisposer = () => void;
+  export interface RenderOptions {
+    animate?: boolean;
+    frameLoop?: FrameLoopOptions;
+  }
+  export function render(
+    root: Node,
+    target: CommandBuffer | Renderer,
+    options?: RenderOptions,
+  ): void;
+  export function setRenderTarget(win: Window | null): void;
+  export function startFrameLoop(options?: FrameLoopOptions): FrameLoopDisposer;
+  export function tickFrame(dtMs: number): void;
+
+  export type SchedulerLane = 'sync' | 'transition';
+  export const DEFAULT_SCHEDULER_FRAME_BUDGET_MS: 8;
+  export function scheduleWork(fiberId: number, lane?: SchedulerLane): void;
+  export function flushSync(): void;
+  export function schedulerFrameBudgetMs(): number;
+
+  export function createSignal<T>(initial: T): [() => T, (next: T | ((prev: T) => T)) => void];
+  export function createMemo<T>(fn: () => T): () => T;
+  export function createEffect(fn: () => void): void;
+  export function untrack<T>(fn: () => T): T;
+  export function batch<T>(fn: () => T): T;
+
+  export interface Theme {
+    colors: Record<string, Color>;
+    spacing: Record<string, number>;
+    radii: Record<string, number>;
+    fontSizes: Record<string, number>;
+  }
+  export const defaultTheme: Theme;
+  export function ThemeProvider(props: {
+    value?: Theme;
+    theme?: Theme;
+    children?: BoundaryChild;
+    key?: string;
+  }): Node;
+  export function useTheme(): Theme;
+
+  export interface ViewProps {
+    key?: string;
+    style?: StyleValue;
+    children?: BoundaryChild;
+  }
+  export interface TextProps {
+    key?: string;
+    style?: StyleValue;
+    children?: TextChild;
+    selectable?: boolean;
+  }
+  export interface ImageProps {
+    key?: string;
+    style?: StyleValue;
+    source?: unknown;
+    width?: number;
+    height?: number;
+    tint?: number;
+  }
+  export interface PressableState {
+    hovered: boolean;
+    pressed: boolean;
+    focused: boolean;
+  }
+  export interface SyntheticEvent<T = unknown> {
+    nativeEvent: T;
+    x: number;
+    y: number;
+    defaultPrevented: boolean;
+    propagationStopped: boolean;
+    preventDefault(): void;
+    stopPropagation(): void;
+  }
+  export interface PressableProps {
+    key?: string;
+    style?: StyleValue | ((state: PressableState) => StyleValue);
+    children?: BoundaryChild | ((state: PressableState) => BoundaryChild);
+    disabled?: boolean;
+    onPress?: (ev: SyntheticEvent) => void;
+    onPressIn?: (ev: SyntheticEvent) => void;
+    onPressOut?: (ev: SyntheticEvent) => void;
+    onHoverIn?: (ev: SyntheticEvent) => void;
+    onHoverOut?: (ev: SyntheticEvent) => void;
+    onFocus?: () => void;
+    onBlur?: () => void;
+    onLongPress?: (ev: SyntheticEvent) => void;
+  }
+  export interface ButtonProps extends Omit<PressableProps, 'children'> {
+    title?: string;
+    children?: string;
+    textStyle?: StyleValue;
+  }
+  export interface ScrollViewProps {
+    key?: string;
+    style?: StyleValue;
+    contentStyle?: StyleValue;
+    children?: BoundaryChild;
+    onScroll?: (offset: { x: number; y: number }) => void;
+  }
+  export type VirtualItemHeight = number | ((index: number) => number);
+  export interface VirtualListProps<T> {
+    key?: string;
+    style?: StyleValue;
+    contentStyle?: StyleValue;
+    data: readonly T[];
+    itemHeight: VirtualItemHeight;
+    estimatedItemHeight?: number;
+    overscan?: number;
+    renderItem: (item: T, index: number) => Node;
+    keyExtractor?: (item: T, index: number) => string;
+    onScroll?: (offset: { x: number; y: number }) => void;
+  }
+  export interface TextInputProps {
+    key?: string;
+    style?: StyleValue;
+    value?: string;
+    placeholder?: string;
+    onChange?: (value: string) => void;
+    onSubmit?: (value: string) => void;
+    onCompose?: (preedit: string, cursor: number) => void;
+    onCommit?: (committed: string) => void;
+  }
+
+  export function View(props: ViewProps): Node;
+  export function Text(props: TextProps): Node;
+  export function Image(props: ImageProps): Node;
+  export function Pressable(props: PressableProps): Node;
+  export function Button(props: ButtonProps): Node;
+  export function ScrollView(props: ScrollViewProps): Node;
+  export function VirtualList<T>(props: VirtualListProps<T>): Node;
+  export function TextInput(props: TextInputProps): Node;
+  export function usePressableState(): PressableState;
+  export function useHover(): boolean;
+  export function useFocus(): boolean;
+
+  export interface MountOptions {
+    renderer?: Renderer;
+    theme?: Theme;
+    lazy?: boolean;
+  }
+  export function mount(root: Node, window: Window, opts?: MountOptions): () => void;
+
+  export interface HitTarget {
+    id: string;
+    rect: LayoutResult;
+    z: number;
+    onFocus?: () => void;
+    onBlur?: () => void;
+    onKeyDown?: (ev: unknown) => void;
+    onKeyPress?: (ev: unknown) => void;
+    onDrag?: (ev: SyntheticEvent) => void;
+  }
+  export function clearHitTargets(): void;
+  export function registerHitTarget(
+    target: Omit<HitTarget, 'z'> & { z?: number } & Record<string, unknown>,
+  ): void;
+  export function hitTest(x: number, y: number): HitTarget | null;
+  export function dispatchMouseMove(
+    ev: WindowEventMap['mousemove'],
+    cursorSink?: { setCursor?(kind: CursorKind): void },
+  ): void;
+  export function dispatchMouseDown(ev: WindowEventMap['mousedown']): void;
+  export function dispatchMouseUp(ev: WindowEventMap['mouseup']): void;
+  export function dispatchWheel(ev: WindowEventMap['wheel'] & { x?: number; y?: number }): void;
+  export function dispatchKeyDown(
+    ev: WindowEventMap['keydown'],
+    clipboardSink?: Pick<Window, 'clipboardText' | 'setClipboardText'>,
+  ): void;
+  export function dispatchKeyPress(ev: WindowEventMap['keypress']): void;
+  export function resetEventPipeline(): void;
+  export function focusTarget(): HitTarget | null;
+  export function focusTarget(id: string | 'next' | 'previous'): HitTarget | null;
+  export function focusedTargetId(): string | null;
+  export function clearFocus(): void;
+}
+
+declare module 'fxe-ui/jsx-runtime' {
+  export type JSXChild =
+    | import('fxe-ui').Node
+    | string
+    | number
+    | readonly JSXChild[]
+    | null
+    | undefined
+    | boolean;
+  export type JSXNode = import('fxe-ui').Node;
+  export const Fragment: symbol;
+  export type FunctionComponentType<P extends object = Record<string, unknown>> = (
+    props: P,
+  ) => JSXNode;
+  export type ClassComponentType<P extends object = Record<string, unknown>> = new (
+    props: P,
+  ) => {
+    render: () => JSXNode;
+    props?: unknown;
+  };
+  export function jsx<P extends Record<string, unknown>>(
+    type:
+      | 'view'
+      | 'text'
+      | 'image'
+      | 'pressable'
+      | 'scroll'
+      | 'input'
+      | typeof Fragment
+      | FunctionComponentType<P>
+      | ClassComponentType<P>,
+    props: (P & { children?: JSXChild; key?: string }) | null,
+    key?: string,
+  ): JSXNode;
+  export function jsxs<P extends Record<string, unknown>>(
+    type:
+      | 'view'
+      | 'text'
+      | 'image'
+      | 'pressable'
+      | 'scroll'
+      | 'input'
+      | typeof Fragment
+      | FunctionComponentType<P>
+      | ClassComponentType<P>,
+    props: (P & { children?: JSXChild; key?: string }) | null,
+    key?: string,
+  ): JSXNode;
+
+  export namespace JSX {
+    type Element = JSXNode;
+    interface ElementChildrenAttribute {
+      children: {};
+    }
+    interface IntrinsicElements {
+      view: import('fxe-ui').ViewProps;
+      text: import('fxe-ui').TextProps;
+      image: import('fxe-ui').ImageProps;
+      pressable: import('fxe-ui').PressableProps;
+      scroll: import('fxe-ui').ScrollViewProps;
+      input: import('fxe-ui').TextInputProps;
+    }
+  }
+}
+
+declare global {
+  namespace FXE {
+    type RenderStatsSnapshot = {
+      verticesSubmitted: number;
+      indicesSubmitted: number;
+      queueCalls: number;
+      cacheHits: number;
+      cacheMisses: number;
+      rebuilds: number;
+      frames: number;
+    };
+    interface RenderStatsNamespace {
+      snapshot(): RenderStatsSnapshot;
+      reset(): void;
+      recordCacheHit(): void;
+      recordCacheMiss(): void;
+      recordRebuild(): void;
+      recordQueueCall(): void;
+      beginFrame(): void;
+    }
+  }
+  var __fxe_devtools:
+    | {
+        fiberTree: () => import('fxe-ui').DevtoolsFiberTreeSnapshot;
+        setPaintFlash: (enabled: boolean) => void;
+      }
+    | undefined;
+}

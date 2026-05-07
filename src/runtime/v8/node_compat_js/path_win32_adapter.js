@@ -1,0 +1,15 @@
+import { win32 } from 'node:path';
+export const sep = win32.sep;
+export const delimiter = win32.delimiter;
+export const resolve = win32.resolve;
+export const normalize = win32.normalize;
+export const isAbsolute = win32.isAbsolute;
+export const join = win32.join;
+export const relative = win32.relative;
+export const dirname = win32.dirname;
+export const basename = win32.basename;
+export const extname = win32.extname;
+export const parse = win32.parse;
+export const format = win32.format;
+export const toNamespacedPath = win32.toNamespacedPath;
+export default win32;

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fxe-debug-client"
+version = "0.1.0"
+description = "Puppeteer-style Python SDK for the fxe debug protocol"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "fxe contributors" }]
+dependencies = []
+
+[project.scripts]
+fxe-cli = "fxe_debug.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fxe_debug*"]

@@ -1,0 +1,1201 @@
+// Match brew V8 ABI: pointer compression + sandbox are enabled in libv8.dylib.
+#define V8_COMPRESS_POINTERS 1
+
+// JS bindings for fxe::primitives::*. Registers a `Primitives` namespace
+// object on the isolate global with one camelCase function per primitive.
+//
+// Every function takes a CommandBuffer (or Renderer) as its first argument.
+// Subsequent args follow the C++ signature; colors accept either a packed
+// RGBA8 number (0xRRGGBBAA) or a 4-tuple of floats in [0,1].
+
+#include "bind_font.hpp"
+#include <fxe/command_buffer.hpp>
+#include <fxe/js_bindings.hpp>
+#include <fxe/primitives.hpp>
+#include <fxe/types.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <string>
+#include <v8.h>
+#include <vector>
+
+namespace fxe::js {
+  namespace {
+    using namespace v8;
+
+    constexpr u32 TAG_PATH = 0x50415448u;        // 'PATH'
+    constexpr u32 PAINT_KIND_PROP = 0x46505850u; // internal marker value
+
+    struct path_holder {
+      primitives::path_2d path;
+      Global<Object> self;
+    };
+
+    command_buffer* unwrap_any_cb(Local<Value> v) {
+      if (!v->IsObject())
+        return nullptr;
+      auto o = v.As<Object>();
+      if (auto* p = static_cast<command_buffer*>(unwrap(o, TAG_COMMAND_BUFFER)))
+        return p;
+      if (auto* p = static_cast<command_buffer*>(unwrap(o, TAG_RENDERER)))
+        return p;
+      return nullptr;
+    }
+
+    void path_finalizer(const WeakCallbackInfo<path_holder>& info) {
+      auto* h = info.GetParameter();
+      h->self.Reset();
+      delete h;
+    }
+
+    path_holder* unwrap_path(Local<Value> v) {
+      if (!v->IsObject())
+        return nullptr;
+      return static_cast<path_holder*>(unwrap(v.As<Object>(), TAG_PATH));
+    }
+
+    Local<String> js_string(Isolate* iso, const std::string& s) {
+      return String::NewFromUtf8(iso, s.c_str(), NewStringType::kNormal, static_cast<int>(s.size()))
+          .ToLocalChecked();
+    }
+
+    enum drain_opcode : u32 {
+      OP_FILL_RECT = 1,
+      OP_DRAW_RECT = 2,
+      OP_FILL_TRIANGLE = 3,
+      OP_DRAW_LINE = 4,
+      OP_DRAW_TEXT = 5,
+      OP_FILL_PATH = 6,
+      OP_STROKE_PATH = 7,
+    };
+
+    r8g8b8a8 color_from_floats(const float* p) {
+      auto clamp = [](float x) { return u8(x < 0.0f ? 0 : x > 1.0f ? 255 : x * 255.0f); };
+      return {clamp(p[0]), clamp(p[1]), clamp(p[2]), clamp(p[3])};
+    }
+
+    bool require_params(Isolate* iso, usize pos, usize need, usize len, const char* op) {
+      if (pos + need <= len)
+        return true;
+      std::string msg = std::string("Primitives.drain: truncated params for ") + op;
+      iso->ThrowException(Exception::RangeError(js_string(iso, msg)));
+      return false;
+    }
+
+    r8g8b8a8 decode_color([[maybe_unused]] Isolate* iso, Local<Context> ctx, Local<Value> v) {
+      if (v->IsNumber()) {
+        auto u = v->Uint32Value(ctx).FromMaybe(0xffffffffu);
+        return r8g8b8a8(u);
+      }
+      if (v->IsArray()) {
+        auto arr = v.As<Array>();
+        float c[4] = {1, 1, 1, 1};
+        for (u32 i = 0; i < 4 && i < arr->Length(); ++i) {
+          Local<Value> e;
+          if (arr->Get(ctx, i).ToLocal(&e))
+            c[i] = static_cast<float>(e->NumberValue(ctx).FromMaybe(static_cast<double>(c[i])));
+        }
+        auto clamp = [](float x) { return u8(x < 0 ? 0 : x > 1 ? 255 : x * 255.0f); };
+        return {clamp(c[0]), clamp(c[1]), clamp(c[2]), clamp(c[3])};
+      }
+      return white;
+    }
+
+    bool decode_vec4(Local<Value> v, math::vec4& out);
+
+    primitives::paint_value decode_paint(Isolate* iso, Local<Context> ctx, Local<Value> v) {
+      if (v->IsObject() && !v->IsArray() && !v->IsFloat32Array() && !v->IsNumber()) {
+        auto obj = v.As<Object>();
+        Local<Value> marker;
+        if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "__fxePaint")).ToLocal(&marker) &&
+            marker->Uint32Value(ctx).FromMaybe(0) == PAINT_KIND_PROP) {
+          primitives::paint_value paint;
+          Local<Value> kind_v;
+          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "kind")).ToLocal(&kind_v))
+            paint.kind = static_cast<primitives::paint_kind>(kind_v->Uint32Value(ctx).FromMaybe(0));
+          Local<Value> p0_v;
+          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "p0")).ToLocal(&p0_v))
+            (void)decode_vec4(p0_v, paint.p0);
+          Local<Value> p1_v;
+          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "p1")).ToLocal(&p1_v))
+            (void)decode_vec4(p1_v, paint.p1);
+          Local<Value> stops_v;
+          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "stops")).ToLocal(&stops_v) &&
+              stops_v->IsFloat32Array()) {
+            auto stops = stops_v.As<Float32Array>();
+            std::vector<float> raw(stops->Length());
+            stops->CopyContents(raw.data(), raw.size() * sizeof(float));
+            for (usize i = 0; i + 4 < raw.size(); i += 5) {
+              paint.stops.push_back({raw[i], color_from_floats(&raw[i + 1])});
+            }
+            std::sort(paint.stops.begin(), paint.stops.end(),
+                      [](const auto& a, const auto& b) { return a.t < b.t; });
+            if (!paint.stops.empty())
+              paint.color = paint.stops.front().color;
+          }
+          return paint;
+        }
+      }
+      return primitives::paint_value::solid(decode_color(iso, ctx, v));
+    }
+
+    bool decode_mat4(Local<Value> v, math::mat4x4& out) {
+      if (!v->IsFloat32Array())
+        return false;
+      auto a = v.As<Float32Array>();
+      if (a->Length() < 16)
+        return false;
+      float t[16];
+      a->CopyContents(t, sizeof(t));
+      out = math::mat4x4(t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8], t[9], t[10], t[11],
+                         t[12], t[13], t[14], t[15]);
+      return true;
+    }
+
+    bool decode_vec4(Local<Value> v, math::vec4& out) {
+      if (v->IsFloat32Array()) {
+        auto a = v.As<Float32Array>();
+        if (a->Length() < 4)
+          return false;
+        float t[4];
+        a->CopyContents(t, sizeof(t));
+        out = {t[0], t[1], t[2], t[3]};
+        return true;
+      }
+      if (v->IsArray()) {
+        auto a = v.As<Array>();
+        if (a->Length() < 4)
+          return false;
+        auto* iso = Isolate::GetCurrent();
+        auto ctx = iso->GetCurrentContext();
+        float t[4];
+        for (uint32_t i = 0; i < 4; ++i) {
+          Local<Value> elt;
+          if (!a->Get(ctx, i).ToLocal(&elt))
+            return false;
+          t[i] = static_cast<float>(elt->NumberValue(ctx).FromMaybe(0.0));
+        }
+        out = {t[0], t[1], t[2], t[3]};
+        return true;
+      }
+      return false;
+    }
+    bool decode_vec2(Local<Value> v, math::vec2& out) {
+      if (v->IsFloat32Array()) {
+        auto a = v.As<Float32Array>();
+        if (a->Length() < 2)
+          return false;
+        float t[2];
+        a->CopyContents(t, sizeof(t));
+        out = {t[0], t[1]};
+        return true;
+      }
+      if (v->IsArray()) {
+        auto a = v.As<Array>();
+        if (a->Length() < 2)
+          return false;
+        auto* iso = Isolate::GetCurrent();
+        auto ctx = iso->GetCurrentContext();
+        float t[2];
+        for (uint32_t i = 0; i < 2; ++i) {
+          Local<Value> elt;
+          if (!a->Get(ctx, i).ToLocal(&elt))
+            return false;
+          t[i] = static_cast<float>(elt->NumberValue(ctx).FromMaybe(0.0));
+        }
+        out = {t[0], t[1]};
+        return true;
+      }
+      return false;
+    }
+
+    double num(Local<Context> ctx, Local<Value> v, double def = 0) {
+      return v->NumberValue(ctx).FromMaybe(def);
+    }
+
+    std::string utf8(Isolate* iso, Local<Value> v) {
+      String::Utf8Value u(iso, v);
+      return *u ? std::string(*u, u.length()) : std::string{};
+    }
+
+    // Helper: argument prelude. Returns nullptr (and throws) on missing cb.
+    command_buffer* get_cb(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      if (info.Length() < 1) {
+        iso->ThrowException(
+            Exception::TypeError(String::NewFromUtf8Literal(iso, "missing CommandBuffer")));
+        return nullptr;
+      }
+      auto* cb = unwrap_any_cb(info[0]);
+      if (!cb) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "first arg must be CommandBuffer")));
+        return nullptr;
+      }
+      return cb;
+    }
+
+    // -------------------------------------------------------------------------
+    // Implementations
+    // -------------------------------------------------------------------------
+    void p_drawLine(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      // drawLine(cb, src[4], dst[4], color, thickness=0)
+      math::vec4 src{}, dst{};
+      if (info.Length() < 3 || !decode_vec4(info[1], src) || !decode_vec4(info[2], dst)) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "drawLine: src/dst must be Float32Array(4)")));
+        return;
+      }
+      auto color = info.Length() >= 4 ? decode_color(iso, ctx, info[3]) : white;
+      float thick = info.Length() >= 5 ? float(num(ctx, info[4])) : 0.0f;
+      primitives::draw_line(*cb, src, dst, color, thick);
+    }
+
+    void p_fillTriangle(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::vec4 a{}, b{}, c{};
+      if (info.Length() < 4 || !decode_vec4(info[1], a) || !decode_vec4(info[2], b) ||
+          !decode_vec4(info[3], c)) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "fillTriangle: a/b/c must be Float32Array(4)")));
+        return;
+      }
+      auto color = info.Length() >= 5 ? decode_color(iso, ctx, info[4]) : white;
+      primitives::fill_triangle(*cb, a, b, c, color);
+    }
+
+    void p_fillRect(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      // fillRect(cb, [x,y], [w,h], depth?, color?)        — array form
+      // fillRect(cb, x, y, w, h, depth?, color?)          — scalar form
+      math::vec2 at{}, sz{};
+      int next = 1;
+      if (info.Length() >= 2 && info[1]->IsNumber()) {
+        at.x = float(num(ctx, info[1]));
+        at.y = float(num(ctx, info[2]));
+        sz.x = float(num(ctx, info[3]));
+        sz.y = float(num(ctx, info[4]));
+        next = 5;
+      } else if (info.Length() < 3 || !decode_vec2(info[1], at) || !decode_vec2(info[2], sz)) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "fillRect: expected (cb, [x,y], [w,h], …) or (cb, x, y, w, h, …)")));
+        return;
+      } else {
+        next = 3;
+      }
+      float d = info.Length() > next ? float(num(ctx, info[next])) : 0.0f;
+      auto paint = info.Length() > next + 1 ? decode_paint(iso, ctx, info[next + 1])
+                                            : primitives::paint_value::solid(white);
+      primitives::fill_rect(*cb, at, sz, d, paint);
+    }
+
+    void p_drawRect(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      // drawRect(cb, [x,y], [w,h], depth?, color?, thickness?)        — array form
+      // drawRect(cb, x, y, w, h, depth?, color?, thickness?)          — scalar form
+      math::vec2 at{}, sz{};
+      int next = 1;
+      if (info.Length() >= 2 && info[1]->IsNumber()) {
+        at.x = float(num(ctx, info[1]));
+        at.y = float(num(ctx, info[2]));
+        sz.x = float(num(ctx, info[3]));
+        sz.y = float(num(ctx, info[4]));
+        next = 5;
+      } else if (info.Length() < 3 || !decode_vec2(info[1], at) || !decode_vec2(info[2], sz)) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "drawRect: expected (cb, [x,y], [w,h], …) or (cb, x, y, w, h, …)")));
+        return;
+      } else {
+        next = 3;
+      }
+      float d = info.Length() > next ? float(num(ctx, info[next])) : 0.0f;
+      auto color = info.Length() > next + 1 ? decode_color(iso, ctx, info[next + 1]) : white;
+      float thick = info.Length() > next + 2 ? float(num(ctx, info[next + 2])) : 0.0f;
+      primitives::draw_rect(*cb, at, sz, d, color, thick);
+    }
+
+    // Mat4-only helpers for ellipse/box/cbox/pyramid/sphere/cylinder/quad-rounded.
+    template <typename Fn> void mat_color(const FunctionCallbackInfo<Value>& info, Fn&& fn) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::mat4x4 m;
+      if (info.Length() < 2 || !decode_mat4(info[1], m)) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "expected mat4 Float32Array(16) at arg 2")));
+        return;
+      }
+      auto color = info.Length() >= 3 ? decode_color(iso, ctx, info[2]) : white;
+      fn(*cb, m, color, info, ctx, iso);
+    }
+
+    void p_fillEllipse(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
+        float perc = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
+        usize edges = info.Length() >= 5 ? usize(num(ctx, info[4], 64)) : 64;
+        primitives::fill_ellipse(cb, m, c, perc, edges);
+      });
+    }
+    void p_drawEllipse(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
+        float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
+        float perc = info.Length() >= 5 ? float(num(ctx, info[4], 1.0)) : 1.0f;
+        usize edges = info.Length() >= 6 ? usize(num(ctx, info[5], 64)) : 64;
+        primitives::draw_ellipse(cb, m, c, thick, perc, edges);
+      });
+    }
+    void p_fillBox(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>&, Local<Context>,
+                         Isolate*) { primitives::fill_box(cb, m, c); });
+    }
+    void p_drawBox(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
+        float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
+        primitives::draw_box(cb, m, c, thick);
+      });
+    }
+    void p_fillCbox(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>&, Local<Context>,
+                         Isolate*) { primitives::fill_cbox(cb, m, c); });
+    }
+    void p_drawCbox(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
+        float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
+        primitives::draw_cbox(cb, m, c, thick);
+      });
+    }
+    void p_fillSphere(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
+        float px = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
+        float py = info.Length() >= 5 ? float(num(ctx, info[4], 1.0)) : 1.0f;
+        usize edges = info.Length() >= 6 ? usize(num(ctx, info[5], 32)) : 32;
+        primitives::fill_sphere(cb, m, c, px, py, edges);
+      });
+    }
+    void p_fillCylinder(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::mat4x4 m;
+      if (info.Length() < 2 || !decode_mat4(info[1], m))
+        return;
+      auto c = info.Length() >= 3 ? decode_color(iso, ctx, info[2]) : white;
+      float perc = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
+      usize edges = info.Length() >= 5 ? usize(num(ctx, info[4], 64)) : 64;
+      primitives::fill_cylinder(*cb, m, primitives::color_list<2>{c, c}, perc, edges);
+    }
+    void p_fillPyramid(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>&, Local<Context>,
+                         Isolate*) { primitives::fill_pyramid(cb, m, c); });
+    }
+    void p_drawPyramid(const FunctionCallbackInfo<Value>& info) {
+      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+                         const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
+        float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
+        primitives::draw_pyramid(cb, m, c, thick);
+      });
+    }
+    void p_fillQuad(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      // fillQuad(cb, transform_mat4, color)
+      math::mat4x4 m;
+      if (info.Length() < 2 || !decode_mat4(info[1], m))
+        return;
+      auto c = info.Length() >= 3 ? decode_color(iso, ctx, info[2]) : white;
+      primitives::fill_quad(*cb, m, c);
+    }
+    void p_drawQuad(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::mat4x4 m;
+      if (info.Length() < 2 || !decode_mat4(info[1], m))
+        return;
+      auto c = info.Length() >= 3 ? decode_color(iso, ctx, info[2]) : white;
+      float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
+      primitives::draw_quad(*cb, m, c, thick);
+    }
+    void p_fillQuadRounded(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      // fillQuadRounded(cb, p1,p2,p3,p4 (vec4 each), rnd[4], color)
+      math::vec4 p1, p2, p3, p4;
+      if (info.Length() < 5 || !decode_vec4(info[1], p1) || !decode_vec4(info[2], p2) ||
+          !decode_vec4(info[3], p3) || !decode_vec4(info[4], p4))
+        return;
+      primitives::optional_list<float, 4> rnd{0};
+      if (info.Length() >= 6 && info[5]->IsFloat32Array()) {
+        auto a = info[5].As<Float32Array>();
+        float t[4]{};
+        a->CopyContents(t, std::min<usize>(sizeof(t), a->ByteLength()));
+        rnd[0] = t[0];
+        rnd[1] = t[1];
+        rnd[2] = t[2];
+        rnd[3] = t[3];
+      }
+      auto c = info.Length() >= 7 ? decode_color(iso, ctx, info[6]) : white;
+      primitives::color_list<4> cl{c, c, c, c};
+      primitives::fill_quad_rounded(*cb, p1, p2, p3, p4, rnd, cl);
+    }
+    void p_drawQuadRounded(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::vec4 p1, p2, p3, p4;
+      if (info.Length() < 5 || !decode_vec4(info[1], p1) || !decode_vec4(info[2], p2) ||
+          !decode_vec4(info[3], p3) || !decode_vec4(info[4], p4))
+        return;
+      primitives::optional_list<float, 4> rnd{0};
+      if (info.Length() >= 6 && info[5]->IsFloat32Array()) {
+        auto a = info[5].As<Float32Array>();
+        float t[4]{};
+        a->CopyContents(t, std::min<usize>(sizeof(t), a->ByteLength()));
+        rnd[0] = t[0];
+        rnd[1] = t[1];
+        rnd[2] = t[2];
+        rnd[3] = t[3];
+      }
+      auto c = info.Length() >= 7 ? decode_color(iso, ctx, info[6]) : white;
+      float thick = info.Length() >= 8 ? float(num(ctx, info[7])) : 1.0f;
+      primitives::color_list<4> cl{c, c, c, c};
+      primitives::draw_quad_rounded(*cb, p1, p2, p3, p4, rnd, cl, thick);
+    }
+    void p_fillRectRounded(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::mat4x4 m;
+      if (info.Length() < 2 || !decode_mat4(info[1], m))
+        return;
+      primitives::optional_list<float, 4> rnd{0};
+      if (info.Length() >= 3 && info[2]->IsFloat32Array()) {
+        auto a = info[2].As<Float32Array>();
+        float t[4]{};
+        a->CopyContents(t, std::min<usize>(sizeof(t), a->ByteLength()));
+        rnd[0] = t[0];
+        rnd[1] = t[1];
+        rnd[2] = t[2];
+        rnd[3] = t[3];
+      }
+      float shift = info.Length() >= 4 ? float(num(ctx, info[3])) : 0.0f;
+      auto paint = info.Length() >= 5 ? decode_paint(iso, ctx, info[4])
+                                      : primitives::paint_value::solid(white);
+      primitives::fill_rect_rounded(*cb, m, rnd, shift, paint);
+    }
+    void p_drawRectRounded(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::mat4x4 m;
+      if (info.Length() < 2 || !decode_mat4(info[1], m))
+        return;
+      primitives::optional_list<float, 4> rnd{0};
+      if (info.Length() >= 3 && info[2]->IsFloat32Array()) {
+        auto a = info[2].As<Float32Array>();
+        float t[4]{};
+        a->CopyContents(t, std::min<usize>(sizeof(t), a->ByteLength()));
+        rnd[0] = t[0];
+        rnd[1] = t[1];
+        rnd[2] = t[2];
+        rnd[3] = t[3];
+      }
+      float shift = info.Length() >= 4 ? float(num(ctx, info[3])) : 0.0f;
+      auto c = info.Length() >= 5 ? decode_color(iso, ctx, info[4]) : white;
+      float thick = info.Length() >= 6 ? float(num(ctx, info[5])) : 1.0f;
+      primitives::color_list<4> cl{c, c, c, c};
+      primitives::draw_rect_rounded(*cb, m, rnd, shift, cl, thick);
+    }
+    void p_drawText(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      // drawText(cb, [x,y], depth, text, opts?)              — array form
+      //   opts: { color, size, pt }.
+      // drawText(cb, x, y, depth, text, size?, color?)       — scalar form
+      math::vec2 at{};
+      int next = 1;
+      if (info.Length() >= 2 && info[1]->IsNumber()) {
+        at.x = float(num(ctx, info[1]));
+        at.y = float(num(ctx, info[2]));
+        next = 3;
+      } else if (info.Length() < 4 || !decode_vec2(info[1], at)) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "drawText: expected (cb, [x,y], depth, text, opts?) or "
+                                            "(cb, x, y, depth, text, size?, color?)")));
+        return;
+      } else {
+        next = 2;
+      }
+      float d = float(num(ctx, info[next]));
+      auto text = utf8(iso, info[next + 1]);
+      u32 font_id = 0;
+      primitives::text_style style{};
+      // Trailing args: either an opts object (array form) or scalar (size, color).
+      if (info.Length() > next + 2) {
+        auto v = info[next + 2];
+        if (v->IsObject() && !v->IsNumber()) {
+          auto o = v.As<Object>();
+          Local<Value> field;
+          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "color")).ToLocal(&field))
+            style.color = decode_color(iso, ctx, field);
+          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "size")).ToLocal(&field) &&
+              field->IsNumber())
+            style.pt = float(field->NumberValue(ctx).FromMaybe(16.0));
+          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "pt")).ToLocal(&field) &&
+              field->IsNumber())
+            style.pt = static_cast<float>(
+                field->NumberValue(ctx).FromMaybe(static_cast<double>(style.pt)));
+          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "fontId")).ToLocal(&field) &&
+              field->IsNumber())
+            font_id = static_cast<u32>(field->NumberValue(ctx).FromMaybe(0.0));
+          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "lineHeight")).ToLocal(&field) &&
+              field->IsNumber())
+            style.line_height = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+          // features: ["liga", "calt"] or [["ss01", 1], ...]
+          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "features")).ToLocal(&field) &&
+              field->IsArray()) {
+            auto a = field.As<Array>();
+            const u32 n = a->Length();
+            for (u32 i = 0; i < n; ++i) {
+              Local<Value> el;
+              if (!a->Get(ctx, i).ToLocal(&el))
+                continue;
+              std::array<char, 4> tag{' ', ' ', ' ', ' '};
+              u32 val = 1;
+              if (el->IsString()) {
+                String::Utf8Value u(iso, el);
+                for (std::size_t k = 0; k < 4 && k < static_cast<std::size_t>(u.length()); ++k)
+                  tag[k] = (*u)[k];
+              } else if (el->IsArray()) {
+                auto pair = el.As<Array>();
+                Local<Value> tv;
+                if (pair->Get(ctx, 0).ToLocal(&tv) && tv->IsString()) {
+                  String::Utf8Value u(iso, tv);
+                  for (std::size_t k = 0; k < 4 && k < static_cast<std::size_t>(u.length()); ++k)
+                    tag[k] = (*u)[k];
+                }
+                Local<Value> vv;
+                if (pair->Get(ctx, 1).ToLocal(&vv) && vv->IsNumber()) {
+                  val = static_cast<u32>(vv->NumberValue(ctx).FromMaybe(1.0));
+                }
+              }
+              style.features.emplace_back(tag, val);
+            }
+          }
+          // variations: { wght: 600, wdth: 110 }
+          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "variations")).ToLocal(&field) &&
+              field->IsObject() && !field->IsArray()) {
+            auto vobj = field.As<Object>();
+            Local<Array> keys;
+            if (vobj->GetOwnPropertyNames(ctx).ToLocal(&keys)) {
+              const u32 n = keys->Length();
+              for (u32 i = 0; i < n; ++i) {
+                Local<Value> kk;
+                if (!keys->Get(ctx, i).ToLocal(&kk) || !kk->IsString())
+                  continue;
+                String::Utf8Value u(iso, kk);
+                std::array<char, 4> tag{' ', ' ', ' ', ' '};
+                for (std::size_t k = 0; k < 4 && k < static_cast<std::size_t>(u.length()); ++k)
+                  tag[k] = (*u)[k];
+                Local<Value> vv;
+                if (!vobj->Get(ctx, kk).ToLocal(&vv) || !vv->IsNumber())
+                  continue;
+                style.variations.emplace_back(
+                    tag, static_cast<float>(vv->NumberValue(ctx).FromMaybe(0.0)));
+              }
+            }
+          }
+        } else if (v->IsNumber()) {
+          style.pt = float(num(ctx, v, 16.0));
+          if (info.Length() > next + 3)
+            style.color = decode_color(iso, ctx, info[next + 3]);
+        }
+      }
+      const auto* font = resolve_font_id(font_id);
+      auto out = primitives::draw_text(*cb, at, d, text, font ? *font : get_font_info(), style);
+      auto arr = Array::New(iso, 4);
+      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(out.x)));
+      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(out.y)));
+      (void)arr->Set(ctx, 2, Number::New(iso, static_cast<double>(out.z)));
+      (void)arr->Set(ctx, 3, Number::New(iso, static_cast<double>(out.w)));
+      info.GetReturnValue().Set(arr);
+    }
+
+    void path_ctor(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      if (!info.IsConstructCall()) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(iso, "Path: use new")));
+        return;
+      }
+      auto* h = new path_holder();
+      auto self = info.This();
+      self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
+      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_PATH));
+      h->self.Reset(iso, self);
+      h->self.SetWeak(h, path_finalizer, WeakCallbackType::kParameter);
+    }
+
+    template <typename Fn> void path_method(const FunctionCallbackInfo<Value>& info, Fn&& fn) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* h = static_cast<path_holder*>(unwrap(info.This(), TAG_PATH));
+      if (!h) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(iso, "invalid Path")));
+        return;
+      }
+      fn(h->path, ctx);
+      info.GetReturnValue().Set(info.This());
+    }
+
+    void path_moveTo(const FunctionCallbackInfo<Value>& info) {
+      path_method(info, [&](primitives::path_2d& p, Local<Context> ctx) {
+        p.move_to(float(num(ctx, info[0])), float(num(ctx, info[1])));
+      });
+    }
+    void path_lineTo(const FunctionCallbackInfo<Value>& info) {
+      path_method(info, [&](primitives::path_2d& p, Local<Context> ctx) {
+        p.line_to(float(num(ctx, info[0])), float(num(ctx, info[1])));
+      });
+    }
+    void path_quadTo(const FunctionCallbackInfo<Value>& info) {
+      path_method(info, [&](primitives::path_2d& p, Local<Context> ctx) {
+        p.quad_to(float(num(ctx, info[0])), float(num(ctx, info[1])), float(num(ctx, info[2])),
+                  float(num(ctx, info[3])));
+      });
+    }
+    void path_cubicTo(const FunctionCallbackInfo<Value>& info) {
+      path_method(info, [&](primitives::path_2d& p, Local<Context> ctx) {
+        p.cubic_to(float(num(ctx, info[0])), float(num(ctx, info[1])), float(num(ctx, info[2])),
+                   float(num(ctx, info[3])), float(num(ctx, info[4])), float(num(ctx, info[5])));
+      });
+    }
+    void path_arc(const FunctionCallbackInfo<Value>& info) {
+      path_method(info, [&](primitives::path_2d& p, Local<Context> ctx) {
+        p.arc(float(num(ctx, info[0])), float(num(ctx, info[1])), float(num(ctx, info[2])),
+              float(num(ctx, info[3])), float(num(ctx, info[4])),
+              info.Length() >= 6 && info[5]->BooleanValue(info.GetIsolate()));
+      });
+    }
+    void path_close(const FunctionCallbackInfo<Value>& info) {
+      path_method(info, [&](primitives::path_2d& p, Local<Context>) { p.close(); });
+    }
+    void path_reset(const FunctionCallbackInfo<Value>& info) {
+      path_method(info, [&](primitives::path_2d& p, Local<Context>) { p.reset(); });
+    }
+
+    Local<Object> make_paint(Isolate* iso, Local<Context> ctx, primitives::paint_kind kind,
+                             math::vec4 p0, math::vec4 p1, Local<Value> stops_v) {
+      auto o = Object::New(iso);
+      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "__fxePaint"),
+                   Integer::NewFromUnsigned(iso, PAINT_KIND_PROP));
+      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "kind"),
+                   Integer::NewFromUnsigned(iso, static_cast<u32>(kind)));
+      auto a0 = Array::New(iso, 4);
+      auto a1 = Array::New(iso, 4);
+      for (int i = 0; i < 4; ++i) {
+        (void)a0->Set(ctx, static_cast<uint32_t>(i), Number::New(iso, static_cast<double>(p0[i])));
+        (void)a1->Set(ctx, static_cast<uint32_t>(i), Number::New(iso, static_cast<double>(p1[i])));
+      }
+      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "p0"), a0);
+      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "p1"), a1);
+      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "stops"), stops_v);
+      return o;
+    }
+
+    void p_linearGradient(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      math::vec2 a{}, b{};
+      if (info.Length() < 3 || !decode_vec2(info[0], a) || !decode_vec2(info[1], b) ||
+          !info[2]->IsFloat32Array()) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "linearGradient: expected (p0, p1, stops)")));
+        return;
+      }
+      info.GetReturnValue().Set(make_paint(iso, ctx, primitives::paint_kind::linear,
+                                           {a.x, a.y, 0, 0}, {b.x, b.y, 0, 0}, info[2]));
+    }
+    void p_radialGradient(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      math::vec2 c{};
+      if (info.Length() < 3 || !decode_vec2(info[0], c) || !info[2]->IsFloat32Array()) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "radialGradient: expected (center, radius, stops)")));
+        return;
+      }
+      info.GetReturnValue().Set(make_paint(iso, ctx, primitives::paint_kind::radial,
+                                           {c.x, c.y, float(num(ctx, info[1], 1.0)), 0}, {},
+                                           info[2]));
+    }
+    void p_conicGradient(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      math::vec2 c{};
+      if (info.Length() < 3 || !decode_vec2(info[0], c) || !info[2]->IsFloat32Array()) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "conicGradient: expected (center, angle, stops)")));
+        return;
+      }
+      info.GetReturnValue().Set(make_paint(iso, ctx, primitives::paint_kind::conic,
+                                           {c.x, c.y, float(num(ctx, info[1])), 0}, {}, info[2]));
+    }
+
+    void p_fillPath(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      auto* p = info.Length() >= 2 ? unwrap_path(info[1]) : nullptr;
+      if (!p) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "fillPath: expected (CommandBuffer, Path, paint?, fillRule?, depth?)")));
+        return;
+      }
+      auto paint = info.Length() >= 3 ? decode_paint(iso, ctx, info[2])
+                                      : primitives::paint_value::solid(white);
+      primitives::fill_rule rule = primitives::fill_rule::nonzero;
+      if (info.Length() >= 4 && info[3]->IsString() && utf8(iso, info[3]) == "evenodd")
+        rule = primitives::fill_rule::evenodd;
+      float depth = info.Length() >= 5 ? float(num(ctx, info[4])) : 0.0f;
+      primitives::fill_path(*cb, p->path, paint, rule, depth);
+    }
+
+    void p_strokePath(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      auto* p = info.Length() >= 2 ? unwrap_path(info[1]) : nullptr;
+      if (!p) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "strokePath: expected (CommandBuffer, Path, paint?, "
+                                            "lineWidth?, join?, cap?, depth?)")));
+        return;
+      }
+      auto paint = info.Length() >= 3 ? decode_paint(iso, ctx, info[2])
+                                      : primitives::paint_value::solid(white);
+      float width = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
+      float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
+      primitives::stroke_path(*cb, p->path, paint, width, primitives::line_join::miter,
+                              primitives::line_cap::butt, depth);
+    }
+
+    void p_calcText(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      float pt = info.Length() >= 2 ? float(num(ctx, info[1], 16.0)) : 16.0f;
+      auto v = primitives::calc_text(text, get_font_info(), pt);
+      auto arr = Array::New(iso, 2);
+      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(v.x)));
+      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(v.y)));
+      info.GetReturnValue().Set(arr);
+    }
+    void p_drain(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      if (info.Length() < 3) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "drain(cmdBuffer, opcodes Uint32Array, params Float32Array)")));
+        return;
+      }
+      auto* cb = unwrap_any_cb(info[0]);
+      if (!cb) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "drain: first arg must be CommandBuffer")));
+        return;
+      }
+      if (!info[1]->IsUint32Array() || !info[2]->IsFloat32Array()) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "drain: expected Uint32Array opcodes and Float32Array params")));
+        return;
+      }
+
+      auto opcodes = info[1].As<Uint32Array>();
+      auto params = info[2].As<Float32Array>();
+      std::vector<u32> ops(opcodes->Length());
+      std::vector<float> p(params->Length());
+      opcodes->CopyContents(ops.data(), ops.size() * sizeof(u32));
+      params->CopyContents(p.data(), p.size() * sizeof(float));
+
+      usize pos = 0;
+      u32 executed = 0;
+      for (usize i = 0; i < ops.size(); ++i) {
+        switch (ops[i]) {
+        case OP_FILL_RECT: {
+          if (!require_params(iso, pos, 9, p.size(), "fillRect"))
+            return;
+          primitives::fill_rect(*cb, math::vec2{p[pos], p[pos + 1]},
+                                math::vec2{p[pos + 2], p[pos + 3]}, p[pos + 4],
+                                color_from_floats(&p[pos + 5]));
+          pos += 9;
+          break;
+        }
+        case OP_DRAW_RECT: {
+          if (!require_params(iso, pos, 10, p.size(), "drawRect"))
+            return;
+          primitives::draw_rect(*cb, math::vec2{p[pos], p[pos + 1]},
+                                math::vec2{p[pos + 2], p[pos + 3]}, p[pos + 4],
+                                color_from_floats(&p[pos + 5]), p[pos + 9]);
+          pos += 10;
+          break;
+        }
+        case OP_FILL_TRIANGLE: {
+          if (!require_params(iso, pos, 16, p.size(), "fillTriangle"))
+            return;
+          primitives::fill_triangle(*cb, math::vec4{p[pos], p[pos + 1], p[pos + 2], p[pos + 3]},
+                                    math::vec4{p[pos + 4], p[pos + 5], p[pos + 6], p[pos + 7]},
+                                    math::vec4{p[pos + 8], p[pos + 9], p[pos + 10], p[pos + 11]},
+                                    color_from_floats(&p[pos + 12]));
+          pos += 16;
+          break;
+        }
+        case OP_DRAW_LINE: {
+          if (!require_params(iso, pos, 13, p.size(), "drawLine"))
+            return;
+          primitives::draw_line(*cb, math::vec4{p[pos], p[pos + 1], p[pos + 2], p[pos + 3]},
+                                math::vec4{p[pos + 4], p[pos + 5], p[pos + 6], p[pos + 7]},
+                                color_from_floats(&p[pos + 8]), p[pos + 12]);
+          pos += 13;
+          break;
+        }
+        case OP_DRAW_TEXT: {
+          if (!require_params(iso, pos, 9, p.size(), "drawText"))
+            return;
+          float x = p[pos];
+          float y = p[pos + 1];
+          float d = p[pos + 2];
+          primitives::text_style style{};
+          style.pt = p[pos + 3];
+          style.color = color_from_floats(&p[pos + 4]);
+          auto char_count = static_cast<u32>(p[pos + 8]);
+          pos += 9;
+          if (!require_params(iso, pos, char_count, p.size(), "drawText text"))
+            return;
+          std::string text;
+          text.reserve(char_count);
+          for (u32 n = 0; n < char_count; ++n) {
+            auto c = static_cast<unsigned>(p[pos + n]);
+            if (c > 0x7f) {
+              iso->ThrowException(Exception::RangeError(String::NewFromUtf8Literal(
+                  iso, "Primitives.drain drawText supports ASCII codepoints only")));
+              return;
+            }
+            text.push_back(static_cast<char>(c));
+          }
+          pos += char_count;
+          (void)primitives::draw_text(*cb, math::vec2{x, y}, d, text, get_font_info(), style);
+          break;
+        }
+        case OP_FILL_PATH:
+        case OP_STROKE_PATH: {
+          if (!require_params(iso, pos, 8, p.size(),
+                              ops[i] == OP_FILL_PATH ? "fillPath" : "strokePath"))
+            return;
+          const u32 command_count = static_cast<u32>(p[pos]);
+          primitives::paint_value paint =
+              primitives::paint_value::solid(color_from_floats(&p[pos + 1]));
+          const float depth = p[pos + 5];
+          const float line_width = p[pos + 6];
+          pos += 8; // slot 7 reserved for future fillRule/join/cap packing.
+          primitives::path_2d path;
+          for (u32 c = 0; c < command_count; ++c) {
+            if (!require_params(iso, pos, 1, p.size(), "path command"))
+              return;
+            const u32 cmd = static_cast<u32>(p[pos++]);
+            switch (cmd) {
+            case 0:
+              if (!require_params(iso, pos, 2, p.size(), "path move"))
+                return;
+              path.move_to(p[pos], p[pos + 1]);
+              pos += 2;
+              break;
+            case 1:
+              if (!require_params(iso, pos, 2, p.size(), "path line"))
+                return;
+              path.line_to(p[pos], p[pos + 1]);
+              pos += 2;
+              break;
+            case 2:
+              if (!require_params(iso, pos, 4, p.size(), "path quad"))
+                return;
+              path.quad_to(p[pos], p[pos + 1], p[pos + 2], p[pos + 3]);
+              pos += 4;
+              break;
+            case 3:
+              if (!require_params(iso, pos, 6, p.size(), "path cubic"))
+                return;
+              path.cubic_to(p[pos], p[pos + 1], p[pos + 2], p[pos + 3], p[pos + 4], p[pos + 5]);
+              pos += 6;
+              break;
+            case 4:
+              if (!require_params(iso, pos, 6, p.size(), "path arc"))
+                return;
+              path.arc(p[pos], p[pos + 1], p[pos + 2], p[pos + 3], p[pos + 4], p[pos + 5] != 0.0f);
+              pos += 6;
+              break;
+            case 5:
+              path.close();
+              break;
+            default:
+              iso->ThrowException(Exception::RangeError(
+                  String::NewFromUtf8Literal(iso, "Primitives.drain: invalid path command")));
+              return;
+            }
+          }
+          if (ops[i] == OP_FILL_PATH)
+            primitives::fill_path(*cb, path, paint, primitives::fill_rule::nonzero, depth);
+          else
+            primitives::stroke_path(*cb, path, paint, line_width);
+          break;
+        }
+        default: {
+          std::string msg = "Primitives.drain: unsupported opcode " + std::to_string(ops[i]);
+          iso->ThrowException(Exception::RangeError(js_string(iso, msg)));
+          return;
+        }
+        }
+        ++executed;
+      }
+      if (pos != p.size()) {
+        iso->ThrowException(Exception::RangeError(
+            String::NewFromUtf8Literal(iso, "Primitives.drain: unused params")));
+        return;
+      }
+      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, executed));
+    }
+
+    void p_blurRect(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      // blurRect(cb, x, y, w, h, depth, color, dispersion, screen_w, screen_h)
+      float x = float(num(ctx, info[1]));
+      float y = float(num(ctx, info[2]));
+      float w = float(num(ctx, info[3]));
+      float h = float(num(ctx, info[4]));
+      float d = float(num(ctx, info[5]));
+      auto c = decode_color(iso, ctx, info[6]);
+      float disp = float(num(ctx, info[7]));
+      float sw = float(num(ctx, info[8]));
+      float sh = float(num(ctx, info[9]));
+      primitives::blur_rect(*cb, math::vec2{x, y}, math::vec2{w, h}, d, c, disp,
+                            math::vec2{sw, sh});
+    }
+
+    void p_drawShadowRect(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      primitives::draw_shadow_rect(
+          *cb, float(num(ctx, info[1])), float(num(ctx, info[2])), float(num(ctx, info[3])),
+          float(num(ctx, info[4])), float(num(ctx, info[5])), decode_color(iso, ctx, info[6]),
+          float(num(ctx, info[7])), float(num(ctx, info[8])), float(num(ctx, info[9])),
+          float(num(ctx, info[10])), float(num(ctx, info[11])), float(num(ctx, info[12])));
+    }
+
+    void p_drawShadowRectRounded(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      primitives::optional_list<float, 4> rnd{0};
+      if (info.Length() >= 7 && info[6]->IsFloat32Array()) {
+        auto a = info[6].As<Float32Array>();
+        float t[4]{};
+        a->CopyContents(t, std::min<usize>(sizeof(t), a->ByteLength()));
+        rnd[0] = t[0];
+        rnd[1] = t[1];
+        rnd[2] = t[2];
+        rnd[3] = t[3];
+      }
+      primitives::draw_shadow_rect_rounded(
+          *cb, float(num(ctx, info[1])), float(num(ctx, info[2])), float(num(ctx, info[3])),
+          float(num(ctx, info[4])), rnd, float(num(ctx, info[5])), decode_color(iso, ctx, info[7]),
+          float(num(ctx, info[8])), float(num(ctx, info[9])), float(num(ctx, info[10])),
+          float(num(ctx, info[11])), float(num(ctx, info[12])), float(num(ctx, info[13])));
+    }
+    void p_blurQuad(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      math::vec4 p1, p2, p3, p4;
+      if (info.Length() < 5 || !decode_vec4(info[1], p1) || !decode_vec4(info[2], p2) ||
+          !decode_vec4(info[3], p3) || !decode_vec4(info[4], p4))
+        return;
+      auto c = info.Length() >= 6 ? decode_color(iso, ctx, info[5]) : white;
+      float disp = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
+      float sw = info.Length() >= 8 ? float(num(ctx, info[7])) : 0.0f;
+      float sh = info.Length() >= 9 ? float(num(ctx, info[8])) : 0.0f;
+      primitives::color_list<4> cl{c, c, c, c};
+      primitives::blur_quad(*cb, p1, p2, p3, p4, cl, disp, math::vec2{sw, sh});
+    }
+    // drawSprite(cb, spriteId, x, y, w, h, depth?, tint?)
+    //
+    // ENGINE GAP: the renderer currently exposes only one global atlas
+    // (set via renderer::set_atlas), so per-spriteId texture sampling is
+    // not yet wired through. This v0 emits a tinted, untextured rect of
+    // the requested size — geometry, layering and tinting all work; the
+    // sampled image will land once the multi-texture path exists.
+    void p_drawSprite(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      if (info.Length() < 6) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "drawSprite(cb, spriteId, x, y, w, h, depth?, tint?)")));
+        return;
+      }
+      (void)info[1]->Uint32Value(ctx).FromMaybe(0u); // spriteId reserved for future routing
+      math::vec2 at{float(num(ctx, info[2])), float(num(ctx, info[3]))};
+      math::vec2 size{float(num(ctx, info[4])), float(num(ctx, info[5]))};
+      float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
+      auto tint = info.Length() >= 8 ? decode_color(iso, ctx, info[7]) : white;
+      primitives::fill_rect(*cb, at, size, depth, tint);
+    }
+  } // namespace
+
+  void install_primitives_namespace(Isolate* iso, Local<ObjectTemplate> global) {
+    HandleScope hs(iso);
+    auto path_tpl = FunctionTemplate::New(iso, path_ctor);
+    path_tpl->SetClassName(String::NewFromUtf8Literal(iso, "Path"));
+    path_tpl->InstanceTemplate()->SetInternalFieldCount(2);
+    auto path_proto = path_tpl->PrototypeTemplate();
+    path_proto->Set(iso, "moveTo", FunctionTemplate::New(iso, path_moveTo));
+    path_proto->Set(iso, "lineTo", FunctionTemplate::New(iso, path_lineTo));
+    path_proto->Set(iso, "quadTo", FunctionTemplate::New(iso, path_quadTo));
+    path_proto->Set(iso, "cubicTo", FunctionTemplate::New(iso, path_cubicTo));
+    path_proto->Set(iso, "arc", FunctionTemplate::New(iso, path_arc));
+    path_proto->Set(iso, "close", FunctionTemplate::New(iso, path_close));
+    path_proto->Set(iso, "reset", FunctionTemplate::New(iso, path_reset));
+    global->Set(iso, "Path", path_tpl);
+    auto ns = ObjectTemplate::New(iso);
+#define P(name, fn) ns->Set(iso, name, FunctionTemplate::New(iso, fn))
+    P("drawLine", p_drawLine);
+    P("fillTriangle", p_fillTriangle);
+    P("fillRect", p_fillRect);
+    P("drawRect", p_drawRect);
+    P("fillEllipse", p_fillEllipse);
+    P("drawEllipse", p_drawEllipse);
+    P("fillBox", p_fillBox);
+    P("drawBox", p_drawBox);
+    P("fillCbox", p_fillCbox);
+    P("drawCbox", p_drawCbox);
+    P("fillSphere", p_fillSphere);
+    P("fillCylinder", p_fillCylinder);
+    P("fillPyramid", p_fillPyramid);
+    P("drawPyramid", p_drawPyramid);
+    P("fillQuad", p_fillQuad);
+    P("drawQuad", p_drawQuad);
+    P("fillQuadRounded", p_fillQuadRounded);
+    P("drawQuadRounded", p_drawQuadRounded);
+    P("fillRectRounded", p_fillRectRounded);
+    P("drawRectRounded", p_drawRectRounded);
+    P("drawText", p_drawText);
+    P("calcText", p_calcText);
+    P("linearGradient", p_linearGradient);
+    P("radialGradient", p_radialGradient);
+    P("conicGradient", p_conicGradient);
+    P("fillPath", p_fillPath);
+    P("strokePath", p_strokePath);
+    P("drawShadowRect", p_drawShadowRect);
+    P("drawShadowRectRounded", p_drawShadowRectRounded);
+    P("blurRect", p_blurRect);
+    P("blurQuad", p_blurQuad);
+    P("drawSprite", p_drawSprite);
+    P("drain", p_drain);
+#define C(name, value) ns->Set(iso, name, Integer::NewFromUnsigned(iso, value))
+    C("OP_FILL_RECT", OP_FILL_RECT);
+    C("OP_DRAW_RECT", OP_DRAW_RECT);
+    C("OP_FILL_TRIANGLE", OP_FILL_TRIANGLE);
+    C("OP_DRAW_LINE", OP_DRAW_LINE);
+    C("OP_DRAW_TEXT", OP_DRAW_TEXT);
+    C("OP_FILL_PATH", OP_FILL_PATH);
+    C("OP_STROKE_PATH", OP_STROKE_PATH);
+#undef C
+#undef P
+    global->Set(iso, "Primitives", ns);
+  }
+} // namespace fxe::js
