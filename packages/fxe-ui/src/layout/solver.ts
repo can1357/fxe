@@ -31,10 +31,7 @@ function finite(v: number): number {
 // semantics for the (undefined | number | percent | 'auto') subset we
 // receive on the hot edge path; throws via resolveLength() for anything
 // exotic to keep the diagnostic.
-function resolveEdge(
-  v: Length | undefined,
-  parent: number | undefined,
-): number {
+function resolveEdge(v: Length | undefined, parent: number | undefined): number {
   if (v === undefined || v === 'auto') return 0;
   if (typeof v === 'number') {
     // Skip the finite() guard: edge values come from user styles and are
@@ -605,8 +602,7 @@ function positionLine(
     const cb = item.marginCrossBefore;
     const ca = item.marginCrossAfter;
     let childCross = item.cross;
-    if (align === 'stretch' && item.cross === 0)
-      childCross = Math.max(0, lineCross - cb - ca);
+    if (align === 'stretch' && item.cross === 0) childCross = Math.max(0, lineCross - cb - ca);
     let crossPos = crossCursor + cb;
     const crossFree = lineCross - childCross - cb - ca;
     if (align === 'center') crossPos += crossFree / 2;

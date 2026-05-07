@@ -118,18 +118,87 @@ function breakLongWord(
   return out;
 }
 
+// Wrap result cache. wrapText() runs through the native HarfBuzz/CoreText
+// shaper for every Text/TextInput on every layout pass, so a stress scene
+// with N text nodes burns N native shape calls per frame even when the
+// inputs don't change. The vast majority of UI text is static across
+// frames; this memo turns those repeats into a Map probe.
+//
+// We swap-evict instead of LRU: when `g_cache` reaches MAX, demote it to
+// `g_old` and start fresh. Lookups check the new cache first, then fall
+// back to the old one (and promote on hit). Memory is bounded to 2*MAX.
+const WRAP_CACHE_MAX = 4096;
+let g_wrap_cache = new Map<string, WrappedText>();
+let g_wrap_cache_old = new Map<string, WrappedText>();
+
+function wrapKey(
+  text: string,
+  fontSize: number,
+  letterSpacing: number,
+  lineHeight: number | undefined,
+  maxWidth: number | undefined,
+  breakWords: boolean,
+): string {
+  // Pipe is rarer than other separators; the join is one V8 string concat
+  // and V8 will intern this for the cache key. Float bit patterns survive
+  // the concat unambiguously.
+  return `${fontSize}|${letterSpacing}|${lineHeight ?? -1}|${maxWidth ?? -1}|${breakWords ? 1 : 0}|${text}`;
+}
+
+function cachedWrap(key: string): WrappedText | undefined {
+  const hit = g_wrap_cache.get(key);
+  if (hit !== undefined) return hit;
+  const old = g_wrap_cache_old.get(key);
+  if (old !== undefined) {
+    g_wrap_cache.set(key, old);
+    if (g_wrap_cache.size >= WRAP_CACHE_MAX) {
+      g_wrap_cache_old = g_wrap_cache;
+      g_wrap_cache = new Map();
+    }
+    return old;
+  }
+  return undefined;
+}
+
+function storeWrap(key: string, value: WrappedText): WrappedText {
+  g_wrap_cache.set(key, value);
+  if (g_wrap_cache.size >= WRAP_CACHE_MAX) {
+    g_wrap_cache_old = g_wrap_cache;
+    g_wrap_cache = new Map();
+  }
+  return value;
+}
+
+// Test/dev hook for invalidating the cache (exposed so the font binding
+// can flush it after a font swap; safe to leave unused).
+export function _resetWrapCache(): void {
+  g_wrap_cache = new Map();
+  g_wrap_cache_old = new Map();
+}
+
 export function wrapText(text: string, style: TextStyle, options: WrapOptions = {}): WrappedText {
   const fontSize = style.fontSize ?? 16;
   const letterSpacing = style.letterSpacing ?? 0;
+  const breakWords = options.breakWords === true;
+  const key = wrapKey(
+    text,
+    fontSize,
+    letterSpacing,
+    style.lineHeight,
+    options.maxWidth,
+    breakWords,
+  );
+  const cached = cachedWrap(key);
+  if (cached !== undefined) return cached;
   const native = nativeWrapText(
     text,
     fontSize,
     letterSpacing,
     options.maxWidth ?? Number.POSITIVE_INFINITY,
     style.lineHeight,
-    options.breakWords === true,
+    breakWords,
   );
-  if (native !== null) return native;
+  if (native !== null) return storeWrap(key, native);
   // `calcText('')` is well-defined in the FXE binding (returns height of the
   // active font), but we substitute 'M' to make sure we always get a real
   // glyph metric for empty inputs.
@@ -142,7 +211,9 @@ export function wrapText(text: string, style: TextStyle, options: WrapOptions = 
       : Number.POSITIVE_INFINITY;
 
   if (text.length === 0) {
-    return { lines: [''], width: 0, height: lineHeight, lineHeight, lineStartIndices: [0] };
+    return storeWrap(key, {
+      lines: [''], width: 0, height: lineHeight, lineHeight, lineStartIndices: [0],
+    });
   }
 
   const paragraphs = text.split('\n');
@@ -218,5 +289,7 @@ export function wrapText(text: string, style: TextStyle, options: WrapOptions = 
   }
 
   if (lines.length === 0) pushLine('', 0);
-  return { lines, width: widest, height: lineHeight * lines.length, lineHeight, lineStartIndices };
+  return storeWrap(key, {
+    lines, width: widest, height: lineHeight * lines.length, lineHeight, lineStartIndices,
+  });
 }
