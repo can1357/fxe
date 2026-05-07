@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <memory>
 #include <sstream>
 #include <unordered_map>
 
@@ -119,6 +121,58 @@ namespace fxe::net {
   // without libuv.
 
   namespace {
+    constexpr long kDefaultTotalTimeoutMs = 60000L;
+    constexpr long kDefaultConnectTimeoutMs = 30000L;
+    constexpr std::size_t kMaxActiveTotal = 64;
+    constexpr std::size_t kMaxActivePerOrigin = 6;
+    constexpr std::size_t kMaxPendingTotal = 256;
+
+    struct origin_key {
+      std::string key;
+    };
+
+    origin_key normalized_origin_key(const std::string& url) {
+      auto scheme_end = url.find("://");
+      std::string scheme =
+          scheme_end == std::string::npos ? "http" : ascii_lower_copy(url.substr(0, scheme_end));
+      std::size_t authority = scheme_end == std::string::npos ? 0 : scheme_end + 3;
+      auto path_pos = url.find_first_of("/?#", authority);
+      std::string host_port = path_pos == std::string::npos
+                                  ? url.substr(authority)
+                                  : url.substr(authority, path_pos - authority);
+      auto at = host_port.rfind('@');
+      if (at != std::string::npos)
+        host_port.erase(0, at + 1);
+
+      std::string host;
+      int port = scheme == "https" ? 443 : 80;
+      if (!host_port.empty() && host_port.front() == '[') {
+        auto end = host_port.find(']');
+        host = end == std::string::npos ? host_port : host_port.substr(1, end - 1);
+        if (end != std::string::npos && end + 1 < host_port.size() && host_port[end + 1] == ':') {
+          const std::string port_s = host_port.substr(end + 2);
+          if (!port_s.empty())
+            port = std::atoi(port_s.c_str());
+        }
+      } else {
+        auto colon = host_port.rfind(':');
+        if (colon != std::string::npos) {
+          host = host_port.substr(0, colon);
+          const std::string port_s = host_port.substr(colon + 1);
+          if (!port_s.empty() && std::all_of(port_s.begin(), port_s.end(),
+                                             [](unsigned char c) { return std::isdigit(c) != 0; }))
+            port = std::atoi(port_s.c_str());
+        } else {
+          host = host_port;
+        }
+      }
+
+      host = ascii_lower_copy(host);
+      if (port <= 0)
+        port = scheme == "https" ? 443 : 80;
+      return origin_key{scheme + "://" + host + ":" + std::to_string(port)};
+    }
+
     struct in_flight {
       http_request_id id;
       CURL* easy = nullptr;
@@ -128,6 +182,7 @@ namespace fxe::net {
       std::string body_buf;
       std::string upload_buf;
       std::string request_url;
+      std::string origin;
       std::vector<std::string> set_cookie_headers;
       std::size_t upload_off = 0;
       bool aborted = false;
@@ -135,6 +190,15 @@ namespace fxe::net {
       curl_mime* mime = nullptr;
       std::string proxy_url;
       std::string proxy_userpwd;
+    };
+
+    struct queued_request {
+      http_request_id id;
+      http_request req;
+      http_callback cb;
+      std::string origin;
+      bool aborted = false;
+      bool settled = false;
     };
 
     static std::size_t write_cb(char* ptr, std::size_t size, std::size_t nmemb, void* user) {
@@ -400,6 +464,11 @@ namespace fxe::net {
     std::atomic<http_request_id> next_id{1};
     std::unordered_map<http_request_id, in_flight*> by_id;
     std::unordered_map<CURL*, in_flight*> by_easy;
+    std::unordered_map<std::string, std::size_t> active_by_origin;
+    std::deque<std::shared_ptr<queued_request>> pending_fifo;
+    std::unordered_map<http_request_id, std::shared_ptr<queued_request>> pending_by_id;
+    std::size_t active_total = 0;
+    std::size_t pending_total = 0;
     cookie_jar& jar;
 
     std::size_t pump_callback_id = 0;
@@ -410,26 +479,243 @@ namespace fxe::net {
         supports_https = curl_supports_https();
       }
       if (ok) {
+        curl_multi_setopt(multi, CURLMOPT_MAX_TOTAL_CONNECTIONS,
+                          static_cast<long>(kMaxActiveTotal));
+        curl_multi_setopt(multi, CURLMOPT_MAX_HOST_CONNECTIONS,
+                          static_cast<long>(kMaxActivePerOrigin));
         pump_callback_id = fxe::runtime::uv_loop_runtime::instance().register_pump_callback(
             [this] { poll_once(); });
       }
     }
     ~impl() {
       fxe::runtime::uv_loop_runtime::instance().unregister_pump_callback(pump_callback_id);
-      for (auto& [_, fl] : by_id) {
-        if (fl->easy) {
-          curl_multi_remove_handle(multi, fl->easy);
-          if (fl->mime)
-            curl_mime_free(fl->mime);
-          curl_easy_cleanup(fl->easy);
-        }
-        if (fl->slist)
-          curl_slist_free_all(fl->slist);
-        delete fl;
-      }
+      pending_by_id.clear();
+      pending_fifo.clear();
+      for (auto& [_, fl] : by_id)
+        cleanup_in_flight(fl);
       if (multi)
         curl_multi_cleanup(multi);
       curl_global_cleanup();
+    }
+
+    bool can_start(const std::string& origin) const {
+      if (active_total >= kMaxActiveTotal)
+        return false;
+      auto it = active_by_origin.find(origin);
+      const std::size_t active_for_origin = it == active_by_origin.end() ? 0 : it->second;
+      return active_for_origin < kMaxActivePerOrigin;
+    }
+
+    void note_active(const std::string& origin) {
+      ++active_total;
+      ++active_by_origin[origin];
+    }
+
+    void release_active(const std::string& origin) {
+      if (active_total == 0) {
+        fxe::runtime::uv_loop_runtime::instance().report_error(
+            "http_client pool release underflow");
+      } else {
+        --active_total;
+      }
+      auto it = active_by_origin.find(origin);
+      if (it == active_by_origin.end() || it->second == 0) {
+        fxe::runtime::uv_loop_runtime::instance().report_error(
+            "http_client origin release underflow: " + origin);
+        return;
+      }
+      --it->second;
+      if (it->second == 0)
+        active_by_origin.erase(it);
+    }
+
+    void cleanup_in_flight(in_flight* fl) {
+      if (!fl)
+        return;
+      if (fl->easy) {
+        curl_multi_remove_handle(multi, fl->easy);
+        if (fl->mime)
+          curl_mime_free(fl->mime);
+        curl_easy_cleanup(fl->easy);
+      }
+      if (fl->slist)
+        curl_slist_free_all(fl->slist);
+      delete fl;
+    }
+
+    void reject_request(http_callback cb, http_error code, std::string message) {
+      http_response r;
+      set_http_error(r, code, std::move(message));
+      if (cb)
+        cb(std::move(r));
+    }
+
+    bool start_request(http_request_id id, http_request req, http_callback cb, std::string origin) {
+      auto* fl = new in_flight();
+      fl->id = id;
+      fl->cb = std::move(cb);
+      fl->request_url = req.url;
+      fl->origin = std::move(origin);
+      fl->upload_buf = std::move(req.body);
+      fl->easy = curl_easy_init();
+      if (!fl->easy) {
+        auto fail_cb = std::move(fl->cb);
+        delete fl;
+        reject_request(std::move(fail_cb), http_error::unknown, "curl_easy_init failed");
+        return false;
+      }
+
+      curl_easy_setopt(fl->easy, CURLOPT_URL, req.url.c_str());
+      curl_easy_setopt(fl->easy, CURLOPT_FOLLOWLOCATION, req.follow_redirects ? 1L : 0L);
+      curl_easy_setopt(fl->easy, CURLOPT_MAXREDIRS, 20L);
+      curl_easy_setopt(fl->easy, CURLOPT_NOSIGNAL, 1L);
+      curl_easy_setopt(fl->easy, CURLOPT_WRITEFUNCTION, write_cb);
+      curl_easy_setopt(fl->easy, CURLOPT_WRITEDATA, fl);
+      curl_easy_setopt(fl->easy, CURLOPT_HEADERFUNCTION, header_cb);
+      curl_easy_setopt(fl->easy, CURLOPT_HEADERDATA, fl);
+      curl_easy_setopt(fl->easy, CURLOPT_ERRORBUFFER, fl->error_buf);
+      curl_easy_setopt(fl->easy, CURLOPT_SSL_VERIFYPEER, 1L);
+      curl_easy_setopt(fl->easy, CURLOPT_SSL_VERIFYHOST, 2L);
+      curl_easy_setopt(fl->easy, CURLOPT_MAXCONNECTS, static_cast<long>(kMaxActiveTotal));
+      configure_proxy(fl->easy, *fl, req);
+
+      const long total_timeout_ms =
+          req.timeout_ms > 0 ? static_cast<long>(req.timeout_ms) : kDefaultTotalTimeoutMs;
+      const long connect_timeout_ms =
+          req.timeout_ms > 0 ? static_cast<long>(req.timeout_ms) : kDefaultConnectTimeoutMs;
+      curl_easy_setopt(fl->easy, CURLOPT_TIMEOUT_MS, total_timeout_ms);
+      curl_easy_setopt(fl->easy, CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms);
+
+      if (!req.range.empty() && !header_exists(req.headers, "range"))
+        req.headers.emplace_back("Range", req.range);
+      const std::string jar_cookie = jar.pick_for_request(req.url);
+      if (!jar_cookie.empty()) {
+        bool merged_cookie = false;
+        for (auto& [k, v] : req.headers) {
+          if (ascii_lower_copy(k) == "cookie") {
+            v = v.empty() ? jar_cookie : jar_cookie + "; " + v;
+            merged_cookie = true;
+            break;
+          }
+        }
+        if (!merged_cookie)
+          req.headers.emplace_back("Cookie", jar_cookie);
+      }
+
+      const std::string& m = req.method;
+      if (!req.multipart.empty()) {
+        if (!configure_multipart(fl->easy, *fl, req.multipart)) {
+          auto fail_cb = std::move(fl->cb);
+          cleanup_in_flight(fl);
+          reject_request(std::move(fail_cb), http_error::unknown, "curl_mime_init failed");
+          return false;
+        }
+        if (!m.empty() && m != "POST")
+          curl_easy_setopt(fl->easy, CURLOPT_CUSTOMREQUEST, m.c_str());
+      } else if (m == "GET" || m == "") {
+        curl_easy_setopt(fl->easy, CURLOPT_HTTPGET, 1L);
+      } else if (m == "HEAD") {
+        curl_easy_setopt(fl->easy, CURLOPT_NOBODY, 1L);
+      } else if (m == "POST") {
+        curl_easy_setopt(fl->easy, CURLOPT_POST, 1L);
+        curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDSIZE_LARGE,
+                         static_cast<curl_off_t>(fl->upload_buf.size()));
+        curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDS, fl->upload_buf.data());
+      } else {
+        curl_easy_setopt(fl->easy, CURLOPT_CUSTOMREQUEST, m.c_str());
+        if (!fl->upload_buf.empty()) {
+          curl_easy_setopt(fl->easy, CURLOPT_UPLOAD, 1L);
+          curl_easy_setopt(fl->easy, CURLOPT_READFUNCTION, read_cb);
+          curl_easy_setopt(fl->easy, CURLOPT_READDATA, fl);
+          curl_easy_setopt(fl->easy, CURLOPT_INFILESIZE_LARGE,
+                           static_cast<curl_off_t>(fl->upload_buf.size()));
+        }
+      }
+
+      for (auto& [k, v] : req.headers) {
+        std::string line = k + ": " + v;
+        fl->slist = curl_slist_append(fl->slist, line.c_str());
+      }
+      if (fl->slist)
+        curl_easy_setopt(fl->easy, CURLOPT_HTTPHEADER, fl->slist);
+
+      const CURLMcode add_rc = curl_multi_add_handle(multi, fl->easy);
+      if (add_rc != CURLM_OK) {
+        fxe::runtime::uv_loop_runtime::instance().report_error(
+            std::string("http_client curl_multi_add_handle failed: ") +
+            curl_multi_strerror(add_rc));
+        auto fail_cb = std::move(fl->cb);
+        cleanup_in_flight(fl);
+        reject_request(std::move(fail_cb), http_error::unknown, "curl_multi_add_handle failed");
+        return false;
+      }
+
+      by_id[id] = fl;
+      by_easy[fl->easy] = fl;
+      note_active(fl->origin);
+      return true;
+    }
+
+    void admit_pending() {
+      while (active_total < kMaxActiveTotal && !pending_fifo.empty()) {
+        bool admitted_any = false;
+        const std::size_t batch = pending_fifo.size();
+        for (std::size_t i = 0; i < batch && active_total < kMaxActiveTotal; ++i) {
+          auto queued = pending_fifo.front();
+          pending_fifo.pop_front();
+          if (!queued || queued->settled || queued->aborted ||
+              pending_by_id.find(queued->id) == pending_by_id.end())
+            continue;
+          if (!can_start(queued->origin)) {
+            pending_fifo.push_back(std::move(queued));
+            continue;
+          }
+
+          pending_by_id.erase(queued->id);
+          if (pending_total > 0)
+            --pending_total;
+          queued->settled = true;
+          auto req = std::move(queued->req);
+          auto cb = std::move(queued->cb);
+          auto origin = std::move(queued->origin);
+          (void)start_request(queued->id, std::move(req), std::move(cb), std::move(origin));
+          admitted_any = true;
+        }
+        if (!admitted_any)
+          break;
+      }
+    }
+
+    void finish_active(in_flight* fl, CURLcode result) {
+      long status = 0;
+      curl_easy_getinfo(fl->easy, CURLINFO_RESPONSE_CODE, &status);
+      char* eff_url = nullptr;
+      curl_easy_getinfo(fl->easy, CURLINFO_EFFECTIVE_URL, &eff_url);
+      fl->resp.status = status;
+      fl->resp.body = std::move(fl->body_buf);
+      if (eff_url)
+        fl->resp.final_url = eff_url;
+      if (result != CURLE_OK) {
+        set_http_error(fl->resp, http_error_from_curl(result), curl_error_message(result, *fl));
+      }
+      const std::string cookie_url =
+          !fl->resp.final_url.empty() ? fl->resp.final_url : fl->request_url;
+      if (result == CURLE_OK) {
+        for (const auto& header : fl->set_cookie_headers)
+          (void)jar.set_from_header(header, cookie_url);
+      }
+
+      auto cb = std::move(fl->cb);
+      auto resp = std::move(fl->resp);
+      const http_request_id id = fl->id;
+      const std::string origin = fl->origin;
+      by_easy.erase(fl->easy);
+      by_id.erase(id);
+      release_active(origin);
+      cleanup_in_flight(fl);
+      if (cb)
+        cb(std::move(resp));
+      admit_pending();
     }
 
     void poll_once() {
@@ -448,38 +734,7 @@ namespace fxe::net {
           curl_easy_cleanup(m->easy_handle);
           continue;
         }
-        in_flight* fl = it->second;
-        long status = 0;
-        curl_easy_getinfo(fl->easy, CURLINFO_RESPONSE_CODE, &status);
-        char* eff_url = nullptr;
-        curl_easy_getinfo(fl->easy, CURLINFO_EFFECTIVE_URL, &eff_url);
-        fl->resp.status = status;
-        fl->resp.body = std::move(fl->body_buf);
-        if (eff_url)
-          fl->resp.final_url = eff_url;
-        if (m->data.result != CURLE_OK) {
-          set_http_error(fl->resp, http_error_from_curl(m->data.result),
-                         curl_error_message(m->data.result, *fl));
-        }
-        const std::string cookie_url =
-            !fl->resp.final_url.empty() ? fl->resp.final_url : fl->request_url;
-        if (m->data.result == CURLE_OK) {
-          for (const auto& header : fl->set_cookie_headers)
-            (void)jar.set_from_header(header, cookie_url);
-        }
-        curl_multi_remove_handle(multi, fl->easy);
-        if (fl->mime)
-          curl_mime_free(fl->mime);
-        curl_easy_cleanup(fl->easy);
-        if (fl->slist)
-          curl_slist_free_all(fl->slist);
-        auto cb = std::move(fl->cb);
-        auto resp = std::move(fl->resp);
-        by_id.erase(fl->id);
-        by_easy.erase(it);
-        delete fl;
-        if (cb)
-          cb(std::move(resp));
+        finish_active(it->second, m->data.result);
       }
     }
   };
@@ -530,129 +785,72 @@ namespace fxe::net {
         cb(std::move(r));
       return id;
     }
-    auto* fl = new in_flight();
-    fl->id = id;
-    fl->cb = std::move(cb);
-    fl->request_url = req.url;
-    fl->upload_buf = std::move(req.body);
-    fl->easy = curl_easy_init();
-    if (!fl->easy) {
-      http_response r;
-      set_http_error(r, http_error::unknown, "curl_easy_init failed");
-      if (fl->cb)
-        fl->cb(std::move(r));
-      delete fl;
+
+    const std::string origin = normalized_origin_key(req.url).key;
+    if (p_->can_start(origin)) {
+      (void)p_->start_request(id, std::move(req), std::move(cb), origin);
       return id;
     }
-    curl_easy_setopt(fl->easy, CURLOPT_URL, req.url.c_str());
-    curl_easy_setopt(fl->easy, CURLOPT_FOLLOWLOCATION, req.follow_redirects ? 1L : 0L);
-    curl_easy_setopt(fl->easy, CURLOPT_MAXREDIRS, 20L);
-    curl_easy_setopt(fl->easy, CURLOPT_NOSIGNAL, 1L);
-    curl_easy_setopt(fl->easy, CURLOPT_WRITEFUNCTION, write_cb);
-    curl_easy_setopt(fl->easy, CURLOPT_WRITEDATA, fl);
-    curl_easy_setopt(fl->easy, CURLOPT_HEADERFUNCTION, header_cb);
-    curl_easy_setopt(fl->easy, CURLOPT_HEADERDATA, fl);
-    curl_easy_setopt(fl->easy, CURLOPT_ERRORBUFFER, fl->error_buf);
-    curl_easy_setopt(fl->easy, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(fl->easy, CURLOPT_SSL_VERIFYHOST, 2L);
-    configure_proxy(fl->easy, *fl, req);
-    if (req.timeout_ms > 0) {
-      const long timeout_ms = static_cast<long>(req.timeout_ms);
-      curl_easy_setopt(fl->easy, CURLOPT_TIMEOUT_MS, timeout_ms);
-      curl_easy_setopt(fl->easy, CURLOPT_CONNECTTIMEOUT_MS, timeout_ms);
-    }
-    if (!req.range.empty() && !header_exists(req.headers, "range"))
-      req.headers.emplace_back("Range", req.range);
-    const std::string jar_cookie = cookies_.pick_for_request(req.url);
-    if (!jar_cookie.empty()) {
-      bool merged_cookie = false;
-      for (auto& [k, v] : req.headers) {
-        if (ascii_lower_copy(k) == "cookie") {
-          v = v.empty() ? jar_cookie : jar_cookie + "; " + v;
-          merged_cookie = true;
-          break;
-        }
-      }
-      if (!merged_cookie)
-        req.headers.emplace_back("Cookie", jar_cookie);
+
+    if (p_->pending_total >= kMaxPendingTotal) {
+      http_response r;
+      set_http_error(r, http_error::unknown, "NetworkError: request queue full");
+      if (cb)
+        cb(std::move(r));
+      return id;
     }
 
-    // Method handling
-    const std::string& m = req.method;
-    if (!req.multipart.empty()) {
-      if (!configure_multipart(fl->easy, *fl, req.multipart)) {
-        http_response r;
-        set_http_error(r, http_error::unknown, "curl_mime_init failed");
-        if (fl->cb)
-          fl->cb(std::move(r));
-        if (fl->mime)
-          curl_mime_free(fl->mime);
-        curl_easy_cleanup(fl->easy);
-        delete fl;
-        return id;
-      }
-      if (!m.empty() && m != "POST")
-        curl_easy_setopt(fl->easy, CURLOPT_CUSTOMREQUEST, m.c_str());
-    } else if (m == "GET" || m == "") {
-      curl_easy_setopt(fl->easy, CURLOPT_HTTPGET, 1L);
-    } else if (m == "HEAD") {
-      curl_easy_setopt(fl->easy, CURLOPT_NOBODY, 1L);
-    } else if (m == "POST") {
-      curl_easy_setopt(fl->easy, CURLOPT_POST, 1L);
-      curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDSIZE_LARGE,
-                       static_cast<curl_off_t>(fl->upload_buf.size()));
-      curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDS, fl->upload_buf.data());
-    } else {
-      curl_easy_setopt(fl->easy, CURLOPT_CUSTOMREQUEST, m.c_str());
-      if (!fl->upload_buf.empty()) {
-        curl_easy_setopt(fl->easy, CURLOPT_UPLOAD, 1L);
-        curl_easy_setopt(fl->easy, CURLOPT_READFUNCTION, read_cb);
-        curl_easy_setopt(fl->easy, CURLOPT_READDATA, fl);
-        curl_easy_setopt(fl->easy, CURLOPT_INFILESIZE_LARGE,
-                         static_cast<curl_off_t>(fl->upload_buf.size()));
-      }
-    }
-
-    for (auto& [k, v] : req.headers) {
-      std::string line = k + ": " + v;
-      fl->slist = curl_slist_append(fl->slist, line.c_str());
-    }
-    if (fl->slist)
-      curl_easy_setopt(fl->easy, CURLOPT_HTTPHEADER, fl->slist);
-
-    p_->by_id[id] = fl;
-    p_->by_easy[fl->easy] = fl;
-    curl_multi_add_handle(p_->multi, fl->easy);
+    auto queued = std::make_shared<queued_request>();
+    queued->id = id;
+    queued->req = std::move(req);
+    queued->cb = std::move(cb);
+    queued->origin = origin;
+    p_->pending_by_id[id] = queued;
+    p_->pending_fifo.push_back(std::move(queued));
+    ++p_->pending_total;
     return id;
   }
 
   void http_client::abort(http_request_id id) {
+    auto pending = p_->pending_by_id.find(id);
+    if (pending != p_->pending_by_id.end()) {
+      auto queued = pending->second;
+      p_->pending_by_id.erase(pending);
+      if (p_->pending_total > 0)
+        --p_->pending_total;
+      if (!queued->settled) {
+        queued->aborted = true;
+        queued->settled = true;
+        http_response r;
+        set_http_error(r, http_error::abort, "aborted");
+        auto cb = std::move(queued->cb);
+        if (cb)
+          cb(std::move(r));
+      }
+      return;
+    }
+
     auto it = p_->by_id.find(id);
     if (it == p_->by_id.end())
       return;
-    it->second->aborted = true;
-    // Mark as failed during the next poll.
-    curl_multi_remove_handle(p_->multi, it->second->easy);
     in_flight* fl = it->second;
-    p_->by_id.erase(it);
+    fl->aborted = true;
+    curl_multi_remove_handle(p_->multi, fl->easy);
     p_->by_easy.erase(fl->easy);
+    p_->by_id.erase(it);
+    p_->release_active(fl->origin);
     set_http_error(fl->resp, http_error::abort, "aborted");
     auto cb = std::move(fl->cb);
     auto resp = std::move(fl->resp);
-    if (fl->mime)
-      curl_mime_free(fl->mime);
-    curl_easy_cleanup(fl->easy);
-    if (fl->slist)
-      curl_slist_free_all(fl->slist);
-    delete fl;
+    p_->cleanup_in_flight(fl);
     if (cb)
       cb(std::move(resp));
+    p_->admit_pending();
   }
 
   void http_client::poll() {
     p_->poll_once();
   }
-
 #else // !FXE_HAS_CURL
 
   namespace {

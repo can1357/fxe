@@ -44,4 +44,4 @@ function App2(): Node {
 
 const win = new Window({ width: COLS * 70, height: ROWS * 54, title: 'stress grid' });
 mount(<App2 />, win, { lazy: false });
-App.run({ animate: true, fps: 60 });
+App.run({ animate: true });

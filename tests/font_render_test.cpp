@@ -4,10 +4,15 @@
 
 #include <fxe/font.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <initializer_list>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace {
   int g_pass = 0;
@@ -21,6 +26,31 @@ namespace {
     }
   }
 #define CHECK(e) check((e), #e, __FILE__, __LINE__)
+
+  fxe::font::GlyphKey make_key(const fxe::font::Face& face, std::uint32_t glyph_id) {
+    fxe::font::GlyphKey key{};
+    key.face_id = face.id();
+    key.glyph_id = glyph_id;
+    key.pixel_size_q = static_cast<std::uint32_t>(std::lround(face.pixel_size() * 64.0f));
+    key.subpixel_x = 0;
+    key.hint = static_cast<std::uint8_t>(fxe::font::Hint::full);
+    return key;
+  }
+
+  std::vector<std::uint8_t> glyph_pixels(const fxe::font::Atlas& atlas,
+                                         const fxe::font::Glyph& glyph) {
+    const auto size = atlas.size();
+    const auto bpp = static_cast<std::size_t>(atlas.bytes_per_pixel());
+    std::vector<std::uint8_t> out(static_cast<std::size_t>(glyph.width) * glyph.height * bpp);
+    for (std::uint32_t y = 0; y < glyph.height; ++y) {
+      const std::uint8_t* src =
+          atlas.pixels().data() +
+          (static_cast<std::size_t>(glyph.atlas_y + y) * size.x + glyph.atlas_x) * bpp;
+      std::copy_n(src, static_cast<std::size_t>(glyph.width) * bpp,
+                  out.data() + static_cast<std::size_t>(y) * glyph.width * bpp);
+    }
+    return out;
+  }
 
   std::string find_path(std::initializer_list<const char*> candidates) {
     for (const char* p : candidates)
@@ -75,6 +105,41 @@ int main() {
         const Atlas& page = (g.format == Format::bgra) ? color : mask;
         CHECK(g.atlas_x + g.width <= page.size().x);
         CHECK(g.atlas_y + g.height <= page.size().y);
+      }
+    }
+  }
+
+  // GlyphCache eviction → re-rendered glyph pixels match the original.
+  {
+    const std::string p = find_ligature_font();
+    if (p.empty()) {
+      std::printf("SKIP glyph cache eviction render (no font)\n");
+    } else {
+      auto face = load_face_from_file(p, 28.0f);
+      CHECK(face != nullptr);
+      if (face) {
+        GlyphCacheBudget budget{};
+        budget.initial_atlas_size = 64;
+        budget.max_atlas_size = 256;
+        budget.max_mask_glyph_count = 5;
+        budget.max_mask_atlas_bytes = 256ull * 256ull;
+        GlyphCache cache{budget};
+        const std::uint32_t gA = face->glyph_index(U'A');
+        CHECK(gA != 0);
+        const Glyph first = cache.lookup(*face, gA);
+        CHECK(first.width > 0);
+        const std::vector<std::uint8_t> first_pixels = glyph_pixels(cache.mask_atlas(), first);
+        for (char32_t ch = U'B'; ch <= U'K'; ++ch) {
+          const std::uint32_t gid = face->glyph_index(ch);
+          if (gid != 0)
+            (void)cache.lookup(*face, gid);
+        }
+        CHECK(!cache.debug_contains(make_key(*face, gA)));
+        const Glyph rerendered = cache.lookup(*face, gA);
+        CHECK(rerendered.width == first.width);
+        CHECK(rerendered.height == first.height);
+        CHECK(rerendered.advance_x == first.advance_x);
+        CHECK(glyph_pixels(cache.mask_atlas(), rerendered) == first_pixels);
       }
     }
   }

@@ -48,6 +48,8 @@ namespace fxe::debug {
     bool keepalive = false;
     // Non-zero -> verbose protocol logging on stderr.
     int log_level = 0;
+    // Conservative cap on simultaneously attached debug clients.
+    u16 max_clients = 8;
   };
 
   class server {
@@ -86,6 +88,8 @@ namespace fxe::debug {
     // Internal helpers used by the dispatcher; not part of the stable API.
     void _internal_set_pause(bool paused, bool single_step) noexcept;
     void _internal_set_console_enabled(bool on) noexcept;
+    void _internal_set_session_console_enabled(std::uint64_t id, bool on) noexcept;
+    void _internal_set_session_channel_enabled(std::uint64_t id, int channel, bool on) noexcept;
 
     // Enqueue a Console.messageAdded event. Safe from the render thread.
     void emit_console(std::string_view level, std::string_view text);

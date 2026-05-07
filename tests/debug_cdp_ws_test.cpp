@@ -126,6 +126,104 @@ namespace {
     return out;
   }
 
+  [[maybe_unused]] bool send_json_line(socket_t s, std::string_view line) {
+    std::string wire(line);
+    wire.push_back('\n');
+    return fxe::debug::cdp_ws::send_all(s, wire);
+  }
+
+  [[maybe_unused]] bool recv_json_line(socket_t s, std::string& buf, nlohmann::ordered_json& out) {
+    for (;;) {
+      auto nl = buf.find('\n');
+      if (nl != std::string::npos) {
+        auto line = buf.substr(0, nl);
+        buf.erase(0, nl + 1);
+        if (!line.empty() && line.back() == '\r')
+          line.pop_back();
+        if (line.empty())
+          continue;
+        out = nlohmann::ordered_json::parse(line);
+        return true;
+      }
+      char chunk[4096];
+#if defined(_WIN32)
+      int n = ::recv(s, chunk, sizeof(chunk), 0);
+#else
+      ssize_t n = ::recv(s, chunk, sizeof(chunk), 0);
+#endif
+      if (n <= 0)
+        return false;
+      buf.append(chunk, static_cast<std::size_t>(n));
+    }
+  }
+
+  bool websocket_handshake(socket_t s, unsigned port, std::string* header_out = nullptr) {
+    std::string hs = "GET /devtools/page/fxe-main HTTP/1.1\r\n"
+                     "Host: 127.0.0.1:" +
+                     std::to_string(port) +
+                     "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                     "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                     "Sec-WebSocket-Version: 13\r\n\r\n";
+    if (!fxe::debug::cdp_ws::send_all(s, hs))
+      return false;
+    auto header = recv_until(s, "\r\n\r\n");
+    if (header_out)
+      *header_out = header;
+    return header.find("HTTP/1.1 101 Switching Protocols") == 0;
+  }
+
+  [[maybe_unused]] socket_t connect_websocket(unsigned port) {
+    socket_t s = connect_loopback(port);
+    if (s == kInvalidSocket)
+      return kInvalidSocket;
+    set_recv_timeout(s, 2000);
+    if (!websocket_handshake(s, port)) {
+      close_socket(s);
+      return kInvalidSocket;
+    }
+    set_recv_timeout(s, 20);
+    return s;
+  }
+
+  [[maybe_unused]] bool send_ws_request(socket_t s, int id, std::string_view method,
+                                        std::string_view params = "{}") {
+    std::string request = "{\"id\":" + std::to_string(id) + ",\"method\":\"" + std::string(method) +
+                          "\",\"params\":" + std::string(params) + "}";
+    return fxe::debug::cdp_ws::send_all(
+        s, fxe::debug::cdp_ws::encode_frame(request, 0x1, true, 0x01020304u));
+  }
+
+  [[maybe_unused]] bool pump_until_ws_id(fxe::debug::server& srv, socket_t s,
+                                         fxe::debug::cdp_ws::reader& reader, int id,
+                                         nlohmann::ordered_json& out) {
+    for (int i = 0; i < 250; ++i) {
+      srv.pump_tasks();
+      auto rr = reader.read_text(s);
+      if (rr.state == fxe::debug::cdp_ws::read_result::status::message) {
+        out = nlohmann::ordered_json::parse(rr.message);
+        if (out.contains("id") && out.at("id").get<int>() == id)
+          return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+  }
+
+  [[maybe_unused]] bool recv_ws_method(socket_t s, fxe::debug::cdp_ws::reader& reader,
+                                       std::string_view method, nlohmann::ordered_json& out) {
+    for (int i = 0; i < 250; ++i) {
+      auto rr = reader.read_text(s);
+      if (rr.state == fxe::debug::cdp_ws::read_result::status::message) {
+        out = nlohmann::ordered_json::parse(rr.message);
+        if (out.contains("method") && out.at("method").is_string() &&
+            out.at("method").get<std::string>() == method)
+          return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+  }
+
   void test_sha1_and_handshake_accept() {
     using namespace fxe::debug::cdp_ws;
     CHECK(sha1_hex("") == "da39a3ee5e6b4b0d3255bfef95601890afd80709");
@@ -238,6 +336,149 @@ namespace {
     close_socket(s);
     srv.stop();
   }
+
+  void test_multiclient_cdp_websocket_exchange_events_and_cap() {
+    using namespace fxe::debug;
+    fxe::js::host host;
+    server_options opts;
+    opts.port = 0;
+    opts.host = "127.0.0.1";
+    server srv(opts);
+    srv.attach_host(&host);
+    if (!srv.start()) {
+      CHECK(false);
+      return;
+    }
+    unsigned port = srv.bound_port();
+
+    socket_t a = connect_websocket(port);
+    socket_t b = connect_websocket(port);
+    if (a == kInvalidSocket || b == kInvalidSocket) {
+      CHECK(false);
+      if (a != kInvalidSocket)
+        close_socket(a);
+      if (b != kInvalidSocket)
+        close_socket(b);
+      srv.stop();
+      return;
+    }
+    fxe::debug::cdp_ws::reader ra(false);
+    fxe::debug::cdp_ws::reader rb(false);
+    nlohmann::ordered_json ja, jb;
+
+    CHECK(send_ws_request(a, 11, "Runtime.evaluate", "{\"expression\":\"10+5\"}"));
+    CHECK(send_ws_request(b, 22, "Runtime.evaluate", "{\"expression\":\"7+8\"}"));
+    CHECK(pump_until_ws_id(srv, a, ra, 11, ja));
+    CHECK(pump_until_ws_id(srv, b, rb, 22, jb));
+    CHECK(ja.at("id").get<int>() == 11);
+    CHECK(jb.at("id").get<int>() == 22);
+    CHECK(ja.at("result").at("result").at("value").get<int>() == 15);
+    CHECK(jb.at("result").at("result").at("value").get<int>() == 15);
+
+    CHECK(send_ws_request(a, 12, "Console.enable"));
+    CHECK(send_ws_request(b, 23, "Console.enable"));
+    CHECK(pump_until_ws_id(srv, a, ra, 12, ja));
+    CHECK(pump_until_ws_id(srv, b, rb, 23, jb));
+    srv.emit_console("log", "ws-both");
+    CHECK(recv_ws_method(a, ra, "Console.messageAdded", ja));
+    CHECK(recv_ws_method(b, rb, "Console.messageAdded", jb));
+    CHECK(ja.at("params").at("text").get<std::string>() == "ws-both");
+    CHECK(jb.at("params").at("text").get<std::string>() == "ws-both");
+
+    close_socket(a);
+    for (int i = 0; i < 20; ++i) {
+      srv.pump_tasks();
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    srv.emit_console("log", "ws-survivor");
+    CHECK(recv_ws_method(b, rb, "Console.messageAdded", jb));
+    CHECK(jb.at("params").at("text").get<std::string>() == "ws-survivor");
+    close_socket(b);
+    srv.stop();
+
+    server srv_cap(opts);
+    srv_cap.attach_host(&host);
+    if (!srv_cap.start()) {
+      CHECK(false);
+      return;
+    }
+    std::vector<socket_t> clients;
+    for (int i = 0; i < 8; ++i) {
+      socket_t s = connect_websocket(srv_cap.bound_port());
+      CHECK(s != kInvalidSocket);
+      if (s != kInvalidSocket)
+        clients.push_back(s);
+    }
+    socket_t overflow = connect_loopback(srv_cap.bound_port());
+    CHECK(overflow != kInvalidSocket);
+    if (overflow != kInvalidSocket) {
+      set_recv_timeout(overflow, 2000);
+      std::string header;
+      (void)websocket_handshake(overflow, srv_cap.bound_port(), &header);
+      CHECK(header.find("HTTP/1.1 503 Service Unavailable") == 0);
+      CHECK(header.find("server is full") != std::string::npos);
+      close_socket(overflow);
+    }
+    for (auto s : clients)
+      close_socket(s);
+    srv_cap.stop();
+  }
+
+  void test_mixed_ndjson_and_websocket_clients() {
+    using namespace fxe::debug;
+    fxe::js::host host;
+    server_options opts;
+    opts.port = 0;
+    opts.host = "127.0.0.1";
+    server srv(opts);
+    srv.attach_host(&host);
+    if (!srv.start()) {
+      CHECK(false);
+      return;
+    }
+    unsigned port = srv.bound_port();
+
+    socket_t nd = connect_loopback(port);
+    socket_t ws = connect_websocket(port);
+    if (nd == kInvalidSocket || ws == kInvalidSocket) {
+      CHECK(false);
+      if (nd != kInvalidSocket)
+        close_socket(nd);
+      if (ws != kInvalidSocket)
+        close_socket(ws);
+      srv.stop();
+      return;
+    }
+    set_recv_timeout(nd, 20);
+    fxe::debug::cdp_ws::reader rw(false);
+    std::string nbuf;
+    nlohmann::ordered_json nreply, wreply;
+
+    CHECK(send_json_line(nd,
+                         R"({"id":31,"method":"Runtime.evaluate","params":{"expression":"3*7"}})"));
+    CHECK(send_ws_request(ws, 41, "Runtime.evaluate", "{\"expression\":\"6*7\"}"));
+    for (int i = 0; i < 250; ++i) {
+      srv.pump_tasks();
+      if (nreply.is_null())
+        (void)recv_json_line(nd, nbuf, nreply);
+      if (wreply.is_null()) {
+        auto rr = rw.read_text(ws);
+        if (rr.state == fxe::debug::cdp_ws::read_result::status::message)
+          wreply = nlohmann::ordered_json::parse(rr.message);
+      }
+      if (!nreply.is_null() && !wreply.is_null())
+        break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    CHECK(nreply.at("id").get<int>() == 31);
+    CHECK(wreply.at("id").get<int>() == 41);
+    CHECK(nreply.at("result").at("result").at("value").get<int>() == 21);
+    CHECK(wreply.at("result").at("result").at("value").get<int>() == 42);
+
+    close_socket(nd);
+    close_socket(ws);
+    srv.stop();
+  }
 #endif
 } // namespace
 
@@ -255,6 +496,8 @@ int main(int argc, char** argv) {
   test_json_version_descriptor();
 #ifdef FXE_HAS_V8
   test_complete_cdp_exchange();
+  test_multiclient_cdp_websocket_exchange_events_and_cap();
+  test_mixed_ndjson_and_websocket_clients();
   fxe::js::shutdown();
 #endif
 

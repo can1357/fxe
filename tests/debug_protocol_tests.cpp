@@ -365,6 +365,38 @@ namespace {
     return false;
   }
 
+  bool send_request(socket_t s, int id, std::string_view method, std::string_view params = "{}") {
+    std::string line = "{\"id\":" + std::to_string(id) + ",\"method\":\"" + std::string(method) +
+                       "\",\"params\":" + std::string(params) + "}\n";
+    return send_all(s, line);
+  }
+
+  bool pump_until_id(fxe::debug::server& srv, socket_t s, std::string& buf, int id,
+                     fxe::debug::json& out) {
+    for (int i = 0; i < 250; ++i) {
+      srv.pump_tasks();
+      while (recv_json_line(s, buf, out)) {
+        if (out.contains("id") && out.at("id").get<int>() == id)
+          return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+  }
+
+  bool recv_until_method(socket_t s, std::string& buf, std::string_view method,
+                         fxe::debug::json& out) {
+    for (int i = 0; i < 250; ++i) {
+      while (recv_json_line(s, buf, out)) {
+        if (out.contains("method") && out.at("method").is_string() &&
+            out.at("method").get<std::string>() == method)
+          return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return false;
+  }
+
   // Minimal in-test window stub: GLFW is on in dev, so we cannot reuse the
   // FXE_HAS_GLFW=0 stub_window. Implement only what the dispatch handlers
   // touch (framebuffer_size, post_redraw, drain, close, should_close).
@@ -678,6 +710,136 @@ namespace {
     close_socket(s);
     srv.stop();
   }
+
+  void test_ndjson_multiclient_routing_and_events(fxe::js::host& host) {
+    using namespace fxe::debug;
+    server_options opts;
+    opts.port = 0;
+    opts.host = "127.0.0.1";
+    server srv(opts);
+    srv.attach_host(&host);
+    if (!srv.start()) {
+      CHECK(false);
+      return;
+    }
+
+    socket_t a = connect_loopback(srv.bound_port());
+    socket_t b = connect_loopback(srv.bound_port());
+    if (a == k_invalid_socket || b == k_invalid_socket) {
+      CHECK(false);
+      if (a != k_invalid_socket)
+        close_socket(a);
+      if (b != k_invalid_socket)
+        close_socket(b);
+      srv.stop();
+      return;
+    }
+    set_recv_timeout(a, 20);
+    set_recv_timeout(b, 20);
+
+    std::string bufa, bufb;
+    json fa{json::object()};
+    json fb{json::object()};
+    CHECK(send_request(a, 101, "Runtime.evaluate", "{\"expression\":\"41+1\"}"));
+    CHECK(send_request(b, 202, "Runtime.evaluate", "{\"expression\":\"20+22\"}"));
+    CHECK(pump_until_id(srv, a, bufa, 101, fa));
+    CHECK(pump_until_id(srv, b, bufb, 202, fb));
+    CHECK(fa.at("id").get<int>() == 101);
+    CHECK(fb.at("id").get<int>() == 202);
+    CHECK(fa.at("result").at("result").at("value").get<int>() == 42);
+    CHECK(fb.at("result").at("result").at("value").get<int>() == 42);
+
+    CHECK(send_request(a, 103, "Console.enable"));
+    CHECK(send_request(b, 204, "Console.enable"));
+    CHECK(pump_until_id(srv, a, bufa, 103, fa));
+    CHECK(pump_until_id(srv, b, bufb, 204, fb));
+    srv.emit_console("log", "both");
+    CHECK(recv_until_method(a, bufa, "Console.messageAdded", fa));
+    CHECK(recv_until_method(b, bufb, "Console.messageAdded", fb));
+    CHECK(fa.at("params").at("text").get<std::string>() == "both");
+    CHECK(fb.at("params").at("text").get<std::string>() == "both");
+
+    close_socket(a);
+    for (int i = 0; i < 20; ++i) {
+      srv.pump_tasks();
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    srv.emit_console("log", "survivor");
+    CHECK(recv_until_method(b, bufb, "Console.messageAdded", fb));
+    CHECK(fb.at("params").at("text").get<std::string>() == "survivor");
+
+    close_socket(b);
+    srv.stop();
+  }
+
+  void test_ndjson_session_cap_and_gap_reuse(fxe::js::host& host) {
+    using namespace fxe::debug;
+    server_options opts;
+    opts.port = 0;
+    opts.host = "127.0.0.1";
+    server srv(opts);
+    srv.attach_host(&host);
+    if (!srv.start()) {
+      CHECK(false);
+      return;
+    }
+
+    std::vector<socket_t> clients;
+    std::vector<std::string> bufs(8);
+    clients.reserve(8);
+    for (int i = 0; i < 8; ++i) {
+      socket_t s = connect_loopback(srv.bound_port());
+      CHECK(s != k_invalid_socket);
+      if (s != k_invalid_socket) {
+        set_recv_timeout(s, 20);
+        clients.push_back(s);
+        CHECK(send_request(s, i + 1, "System.handshake"));
+      }
+    }
+    for (int i = 0; i < static_cast<int>(clients.size()); ++i) {
+      json frame{json::object()};
+      CHECK(pump_until_id(srv, clients[static_cast<std::size_t>(i)],
+                          bufs[static_cast<std::size_t>(i)], i + 1, frame));
+    }
+
+    socket_t overflow = connect_loopback(srv.bound_port());
+    CHECK(overflow != k_invalid_socket);
+    if (overflow != k_invalid_socket) {
+      set_recv_timeout(overflow, 2000);
+      std::string buf;
+      json frame{json::object()};
+      bool got_overflow = recv_json_line(overflow, buf, frame);
+      CHECK(got_overflow);
+      if (got_overflow) {
+        CHECK(frame.at("error").at("code").get<int>() == -32003);
+        CHECK(frame.at("error").at("message").get<std::string>() == "server full");
+      }
+      close_socket(overflow);
+    }
+
+    if (clients.size() == 8) {
+      close_socket(clients.front());
+      for (int i = 0; i < 50; ++i) {
+        srv.pump_tasks();
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+      socket_t replacement = connect_loopback(srv.bound_port());
+      CHECK(replacement != k_invalid_socket);
+      if (replacement != k_invalid_socket) {
+        set_recv_timeout(replacement, 20);
+        std::string buf;
+        json frame{json::object()};
+        CHECK(send_request(replacement, 77, "System.handshake"));
+        CHECK(pump_until_id(srv, replacement, buf, 77, frame));
+        CHECK(frame.at("id").get<int>() == 77);
+        close_socket(replacement);
+      }
+    }
+
+    for (std::size_t i = clients.size() == 8 ? 1u : 0u; i < clients.size(); ++i)
+      close_socket(clients[i]);
+    srv.stop();
+  }
 #endif
 } // namespace
 
@@ -708,6 +870,8 @@ int main([[maybe_unused]] int argc, char** argv) {
     test_heap_profiler_snapshot_stream(host);
     test_hmr_fire_reloads_cached_module(host);
     test_reconciler_snapshot_dispatch(host);
+    test_ndjson_multiclient_routing_and_events(host);
+    test_ndjson_session_cap_and_gap_reuse(host);
   }
 #endif
 

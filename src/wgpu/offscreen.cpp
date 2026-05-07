@@ -1,3 +1,4 @@
+#include <fxe/font.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/spritesheet.hpp>
 
@@ -227,7 +228,8 @@ namespace fxe {
       return levels;
     }
 
-    class dawn_offscreen_renderer final : public offscreen_renderer {
+    class dawn_offscreen_renderer final : public offscreen_renderer,
+                                          public dawn_pipeline_device_access {
     public:
       explicit dawn_offscreen_renderer(offscreen_options options)
           : options_(sanitize(options)), window_({options_.width, options_.height}) {
@@ -257,6 +259,7 @@ namespace fxe {
       void begin_frame(const math::vec3& eye_pos, const math::vec3& eye_dir,
                        const math::mat4x4& world_view_proj) override {
         sync_default_atlas();
+        sync_font_atlases();
         refresh_atlas_bind_group_if_dirty();
         if (recreate_buffers_)
           refresh_pipelines();
@@ -264,10 +267,12 @@ namespace fxe {
                          static_cast<float>(options_.height));
         queue_.WriteBuffer(ubo_, 0, &cbuf_, sizeof(cbuf_));
         clear();
+        queued_custom_draws_.clear();
       }
 
       void end_frame() override {
         sync_default_atlas();
+        sync_font_atlases();
         refresh_atlas_bind_group_if_dirty();
         flush_dynamic();
 
@@ -306,6 +311,7 @@ namespace fxe {
             pass.SetVertexBuffer(0, vbuf_, 0, vbuf_size_used_);
             draw_indexed(pass, mode, blur_seen);
           }
+          encode_custom_draws(pass);
           pass.End();
         };
 
@@ -359,7 +365,7 @@ namespace fxe {
 
       bool queue_dev(const command_buffer& src, const vshader_cbuf&,
                      const render_config&) override {
-        queue(src);
+        command_buffer::queue(src);
         return true;
       }
 
@@ -382,6 +388,42 @@ namespace fxe {
       }
       const window& get_window() const override {
         return window_;
+      }
+
+      wgpu::Device& device() override {
+        return device_;
+      }
+      wgpu::Queue& queue() override {
+        return queue_;
+      }
+      wgpu::TextureFormat color_format() const override {
+        return target_format_;
+      }
+      wgpu::TextureFormat depth_format() const override {
+        return options_.enable_depth ? depth_format_ : wgpu::TextureFormat::Undefined;
+      }
+      uint32_t sample_count() const override {
+        return multisample_count_;
+      }
+      pipeline_cache& cache() override {
+        return pipeline_cache_;
+      }
+      wgpu::BindGroupLayout renderer_bind_group_layout() const override {
+        return bgl_;
+      }
+      wgpu::BindGroup renderer_bind_group() const override {
+        return bind_group_;
+      }
+      wgpu::TextureView texture_view(texture_id id) const override {
+        if (id == framebuffer_texture_id && blur_capture_view_)
+          return blur_capture_view_;
+        return atlas_view_;
+      }
+      wgpu::Sampler texture_sampler() const override {
+        return atlas_sampler_;
+      }
+      void enqueue_custom_draw(custom_pipeline_draw draw) override {
+        queued_custom_draws_.push_back(std::move(draw));
       }
 
     private:
@@ -516,9 +558,9 @@ namespace fxe {
         entries[2].binding = 2;
         entries[2].textureView = atlas_view_;
         entries[3].binding = 3;
-        entries[3].textureView = atlas_view_;
+        entries[3].textureView = font_mask_view_ ? font_mask_view_ : atlas_view_;
         entries[4].binding = 4;
-        entries[4].textureView = atlas_view_;
+        entries[4].textureView = font_color_view_ ? font_color_view_ : atlas_view_;
         entries[5].binding = 5;
         entries[5].sampler = atlas_sampler_;
         entries[6].binding = 6;
@@ -594,6 +636,62 @@ namespace fxe {
         synced_default_atlas_w_ = atlas.size.x;
         synced_default_atlas_h_ = atlas.size.y;
         synced_default_atlas_hash_ = pixel_hash;
+      }
+
+      void sync_font_atlases() {
+        auto& gc = font::shared_glyph_cache();
+        sync_one_font_atlas(gc.mask_atlas(), font_mask_texture_, font_mask_view_, font_mask_w_,
+                            font_mask_h_, font_mask_gen_, wgpu::TextureFormat::R8Unorm,
+                            "fxe-offscreen-font-mask");
+        sync_one_font_atlas(gc.color_atlas(), font_color_texture_, font_color_view_, font_color_w_,
+                            font_color_h_, font_color_gen_, wgpu::TextureFormat::BGRA8Unorm,
+                            "fxe-offscreen-font-color");
+      }
+
+      void sync_one_font_atlas(const font::Atlas& src, wgpu::Texture& tex, wgpu::TextureView& view,
+                               u32& cur_w, u32& cur_h, u64& cur_gen, wgpu::TextureFormat fmt,
+                               const char* label) {
+        const auto sz = src.size();
+        const u32 w = sz.x;
+        const u32 h = sz.y;
+        if (w == 0 || h == 0)
+          return;
+        const u64 gen = src.generation();
+        if (cur_gen == gen && cur_w == w && cur_h == h)
+          return;
+
+        if (cur_w != w || cur_h != h || !tex) {
+          view = {};
+          destroy_texture(tex);
+          wgpu::TextureDescriptor td{};
+          td.label = label;
+          td.dimension = wgpu::TextureDimension::e2D;
+          td.size = {w, h, 1};
+          td.format = fmt;
+          td.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+          td.mipLevelCount = 1;
+          td.sampleCount = 1;
+          tex = device_.CreateTexture(&td);
+          view = tex.CreateView();
+          cur_w = w;
+          cur_h = h;
+          atlas_dirty_ = true;
+        }
+
+        const u32 bpp = src.bytes_per_pixel();
+        wgpu::TexelCopyTextureInfo dst{};
+        dst.texture = tex;
+        dst.mipLevel = 0;
+        dst.origin = {0, 0, 0};
+        dst.aspect = wgpu::TextureAspect::All;
+        wgpu::TexelCopyBufferLayout layout{};
+        layout.offset = 0;
+        layout.bytesPerRow = w * bpp;
+        layout.rowsPerImage = h;
+        wgpu::Extent3D extent{w, h, 1};
+        queue_.WriteTexture(&dst, src.pixels().data(), static_cast<usize>(w) * h * bpp, &layout,
+                            &extent);
+        cur_gen = gen;
       }
 
       void refresh_atlas_bind_group_if_dirty() {
@@ -787,6 +885,26 @@ namespace fxe {
         }
       }
 
+      void encode_custom_draws(wgpu::RenderPassEncoder& pass) {
+        for (const auto& draw : queued_custom_draws_) {
+          if (!draw.pipeline || !draw.vertex_buffer || draw.vertex_count == 0)
+            continue;
+          pass.SetPipeline(draw.pipeline);
+          if (draw.uses_renderer_bind_group && draw.renderer_bind_group)
+            pass.SetBindGroup(0, draw.renderer_bind_group);
+          if (draw.uses_user_bind_group && draw.user_bind_group)
+            pass.SetBindGroup(1, draw.user_bind_group);
+          pass.SetVertexBuffer(0, draw.vertex_buffer, 0, draw.vertex_bytes);
+          if (draw.index_count > 0 && draw.index_buffer) {
+            pass.SetIndexBuffer(draw.index_buffer, wgpu::IndexFormat::Uint32, 0,
+                                u64(draw.index_count) * sizeof(u32));
+            pass.DrawIndexed(draw.index_count, 1, 0, 0, 0);
+          } else {
+            pass.Draw(draw.vertex_count, 1, 0, 0);
+          }
+        }
+      }
+
       void ensure_readback_buffer(u64 needed) {
         if (readback_size_ >= needed)
           return;
@@ -842,6 +960,7 @@ namespace fxe {
       u64 tri_ibuf_capacity_ = 0;
       u64 line_ibuf_capacity_ = 0;
       u64 vbuf_size_used_ = 0;
+      std::vector<custom_pipeline_draw> queued_custom_draws_;
       wgpu::BindGroupLayout bgl_;
       wgpu::BindGroup bind_group_;
       wgpu::PipelineLayout pipeline_layout_;
@@ -870,6 +989,16 @@ namespace fxe {
       u32 synced_default_atlas_w_ = 0;
       u32 synced_default_atlas_h_ = 0;
       u64 synced_default_atlas_hash_ = 0;
+      wgpu::Texture font_mask_texture_;
+      wgpu::TextureView font_mask_view_;
+      wgpu::Texture font_color_texture_;
+      wgpu::TextureView font_color_view_;
+      u32 font_mask_w_ = 0;
+      u32 font_mask_h_ = 0;
+      u32 font_color_w_ = 0;
+      u32 font_color_h_ = 0;
+      u64 font_mask_gen_ = 0;
+      u64 font_color_gen_ = 0;
       wgpu::Buffer readback_buf_;
       u64 readback_size_ = 0;
       u32 readback_padded_row_ = 0;

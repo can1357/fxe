@@ -212,7 +212,7 @@ namespace fxe {
     // ---------------------------------------------------------------------
     // The renderer.
     // ---------------------------------------------------------------------
-    class dawn_renderer final : public renderer {
+    class dawn_renderer final : public renderer, public dawn_pipeline_device_access {
     public:
       dawn_renderer(window& w, const renderer_options& opts) : win_(w) {
         auto& runtime = gpu_runtime::get();
@@ -292,6 +292,7 @@ namespace fxe {
         queue_.WriteBuffer(ubo_, 0, &cbuf_, sizeof(cbuf_));
         clear();
         queued_dev_draws_.clear();
+        queued_custom_draws_.clear();
         queued_dev_prepared_ = false;
       }
 
@@ -372,6 +373,7 @@ namespace fxe {
                                   draw.line_index_count, draw.cfg, mode, blur_seen);
             }
           }
+          encode_custom_draws(pass);
           pass.End();
         };
 
@@ -559,6 +561,42 @@ namespace fxe {
       }
       const window& get_window() const override {
         return win_;
+      }
+
+      wgpu::Device& device() override {
+        return device_;
+      }
+      wgpu::Queue& queue() override {
+        return queue_;
+      }
+      wgpu::TextureFormat color_format() const override {
+        return surface_format_;
+      }
+      wgpu::TextureFormat depth_format() const override {
+        return depth_format_;
+      }
+      uint32_t sample_count() const override {
+        return multisample_count_;
+      }
+      pipeline_cache& cache() override {
+        return pipeline_cache_;
+      }
+      wgpu::BindGroupLayout renderer_bind_group_layout() const override {
+        return bgl_;
+      }
+      wgpu::BindGroup renderer_bind_group() const override {
+        return bind_group_;
+      }
+      wgpu::TextureView texture_view(texture_id id) const override {
+        if (id == framebuffer_texture_id && blur_capture_view_)
+          return blur_capture_view_;
+        return atlas_view_;
+      }
+      wgpu::Sampler texture_sampler() const override {
+        return atlas_sampler_;
+      }
+      void enqueue_custom_draw(custom_pipeline_draw draw) override {
+        queued_custom_draws_.push_back(std::move(draw));
       }
 
     private:
@@ -825,6 +863,8 @@ namespace fxe {
         if (cur_gen == gen && cur_w == w && cur_h == h)
           return;
         if (cur_w != w || cur_h != h || !tex) {
+          view = {};
+          destroy_texture(tex);
           wgpu::TextureDescriptor td{};
           td.label = label;
           td.dimension = wgpu::TextureDimension::e2D;
@@ -891,7 +931,7 @@ namespace fxe {
           draw.tri_index_offset =
               index_buffers[usize(vertex_topology::triangle)].size() * sizeof(u32);
           draw.line_index_offset = index_buffers[usize(vertex_topology::line)].size() * sizeof(u32);
-          queue(draw.src);
+          command_buffer::queue(draw.src);
         }
         queued_dev_prepared_ = true;
       }
@@ -1119,6 +1159,26 @@ namespace fxe {
         }
       }
 
+      void encode_custom_draws(wgpu::RenderPassEncoder& pass) {
+        for (const auto& draw : queued_custom_draws_) {
+          if (!draw.pipeline || !draw.vertex_buffer || draw.vertex_count == 0)
+            continue;
+          pass.SetPipeline(draw.pipeline);
+          if (draw.uses_renderer_bind_group && draw.renderer_bind_group)
+            pass.SetBindGroup(0, draw.renderer_bind_group);
+          if (draw.uses_user_bind_group && draw.user_bind_group)
+            pass.SetBindGroup(1, draw.user_bind_group);
+          pass.SetVertexBuffer(0, draw.vertex_buffer, 0, draw.vertex_bytes);
+          if (draw.index_count > 0 && draw.index_buffer) {
+            pass.SetIndexBuffer(draw.index_buffer, wgpu::IndexFormat::Uint32, 0,
+                                u64(draw.index_count) * sizeof(u32));
+            pass.DrawIndexed(draw.index_count, 1, 0, 0, 0);
+          } else {
+            pass.Draw(draw.vertex_count, 1, 0, 0);
+          }
+        }
+      }
+
       [[nodiscard]] bool queued_frame_has_blur() const {
         if (range_has_framebuffer_samples(0, main_tri_index_count_))
           return true;
@@ -1202,6 +1262,7 @@ namespace fxe {
         wgpu::BindGroup bind_group;
       };
       std::vector<queued_dev_draw> queued_dev_draws_;
+      std::vector<custom_pipeline_draw> queued_custom_draws_;
 
       wgpu::BindGroupLayout bgl_;
       wgpu::BindGroup bind_group_;

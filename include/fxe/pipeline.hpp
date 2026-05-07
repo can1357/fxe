@@ -92,6 +92,7 @@ namespace fxe {
       }
     }
 
+#if !FXE_HAS_WGPU
     class recording_pipeline final : public pipeline {
     public:
       explicit recording_pipeline(pipeline_desc desc) : desc_(std::move(desc)) {
@@ -137,6 +138,7 @@ namespace fxe {
       std::vector<uint8_t> uniforms_;
       std::vector<texture_id> bound_textures_;
     };
+#endif
   } // namespace pipeline_detail
 
 #if !FXE_HAS_WGPU

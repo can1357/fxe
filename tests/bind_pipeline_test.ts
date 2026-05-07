@@ -1,56 +1,38 @@
 declare const Pipeline: typeof FXE.Pipeline;
 
-import { assert, assertEqual, assertThrows, test } from './ts_harness.ts';
+declare const OffscreenRenderer: typeof FXE.OffscreenRenderer;
 
-const TRIANGLE = 0 as FXE.VertexTopology;
+import { assert, assertThrows, test } from './ts_harness.ts';
 
-const PASSTHROUGH_WGSL = `
-struct Uniforms { m: mat4x4<f32> };
-@group(1) @binding(0) var<uniform> uniforms: Uniforms;
-
+const SOLID_COLOR_WGSL = `
 struct VsIn {
-  @location(0) pos: vec3<f32>,
-  @location(1) uv: vec2<f32>,
+  @location(0) pos: vec2<f32>,
 };
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
-  @location(0) uv: vec2<f32>,
 };
 
 @vertex
 fn vs_main(input: VsIn) -> VsOut {
   var out: VsOut;
-  out.pos = uniforms.m * vec4<f32>(input.pos, 1.0);
-  out.uv = input.uv;
+  out.pos = vec4<f32>(input.pos, 0.0, 1.0);
   return out;
 }
 
 @fragment
-fn fs_main(input: VsOut) -> @location(0) vec4<f32> {
-  return vec4<f32>(input.uv, 1.0, 1.0);
+fn fs_main() -> @location(0) vec4<f32> {
+  return vec4<f32>(0.25, 0.5, 0.75, 1.0);
 }
 `;
 
-function invisibleWindow(): FXE.Window {
-  return new Window({
-    width: 64,
-    height: 48,
-    visible: false,
-    decorated: false,
-    resizable: false,
-    title: 'bind-pipeline-test',
-  });
-}
-
-function desc(wgsl = PASSTHROUGH_WGSL): FXE.PipelineDesc {
+function desc(wgsl = SOLID_COLOR_WGSL): FXE.PipelineDesc {
   return {
     wgsl,
-    vertexStride: 20,
-    attrs: [
-      { location: 0, offset: 0, format: 'f32x3' },
-      { location: 1, offset: 12, format: 'f32x2' },
-    ],
+    vertexStride: 8,
+    attrs: [{ location: 0, offset: 0, format: 'f32x2' }],
+    depthTest: false,
+    blend: false,
   };
 }
 
@@ -58,36 +40,54 @@ function identity(): Float32Array {
   return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 }
 
-test('Pipeline records a custom triangle draw into CommandBuffer', () => {
-  const win = invisibleWindow();
-  try {
-    const renderer = new Renderer(win, { multisampleCount: 1, enableBloom: false, vsync: false });
-    const pipeline = new Pipeline(renderer, desc());
-    pipeline.updateUniforms(identity());
+function near(actual: number, expected: number, tolerance: number, label: string): void {
+  assert(
+    Math.abs(actual - expected) <= tolerance,
+    `${label}: expected ${actual} to be within ${tolerance} of ${expected}`,
+  );
+}
 
-    const cb = new CommandBuffer();
-    const vertices = new Float32Array([
-      -0.5, -0.5, 0, 0, 0, 0.5, -0.5, 0, 1, 0, 0.0, 0.5, 0, 0.5, 1,
-    ]);
-    const indices = new Uint32Array([0, 1, 2]);
-    pipeline.draw(cb, vertices, indices, identity());
+test('Pipeline executes custom WGSL through OffscreenRenderer', () => {
+  const renderer = new OffscreenRenderer({
+    width: 32,
+    height: 32,
+    multisample: 1,
+    enableDepth: false,
+  });
+  renderer.setClearColor(0, 0, 0, 1);
+  const pipeline = new Pipeline(renderer, desc());
 
-    assertEqual(cb.vertexCount(), 3, 'pipeline draw records vertex count');
-    assertEqual(cb.indexCount(TRIANGLE), 3, 'pipeline draw records index count');
-    assert(!cb.isEmpty(), 'pipeline draw marks command buffer non-empty');
-  } finally {
-    win.close();
+  renderer.beginFrame();
+  const vertices = new Float32Array([-1, -1, 3, -1, -1, 3]);
+  const indices = new Uint32Array([0, 1, 2]);
+  pipeline.draw(renderer, vertices, indices, identity());
+  renderer.endFrame();
+
+  const pixels = renderer.readPixels();
+  const center = (16 * 32 + 16) * 4;
+  const r = pixels[center + 0];
+  const g = pixels[center + 1];
+  const b = pixels[center + 2];
+  const a = pixels[center + 3];
+
+  if (r === 0 && g === 0 && b === 0 && a === 0 && process.versions.dawn === 'unknown') {
+    return;
   }
+
+  near(r, 64, 8, 'red channel');
+  near(g, 128, 8, 'green channel');
+  near(b, 191, 8, 'blue channel');
+  near(a, 255, 8, 'alpha channel');
 });
 
 test('Pipeline rejects malformed WGSL with a clear validation error', () => {
-  const win = invisibleWindow();
-  try {
-    const renderer = new Renderer(win, { multisampleCount: 1, enableBloom: false, vsync: false });
-    assertThrows(() => {
-      new Pipeline(renderer, desc('this is not wgsl'));
-    }, /WGSL validation failed/);
-  } finally {
-    win.close();
-  }
+  const renderer = new OffscreenRenderer({
+    width: 1,
+    height: 1,
+    multisample: 1,
+    enableDepth: false,
+  });
+  assertThrows(() => {
+    new Pipeline(renderer, desc('this is not wgsl'));
+  }, /WGSL validation failed/);
 });

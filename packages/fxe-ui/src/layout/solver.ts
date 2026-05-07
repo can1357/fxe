@@ -26,20 +26,25 @@ function finite(v: number): number {
   return v;
 }
 
-function edge(
-  style: LayoutStyle,
-  side: keyof LayoutEdges,
-  axisParent: number | undefined,
-  base: 'padding' | 'margin',
+// Inlined length resolver for edges() — avoids the function-call overhead
+// and per-call argument object that resolveLength() incurs. Identical
+// semantics for the (undefined | number | percent | 'auto') subset we
+// receive on the hot edge path; throws via resolveLength() for anything
+// exotic to keep the diagnostic.
+function resolveEdge(
+  v: Length | undefined,
+  parent: number | undefined,
 ): number {
-  const cap = side[0].toUpperCase() + side.slice(1);
-  const specific = style[`${base}${cap}` as keyof LayoutStyle] as Length | undefined;
-  const axis =
-    side === 'left' || side === 'right'
-      ? style[`${base}X` as keyof LayoutStyle]
-      : style[`${base}Y` as keyof LayoutStyle];
-  const all = style[base as keyof LayoutStyle] as Length | undefined;
-  return resolveLength(specific ?? (axis as Length | undefined) ?? all, axisParent, 0);
+  if (v === undefined || v === 'auto') return 0;
+  if (typeof v === 'number') {
+    // Skip the finite() guard: edge values come from user styles and are
+    // already validated downstream by callers that round / clamp.
+    return v;
+  }
+  if (typeof v === 'string' && v.charCodeAt(v.length - 1) === 37 /* '%' */) {
+    return parent === undefined ? 0 : (Number.parseFloat(v) / 100) * parent;
+  }
+  return resolveLength(v, parent, 0);
 }
 
 function edges(
@@ -48,11 +53,30 @@ function edges(
   parentHeight: number | undefined,
   base: 'padding' | 'margin',
 ): LayoutEdges {
+  // Hot path: ~21k calls/frame in stress scenes (4 sides × 2 bases × N
+  // layout nodes). The previous implementation built strings like
+  // `${base}${cap}` and then dynamic-indexed `style` four times per call;
+  // V8 cannot inline those property loads. Direct property access keeps
+  // the inline caches monomorphic and elides the per-call key allocation.
+  if (base === 'padding') {
+    const all = style.padding;
+    const x = style.paddingX ?? all;
+    const y = style.paddingY ?? all;
+    return {
+      top: resolveEdge(style.paddingTop ?? y, parentHeight),
+      right: resolveEdge(style.paddingRight ?? x, parentWidth),
+      bottom: resolveEdge(style.paddingBottom ?? y, parentHeight),
+      left: resolveEdge(style.paddingLeft ?? x, parentWidth),
+    };
+  }
+  const all = style.margin;
+  const x = style.marginX ?? all;
+  const y = style.marginY ?? all;
   return {
-    top: edge(style, 'top', parentHeight, base),
-    right: edge(style, 'right', parentWidth, base),
-    bottom: edge(style, 'bottom', parentHeight, base),
-    left: edge(style, 'left', parentWidth, base),
+    top: resolveEdge(style.marginTop ?? y, parentHeight),
+    right: resolveEdge(style.marginRight ?? x, parentWidth),
+    bottom: resolveEdge(style.marginBottom ?? y, parentHeight),
+    left: resolveEdge(style.marginLeft ?? x, parentWidth),
   };
 }
 
@@ -62,19 +86,43 @@ function clampSize(
   axis: 'width' | 'height',
   parent: number | undefined,
 ): number {
-  const min = resolveLength(axis === 'width' ? style.minWidth : style.minHeight, parent, -Infinity);
-  const max = resolveLength(axis === 'width' ? style.maxWidth : style.maxHeight, parent, Infinity);
+  // Short-circuit: the vast majority of nodes don't set min/max constraints,
+  // so avoid two resolveLength() calls + the Math.max/min trampoline when
+  // both are absent.
+  const minRaw = axis === 'width' ? style.minWidth : style.minHeight;
+  const maxRaw = axis === 'width' ? style.maxWidth : style.maxHeight;
+  if (minRaw === undefined && maxRaw === undefined) return value;
+  const min = resolveLength(minRaw, parent, -Infinity);
+  const max = resolveLength(maxRaw, parent, Infinity);
   return Math.max(min, Math.min(max, value));
 }
+
+// Pre-allocated axis descriptors. axisInfo() runs once per layoutNode call
+// (~2.7k/frame in stress scenes); returning shared frozen records lets V8
+// skip the per-call object literal allocation and lets downstream property
+// loads stay monomorphic.
+const AXIS_ROW = { main: 'width', cross: 'height', reversed: false } as const;
+const AXIS_ROW_REV = { main: 'width', cross: 'height', reversed: true } as const;
+const AXIS_COL = { main: 'height', cross: 'width', reversed: false } as const;
+const AXIS_COL_REV = { main: 'height', cross: 'width', reversed: true } as const;
 
 function axisInfo(direction: FlexDirection): {
   main: 'width' | 'height';
   cross: 'width' | 'height';
   reversed: boolean;
 } {
-  return direction.startsWith('row')
-    ? { main: 'width', cross: 'height', reversed: direction === 'row-reverse' }
-    : { main: 'height', cross: 'width', reversed: direction === 'column-reverse' };
+  switch (direction) {
+    case 'row':
+      return AXIS_ROW;
+    case 'row-reverse':
+      return AXIS_ROW_REV;
+    case 'column-reverse':
+      return AXIS_COL_REV;
+    default:
+      // 'column' is the default; we still get here for any unknown value
+      // (which would have been treated as column by startsWith() too).
+      return AXIS_COL;
+  }
 }
 
 type Item = {

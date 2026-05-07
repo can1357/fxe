@@ -1,12 +1,14 @@
 #pragma once
 
-// Page-tagged atlas with a shelf packer. Two variants live in any process:
+// Bounded, rebuildable page atlas with a shelf packer. Two variants live in
+// any process:
 //   - a grayscale (R8) page for FT/CT alpha bitmaps.
 //   - a BGRA8 page for color emoji bitmaps.
 // The renderer uploads the two pages as separate textures; the shader picks
 // one via a flag bit on the texture id (see src/wgpu/shaders/main.wgsl).
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include <fxe/font/glyph.hpp>
@@ -21,6 +23,13 @@ namespace fxe::font {
     bool ok = false;
     std::uint32_t x = 0;
     std::uint32_t y = 0;
+  };
+
+  struct AtlasRepackItem {
+    Glyph* glyph = nullptr;
+    std::span<const std::uint8_t> pixels{};
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
   };
 
   class Atlas {
@@ -38,13 +47,13 @@ namespace fxe::font {
       return pixels_;
     }
     [[nodiscard]] std::uint32_t bytes_per_pixel() const noexcept;
-    // Atlas pages are growth-only; callers monotonically observe a generation
-    // counter to know when to re-upload to the GPU.
+    // Atlas pages are bounded and rebuildable under cache pressure; callers
+    // observe a generation counter to know when to re-upload to the GPU.
     [[nodiscard]] std::uint64_t generation() const noexcept {
       return generation_;
     }
 
-    // Resets the atlas to an empty 1×1 page. Used by tests.
+    // Resets the atlas to an empty initial-size page. Used by tests/repack.
     void clear();
 
     // Packs an opaque rectangle into the atlas. `bytes` must be either
@@ -62,15 +71,22 @@ namespace fxe::font {
     // `size()`. Bumps `generation()` because the page contents change.
     [[nodiscard]] std::uint8_t* mutable_pixels() noexcept;
 
+    // Clears the page and repacks the supplied live glyph bitmaps in order.
+    // Updates each glyph's atlas coordinates. Returns false if any bitmap
+    // cannot fit even after growth to `max_size`.
+    [[nodiscard]] bool rebuild_from_live(std::span<AtlasRepackItem> live) noexcept;
+
   private:
     bool grow_(std::uint32_t min_w, std::uint32_t min_h) noexcept;
     void copy_into_(std::uint32_t dst_x, std::uint32_t dst_y, std::uint32_t w, std::uint32_t h,
                     const std::uint8_t* src) noexcept;
+    void reset_empty_();
 
     Format format_ = Format::grayscale;
     std::uint32_t width_ = 0;
     std::uint32_t height_ = 0;
     std::uint32_t max_size_ = 8192;
+    std::uint32_t initial_size_ = 0;
     std::uint32_t cursor_x_ = 1;
     std::uint32_t cursor_y_ = 1;
     std::uint32_t row_h_ = 0;

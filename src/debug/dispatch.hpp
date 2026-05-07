@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -23,6 +24,7 @@ namespace fxe::js {
 namespace fxe::debug {
   using json = nlohmann::ordered_json;
   class server;
+  using session_id = std::uint64_t;
 
   // JSON-RPC standard codes plus engine-defined range -32000..-32099.
   enum class err_code : int {
@@ -49,6 +51,7 @@ namespace fxe::debug {
     js::host* host = nullptr;
     window* win = nullptr;
     renderer* rdr = nullptr;
+    session_id session = 0;
   };
 
   // Looks up the method, runs the handler, returns the result payload as a

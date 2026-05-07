@@ -1,30 +1,29 @@
-// fxe debug server — NDJSON or CDP WebSocket over TCP. Single-connection v1.
+// fxe debug server — NDJSON or CDP WebSocket over TCP.
 //
 // Layout:
 //   * server::impl owns a listening socket and an accept thread.
-//   * For each accepted protocol connection a "session thread" reads NDJSON
-//     lines or WebSocket text frames, parses JSON-RPC/CDP payloads, validates
-//     the method, and pushes a `pending_call` onto the MPSC queue consumed by
-//     pump_tasks() on the render thread.
-//   * Replies are produced on the render thread and posted back to the
-//     session thread's outbox; the session thread serializes & flushes.
-//   * Events (Console.messageAdded, Debugger.paused, ...) are pushed by the
-//     render thread into the same outbox via emit_event/emit_console.
+//   * Each accepted protocol connection becomes an explicit session with its
+//     own reader thread, writer thread, outbox, and event subscriptions.
+//   * Readers parse JSON-RPC/CDP payloads, validate the method, and push a
+//     `pending_call` tagged with the origin session onto the MPSC queue
+//     consumed by pump_tasks() on the render thread.
+//   * Replies are produced on the render thread and routed only to the origin
+//     session; events are broadcast to sessions whose per-session subscriptions
+//     allow them.
 //
 // Robustness notes:
-//   * If the client disconnects while a task is queued, the task still runs
-//     (cheap, render thread doesn't block on the wire) but its reply is
-//     dropped before serialize.
+//   * If a client disconnects while tasks are queued, only that session's
+//     pending calls are aborted; other sessions and their outboxes remain live.
 //   * Bind errors leave the server in a not-running state; last_error()
 //     reports the cause.
 //
 // Threading:
 //   * Render thread calls pump_tasks(), is_paused(), emit_event/console,
 //     attach_*, set_wake_callback, start, stop, dtor.
-//   * Accept thread runs accept() loop. Once a client is in, it owns the
-//     fd until the connection ends.
-//   * Session thread reads/writes the connection.
-// All shared state is guarded by `mu_` except the atomics noted below.
+//   * Accept thread runs accept() loop and allocates sessions up to the
+//     configured cap.
+//   * Each session has a reader thread and writer thread.
+// All shared server state is guarded by `mu` except atomics noted below.
 
 #include <fxe/debug.hpp>
 #include <fxe/types.hpp>
@@ -51,6 +50,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #if defined(_WIN32)
@@ -186,24 +186,64 @@ namespace fxe::debug {
     return cdp_ws::http_response(200, "OK", "application/json; charset=utf-8", payload);
   }
 
+  constexpr uint32_t event_channel_bit(event_channel c) {
+    return uint32_t(1) << static_cast<int>(c);
+  }
+
+  std::optional<event_channel> channel_for_event_method(std::string_view method) {
+    if (method.rfind("Window.", 0) == 0)
+      return event_channel::window;
+    if (method.rfind("Fetch.", 0) == 0)
+      return event_channel::fetch;
+    if (method.rfind("Fs.", 0) == 0)
+      return event_channel::fs;
+    if (method.rfind("Performance.", 0) == 0)
+      return event_channel::perf;
+    return std::nullopt;
+  }
+
+  struct outgoing_message {
+    std::string line; // serialized JSON envelope, no transport delimiter
+  };
+
   // -------------------------------------------------------------------------
-  // Pending request: parsed off the wire on the session thread, executed on
-  // the render thread. The session thread waits on the future to serialize the
-  // reply back to the client.
+  // Session state: one accepted NDJSON or WebSocket client.
+  // -------------------------------------------------------------------------
+  struct session {
+    session_id id = 0;
+    socket_t sock = kInvalidSocket;
+    std::atomic<bool> is_websocket{false};
+    std::optional<cdp_ws::http_request> initial_http_request;
+
+    std::thread reader_thread;
+    std::thread writer_thread;
+
+    std::mutex close_mu;
+    std::mutex outbox_mu;
+    std::condition_variable outbox_cv;
+    std::deque<outgoing_message> outbox;
+
+    std::atomic<uint32_t> channel_mask{0};
+    std::atomic<bool> socket_closed{false};
+    std::atomic<bool> console_enabled{false};
+    std::atomic<bool> alive{true};
+  };
+
+  // -------------------------------------------------------------------------
+  // Pending request: parsed off the wire by a session reader, executed on the
+  // render thread, and routed back to the origin session by id.
   // -------------------------------------------------------------------------
   struct pending_call {
     std::string method;
     json params;
-    json id;                         // null when a notification (no reply expected)
-    std::promise<std::string> reply; // serialized JSON envelope (or "" to drop)
+    json id; // null when a notification (no reply expected)
+    session_id origin = 0;
+    std::weak_ptr<session> origin_session;
+    std::atomic<bool> aborted{false};
     // If set, pump_tasks() must not run this call until steady_clock has
     // reached this point. Used to honour Page.screenshot delayMs without
     // blocking the render thread.
     std::optional<std::chrono::steady_clock::time_point> not_before{};
-  };
-
-  struct outgoing_message {
-    std::string line; // serialized JSON envelope, no transport delimiter
   };
 
   struct server::impl {
@@ -221,29 +261,25 @@ namespace fxe::debug {
     socket_t listen_sock = kInvalidSocket;
     std::thread accept_thread;
 
-    // Session state. mu_ protects.
+    // Session state. `mu` protects session map, id allocation, and all_sessions_.
     std::mutex mu;
-    std::condition_variable session_cv;
-    std::thread session_thread;
-    socket_t conn_sock = kInvalidSocket;
-    std::atomic<bool> session_alive{false};
+    session_id next_session_id = 1;
+    std::unordered_map<session_id, std::shared_ptr<session>> sessions_;
+    std::vector<std::shared_ptr<session>> all_sessions_;
 
     // Render-thread inbound queue.
     std::mutex inbox_mu;
     std::deque<std::shared_ptr<pending_call>> inbox;
 
-    // Session outbox — single-writer (render thread / session thread for
-    // immediate replies) → consumer (session thread).
-    std::mutex outbox_mu;
-    std::condition_variable outbox_cv;
-    std::deque<outgoing_message> outbox;
-
-    // Debugger flags.
+    // Debugger flags. paused/step_once affect the single target process
+    // globally: multiple clients are controlling one process, not isolated
+    // debugging targets.
     std::atomic<bool> paused{false};
     std::atomic<bool> step_once{false};
-    std::atomic<bool> console_enabled{false};
 
     impl(server_options o) : opts(std::move(o)) {
+      if (opts.max_clients == 0)
+        opts.max_clients = 8;
       paused.store(opts.start_paused);
     }
 
@@ -251,66 +287,181 @@ namespace fxe::debug {
       shutdown();
     }
 
+    u16 max_sessions() const {
+      return opts.max_clients == 0 ? 8 : opts.max_clients;
+    }
+
     void shutdown() {
       bool was_running = running.exchange(false);
       if (!was_running)
         return;
-      // Close listening socket so accept() returns.
       if (listen_sock != kInvalidSocket) {
         close_socket(listen_sock);
         listen_sock = kInvalidSocket;
       }
-      // Close session socket so session thread exits.
+
+      std::vector<std::shared_ptr<session>> to_stop;
       {
         std::lock_guard<std::mutex> g(mu);
-        if (conn_sock != kInvalidSocket) {
-          ::shutdown(conn_sock, 2);
-          close_socket(conn_sock);
-          conn_sock = kInvalidSocket;
-        }
+        to_stop = all_sessions_;
+        sessions_.clear();
+        all_sessions_.clear();
+      }
+      for (auto& sess : to_stop) {
+        sess->alive.store(false);
+        close_session_socket(*sess);
+        sess->outbox_cv.notify_all();
       }
       abort_pending_calls();
-      outbox_cv.notify_all();
+      update_global_channel_mask(0);
+
       if (accept_thread.joinable())
         accept_thread.join();
-      if (session_thread.joinable())
-        session_thread.join();
+      join_sessions(to_stop);
     }
 
-    void abort_pending_calls() {
-      std::deque<std::shared_ptr<pending_call>> pending;
+    void abort_pending_calls(session_id id = 0) {
+      std::deque<std::shared_ptr<pending_call>> aborted;
       {
         std::lock_guard<std::mutex> g(inbox_mu);
-        pending = std::move(inbox);
-        inbox.clear();
-      }
-      for (auto& call : pending) {
-        try {
-          call->reply.set_value({});
-        } catch (...) {
-          // The render thread may already have completed the call.
+        if (id == 0) {
+          aborted = std::move(inbox);
+          inbox.clear();
+        } else {
+          std::deque<std::shared_ptr<pending_call>> retain;
+          for (auto& call : inbox) {
+            if (call->origin == id)
+              aborted.push_back(std::move(call));
+            else
+              retain.push_back(std::move(call));
+          }
+          inbox = std::move(retain);
         }
+      }
+      for (auto& call : aborted)
+        call->aborted.store(true);
+    }
+
+    void enqueue_outgoing(session_id id, std::string line) {
+      std::shared_ptr<session> sess;
+      {
+        std::lock_guard<std::mutex> g(mu);
+        auto it = sessions_.find(id);
+        if (it == sessions_.end())
+          return;
+        sess = it->second;
+      }
+      if (!sess->alive.load())
+        return;
+      {
+        std::lock_guard<std::mutex> g(sess->outbox_mu);
+        if (!sess->alive.load())
+          return;
+        sess->outbox.push_back({std::move(line)});
+      }
+      sess->outbox_cv.notify_all();
+    }
+
+    bool event_allowed_for_session(const session& sess, std::string_view method) const {
+      if (!sess.alive.load())
+        return false;
+      if (method == "Console.messageAdded")
+        return sess.console_enabled.load(std::memory_order_acquire);
+      if (auto channel = channel_for_event_method(method)) {
+        return (sess.channel_mask.load(std::memory_order_acquire) & event_channel_bit(*channel)) !=
+               0;
+      }
+      return true;
+    }
+
+    void broadcast_event(std::string_view method, std::string line) {
+      std::vector<std::shared_ptr<session>> targets;
+      {
+        std::lock_guard<std::mutex> g(mu);
+        targets.reserve(sessions_.size());
+        for (auto& [_, sess] : sessions_) {
+          if (event_allowed_for_session(*sess, method))
+            targets.push_back(sess);
+        }
+      }
+      for (auto& sess : targets) {
+        {
+          std::lock_guard<std::mutex> g(sess->outbox_mu);
+          if (!sess->alive.load())
+            continue;
+          sess->outbox.push_back({line});
+        }
+        sess->outbox_cv.notify_all();
       }
     }
 
-    void enqueue_outgoing(std::string line) {
+    void broadcast_event(std::string line) {
+      broadcast_event("", std::move(line));
+    }
+
+    void set_session_console_enabled(session_id id, bool on) {
+      std::shared_ptr<session> sess;
       {
-        std::lock_guard<std::mutex> g(outbox_mu);
-        outbox.push_back({std::move(line)});
+        std::lock_guard<std::mutex> g(mu);
+        auto it = sessions_.find(id);
+        if (it == sessions_.end())
+          return;
+        sess = it->second;
       }
-      outbox_cv.notify_all();
+      sess->console_enabled.store(on, std::memory_order_release);
+    }
+
+    void set_all_console_enabled(bool on) {
+      std::lock_guard<std::mutex> g(mu);
+      for (auto& [_, sess] : sessions_)
+        sess->console_enabled.store(on, std::memory_order_release);
+    }
+
+    void set_session_channel_enabled(session_id id, event_channel channel, bool enabled) {
+      uint32_t mask = 0;
+      {
+        std::lock_guard<std::mutex> g(mu);
+        auto it = sessions_.find(id);
+        if (it == sessions_.end())
+          return;
+        auto& sess = *it->second;
+        const uint32_t bit = event_channel_bit(channel);
+        if (enabled)
+          sess.channel_mask.fetch_or(bit, std::memory_order_acq_rel);
+        else
+          sess.channel_mask.fetch_and(~bit, std::memory_order_acq_rel);
+        mask = aggregate_channel_mask_locked();
+      }
+      update_global_channel_mask(mask);
+    }
+
+    uint32_t aggregate_channel_mask_locked() const {
+      uint32_t mask = 0;
+      for (const auto& [_, sess] : sessions_)
+        mask |= sess->channel_mask.load(std::memory_order_acquire);
+      return mask;
+    }
+
+    void update_global_channel_mask(uint32_t mask) {
+      set_channel_enabled(event_channel::window,
+                          (mask & event_channel_bit(event_channel::window)) != 0);
+      set_channel_enabled(event_channel::fetch,
+                          (mask & event_channel_bit(event_channel::fetch)) != 0);
+      set_channel_enabled(event_channel::fs, (mask & event_channel_bit(event_channel::fs)) != 0);
+      set_channel_enabled(event_channel::perf,
+                          (mask & event_channel_bit(event_channel::perf)) != 0);
     }
 
     // ----- accept thread -------------------------------------------------
     void accept_loop() {
       while (running.load()) {
+
         sockaddr_in peer{};
         socklen_t plen = sizeof(peer);
         socket_t s = ::accept(listen_sock, reinterpret_cast<sockaddr*>(&peer), &plen);
         if (s == kInvalidSocket) {
           if (!running.load())
             break;
-          // EINTR / EAGAIN: retry. Otherwise log & break.
           int e = socket_errno();
           if (e == EINTR)
             continue;
@@ -324,51 +475,58 @@ namespace fxe::debug {
 #endif
         const std::string peer_addr = format_peer_address(peer);
 
-        // TODO(multiclient): replace this single-client gate with session routing.
-        bool busy = false;
-        socket_t session_sock = kInvalidSocket;
+        bool full = false;
         {
           std::lock_guard<std::mutex> g(mu);
-          if (session_alive.load() || conn_sock != kInvalidSocket) {
-            busy = true;
-          } else {
-            conn_sock = s;
-            // Snapshot while `mu` protects conn_sock; session_loop uses this local
-            // descriptor and does not read conn_sock after the lock is released.
-            session_sock = conn_sock;
-          }
+          full = sessions_.size() >= max_sessions();
         }
-        if (busy) {
-          if (handle_stateless_http_probe(s, peer_addr)) {
-            ::shutdown(s, 2);
-            close_socket(s);
-            continue;
-          }
-        }
-        if (busy) {
+        if (full) {
           if (opts.log_level > 0)
-            std::fprintf(stderr, "fxe.debug: rejecting client %s: server busy\n",
+            std::fprintf(stderr, "fxe.debug: rejecting client %s: server full\n",
                          peer_addr.c_str());
-          static const char kBusy[] = "{\"error\":{\"code\":-32003,\"message\":\"server busy\"}}\n";
-          ::send(s, kBusy, sizeof(kBusy) - 1, send_flags());
-          ::shutdown(s, 2);
-          close_socket(s);
+          if (peek_first_byte_nonblocking(s) == 'G') {
+            cdp_ws::http_request req;
+            std::string error;
+            if (cdp_ws::read_http_request(s, req, error)) {
+              auto authority = request_host_authority(req);
+              if (auto response =
+                      make_cdp_discovery_http_response(req.path, authority, port.load())) {
+                send_http_response(s, *response);
+              } else if (path_is_ws_endpoint(req.path) && !req.header("upgrade").empty()) {
+                send_http_response(s, cdp_ws::http_response(
+                                          503, "Service Unavailable", "text/plain; charset=utf-8",
+                                          "fxe debug server is full; maximum clients attached."));
+              } else {
+                send_http_response(s, cdp_ws::http_response(404, "Not Found",
+                                                            "text/plain; charset=utf-8",
+                                                            cdp_not_found_body(req.path)));
+              }
+            } else {
+              send_http_response(
+                  s, cdp_ws::http_response(400, "Bad Request", "text/plain; charset=utf-8",
+                                           error.empty() ? "bad HTTP request" : error));
+            }
+          } else {
+            static const char kFull[] =
+                "{\"error\":{\"code\":-32003,\"message\":\"server full\"}}\n";
+            cdp_ws::send_all(s, kFull);
+          }
+          close_accepted_socket(s);
           continue;
         }
-        // Reset paused flag honoring opts.start_paused on every fresh
-        // connection (fresh debugging session).
-        paused.store(opts.start_paused);
-        step_once.store(false);
-        console_enabled.store(false);
+
+        auto sess = std::make_shared<session>();
+        sess->sock = s;
+
         {
-          std::lock_guard<std::mutex> g(outbox_mu);
-          outbox.clear();
+          std::lock_guard<std::mutex> g(mu);
+          sess->id = next_session_id++;
+          sessions_.emplace(sess->id, sess);
+          all_sessions_.push_back(sess);
         }
 
-        if (session_thread.joinable())
-          session_thread.join();
-        session_alive.store(true);
-        session_thread = std::thread(&impl::session_loop, this, session_sock);
+        sess->writer_thread = std::thread(&impl::writer_loop, this, sess);
+        sess->reader_thread = std::thread(&impl::session_loop, this, sess);
       }
     }
 
@@ -379,6 +537,25 @@ namespace fxe::debug {
       int n = ::recv(s, &ch, 1, MSG_PEEK);
 #else
       ssize_t n = ::recv(s, &ch, 1, MSG_PEEK);
+#endif
+      return n == 1 ? static_cast<unsigned char>(ch) : -1;
+    }
+
+    int peek_first_byte_nonblocking(socket_t s) {
+      char ch = 0;
+#if defined(_WIN32)
+      u_long one = 1;
+      u_long zero = 0;
+      ioctlsocket(s, FIONBIO, &one);
+      int n = ::recv(s, &ch, 1, MSG_PEEK);
+      ioctlsocket(s, FIONBIO, &zero);
+#else
+      int flags = ::fcntl(s, F_GETFL, 0);
+      if (flags < 0)
+        return -1;
+      ::fcntl(s, F_SETFL, flags | O_NONBLOCK);
+      ssize_t n = ::recv(s, &ch, 1, MSG_PEEK);
+      ::fcntl(s, F_SETFL, flags);
 #endif
       return n == 1 ? static_cast<unsigned char>(ch) : -1;
     }
@@ -394,109 +571,113 @@ namespace fxe::debug {
       return cdp_ws::send_all(s, response);
     }
 
+    void close_accepted_socket(socket_t s) {
+      ::shutdown(s, 2);
+      close_socket(s);
+    }
+
+    void close_session_socket(session& sess) {
+      std::lock_guard<std::mutex> g(sess.close_mu);
+      if (sess.sock != kInvalidSocket && !sess.socket_closed.exchange(true)) {
+        ::shutdown(sess.sock, 2);
+        close_socket(sess.sock);
+      }
+    }
+
     bool path_is_ws_endpoint(std::string_view path) const {
       return path == "/devtools/browser" || path == "/devtools/page/fxe-main";
     }
 
-    bool handle_stateless_http_probe(socket_t s, const std::string& peer_addr) {
-      if (peek_first_byte(s) != 'G')
-        return false;
+    bool handle_http_connection(const std::shared_ptr<session>& sess) {
       cdp_ws::http_request req;
-      std::string error;
-      if (!cdp_ws::read_http_request(s, req, error))
-        return false;
-      auto authority = request_host_authority(req);
-      if (auto response = make_cdp_discovery_http_response(req.path, authority, port.load())) {
-        send_http_response(s, *response);
-        return true;
-      }
-      const bool busy_ws_endpoint = path_is_ws_endpoint(req.path);
-      if (busy_ws_endpoint && opts.log_level > 0)
-        std::fprintf(stderr, "fxe.debug: rejecting client %s: server busy\n", peer_addr.c_str());
-      auto body = busy_ws_endpoint
-                      ? "fxe debug server is busy; one WebSocket client is already attached."
-                      : cdp_not_found_body(req.path);
-      send_http_response(
-          s, cdp_ws::http_response(busy_ws_endpoint ? 503 : 404,
-                                   busy_ws_endpoint ? "Service Unavailable" : "Not Found",
-                                   "text/plain; charset=utf-8", body));
-      return true;
-    }
-
-    bool handle_http_connection(socket_t s) {
-      cdp_ws::http_request req;
-      std::string error;
-      if (!cdp_ws::read_http_request(s, req, error)) {
-        send_http_response(s, cdp_ws::http_response(400, "Bad Request", "text/plain; charset=utf-8",
-                                                    error.empty() ? "bad HTTP request" : error));
-        return false;
-      }
-      auto authority = request_host_authority(req);
-      if (auto response = make_cdp_discovery_http_response(req.path, authority, port.load())) {
-        send_http_response(s, *response);
-        return false;
-      }
-      if (path_is_ws_endpoint(req.path) && !req.header("upgrade").empty()) {
-        if (!cdp_ws::handshake(s, req, error)) {
-          send_http_response(
-              s, cdp_ws::http_response(400, "Bad Request", "text/plain; charset=utf-8",
-                                       error.empty() ? "bad WebSocket handshake" : error));
+      if (sess->initial_http_request) {
+        req = *sess->initial_http_request;
+      } else {
+        std::string read_error;
+        if (!cdp_ws::read_http_request(sess->sock, req, read_error)) {
+          send_http_response(sess->sock, cdp_ws::http_response(
+                                             400, "Bad Request", "text/plain; charset=utf-8",
+                                             read_error.empty() ? "bad HTTP request" : read_error));
           return false;
         }
+      }
+      auto authority = request_host_authority(req);
+      if (auto response = make_cdp_discovery_http_response(req.path, authority, port.load())) {
+        send_http_response(sess->sock, *response);
+        return false;
+      }
+      std::string error;
+      if (path_is_ws_endpoint(req.path) && !req.header("upgrade").empty()) {
+        if (!cdp_ws::handshake(sess->sock, req, error)) {
+          send_http_response(
+              sess->sock, cdp_ws::http_response(400, "Bad Request", "text/plain; charset=utf-8",
+                                                error.empty() ? "bad WebSocket handshake" : error));
+          return false;
+        }
+        sess->is_websocket.store(true);
         return true;
       }
-      send_http_response(s, cdp_ws::http_response(404, "Not Found", "text/plain; charset=utf-8",
-                                                  cdp_not_found_body(req.path)));
+      send_http_response(sess->sock,
+                         cdp_ws::http_response(404, "Not Found", "text/plain; charset=utf-8",
+                                               cdp_not_found_body(req.path)));
       return false;
     }
 
-    void cleanup_session(socket_t s, std::thread* writer) {
+    void finish_session(const std::shared_ptr<session>& sess) {
+      sess->alive.store(false);
+      close_session_socket(*sess);
+      sess->outbox_cv.notify_all();
+      abort_pending_calls(sess->id);
+
+      uint32_t mask = 0;
+      bool removed = false;
       {
         std::lock_guard<std::mutex> g(mu);
-        if (conn_sock == s) {
-          ::shutdown(s, 2);
-          close_socket(s);
-          conn_sock = kInvalidSocket;
+        auto it = sessions_.find(sess->id);
+        if (it != sessions_.end()) {
+          sessions_.erase(it);
+          removed = true;
+          mask = aggregate_channel_mask_locked();
         }
       }
-      session_alive.store(false);
-      outbox_cv.notify_all();
-      if (writer && writer->joinable())
-        writer->join();
+      if (removed)
+        update_global_channel_mask(mask);
     }
 
-    void session_loop(socket_t s) {
-      bool websocket = false;
-      int first = peek_first_byte(s);
-      if (first == 'G') {
-        websocket = handle_http_connection(s);
-        if (!websocket) {
-          cleanup_session(s, nullptr);
-          return;
-        }
+    void join_sessions(std::vector<std::shared_ptr<session>>& sessions) {
+      const auto self = std::this_thread::get_id();
+      for (auto& sess : sessions) {
+        if (sess->writer_thread.joinable() && sess->writer_thread.get_id() != self)
+          sess->writer_thread.join();
+        if (sess->reader_thread.joinable() && sess->reader_thread.get_id() != self)
+          sess->reader_thread.join();
+      }
+      sessions.clear();
+    }
+
+    void session_loop(std::shared_ptr<session> sess) {
+      if (peek_first_byte(sess->sock) == 'G' && !handle_http_connection(sess)) {
+        finish_session(sess);
+        return;
       }
 
-      std::thread writer(&impl::writer_loop, this, s, websocket);
-      if (websocket)
-        websocket_read_loop(s);
+      if (sess->is_websocket.load())
+        websocket_read_loop(sess);
       else
-        ndjson_read_loop(s);
-      cleanup_session(s, &writer);
-
-      // Drain any inflight tasks: their reply futures will go nowhere, but
-      // the render thread still runs them. Drop unfulfilled pending replies.
+        ndjson_read_loop(sess);
+      finish_session(sess);
     }
 
-    void ndjson_read_loop(socket_t s) {
+    void ndjson_read_loop(const std::shared_ptr<session>& sess) {
       std::string buf;
       buf.reserve(4096);
       char chunk[4096];
       bool close_requested = false;
-      while (running.load()) {
+      while (running.load() && sess->alive.load()) {
 #if defined(_WIN32)
-        int n = ::recv(s, chunk, sizeof(chunk), 0);
+        int n = ::recv(sess->sock, chunk, sizeof(chunk), 0);
 #else
-        ssize_t n = ::recv(s, chunk, sizeof(chunk), 0);
+        ssize_t n = ::recv(sess->sock, chunk, sizeof(chunk), 0);
 #endif
         if (n <= 0)
           break;
@@ -511,30 +692,29 @@ namespace fxe::debug {
             line.pop_back();
           if (line.empty())
             continue;
-          close_requested = !handle_line(std::move(line), s);
+          close_requested = !handle_line(sess, std::move(line));
         }
         if (close_requested)
           break;
       }
     }
 
-    void websocket_read_loop(socket_t s) {
+    void websocket_read_loop(const std::shared_ptr<session>& sess) {
       cdp_ws::reader r(true);
-      while (running.load()) {
-        auto rr = r.read_text(s);
+      while (running.load() && sess->alive.load()) {
+        auto rr = r.read_text(sess->sock);
         if (rr.state == cdp_ws::read_result::status::message) {
-          if (!handle_line(std::move(rr.message), s))
+          if (!handle_line(sess, std::move(rr.message)))
             break;
           continue;
         }
         if (rr.state == cdp_ws::read_result::status::error)
-          cdp_ws::write_close(s, 1002, rr.error);
+          cdp_ws::write_close(sess->sock, 1002, rr.error);
         break;
       }
     }
 
-    bool handle_line(std::string line, socket_t s) {
-      (void)s;
+    bool handle_line(const std::shared_ptr<session>& sess, std::string line) {
       json parsed;
       try {
         parsed = json::parse(line);
@@ -544,11 +724,11 @@ namespace fxe::debug {
         err["code"] = static_cast<double>(static_cast<int>(err_code::parse_error));
         err["message"] = std::string(e.what());
         reply["error"] = std::move(err);
-        enqueue_outgoing(reply.dump());
+        enqueue_outgoing(sess->id, reply.dump());
         return true;
       }
       if (!parsed.is_object()) {
-        send_error(json{nullptr}, err_code::invalid_request, "expected object");
+        send_error(sess->id, json{nullptr}, err_code::invalid_request, "expected object");
         return true;
       }
       auto mp = parsed.find("method");
@@ -556,7 +736,7 @@ namespace fxe::debug {
       if (auto ip = parsed.find("id"); ip != parsed.end())
         id_val = *ip;
       if (mp == parsed.end() || !mp->is_string()) {
-        send_error(id_val, err_code::invalid_request, "missing method");
+        send_error(sess->id, id_val, err_code::invalid_request, "missing method");
         return true;
       }
       std::string method = mp->get<std::string>();
@@ -564,7 +744,7 @@ namespace fxe::debug {
       if (auto pp = parsed.find("params"); pp != parsed.end())
         params = *pp;
       if (!method_exists(method)) {
-        send_error(id_val, err_code::method_not_found, method);
+        send_error(sess->id, id_val, err_code::method_not_found, method);
         return true;
       }
 
@@ -572,13 +752,15 @@ namespace fxe::debug {
       call->method = std::move(method);
       call->params = std::move(params);
       call->id = id_val;
+      call->origin = sess->id;
+      call->origin_session = sess;
 
       // Defer screenshot dispatch by `delayMs` to allow the script to render
       // additional frames before capture. Larger schedulers (e.g. CDP-style
       // animations) live client-side; this is the simple "wait then snap".
       if (call->method == "Page.screenshot") {
         double delay_ms = 0.0;
-        if (auto it = params.find("delayMs"); it != params.end() && it->is_number())
+        if (auto it = call->params.find("delayMs"); it != call->params.end() && it->is_number())
           delay_ms = it->get<double>();
         if (delay_ms > 0.0) {
           if (delay_ms > 60000.0)
@@ -588,49 +770,42 @@ namespace fxe::debug {
         }
       }
 
-      auto fut = call->reply.get_future();
       {
         std::lock_guard<std::mutex> g(inbox_mu);
         inbox.push_back(call);
       }
       if (wake)
         wake();
-
-      // Block until render thread completes the call. This is fine on the
-      // session thread; the render thread won't deadlock waiting on us.
-      std::string reply_line = fut.get();
-      if (!reply_line.empty())
-        enqueue_outgoing(std::move(reply_line));
       return true;
     }
 
-    void send_error(const json& id, err_code code, std::string_view msg) {
+    void send_error(session_id id, const json& request_id, err_code code, std::string_view msg) {
       json reply{json::object()};
-      if (!id.is_null())
-        reply["id"] = id;
+      if (!request_id.is_null())
+        reply["id"] = request_id;
       json err{json::object()};
       err["code"] = static_cast<double>(static_cast<int>(code));
       err["message"] = std::string(msg);
       reply["error"] = std::move(err);
-      enqueue_outgoing(reply.dump());
+      enqueue_outgoing(id, reply.dump());
     }
 
-    void writer_loop(socket_t s, bool websocket) {
-      while (running.load()) {
+    void writer_loop(std::shared_ptr<session> sess) {
+      while (running.load() && sess->alive.load()) {
         outgoing_message msg;
         {
-          std::unique_lock<std::mutex> g(outbox_mu);
-          outbox_cv.wait(
-              g, [&] { return !running.load() || !session_alive.load() || !outbox.empty(); });
-          if ((!running.load() || !session_alive.load()) && outbox.empty())
+          std::unique_lock<std::mutex> g(sess->outbox_mu);
+          sess->outbox_cv.wait(
+              g, [&] { return !running.load() || !sess->alive.load() || !sess->outbox.empty(); });
+          if ((!running.load() || !sess->alive.load()) && sess->outbox.empty())
             return;
-          if (outbox.empty())
+          if (sess->outbox.empty())
             continue;
-          msg = std::move(outbox.front());
-          outbox.pop_front();
+          msg = std::move(sess->outbox.front());
+          sess->outbox.pop_front();
         }
-        if (websocket) {
-          if (!cdp_ws::write_text(s, msg.line))
+        if (sess->is_websocket.load()) {
+          if (!cdp_ws::write_text(sess->sock, msg.line))
             return;
           continue;
         }
@@ -640,9 +815,9 @@ namespace fxe::debug {
         usize left = wire.size();
         while (left > 0) {
 #if defined(_WIN32)
-          int n = ::send(s, p, static_cast<int>(left), send_flags());
+          int n = ::send(sess->sock, p, static_cast<int>(left), send_flags());
 #else
-          ssize_t n = ::send(s, p, left, send_flags());
+          ssize_t n = ::send(sess->sock, p, left, send_flags());
 #endif
           if (n <= 0)
             return;
@@ -659,9 +834,13 @@ namespace fxe::debug {
       if (s)
         s->_internal_set_pause(paused, single_step);
     }
-    void server_set_console_enabled(server* s, bool on) {
+    void server_set_console_enabled(server* s, session_id id, bool on) {
       if (s)
-        s->_internal_set_console_enabled(on);
+        s->_internal_set_session_console_enabled(id, on);
+    }
+    void server_set_channel_enabled(server* s, session_id id, event_channel channel, bool enabled) {
+      if (s)
+        s->_internal_set_session_channel_enabled(id, static_cast<int>(channel), enabled);
     }
   } // namespace detail
 
@@ -692,7 +871,7 @@ namespace fxe::debug {
     std::atomic<uint32_t> g_channel_mask{0}; // bit i = channel i enabled
 
     constexpr uint32_t channel_bit(event_channel c) {
-      return uint32_t(1) << static_cast<int>(c);
+      return event_channel_bit(c);
     }
   } // namespace
 
@@ -747,7 +926,7 @@ namespace fxe::debug {
       close_socket(s);
       return false;
     }
-    if (::listen(s, 1) != 0) {
+    if (::listen(s, static_cast<int>(p_->max_sessions())) != 0) {
       p_->last_error = "listen() failed";
       close_socket(s);
       return false;
@@ -802,7 +981,20 @@ namespace fxe::debug {
   }
 
   void server::_internal_set_console_enabled(bool on) noexcept {
-    p_->console_enabled.store(on);
+    p_->set_all_console_enabled(on);
+  }
+
+  void server::_internal_set_session_console_enabled(std::uint64_t id, bool on) noexcept {
+    p_->set_session_console_enabled(static_cast<session_id>(id), on);
+  }
+
+  void server::_internal_set_session_channel_enabled(std::uint64_t id, int channel,
+                                                     bool on) noexcept {
+    if (channel < static_cast<int>(event_channel::window) ||
+        channel > static_cast<int>(event_channel::perf))
+      return;
+    p_->set_session_channel_enabled(static_cast<session_id>(id),
+                                    static_cast<event_channel>(channel), on);
   }
 
   void server::pump_tasks() {
@@ -812,6 +1004,11 @@ namespace fxe::debug {
       auto now = std::chrono::steady_clock::now();
       std::deque<std::shared_ptr<pending_call>> retain;
       for (auto& c : p_->inbox) {
+        if (c->aborted.load())
+          continue;
+        auto origin = c->origin_session.lock();
+        if (!origin || !origin->alive.load())
+          continue;
         if (c->not_before && *c->not_before > now)
           retain.push_back(std::move(c));
         else
@@ -820,6 +1017,9 @@ namespace fxe::debug {
       p_->inbox = std::move(retain);
     }
     for (auto& call : drained) {
+      auto origin = call->origin_session.lock();
+      if (call->aborted.load() || !origin || !origin->alive.load())
+        continue;
       // Prefer host-tracked active window/renderer (set by JS bindings) so
       // protocol methods automatically see whatever the script just created.
       // Fall back to anything explicitly attached on the server.
@@ -831,7 +1031,7 @@ namespace fxe::debug {
         if (auto* r = p_->host->active_renderer())
           rdr = r;
       }
-      dispatch_context cx{this, p_->host, win, rdr};
+      dispatch_context cx{this, p_->host, win, rdr, call->origin};
       json reply_envelope{json::object()};
       if (!call->id.is_null())
         reply_envelope["id"] = call->id;
@@ -860,12 +1060,8 @@ namespace fxe::debug {
       std::string serialized;
       if (!call->id.is_null())
         serialized = reply_envelope.dump();
-      // Hand back to the session thread (notifications: empty string).
-      try {
-        call->reply.set_value(std::move(serialized));
-      } catch (...) {
-        // promise already satisfied (shouldn't happen); ignore
-      }
+      if (!serialized.empty() && !call->aborted.load())
+        p_->enqueue_outgoing(call->origin, std::move(serialized));
     }
   }
 
@@ -874,8 +1070,6 @@ namespace fxe::debug {
   }
 
   void server::emit_console(std::string_view level, std::string_view text) {
-    if (!p_->console_enabled.load())
-      return;
     json params{json::object()};
     params["level"] = std::string(level);
     params["text"] = std::string(text);
@@ -889,11 +1083,9 @@ namespace fxe::debug {
   }
 
   void server::emit_event(std::string_view method, json params) {
-    if (!p_->session_alive.load())
-      return;
     json envelope{json::object()};
     envelope["method"] = std::string(method);
     envelope["params"] = std::move(params);
-    p_->enqueue_outgoing(envelope.dump());
+    p_->broadcast_event(method, envelope.dump());
   }
 } // namespace fxe::debug

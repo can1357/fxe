@@ -264,6 +264,7 @@ namespace fxe::js {
           throw_type(iso, "Pipeline.bindTexture: arg 2 must be ImageHandle or texture id");
           return;
         }
+        tex = get_default_spritesheet().add_texture(*img->tex);
       }
       h->owned->bind_texture(binding, tex);
     }

@@ -118,6 +118,24 @@ namespace fxe::js {
       return err;
     }
 
+    Local<Value> make_named_error(Isolate* iso, std::string_view name, std::string_view message) {
+      std::string msg(message);
+      auto err = Exception::Error(s8(iso, msg)).As<Object>();
+      (void)err->Set(iso->GetCurrentContext(), s8(iso, "name"), s8(iso, std::string(name)));
+      return err;
+    }
+
+    Local<Value> make_abort_error(Isolate* iso, std::string_view reason) {
+      std::string msg = reason.empty() ? "The operation was aborted" : std::string(reason);
+      return make_named_error(iso, "AbortError", msg);
+    }
+
+    Local<Value> make_timeout_error(Isolate* iso, std::string_view message) {
+      // Use TimeoutError rather than AbortError so libcurl deadline expiry is
+      // distinguishable from a caller-triggered AbortSignal.
+      return make_named_error(iso, "TimeoutError", message);
+    }
+
     std::string net_permission_message(std::string_view url) {
       std::string msg = "network access denied for '";
       msg.append(url);
@@ -367,6 +385,37 @@ namespace fxe::js {
       d->listeners.emplace_back(iso, info[1].As<Function>());
     }
 
+    void abort_signal_remove_listener(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction())
+        return;
+      if (to_str(iso, info[0]) != "abort")
+        return;
+      auto* d = unwrap_abort_signal(info.This());
+      if (!d)
+        return;
+      auto listener = info[1].As<Function>();
+      for (auto it = d->listeners.begin(); it != d->listeners.end(); ++it) {
+        if (it->Get(iso)->StrictEquals(listener)) {
+          it->Reset();
+          d->listeners.erase(it);
+          return;
+        }
+      }
+    }
+
+    void abort_signal_abort_static(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      abort_signal_data* sig = nullptr;
+      auto obj = make_abort_signal(iso, ctx, sig);
+      sig->aborted = true;
+      sig->reason = info.Length() >= 1 ? to_str(iso, info[0]) : std::string("aborted");
+      info.GetReturnValue().Set(obj);
+    }
+
     struct abort_controller_data {
       Global<Object> signal_obj;
       abort_signal_data* signal = nullptr;
@@ -410,23 +459,35 @@ namespace fxe::js {
         return;
       sig->aborted = true;
       sig->reason = info.Length() >= 1 ? to_str(iso, info[0]) : std::string("aborted");
-      // Fire listeners.
-      for (auto& g : sig->listeners) {
+      // Fire listeners once. Swap first so callbacks may remove themselves
+      // during promise settlement without invalidating this dispatch loop.
+      std::vector<Global<Function>> listeners;
+      listeners.swap(sig->listeners);
+      for (auto& g : listeners) {
         auto fn = g.Get(iso);
         Local<Value> ignored;
         (void)fn->Call(ctx, Undefined(iso), 0, nullptr).ToLocal(&ignored);
+        g.Reset();
       }
-      sig->listeners.clear();
     }
 
     // ---------------- In-flight tracking ------------------------------------
 
+    struct in_flight_state;
+    struct abort_listener_context {
+      std::shared_ptr<in_flight_state> st;
+    };
+
     struct in_flight_state {
       Global<Promise::Resolver> resolver;
       Global<Context> ctx;
-      Global<Object> signal_obj; // optional
+      Global<Object> signal_obj;       // optional
+      Global<Function> abort_listener; // optional
+      abort_listener_context* abort_ctx = nullptr;
       net::http_request_id req_id = 0;
       bool aborted = false;
+      bool settled = false;
+      std::string abort_reason;
     };
 
     // No global registry — each in-flight state lives inside the libcurl
@@ -645,6 +706,7 @@ namespace fxe::js {
       Global<Object> signal_obj;
       std::string proxy;
       std::string range;
+      int timeout_ms = 0; // internal/test-only; intentionally not in RequestInit d.ts
     };
     void request_finalizer(const WeakCallbackInfo<request_data>& info) {
       delete info.GetParameter();
@@ -711,6 +773,9 @@ namespace fxe::js {
       if (init->Get(ctx, String::NewFromUtf8Literal(iso, "range")).ToLocal(&v) &&
           !v->IsUndefined() && !v->IsNull())
         req.range = to_str(iso, v);
+      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "timeout_ms")).ToLocal(&v) &&
+          !v->IsUndefined() && !v->IsNull())
+        req.timeout_ms = v->Int32Value(ctx).FromMaybe(0);
       return true;
     }
 
@@ -750,14 +815,66 @@ namespace fxe::js {
 
     // ---------------- fetch -------------------------------------------------
 
+    void cleanup_abort_listener(Isolate* iso, in_flight_state& st) {
+      if (!st.abort_listener.IsEmpty() && !st.signal_obj.IsEmpty()) {
+        auto signal_obj = st.signal_obj.Get(iso);
+        auto* sig = unwrap_abort_signal(signal_obj);
+        auto listener = st.abort_listener.Get(iso);
+        if (sig) {
+          for (auto it = sig->listeners.begin(); it != sig->listeners.end(); ++it) {
+            if (it->Get(iso)->StrictEquals(listener)) {
+              it->Reset();
+              sig->listeners.erase(it);
+              break;
+            }
+          }
+        }
+        st.abort_listener.Reset();
+      }
+      delete st.abort_ctx;
+      st.abort_ctx = nullptr;
+      st.signal_obj.Reset();
+    }
+
+    std::string abort_reason_from_state(Isolate* iso, in_flight_state& st) {
+      if (!st.abort_reason.empty())
+        return st.abort_reason;
+      if (!st.signal_obj.IsEmpty()) {
+        if (auto* sig = unwrap_abort_signal(st.signal_obj.Get(iso)); sig && sig->aborted)
+          return sig->reason;
+      }
+      return "aborted";
+    }
+
     void resolve_with_response(Isolate* iso, in_flight_state& st, net::http_response&& resp) {
+      if (st.settled)
+        return;
+      st.settled = true;
       auto ctx = st.ctx.Get(iso);
       Context::Scope cs(ctx);
       HandleScope hs(iso);
       auto resolver = st.resolver.Get(iso);
+      if (st.aborted || resp.last_error == net::http_error::abort) {
+        const std::string reason = abort_reason_from_state(iso, st);
+        cleanup_abort_listener(iso, st);
+        resolver->Reject(ctx, make_abort_error(iso, reason)).Check();
+        st.resolver.Reset();
+        st.ctx.Reset();
+        return;
+      }
+      if (resp.last_error == net::http_error::timeout) {
+        cleanup_abort_listener(iso, st);
+        resolver->Reject(ctx, make_timeout_error(iso, "fetch timed out")).Check();
+        st.resolver.Reset();
+        st.ctx.Reset();
+        return;
+      }
       if (!resp.error.empty()) {
         std::string msg = "fetch failed: " + resp.error;
+        cleanup_abort_listener(iso, st);
         resolver->Reject(ctx, Exception::Error(s8(iso, msg))).Check();
+        st.resolver.Reset();
+        st.ctx.Reset();
         return;
       }
       auto h_data = std::make_unique<headers_data>();
@@ -771,7 +888,10 @@ namespace fxe::js {
       rd->body = std::move(resp.body);
       rd->headers_obj.Reset(iso, h_obj);
       auto resp_obj = wrap_response(iso, ctx, std::move(rd));
+      cleanup_abort_listener(iso, st);
       resolver->Resolve(ctx, resp_obj).Check();
+      st.resolver.Reset();
+      st.ctx.Reset();
     }
 
     void cookie_jar_set(const FunctionCallbackInfo<Value>& info) {
@@ -854,6 +974,7 @@ namespace fxe::js {
         hreq.body = rd->body;
         hreq.proxy = rd->proxy;
         hreq.range = rd->range;
+        hreq.timeout_ms = rd->timeout_ms;
         if (!rd->headers_obj.IsEmpty()) {
           auto* hd = unwrap_headers(rd->headers_obj.Get(iso));
           if (hd)
@@ -896,6 +1017,8 @@ namespace fxe::js {
           hreq.proxy = scratch.proxy;
         if (!scratch.range.empty())
           hreq.range = scratch.range;
+        if (scratch.timeout_ms > 0)
+          hreq.timeout_ms = scratch.timeout_ms;
         if (!scratch.signal_obj.IsEmpty()) {
           signal_obj_local = scratch.signal_obj.Get(iso);
           have_signal = true;
@@ -919,11 +1042,12 @@ namespace fxe::js {
         }
       }
 
-      // Pre-aborted signal -> fast reject.
+      // Pre-aborted signal -> fast reject with the same AbortError contract as
+      // mid-flight cancellation.
       if (have_signal) {
         auto* sig = unwrap_abort_signal(signal_obj_local);
         if (sig && sig->aborted) {
-          resolver->Reject(ctx, Exception::Error(s8(iso, "aborted: " + sig->reason))).Check();
+          resolver->Reject(ctx, make_abort_error(iso, sig->reason)).Check();
           return;
         }
       }
@@ -940,36 +1064,44 @@ namespace fxe::js {
       auto cb_state = state;
       net::http_request_id id = net::http_client::instance().submit(
           std::move(hreq), [iso, cb_state](net::http_response resp) mutable {
-            if (cb_state->aborted)
-              return;
             HandleScope hs2(iso);
             resolve_with_response(iso, *cb_state, std::move(resp));
           });
       state->req_id = id;
 
       // If we have a signal, install an 'abort' listener that cancels the
-      // in-flight curl handle and marks the state aborted.
-      if (have_signal) {
+      // in-flight curl handle and marks the state aborted. The completion
+      // callback still settles the Promise; it is not dropped on abort.
+      if (have_signal && !state->settled) {
         auto* sig = unwrap_abort_signal(signal_obj_local);
         if (sig) {
-          struct abort_ctx {
-            std::shared_ptr<in_flight_state> st;
-          };
-          auto* lctx = new abort_ctx{state};
+          auto* lctx = new abort_listener_context{state};
+          state->abort_ctx = lctx;
           auto data = External::New(iso, lctx, v8::kExternalPointerTypeTagDefault);
           auto fn_maybe = Function::New(
               ctx,
               [](const FunctionCallbackInfo<Value>& i) {
-                auto* a = static_cast<abort_ctx*>(
+                auto* a = static_cast<abort_listener_context*>(
                     i.Data().As<External>()->Value(v8::kExternalPointerTypeTagDefault));
-                if (!a || !a->st)
+                if (!a || !a->st || a->st->settled)
                   return;
+                auto* iso = i.GetIsolate();
                 a->st->aborted = true;
+                if (!a->st->signal_obj.IsEmpty()) {
+                  if (auto* sig = unwrap_abort_signal(a->st->signal_obj.Get(iso)); sig)
+                    a->st->abort_reason = sig->reason;
+                }
                 net::http_client::instance().abort(a->st->req_id);
               },
               data);
-          if (!fn_maybe.IsEmpty())
-            sig->listeners.emplace_back(iso, fn_maybe.ToLocalChecked());
+          if (!fn_maybe.IsEmpty()) {
+            auto fn = fn_maybe.ToLocalChecked();
+            state->abort_listener.Reset(iso, fn);
+            sig->listeners.emplace_back(iso, fn);
+          } else {
+            delete lctx;
+            state->abort_ctx = nullptr;
+          }
         }
       }
     }
@@ -1032,7 +1164,10 @@ namespace fxe::js {
     siginst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "reason"),
                                    abort_signal_get_reason);
     auto sigproto = sigtpl->PrototypeTemplate();
+    sigtpl->Set(iso, "abort", FunctionTemplate::New(iso, abort_signal_abort_static));
     sigproto->Set(iso, "addEventListener", FunctionTemplate::New(iso, abort_signal_add_listener));
+    sigproto->Set(iso, "removeEventListener",
+                  FunctionTemplate::New(iso, abort_signal_remove_listener));
     global->Set(iso, "AbortSignal", sigtpl);
     abort_signal_tpl_table()[iso].Reset(iso, sigtpl);
 

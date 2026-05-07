@@ -2,8 +2,9 @@
 // mask, BGRA8 color emoji). The packer is intentionally simple: a single
 // shelf advances left-to-right; if the row fills, we wrap to a new shelf at
 // `cursor_y + row_h + padding`. When the atlas can't accommodate a glyph we
-// double the shorter axis (up to `max_size_`) and re-blit the existing
-// pixels into the grown buffer.
+// double the shorter axis (up to `max_size_`) and re-blit existing pixels.
+// Under cache pressure callers can rebuild the page from retained glyph
+// bitmaps, shrinking back to the initial size when possible.
 
 #include <fxe/font/atlas.hpp>
 
@@ -14,9 +15,19 @@
 namespace fxe::font {
 
   Atlas::Atlas(Format f, std::uint32_t initial_size, std::uint32_t max_size)
-      : format_(f), width_(initial_size), height_(initial_size), max_size_(max_size) {
+      : format_(f), width_(initial_size), height_(initial_size), max_size_(max_size),
+        initial_size_(initial_size) {
     pixels_.assign(static_cast<std::size_t>(width_) * height_ * bytes_per_pixel(), 0);
     ++generation_;
+  }
+
+  void Atlas::reset_empty_() {
+    width_ = std::max<std::uint32_t>(initial_size_, 1);
+    height_ = std::max<std::uint32_t>(initial_size_, 1);
+    cursor_x_ = padding_;
+    cursor_y_ = padding_;
+    row_h_ = 0;
+    pixels_.assign(static_cast<std::size_t>(width_) * height_ * bytes_per_pixel(), 0);
   }
 
   std::uint32_t Atlas::bytes_per_pixel() const noexcept {
@@ -30,10 +41,7 @@ namespace fxe::font {
   }
 
   void Atlas::clear() {
-    cursor_x_ = padding_;
-    cursor_y_ = padding_;
-    row_h_ = 0;
-    std::fill(pixels_.begin(), pixels_.end(), std::uint8_t{0});
+    reset_empty_();
     ++generation_;
   }
 
@@ -119,6 +127,30 @@ namespace fxe::font {
       return r;
     copy_into_(r.x, r.y, w, h, bytes);
     return r;
+  }
+
+  bool Atlas::rebuild_from_live(std::span<AtlasRepackItem> live) noexcept {
+    reset_empty_();
+    ++generation_;
+    for (auto& item : live) {
+      if (!item.glyph)
+        return false;
+      if (item.width == 0 || item.height == 0) {
+        item.glyph->atlas_x = 0;
+        item.glyph->atlas_y = 0;
+        continue;
+      }
+      if (item.pixels.size() !=
+          static_cast<std::size_t>(item.width) * item.height * bytes_per_pixel()) {
+        return false;
+      }
+      AtlasRegion r = pack(item.width, item.height, item.pixels.data());
+      if (!r.ok)
+        return false;
+      item.glyph->atlas_x = r.x;
+      item.glyph->atlas_y = r.y;
+    }
+    return true;
   }
 
 } // namespace fxe::font

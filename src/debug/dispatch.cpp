@@ -432,11 +432,11 @@ namespace fxe::debug {
     // ---- Console.* ---------------------------------------------------------
 
     json h_console_enable(dispatch_context& cx, const json&) {
-      detail::server_set_console_enabled(cx.srv, true);
+      detail::server_set_console_enabled(cx.srv, cx.session, true);
       return json{json::object()};
     }
     json h_console_disable(dispatch_context& cx, const json&) {
-      detail::server_set_console_enabled(cx.srv, false);
+      detail::server_set_console_enabled(cx.srv, cx.session, false);
       return json{json::object()};
     }
 
@@ -836,28 +836,28 @@ namespace fxe::debug {
     // ---- *.subscribe / unsubscribe ----------------------------------------
     // Toggle event channels. The engine pushes events through
     // emit_event_if_attached() unconditionally; the server filters here.
-    json h_window_subscribe(dispatch_context&, const json&) {
-      set_channel_enabled(event_channel::window, true);
+    json h_window_subscribe(dispatch_context& cx, const json&) {
+      detail::server_set_channel_enabled(cx.srv, cx.session, event_channel::window, true);
       return json{json::object()};
     }
-    json h_window_unsubscribe(dispatch_context&, const json&) {
-      set_channel_enabled(event_channel::window, false);
+    json h_window_unsubscribe(dispatch_context& cx, const json&) {
+      detail::server_set_channel_enabled(cx.srv, cx.session, event_channel::window, false);
       return json{json::object()};
     }
-    json h_fetch_subscribe(dispatch_context&, const json&) {
-      set_channel_enabled(event_channel::fetch, true);
+    json h_fetch_subscribe(dispatch_context& cx, const json&) {
+      detail::server_set_channel_enabled(cx.srv, cx.session, event_channel::fetch, true);
       return json{json::object()};
     }
-    json h_fetch_unsubscribe(dispatch_context&, const json&) {
-      set_channel_enabled(event_channel::fetch, false);
+    json h_fetch_unsubscribe(dispatch_context& cx, const json&) {
+      detail::server_set_channel_enabled(cx.srv, cx.session, event_channel::fetch, false);
       return json{json::object()};
     }
-    json h_fs_subscribe(dispatch_context&, const json&) {
-      set_channel_enabled(event_channel::fs, true);
+    json h_fs_subscribe(dispatch_context& cx, const json&) {
+      detail::server_set_channel_enabled(cx.srv, cx.session, event_channel::fs, true);
       return json{json::object()};
     }
-    json h_fs_unsubscribe(dispatch_context&, const json&) {
-      set_channel_enabled(event_channel::fs, false);
+    json h_fs_unsubscribe(dispatch_context& cx, const json&) {
+      detail::server_set_channel_enabled(cx.srv, cx.session, event_channel::fs, false);
       return json{json::object()};
     }
 

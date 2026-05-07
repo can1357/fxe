@@ -2,6 +2,7 @@
 // `RenderStats` object on the global with bumpers used by the JS reactive
 // reconciler and a snapshot() reader for diagnostics.
 
+#include <fxe/command_buffer.hpp>
 #include <fxe/render_stats.hpp>
 
 #include "bind_render_stats.hpp"
@@ -30,6 +31,9 @@ namespace fxe::js {
       put("cacheMisses", s.cache_misses);
       put("rebuilds", s.rebuilds);
       put("frames", s.frames);
+      put("queueFastIdentity", fxe::command_buffer::g_q_fast.load());
+      put("queueXform", fxe::command_buffer::g_q_xform.load());
+      put("queueTinted", fxe::command_buffer::g_q_tinted.load());
       info.GetReturnValue().Set(out);
     }
 

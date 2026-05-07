@@ -4,6 +4,7 @@
 // header so callers can `#include <fxe/font.hpp>` without listing each
 // sub-header manually.
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -22,9 +23,19 @@ namespace fxe::font {
 
   // Glyph cache: maps (face, glyph_id, size, hint, subpixel) → Glyph and
   // owns the two atlas pages. Renderers read the pages from here each frame.
+
+  struct GlyphCacheBudget {
+    std::uint32_t initial_atlas_size = 256;
+    std::uint32_t max_atlas_size = 8192;
+    std::size_t max_mask_glyph_count = 4096;
+    std::size_t max_color_glyph_count = 1024;
+    std::size_t max_mask_atlas_bytes = 16ull * 1024ull * 1024ull;
+    std::size_t max_color_atlas_bytes = 16ull * 1024ull * 1024ull;
+  };
   class GlyphCache {
   public:
     GlyphCache();
+    explicit GlyphCache(GlyphCacheBudget budget);
     ~GlyphCache();
     GlyphCache(const GlyphCache&) = delete;
     GlyphCache& operator=(const GlyphCache&) = delete;
@@ -38,6 +49,13 @@ namespace fxe::font {
     // to four bins inside.
     [[nodiscard]] const Glyph& lookup(Face& face, std::uint32_t glyph_id, float subpixel_x = 0.0f,
                                       Hint hint = Hint::full);
+
+    void set_budget(GlyphCacheBudget budget);
+    [[nodiscard]] std::size_t cache_size(Format format) const noexcept;
+    [[nodiscard]] std::size_t eviction_count(Format format) const noexcept;
+    [[nodiscard]] std::size_t atlas_bytes(Format format) const noexcept;
+    [[nodiscard]] std::uint64_t generation(Format format) const noexcept;
+    [[nodiscard]] bool debug_contains(const GlyphKey& key) const noexcept;
 
     // Drops every cached glyph. Used by tests; not needed in steady state.
     void clear();

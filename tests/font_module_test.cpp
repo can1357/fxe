@@ -12,6 +12,8 @@
 #include <fxe/font/library.hpp>
 #include <fxe/font/shaper.hpp>
 
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -33,6 +35,18 @@ namespace {
   }
 #define CHECK(expr) check((expr), #expr, __FILE__, __LINE__)
 
+  fxe::font::GlyphKey make_key(const fxe::font::Face& face, std::uint32_t glyph_id,
+                               fxe::font::Hint hint = fxe::font::Hint::full,
+                               std::uint8_t subpixel = 0) {
+    fxe::font::GlyphKey key{};
+    key.face_id = face.id();
+    key.glyph_id = glyph_id;
+    key.pixel_size_q = static_cast<std::uint32_t>(std::lround(face.pixel_size() * 64.0f));
+    key.subpixel_x = subpixel;
+    key.hint = static_cast<std::uint8_t>(hint);
+    return key;
+  }
+
   // Pick a system font path for tests. We try a small handful of well-known
   // Apple fonts; on non-macOS hosts, tests that need a real face are
   // soft-skipped.
@@ -41,6 +55,19 @@ namespace {
         "/System/Library/Fonts/SFNS.ttf",         "/System/Library/Fonts/Helvetica.ttc",
         "/System/Library/Fonts/Geneva.ttf",       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+    };
+    for (const char* p : candidates) {
+      if (std::filesystem::exists(p))
+        return p;
+    }
+    return {};
+  }
+
+  std::string find_emoji_font() {
+    const char* candidates[] = {
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+        "/usr/share/fonts/google-noto/NotoColorEmoji.ttf",
     };
     for (const char* p : candidates) {
       if (std::filesystem::exists(p))
@@ -127,6 +154,106 @@ int main() {
       const auto& fi = fi_runs.front();
       CHECK(!fi.glyphs.empty());
       CHECK(fi.glyphs.size() <= 2);
+    }
+
+    // A7: bounded GlyphCache LRU eviction and atlas repack.
+    if (face) {
+      std::vector<std::uint32_t> glyphs;
+      for (char32_t ch = U'A'; ch <= U'J'; ++ch) {
+        const std::uint32_t gid = face->glyph_index(ch);
+        if (gid != 0)
+          glyphs.push_back(gid);
+      }
+      if (glyphs.size() >= 10) {
+        GlyphCacheBudget budget{};
+        budget.initial_atlas_size = 64;
+        budget.max_atlas_size = 512;
+        budget.max_mask_glyph_count = 5;
+        budget.max_mask_atlas_bytes = 512ull * 512ull;
+        GlyphCache cache{budget};
+
+        for (std::uint32_t gid : glyphs)
+          (void)cache.lookup(*face, gid);
+        CHECK(cache.cache_size(Format::grayscale) == 5);
+        CHECK(cache.eviction_count(Format::grayscale) == 5);
+        CHECK(!cache.debug_contains(make_key(*face, glyphs[0])));
+        CHECK(!cache.debug_contains(make_key(*face, glyphs[4])));
+        CHECK(cache.debug_contains(make_key(*face, glyphs[5])));
+        CHECK(cache.debug_contains(make_key(*face, glyphs[9])));
+
+        GlyphCache recent_cache{budget};
+        for (std::size_t i = 0; i < 5; ++i)
+          (void)recent_cache.lookup(*face, glyphs[i]);
+        (void)recent_cache.lookup(*face, glyphs[0]);
+        (void)recent_cache.lookup(*face, glyphs[5]);
+        (void)recent_cache.lookup(*face, glyphs[6]);
+        CHECK(recent_cache.debug_contains(make_key(*face, glyphs[0])));
+        CHECK(!recent_cache.debug_contains(make_key(*face, glyphs[1])));
+        CHECK(recent_cache.cache_size(Format::grayscale) == 5);
+
+        GlyphCacheBudget repack_budget{};
+        repack_budget.initial_atlas_size = 32;
+        repack_budget.max_atlas_size = 64;
+        repack_budget.max_mask_glyph_count = 128;
+        repack_budget.max_mask_atlas_bytes = 64ull * 64ull;
+        GlyphCache repack_cache{repack_budget};
+        const std::uint64_t before_gen = repack_cache.generation(Format::grayscale);
+        std::vector<std::uint32_t> repack_glyphs;
+        for (char32_t ch = U'!'; ch <= U'~'; ++ch) {
+          const std::uint32_t gid = face->glyph_index(ch);
+          if (gid == 0)
+            continue;
+          repack_glyphs.push_back(gid);
+          (void)repack_cache.lookup(*face, gid);
+        }
+        CHECK(repack_cache.eviction_count(Format::grayscale) > 0);
+        CHECK(repack_cache.generation(Format::grayscale) > before_gen);
+        for (std::uint32_t gid : repack_glyphs) {
+          const auto key = make_key(*face, gid);
+          if (!repack_cache.debug_contains(key))
+            continue;
+          const Glyph& g = repack_cache.lookup(*face, gid);
+          const Atlas& page =
+              (g.format == Format::bgra) ? repack_cache.color_atlas() : repack_cache.mask_atlas();
+          CHECK(g.atlas_x + g.width <= page.size().x);
+          CHECK(g.atlas_y + g.height <= page.size().y);
+        }
+      }
+
+      const std::string emoji_path = find_emoji_font();
+      if (!emoji_path.empty()) {
+        auto emoji_face = load_face_from_file(emoji_path, 24.0f);
+        if (emoji_face) {
+          GlyphCacheBudget budget{};
+          budget.max_mask_glyph_count = 5;
+          budget.max_color_glyph_count = 1;
+          budget.max_color_atlas_bytes = 16ull * 1024ull * 1024ull;
+          GlyphCache mixed{budget};
+          const std::uint32_t mask_a = face->glyph_index(U'A');
+          const std::uint32_t mask_b = face->glyph_index(U'B');
+          (void)mixed.lookup(*face, mask_a);
+          (void)mixed.lookup(*face, mask_b);
+          const auto key_a = make_key(*face, mask_a);
+          const auto key_b = make_key(*face, mask_b);
+          const char32_t emoji_chars[] = {char32_t{0x1F389}, char32_t{0x1F600}, char32_t{0x1F680}};
+          std::size_t color_seen = 0;
+          for (char32_t ch : emoji_chars) {
+            const std::uint32_t gid = emoji_face->glyph_index(ch);
+            if (gid == 0)
+              continue;
+            const Glyph& g = mixed.lookup(*emoji_face, gid);
+            if (g.format == Format::bgra && g.width > 0)
+              ++color_seen;
+          }
+          if (color_seen > 1) {
+            CHECK(mixed.cache_size(Format::bgra) == 1);
+            CHECK(mixed.eviction_count(Format::bgra) > 0);
+            CHECK(mixed.debug_contains(key_a));
+            CHECK(mixed.debug_contains(key_b));
+            CHECK(mixed.cache_size(Format::grayscale) == 2);
+          }
+        }
+      }
     }
 
     // Phase 4: collection.

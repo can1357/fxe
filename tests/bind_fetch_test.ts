@@ -1,11 +1,66 @@
+// @ts-ignore FXE host-backed builtin
+import net from 'node:net';
 import {
   assert,
   assertDeepEqual,
   assertEqual,
   assertRejects,
   assertThrows,
+  delay,
   test,
 } from './ts_harness.ts';
+
+type TestSocket = {
+  on(name: string, cb: (chunk?: Uint8Array) => void): void;
+  write(chunk: string): void;
+  end(chunk?: string): void;
+  destroy(): void;
+};
+
+async function expectRejectName(
+  fn: () => Promise<unknown>,
+  name: string,
+): Promise<Error> {
+  try {
+    await fn();
+  } catch (error) {
+    assert(error instanceof Error, 'fetch should reject with an Error');
+    assertEqual(error.name, name);
+    return error;
+  }
+  throw new Error('expected promise to reject');
+}
+
+async function withHttpServer(
+  handler: (socket: TestSocket, request: string) => void,
+  fn: (url: string) => Promise<void>,
+): Promise<void> {
+  const sockets = new Set<TestSocket>();
+  const server = net.createServer((socket: TestSocket) => {
+    sockets.add(socket);
+    let request = '';
+    socket.on('data', (chunk?: Uint8Array) => {
+      if (chunk) {
+        request += Array.from(chunk, (byte) => String.fromCharCode(byte)).join('');
+      }
+      if (request.includes('\r\n\r\n')) {
+        handler(socket, request);
+      }
+    });
+  });
+  const { promise: listenPromise, resolve: resolveListen } = Promise.withResolvers<void>();
+  server.listen(0, '127.0.0.1', resolveListen);
+  await listenPromise;
+  const address = server.address() as { port: number };
+  try {
+    await fn(`http://127.0.0.1:${address.port}/fetch-test`);
+  } finally {
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    server.close();
+  }
+}
 
 test('Headers normalizes names and preserves combined values case-insensitively', () => {
   const headers = new Headers([
@@ -151,22 +206,57 @@ test('fetch rejects unsupported stream request bodies', async () => {
 });
 
 test('fetch rejects pre-aborted signals before network submission', async () => {
-  const controller = new AbortController();
-  controller.abort('already-done');
-
-  await assertRejects(
-    () => fetch('http://127.0.0.1/pre-aborted', { signal: controller.signal }),
-    'aborted: already-done',
+  const signal = (AbortSignal as unknown as { abort(reason?: string): AbortSignal }).abort(
+    'already-done',
   );
+
+  const error = await expectRejectName(
+    () => fetch('http://127.0.0.1/pre-aborted', { signal }),
+    'AbortError',
+  );
+  assertEqual(error.message, 'already-done');
 });
 
 test('fetch accepts invalid local URLs for pre-submit rejection paths without network dependency', async () => {
   const controller = new AbortController();
   controller.abort('invalid-local-url');
 
-  await assertRejects(
+  const error = await expectRejectName(
     () => fetch('http://127.0.0.1:0/', { signal: controller.signal }),
-    'aborted: invalid-local-url',
+    'AbortError',
+  );
+  assertEqual(error.message, 'invalid-local-url');
+});
+
+test('fetch rejects mid-flight abort exactly once with AbortError', async () => {
+  await withHttpServer(
+    (socket) => {
+      setTimeout(() => {
+        socket.end('HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nlate');
+      }, 250);
+    },
+    async (url) => {
+      const controller = new AbortController();
+      const pending = fetch(url, { signal: controller.signal });
+      await delay(10);
+      controller.abort('stop-now');
+      const error = await expectRejectName(() => pending, 'AbortError');
+      assertEqual(error.message, 'stop-now');
+    },
+  );
+});
+
+test('fetch timeout rejects with TimeoutError', async () => {
+  await withHttpServer(
+    (socket) => {
+      setTimeout(() => socket.end(), 500);
+    },
+    async (url) => {
+      await expectRejectName(
+        () => fetch(url, { timeout_ms: 100 } as unknown as RequestInit),
+        'TimeoutError',
+      );
+    },
   );
 });
 
