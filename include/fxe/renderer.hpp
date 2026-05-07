@@ -52,7 +52,9 @@ namespace fxe {
     }
 
     // Capture the previously-presented frame as RGBA8 pixels.
-    // Synchronous: blocks the render thread until the GPU readback completes.
+    // Non-blocking staged contract: the first call arms a readback and returns
+    // a retryable error; subsequent calls poll until cached pixels are ready or
+    // the capture fails.
     // `rgba` is replaced with width*height*4 bytes (row-major, tightly packed
     // — row stride = width*4); width/height with framebuffer dimensions.
     // Returns ok=false (with `error` populated) if the backend cannot honour

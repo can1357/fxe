@@ -6,12 +6,15 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -147,15 +150,27 @@ namespace fxe {
       return std::bit_cast<texture_id>(v.uv.z);
     }
 
+    constexpr texture_id kFontColorFlag = 0x080000u;
+    constexpr texture_id kFontMaskFlag = 0x040000u;
+
     [[nodiscard]] primitive_effect classify_triangle(const std::vector<vertex>& vertices,
                                                      const u32* indices) noexcept {
+      primitive_effect alpha_effect = primitive_effect::color;
       for (u32 i = 0; i != 3; ++i) {
-        if (indices[i] < vertices.size() &&
-            vertex_texture_id(vertices[indices[i]]) == framebuffer_texture_id) {
+        if (indices[i] >= vertices.size())
+          continue;
+        const vertex& v = vertices[indices[i]];
+        const texture_id tx = vertex_texture_id(v);
+        if (tx == framebuffer_texture_id)
           return primitive_effect::framebuffer_sample;
-        }
+        if ((tx & kFontMaskFlag) != 0u)
+          return primitive_effect::text_mask;
+        if ((tx & kFontColorFlag) != 0u)
+          return primitive_effect::text_color;
+        if (v.color.a < 255)
+          alpha_effect = primitive_effect::transparent;
       }
-      return primitive_effect::color;
+      return alpha_effect;
     }
 
     template <typename Future> void wait_future(wgpu::Instance& instance, Future fut) {
@@ -282,7 +297,8 @@ namespace fxe {
 
         const bool has_blur = has_framebuffer_samples();
         auto encode_draw_pass = [&](wgpu::LoadOp color_load, wgpu::LoadOp depth_load,
-                                    blur_draw_mode mode, bool* blur_seen) {
+                                    blur_draw_mode mode,
+                                    const wgpu::TextureView& framebuffer_view = {}) {
           wgpu::RenderPassColorAttachment color{};
           color.view = multisample_count_ > 1 ? msaa_view_ : color_view_;
           if (multisample_count_ > 1)
@@ -306,19 +322,52 @@ namespace fxe {
           if (depth_view_)
             pass_desc.depthStencilAttachment = &depth;
           wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&pass_desc);
-          pass.SetBindGroup(0, bind_group_);
+          const wgpu::BindGroup frame_bind_group =
+              framebuffer_view
+                  ? create_bind_group(ubo_, "fxe-offscreen-bg-framebuffer", framebuffer_view)
+                  : bind_group_;
+          pass.SetBindGroup(0, frame_bind_group);
           if (vbuf_size_used_ > 0) {
             pass.SetVertexBuffer(0, vbuf_, 0, vbuf_size_used_);
-            draw_indexed(pass, mode, blur_seen);
+            draw_indexed(pass, mode);
           }
-          encode_custom_draws(pass);
+          if (mode != blur_draw_mode::composite)
+            encode_custom_draws(pass);
           pass.End();
         };
 
-        if (has_blur) {
-          bool blur_seen = false;
-          encode_draw_pass(wgpu::LoadOp::Clear, wgpu::LoadOp::Clear, blur_draw_mode::pre_capture,
-                           &blur_seen);
+        auto encode_post_process_pass = [&](wgpu::RenderPipeline pipeline,
+                                            const wgpu::TextureView& src_view,
+                                            const wgpu::TextureView& dst_view, const char* label) {
+          wgpu::RenderPassColorAttachment color{};
+          color.view = dst_view;
+          color.loadOp = wgpu::LoadOp::Clear;
+          color.storeOp = wgpu::StoreOp::Store;
+          color.clearValue = {0.0, 0.0, 0.0, 0.0};
+          color.depthSlice = wgpu::kDepthSliceUndefined;
+          wgpu::RenderPassDescriptor pass_desc{};
+          pass_desc.label = label;
+          pass_desc.colorAttachmentCount = 1;
+          pass_desc.colorAttachments = &color;
+          wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&pass_desc);
+          pass.SetPipeline(pipeline);
+          pass.SetBindGroup(0, create_bind_group(ubo_, label, src_view));
+          if (vbuf_size_used_ > 0)
+            pass.SetVertexBuffer(0, vbuf_, 0, vbuf_size_used_);
+          pass.Draw(3, 1, 0, 0);
+          pass.End();
+        };
+
+        const bool blur_ready = blur_capture_texture_ && blur_capture_view_ && blur_ping_texture_ &&
+                                blur_ping_view_ && blur_pong_texture_ && blur_pong_view_;
+        if (has_blur && !blur_ready && !blur_texture_failure_logged_) {
+          std::fprintf(stderr, "fxe.offscreen: blur intermediate texture allocation failed; "
+                               "falling back to unblurred base\n");
+          blur_texture_failure_logged_ = true;
+        }
+
+        if (has_blur && blur_ready) {
+          encode_draw_pass(wgpu::LoadOp::Clear, wgpu::LoadOp::Clear, blur_draw_mode::base);
           wgpu::TexelCopyTextureInfo blur_src{};
           blur_src.texture = color_texture_;
           blur_src.mipLevel = 0;
@@ -331,11 +380,15 @@ namespace fxe {
           blur_dst.aspect = wgpu::TextureAspect::All;
           wgpu::Extent3D blur_extent{options_.width, options_.height, 1};
           encoder.CopyTextureToTexture(&blur_src, &blur_dst, &blur_extent);
-          blur_seen = false;
-          encode_draw_pass(wgpu::LoadOp::Load, wgpu::LoadOp::Load, blur_draw_mode::post_capture,
-                           &blur_seen);
+          encode_post_process_pass(vblur_pipeline_, blur_capture_view_, blur_ping_view_,
+                                   "fxe-offscreen-vblur-pass");
+          encode_post_process_pass(hblur_pipeline_, blur_ping_view_, blur_pong_view_,
+                                   "fxe-offscreen-hblur-pass");
+          encode_draw_pass(wgpu::LoadOp::Load, wgpu::LoadOp::Load, blur_draw_mode::composite,
+                           blur_pong_view_);
         } else {
-          encode_draw_pass(wgpu::LoadOp::Clear, wgpu::LoadOp::Clear, blur_draw_mode::all, nullptr);
+          const blur_draw_mode mode = has_blur ? blur_draw_mode::base : blur_draw_mode::all;
+          encode_draw_pass(wgpu::LoadOp::Clear, wgpu::LoadOp::Clear, mode);
         }
 
         const u32 row_bytes = options_.width * 4u;
@@ -529,16 +582,31 @@ namespace fxe {
         key.fs_entry = "ps_opaque";
         key.color_format = target_format_;
         key.depth_format = options_.enable_depth ? depth_format_ : wgpu::TextureFormat::Undefined;
-        key.blend = current_blend_mode();
+        key.blend = blend_mode::none;
         key.topology = wgpu::PrimitiveTopology::TriangleList;
         key.sample_count = multisample_count_;
         triangle_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
-        key.topology = wgpu::PrimitiveTopology::LineList;
-        line_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
-        key.vs_entry = "vs_transform_uv";
-        key.topology = wgpu::PrimitiveTopology::TriangleList;
-        key.fs_entry = "ps_sample";
+
+        key.blend = blend_mode::alpha;
+        key.fs_entry = "ps_transparent";
+        transparent_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
+        key.fs_entry = "ps_text_mask";
+        text_mask_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
+        key.fs_entry = "ps_text_color";
+        text_color_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
+        key.fs_entry = "ps_framebuffer_sample";
         sample_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
+
+        key.fs_entry = "ps_opaque";
+        key.topology = wgpu::PrimitiveTopology::LineList;
+        key.blend = current_blend_mode();
+        line_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
+
+        key.vs_entry = "vs_fullscreen";
+        key.topology = wgpu::PrimitiveTopology::TriangleList;
+        key.depth_format = wgpu::TextureFormat::Undefined;
+        key.blend = blend_mode::none;
+        key.sample_count = 1;
         key.fs_entry = "ps_vblur";
         vblur_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
         key.fs_entry = "ps_hblur";
@@ -548,7 +616,8 @@ namespace fxe {
         recreate_buffers_ = false;
       }
 
-      wgpu::BindGroup create_bind_group(const wgpu::Buffer& ubo, const char* label) {
+      wgpu::BindGroup create_bind_group(const wgpu::Buffer& ubo, const char* label,
+                                        const wgpu::TextureView& framebuffer_view = {}) {
         std::array<wgpu::BindGroupEntry, 8> entries{};
         entries[0].binding = 0;
         entries[0].buffer = ubo;
@@ -564,7 +633,9 @@ namespace fxe {
         entries[5].binding = 5;
         entries[5].sampler = atlas_sampler_;
         entries[6].binding = 6;
-        entries[6].textureView = blur_capture_view_ ? blur_capture_view_ : atlas_view_;
+        entries[6].textureView = framebuffer_view
+                                     ? framebuffer_view
+                                     : (blur_capture_view_ ? blur_capture_view_ : atlas_view_);
         entries[7].binding = 7;
         entries[7].sampler = mask_sampler_;
         wgpu::BindGroupDescriptor bg_desc{};
@@ -729,14 +800,25 @@ namespace fxe {
         }
 
         blur_capture_view_ = {};
+        blur_ping_view_ = {};
+        blur_pong_view_ = {};
         destroy_texture(blur_capture_texture_);
+        destroy_texture(blur_ping_texture_);
+        destroy_texture(blur_pong_texture_);
         wgpu::TextureDescriptor blur_desc = color_desc;
-        blur_desc.label = "fxe-offscreen-blur-capture";
-        blur_desc.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst |
+        blur_desc.usage = wgpu::TextureUsage::RenderAttachment |
+                          wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst |
                           wgpu::TextureUsage::CopySrc;
         blur_desc.sampleCount = 1;
+        blur_desc.label = "fxe-offscreen-blur-capture";
         blur_capture_texture_ = device_.CreateTexture(&blur_desc);
         blur_capture_view_ = blur_capture_texture_.CreateView();
+        blur_desc.label = "fxe-offscreen-blur-ping";
+        blur_ping_texture_ = device_.CreateTexture(&blur_desc);
+        blur_ping_view_ = blur_ping_texture_.CreateView();
+        blur_desc.label = "fxe-offscreen-blur-pong";
+        blur_pong_texture_ = device_.CreateTexture(&blur_desc);
+        blur_pong_view_ = blur_pong_texture_.CreateView();
         if (bgl_)
           bind_group_ = create_bind_group(ubo_, "fxe-offscreen-bg");
 
@@ -795,7 +877,7 @@ namespace fxe {
         vbuf_size_used_ = vbytes;
       }
 
-      enum class blur_draw_mode { all, pre_capture, post_capture };
+      enum class blur_draw_mode { all, base, composite };
 
       [[nodiscard]] bool has_framebuffer_samples() const {
         const auto& tri = index_buffers[usize(vertex_topology::triangle)];
@@ -808,6 +890,12 @@ namespace fxe {
 
       [[nodiscard]] wgpu::RenderPipeline pipeline_for_effect(primitive_effect effect) const {
         switch (effect) {
+        case primitive_effect::transparent:
+          return transparent_pipeline_;
+        case primitive_effect::text_mask:
+          return text_mask_pipeline_;
+        case primitive_effect::text_color:
+          return text_color_pipeline_;
         case primitive_effect::framebuffer_sample:
           return sample_pipeline_;
         case primitive_effect::vertical_blur:
@@ -832,7 +920,7 @@ namespace fxe {
         pass.DrawIndexed(count, 1, 0, 0, 0);
       }
 
-      void draw_triangles(wgpu::RenderPassEncoder& pass, blur_draw_mode mode, bool& blur_seen) {
+      void draw_triangles(wgpu::RenderPassEncoder& pass, blur_draw_mode mode) {
         const auto& tri = index_buffers[usize(vertex_topology::triangle)];
         u32 batch_first = 0;
         u32 batch_count = 0;
@@ -842,18 +930,13 @@ namespace fxe {
           batch_count = 0;
         };
         for (usize i = 0; i + 2 < tri.size(); i += 3) {
-          primitive_effect effect = classify_triangle(vertex_buffer, &tri[i]);
-          if (mode == blur_draw_mode::pre_capture &&
-              effect == primitive_effect::framebuffer_sample) {
-            flush();
-            blur_seen = true;
-            return;
-          }
-          if (mode == blur_draw_mode::post_capture && !blur_seen) {
-            if (effect != primitive_effect::framebuffer_sample)
-              continue;
-            blur_seen = true;
-          }
+          const primitive_effect effect = classify_triangle(vertex_buffer, &tri[i]);
+          const bool composite_effect = effect == primitive_effect::framebuffer_sample ||
+                                        effect == primitive_effect::transparent;
+          if (mode == blur_draw_mode::base && composite_effect)
+            continue;
+          if (mode == blur_draw_mode::composite && !composite_effect)
+            continue;
           const u32 rel = static_cast<u32>(i);
           if (batch_count == 0) {
             batch_first = rel;
@@ -871,14 +954,11 @@ namespace fxe {
         flush();
       }
 
-      void draw_indexed(wgpu::RenderPassEncoder& pass, blur_draw_mode mode = blur_draw_mode::all,
-                        bool* blur_seen_arg = nullptr) {
-        bool local_blur_seen = mode != blur_draw_mode::post_capture;
-        bool& blur_seen = blur_seen_arg ? *blur_seen_arg : local_blur_seen;
-        draw_triangles(pass, mode, blur_seen);
+      void draw_indexed(wgpu::RenderPassEncoder& pass, blur_draw_mode mode = blur_draw_mode::all) {
+        draw_triangles(pass, mode);
         const usize top = static_cast<usize>(vertex_topology::line);
         const u32 count = static_cast<u32>(index_buffers[top].size());
-        if (count > 0 && mode != blur_draw_mode::pre_capture) {
+        if (count > 0 && mode != blur_draw_mode::composite) {
           pass.SetPipeline(line_pipeline_);
           pass.SetIndexBuffer(line_ibuf_, wgpu::IndexFormat::Uint32, 0, count * sizeof(u32));
           pass.DrawIndexed(count, 1, 0, 0, 0);
@@ -917,17 +997,26 @@ namespace fxe {
       }
 
       void finish_readback(u64 needed) {
-        struct map_state {
-          bool ok = false;
-        } state;
-        auto fut =
-            readback_buf_.MapAsync(wgpu::MapMode::Read, 0, needed, wgpu::CallbackMode::WaitAnyOnly,
-                                   [&state](wgpu::MapAsyncStatus status, wgpu::StringView) {
-                                     state.ok = (status == wgpu::MapAsyncStatus::Success);
-                                   });
-        wgpu::FutureWaitInfo info{fut};
-        instance_.WaitAny(1, &info, UINT64_MAX);
-        if (!state.ok)
+        // Offscreen read_rgba8() is a test-only synchronous API. Keep it bounded:
+        // never use an infinite WaitAny; instead pump Dawn events until the
+        // non-blocking map callback fires or a finite timeout expires.
+        std::atomic<bool> done{false};
+        std::atomic<bool> ok{false};
+        auto fut = readback_buf_.MapAsync(
+            wgpu::MapMode::Read, 0, needed, wgpu::CallbackMode::AllowSpontaneous,
+            [&done, &ok](wgpu::MapAsyncStatus status, wgpu::StringView) {
+              ok.store(status == wgpu::MapAsyncStatus::Success, std::memory_order_release);
+              done.store(true, std::memory_order_release);
+            });
+        (void)fut;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
+          instance_.ProcessEvents();
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        instance_.ProcessEvents();
+        if (!done.load(std::memory_order_acquire) || !ok.load(std::memory_order_acquire))
           return;
         const auto* mapped = static_cast<const u8*>(readback_buf_.GetConstMappedRange(0, needed));
         if (!mapped) {
@@ -966,8 +1055,11 @@ namespace fxe {
       wgpu::PipelineLayout pipeline_layout_;
       wgpu::ShaderModule shader_;
       wgpu::RenderPipeline triangle_pipeline_;
+      wgpu::RenderPipeline transparent_pipeline_;
       wgpu::RenderPipeline line_pipeline_;
       pipeline_cache pipeline_cache_;
+      wgpu::RenderPipeline text_mask_pipeline_;
+      wgpu::RenderPipeline text_color_pipeline_;
       wgpu::RenderPipeline sample_pipeline_;
       wgpu::RenderPipeline vblur_pipeline_;
       wgpu::RenderPipeline hblur_pipeline_;
@@ -980,6 +1072,11 @@ namespace fxe {
       wgpu::TextureView depth_view_;
       wgpu::Texture blur_capture_texture_;
       wgpu::TextureView blur_capture_view_;
+      wgpu::Texture blur_ping_texture_;
+      wgpu::TextureView blur_ping_view_;
+      wgpu::Texture blur_pong_texture_;
+      wgpu::TextureView blur_pong_view_;
+      bool blur_texture_failure_logged_ = false;
       wgpu::Texture atlas_texture_;
       wgpu::TextureView atlas_view_;
       wgpu::Sampler atlas_sampler_;

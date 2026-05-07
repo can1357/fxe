@@ -109,6 +109,21 @@ fn shade(arg: VertexOut) -> vec4<f32> {
   return arg.color * s;
 }
 
+fn shade_text_mask(arg: VertexOut) -> vec4<f32> {
+  let s = textureSampleLevel(font_mask_tex, mask_sampler, arg.uv, 0.0);
+  return vec4<f32>(arg.color.rgb, arg.color.a * s.r);
+}
+
+fn shade_text_color(arg: VertexOut) -> vec4<f32> {
+  let s = textureSampleLevel(font_color_tex, atlas_sampler, arg.uv, 0.0);
+  return vec4<f32>(s.rgb, s.a * arg.color.a);
+}
+
+fn shade_framebuffer_sample(arg: VertexOut) -> vec4<f32> {
+  return arg.color * sample_framebuffer(arg.pos, arg.uv);
+}
+
+
 @fragment
 fn ps_opaque(arg: VertexOut) -> @location(0) vec4<f32> {
   return shade(arg);
@@ -118,6 +133,22 @@ fn ps_opaque(arg: VertexOut) -> @location(0) vec4<f32> {
 fn ps_transparent(arg: VertexOut) -> @location(0) vec4<f32> {
   return shade(arg);
 }
+
+@fragment
+fn ps_text_mask(arg: VertexOut) -> @location(0) vec4<f32> {
+  return shade_text_mask(arg);
+}
+
+@fragment
+fn ps_text_color(arg: VertexOut) -> @location(0) vec4<f32> {
+  return shade_text_color(arg);
+}
+
+@fragment
+fn ps_framebuffer_sample(arg: VertexOut) -> @location(0) vec4<f32> {
+  return shade_framebuffer_sample(arg);
+}
+
 
 struct FullscreenOut {
   @builtin(position) pos: vec4<f32>,
@@ -142,9 +173,9 @@ fn vs_fullscreen(@builtin(vertex_index) vertex_index: u32) -> FullscreenOut {
     vec2<f32>(-1.0,  3.0)
   );
   var uvs = array<vec2<f32>, 3>(
-    vec2<f32>(0.0, 1.0),
-    vec2<f32>(2.0, 1.0),
-    vec2<f32>(0.0, -1.0)
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(0.0, 0.0),
+    vec2<f32>(0.0, 0.0)
   );
   var out: FullscreenOut;
   out.pos = vec4<f32>(positions[vertex_index], 0.0, 1.0);

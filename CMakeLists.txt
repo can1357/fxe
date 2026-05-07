@@ -1015,6 +1015,7 @@ if(FXE_BUILD_TESTS)
     # ---------------------------------------------------------------------
     if(TARGET fxe_js)
         fxe_add_v8_ts_test(fxe_ts_tests)
+        fxe_add_v8_ts_test(fxe_ui_box_shadow_blur_test tests/ui_box_shadow_blur_test.tsx)
         file(
             GLOB _v8_ts_test_scripts
             RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"

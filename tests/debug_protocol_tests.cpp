@@ -4,7 +4,9 @@
 #include "../src/debug/base64.hpp"
 #include "../src/debug/dispatch.hpp"
 #include "../src/debug/server.hpp"
+#include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
+#include <fxe/window.hpp>
 
 #include <chrono>
 #include <cstdio>
@@ -18,7 +20,6 @@
 #ifdef FXE_HAS_V8
 #include <atomic>
 #include <fxe/v8_host.hpp>
-#include <fxe/window.hpp>
 #endif
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -52,6 +53,106 @@ namespace {
       }
     }
     return false;
+  }
+
+  class screenshot_test_window final : public fxe::window {
+  public:
+    screenshot_test_window(unsigned w, unsigned h) : size_{w, h} {}
+    void poll() override {}
+    void wait_events() override {}
+    void wait_events_timeout(double) override {}
+    void post_redraw() override {
+      dirty_ = true;
+    }
+    bool take_redraw_request() override {
+      bool out = dirty_;
+      dirty_ = false;
+      return out;
+    }
+    void close() override {
+      closed_ = true;
+    }
+    bool should_close() const override {
+      return closed_;
+    }
+    fxe::math::uvec2 framebuffer_size() const override {
+      return size_;
+    }
+    void set_vsync(bool) override {}
+    void* native_handle() const override {
+      return nullptr;
+    }
+
+  private:
+    fxe::math::uvec2 size_{};
+    bool dirty_ = false;
+    bool closed_ = false;
+  };
+
+  class async_capture_test_renderer final : public fxe::renderer {
+  public:
+    explicit async_capture_test_renderer(screenshot_test_window& w) : win_(w) {}
+
+    void begin_frame(const fxe::math::vec3& = {}, const fxe::math::vec3& = {},
+                     const fxe::math::mat4x4& = fxe::math::identity()) override {}
+    void end_frame() override {
+      if (state_ == state::pending)
+        state_ = state::ready;
+    }
+    bool queue_dev(const fxe::command_buffer&, const fxe::vshader_cbuf&,
+                   const fxe::render_config&) override {
+      return true;
+    }
+    fxe::renderer::capture_result capture_frame() override {
+      ++capture_calls_;
+      fxe::renderer::capture_result r;
+      if (state_ == state::idle) {
+        state_ = state::pending;
+        win_.post_redraw();
+        r.error = "capture armed; retry after the next render";
+        return r;
+      }
+      if (state_ == state::pending) {
+        r.error = "capture in progress; retry shortly";
+        return r;
+      }
+      r.ok = true;
+      r.width = 2;
+      r.height = 1;
+      r.rgba = known_rgba_;
+      return r;
+    }
+    fxe::window& get_window() override {
+      return win_;
+    }
+    const fxe::window& get_window() const override {
+      return win_;
+    }
+    int capture_calls() const {
+      return capture_calls_;
+    }
+    const std::vector<::u8>& known_rgba() const {
+      return known_rgba_;
+    }
+
+  private:
+    enum class state { idle, pending, ready };
+    screenshot_test_window& win_;
+    state state_ = state::idle;
+    int capture_calls_ = 0;
+    // Known-color bytes after BGRA->RGBA conversion: red-ish then blue-ish.
+    std::vector<::u8> known_rgba_{0x11, 0x22, 0x33, 0xff, 0xaa, 0xbb, 0xcc, 0x80};
+  };
+
+  bool png_has_ihdr_size(const std::vector<::u8>& bytes, unsigned w, unsigned h) {
+    const unsigned char sig[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    if (bytes.size() < 24 || std::memcmp(bytes.data(), sig, sizeof(sig)) != 0)
+      return false;
+    auto be32 = [&](std::size_t off) {
+      return (unsigned(bytes[off]) << 24u) | (unsigned(bytes[off + 1]) << 16u) |
+             (unsigned(bytes[off + 2]) << 8u) | unsigned(bytes[off + 3]);
+    };
+    return be32(16) == w && be32(20) == h;
   }
 
   void test_base64() {
@@ -126,6 +227,56 @@ namespace {
     CHECK(schema_domain_exists(domains, "Runtime"));
     CHECK(schema_domain_exists(domains, "Debugger"));
     CHECK(schema_domain_exists(domains, "Reconciler"));
+  }
+
+  void test_page_screenshot_async_retry_dispatch() {
+    using namespace fxe::debug;
+    screenshot_test_window win{2, 1};
+    async_capture_test_renderer rdr{win};
+    dispatch_context cx{};
+    cx.win = &win;
+    cx.rdr = &rdr;
+
+    bool first_threw = false;
+    try {
+      (void)dispatch(cx, "Page.screenshot", json{json::object()});
+    } catch (const dispatch_error& e) {
+      first_threw = true;
+      CHECK(static_cast<int>(e.code) == -32001);
+      CHECK(e.message == "capture armed; retry after the next render");
+    }
+    CHECK(first_threw);
+    CHECK(win.take_redraw_request());
+
+    auto fb = dispatch(cx, "Page.framebufferSize", json{json::object()});
+    CHECK(fb.at("width").get<double>() == 2.0);
+    CHECK(fb.at("height").get<double>() == 1.0);
+
+    bool pending_threw = false;
+    try {
+      (void)dispatch(cx, "Page.screenshot", json{json::object()});
+    } catch (const dispatch_error& e) {
+      pending_threw = true;
+      CHECK(static_cast<int>(e.code) == -32001);
+      CHECK(e.message == "capture in progress; retry shortly");
+    }
+    CHECK(pending_threw);
+
+    rdr.end_frame();
+    auto out = dispatch(cx, "Page.screenshot", json{json::object()});
+    CHECK(out.at("format").get<std::string>() == "png");
+    CHECK(out.at("width").get<double>() == 2.0);
+    CHECK(out.at("height").get<double>() == 1.0);
+    CHECK(out.at("byteSize").get<double>() > 0.0);
+    auto png = base64::decode(out.at("dataBase64").get<std::string>());
+    CHECK(png.has_value());
+    if (png)
+      CHECK(png_has_ihdr_size(*png, 2, 1));
+
+    auto cap = rdr.capture_frame();
+    CHECK(cap.ok);
+    CHECK(cap.rgba == rdr.known_rgba());
+    CHECK(rdr.capture_calls() >= 4);
   }
 
   void test_cdp_enable_dispatch() {
@@ -855,6 +1006,7 @@ int main([[maybe_unused]] int argc, char** argv) {
   test_handshake_dispatch();
   test_method_not_found();
   test_cdp_schema_dispatch();
+  test_page_screenshot_async_retry_dispatch();
   test_cdp_enable_dispatch();
   test_cdp_profiler_dispatch();
   test_runtime_unavailable_dispatch();

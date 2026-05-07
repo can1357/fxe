@@ -1,7 +1,7 @@
 /** @jsxImportSource fxe-ui */
 
 import { App, Window } from 'fxe';
-import { mount, type Node, StyleSheet, Text, useState, View } from 'fxe-ui';
+import { mount, type Node, StyleSheet, Text, useFrame, useState, View } from 'fxe-ui';
 
 const COLS = 30;
 const ROWS = 30;
@@ -31,8 +31,8 @@ function Cell({ i, tick }: { i: number; tick: number }): Node {
 
 function App2(): Node {
   const [tick, setTick] = useState(0);
-  // Animate so reconcile/paint actually runs every frame
-  setTimeout(() => setTick((t) => t + 1), 0);
+  useFrame(() => setTick((t) => t + 1));
+  if (tick % 60 === 0) console.log('App2 render tick=', tick);
   const cells: Node[] = [];
   for (let i = 0; i < COLS * ROWS; i++) cells.push(<Cell key={i} i={i} tick={tick} />);
   return (

@@ -368,7 +368,8 @@ asyncio.run(main())
   to discover what the script exposes.
 - `await page.screenshot(path)` — RGBA8 PNG of the most recent frame, decoded
   from base64. **First call after launch arms capture and returns an error
-  ("retry after the next render"); the SDK does not auto-retry — sleep for a
+  ("retry after the next render"); while readback is still pending it may return
+  "capture in progress; retry shortly". The SDK does not auto-retry — sleep for a
   frame and call again.** A small helper:
   ```python
   async def shot(page, path, retries=3):
@@ -532,7 +533,7 @@ easiest way to force a full layout pass into the buffer.
 |---|---|---|
 | `LaunchError: FXE_DEBUG_PORT not detected` | binary missing or build stale | `just build dev` |
 | `ProtocolError(-32002, "V8 host not attached")` | called Runtime.* before the host loaded | wait for handshake / `await asyncio.sleep(0.05)` |
-| `ProtocolError(-32001, "capture armed; retry after the next render")` | first screenshot call | retry after a short sleep (see helper above) |
+| `ProtocolError(-32001, "capture armed; retry after the next render")` or `"capture in progress; retry shortly"` | screenshot capture is not ready yet | retry after a short sleep (see helper above) |
 | `ProtocolError(-32002, "window not attached")` / `"renderer not attached"` | the script hasn't run `new Window`/`new Renderer` yet | the SDK should `await page.resume()` if launched paused; otherwise wait |
 | Hangs on close | child blocked in `win.run` | the SDK's `__aexit__` sends `Window.close`; if your script ignores close, also call `await page.evaluate("window.close()")` |
 | Screenshot all transparent | the renderer hasn't rendered yet — first arming returns nothing | second call after the next `endFrame` will succeed |

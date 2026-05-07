@@ -17,6 +17,9 @@
 namespace fxe {
   enum class primitive_effect : u8 {
     color = 0,
+    transparent,
+    text_mask,
+    text_color,
     framebuffer_sample,
     vertical_blur,
     horizontal_blur,

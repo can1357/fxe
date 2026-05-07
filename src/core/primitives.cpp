@@ -1641,12 +1641,12 @@ namespace fxe::primitives {
                  const color_list<4>& color, float dispersion, math::vec2 screen_size) {
     auto [vt, id] = r.allocate(4 * 26, 6 * 26, vertex_topology::triangle);
 
-    // First quad: opaque base colours used as the "pre-multiplied" backdrop.
+    // First quad: capture-only base colours used as the blur source mask.
     const r8g8b8a8 base[4] = {
-        r8g8b8a8{color[0].r, color[0].g, color[0].b, 255},
-        r8g8b8a8{color[1].r, color[1].g, color[1].b, 255},
-        r8g8b8a8{color[2].r, color[2].g, color[2].b, 255},
-        r8g8b8a8{color[3].r, color[3].g, color[3].b, 255},
+        r8g8b8a8{color[0].r, color[0].g, color[0].b, static_cast<u8>(color[0].a == 0 ? 0 : 255)},
+        r8g8b8a8{color[1].r, color[1].g, color[1].b, static_cast<u8>(color[1].a == 0 ? 0 : 255)},
+        r8g8b8a8{color[2].r, color[2].g, color[2].b, static_cast<u8>(color[2].a == 0 ? 0 : 255)},
+        r8g8b8a8{color[3].r, color[3].g, color[3].b, static_cast<u8>(color[3].a == 0 ? 0 : 255)},
     };
     vt[0] = make_vertex4(p1, {}, null_texture, base[0]);
     vt[1] = make_vertex4(p2, {}, null_texture, base[1]);
@@ -1669,8 +1669,8 @@ namespace fxe::primitives {
       for (int y = -2; y <= +2; ++y) {
         const float w = kBlurKernel[std::abs(x)][std::abs(y)];
         const math::vec2 uv{float(x) * ires.x, float(y) * ires.y};
-        // TODO(blur): src/wgpu/shaders/main.wgsl currently has no framebuffer
-        // binding for framebuffer_texture_id, so blur is not functional end-to-end.
+        // Sentinel contract: tx == framebuffer_texture_id means the renderer
+        // composites this batch in the post-blur framebuffer sample pass.
         const texture_id tex = framebuffer_texture_id;
         const u8 a0 = u8(math::fclamp(ca[0] * w, 0.0f, 255.0f));
         const u8 a1 = u8(math::fclamp(ca[1] * w, 0.0f, 255.0f));
