@@ -114,13 +114,17 @@ int main() {
     CHECK(shaper != nullptr);
     if (shaper && face) {
       ShapeOptions opts;
-      ShapeRun run = shaper->shape(*face, "Hello", opts);
+      auto runs = shaper->shape(*face, "Hello", opts);
+      CHECK(!runs.empty());
+      const auto& run = runs.front();
       CHECK(!run.glyphs.empty());
       CHECK(run.total_advance > 0.0f);
 
       // "fi" should ligate on most monospace fonts, and at minimum produce
       // ≤ 2 glyphs. On fonts without a fi ligature, we still expect 2.
-      ShapeRun fi = shaper->shape(*face, "fi", opts);
+      auto fi_runs = shaper->shape(*face, "fi", opts);
+      CHECK(!fi_runs.empty());
+      const auto& fi = fi_runs.front();
       CHECK(!fi.glyphs.empty());
       CHECK(fi.glyphs.size() <= 2);
     }

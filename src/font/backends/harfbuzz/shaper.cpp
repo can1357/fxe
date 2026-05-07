@@ -37,16 +37,23 @@ namespace fxe::font {
 
     class HarfBuzzShaper final : public Shaper {
     public:
-      [[nodiscard]] ShapeRun shape(Face& face, std::string_view utf8,
-                                   const ShapeOptions& opts) override {
+      [[nodiscard]] std::vector<ShapeRun> shape(Face& face, std::string_view utf8,
+                                                const ShapeOptions& opts) override {
         ShapeRun out{};
+        out.face = &face;
         out.direction = opts.direction;
-        if (utf8.empty())
-          return out;
+        if (utf8.empty()) {
+          std::vector<ShapeRun> runs;
+          runs.push_back(std::move(out));
+          return runs;
+        }
 
         hb_font_t* font = face_freetype_hb_font(face);
-        if (!font)
-          return out;
+        if (!font) {
+          std::vector<ShapeRun> runs;
+          runs.push_back(std::move(out));
+          return runs;
+        }
 
         // Apply variations on the face if requested.
         if (!opts.variations.empty()) {
@@ -95,7 +102,9 @@ namespace fxe::font {
         }
 
         hb_buffer_destroy(buf);
-        return out;
+        std::vector<ShapeRun> runs;
+        runs.push_back(std::move(out));
+        return runs;
       }
     };
 

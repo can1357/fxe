@@ -294,6 +294,14 @@ namespace fxe::font {
     return face;
   }
 
+  std::unique_ptr<Face> make_face_from_ctfont(void* ct_font_ref, float pixel_size) {
+    if (!ct_font_ref) return nullptr;
+    CTFontRef ct = static_cast<CTFontRef>(ct_font_ref);
+    if (pixel_size <= 0.0f || !std::isfinite(pixel_size))
+      pixel_size = static_cast<float>(CTFontGetSize(ct));
+    return std::make_unique<CoreTextFace>(ct, pixel_size);
+  }
+
   std::unique_ptr<Face> load_face_coretext_name(std::string_view family, float pixel_size,
                                                 Style style) {
     CFStringRef name = CFStringCreateWithBytes(nullptr,

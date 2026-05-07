@@ -34,6 +34,12 @@ namespace fxe::font {
     Direction direction = Direction::ltr;
     // Total inked advance in pixels. Convenience for measureText().
     float total_advance = 0.0f;
+    // Resolved face for THIS run. Non-owning. When CoreText / HarfBuzz cascade
+    // substitutes a different font for unsupported codepoints (e.g. emoji
+    // falling back to Apple Color Emoji), the shaper emits a separate run
+    // pointing at that substitute Face. `nullptr` means "use the caller-
+    // supplied face" — that is the common single-script path.
+    Face* face = nullptr;
   };
 
   struct ShapeOptions {
@@ -50,8 +56,12 @@ namespace fxe::font {
   class Shaper {
   public:
     virtual ~Shaper() = default;
-    [[nodiscard]] virtual ShapeRun shape(Face& face, std::string_view utf8,
-                                         const ShapeOptions& opts) = 0;
+    // Returns one ShapeRun per resolved face. Single-script Latin text
+    // typically returns a vector of size 1; mixed text (text + emoji,
+    // CJK + Latin, etc.) yields one run per font segment, each with its
+    // own `face` pointer the renderer should use to look up glyphs.
+    [[nodiscard]] virtual std::vector<ShapeRun> shape(Face& face, std::string_view utf8,
+                                                     const ShapeOptions& opts) = 0;
   };
 
   [[nodiscard]] std::unique_ptr<Shaper> default_shaper();

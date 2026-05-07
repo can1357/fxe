@@ -93,19 +93,25 @@ int main() {
       CHECK(shaper != nullptr);
       if (face && shaper) {
         ShapeOptions opts;
-        ShapeRun fi = shaper->shape(*face, "fi", opts);
+        auto fi_runs = shaper->shape(*face, "fi", opts);
+        CHECK(!fi_runs.empty());
+        const auto& fi = fi_runs.front();
         CHECK(!fi.glyphs.empty());
         CHECK(fi.glyphs.size() <= 2);
         CHECK(fi.total_advance > 0.0f);
 
         // "AVA" should kern: total_advance(AVA) < 3 * advance(A) for a font
         // with kerning. Skip the strict assertion since not all fonts kern A/V.
-        ShapeRun ava = shaper->shape(*face, "AVA", opts);
+        auto ava_runs = shaper->shape(*face, "AVA", opts);
+        CHECK(!ava_runs.empty());
+        const auto& ava = ava_runs.front();
         CHECK(ava.glyphs.size() == 3);
         CHECK(ava.total_advance > 0.0f);
 
         // Empty input produces empty run.
-        ShapeRun empty = shaper->shape(*face, "", opts);
+        auto empty_runs = shaper->shape(*face, "", opts);
+        CHECK(!empty_runs.empty());
+        const auto& empty = empty_runs.front();
         CHECK(empty.glyphs.empty());
         CHECK(empty.total_advance == 0.0f);
       }

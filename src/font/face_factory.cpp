@@ -22,11 +22,15 @@ namespace fxe::font {
   std::unique_ptr<Face> load_face_coretext(std::span<const std::uint8_t> bytes, float pixel_size);
   std::unique_ptr<Face> load_face_coretext_name(std::string_view family, float pixel_size,
                                                 Style style);
+  std::unique_ptr<Face> make_face_from_ctfont(void* ct_font_ref, float pixel_size);
 #else
   std::unique_ptr<Face> load_face_coretext(std::span<const std::uint8_t>, float) {
     return nullptr;
   }
   std::unique_ptr<Face> load_face_coretext_name(std::string_view, float, Style) {
+    return nullptr;
+  }
+  std::unique_ptr<Face> make_face_from_ctfont(void*, float) {
     return nullptr;
   }
 #endif

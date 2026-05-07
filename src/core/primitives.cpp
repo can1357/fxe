@@ -1417,13 +1417,17 @@ namespace fxe::primitives {
         if (it == end || *it == '\n') {
           const std::string_view line{line_start, static_cast<std::size_t>(it - line_start)};
           font::ShapeOptions opts = style_to_shape_opts(style);
-          font::ShapeRun run = shaper->shape(face, line, opts);
-          const math::vec2 next_pen_fb =
-              emit_shaped_run_screen(r, pen_fb, depth, dpr, face, run, col);
+          auto runs = shaper->shape(face, line, opts);
+          math::vec2 line_pen_fb = pen_fb;
+          for (const auto& run : runs) {
+            font::Face* run_face = run.face ? run.face : &face;
+            line_pen_fb = emit_shaped_run_screen(r, line_pen_fb, depth, dpr, *run_face, run, col);
+            advance_total_logical += run.total_advance * inv_dpr;
+            glyph_count += static_cast<u32>(run.glyphs.size());
+          }
+          const math::vec2 next_pen_fb = line_pen_fb;
           const float row_advance_logical = (next_pen_fb.x - origin_fb_x) * inv_dpr;
           max_advance_logical = math::fmax(max_advance_logical, row_advance_logical);
-          advance_total_logical += run.total_advance * inv_dpr;
-          glyph_count += static_cast<u32>(run.glyphs.size());
           if (it == end)
             break;
           ++it;
@@ -1461,8 +1465,11 @@ namespace fxe::primitives {
         if (it == end || *it == '\n') {
           const std::string_view line{line_start, static_cast<std::size_t>(it - line_start)};
           font::ShapeOptions opts = style_to_shape_opts(style);
-          font::ShapeRun run = shaper->shape(face, line, opts);
-          x_max_logical = math::fmax(x_max_logical, run.total_advance * inv_dpr);
+          auto runs = shaper->shape(face, line, opts);
+          float line_advance = 0.0f;
+          for (const auto& run : runs)
+            line_advance += run.total_advance;
+          x_max_logical = math::fmax(x_max_logical, line_advance * inv_dpr);
           if (it == end) {
             ++lines;
             break;

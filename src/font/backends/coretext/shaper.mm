@@ -15,6 +15,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <string_view>
 #include <vector>
 
@@ -23,10 +24,9 @@ namespace fxe::font {
 
     class CoreTextShaper final : public Shaper {
     public:
-      [[nodiscard]] ShapeRun shape(Face& face, std::string_view utf8,
-                                   const ShapeOptions& opts) override {
-        ShapeRun out{};
-        out.direction = opts.direction;
+      [[nodiscard]] std::vector<ShapeRun> shape(Face& face, std::string_view utf8,
+                                                const ShapeOptions& opts) override {
+        std::vector<ShapeRun> out;
         if (utf8.empty()) return out;
 
         CTFontRef ct = static_cast<CTFontRef>(face.native_handle());
@@ -97,6 +97,26 @@ namespace fxe::font {
           CTRunRef run = static_cast<CTRunRef>(CFArrayGetValueAtIndex(runs, i));
           const CFIndex glyph_count = CTRunGetGlyphCount(run);
           if (glyph_count <= 0) continue;
+
+          // CoreText cascades to a different physical font when the requested
+          // font does not cover a codepoint (Latin → Apple Color Emoji for
+          // 🔒 for example). Each CTRun reports the font it actually used in
+          // its attribute dictionary. We resolve that here so the renderer
+          // looks up glyphs against the right Face — otherwise the glyph_id
+          // we hand out belongs to the substitute font but the cache renders
+          // it through the original face, producing missing/garbled output.
+          CTFontRef run_ct = ct;
+          if (CFDictionaryRef run_attrs = CTRunGetAttributes(run); run_attrs) {
+            if (auto* maybe_font = CFDictionaryGetValue(run_attrs, kCTFontAttributeName)) {
+              run_ct = static_cast<CTFontRef>(maybe_font);
+            }
+          }
+          Face* run_face = &face;
+          if (run_ct != ct) {
+            run_face = resolve_substitute_face(run_ct);
+            if (!run_face) run_face = &face; // best-effort fallback
+          }
+
           std::vector<CGGlyph> glyphs(static_cast<std::size_t>(glyph_count));
           std::vector<CGSize> advances(static_cast<std::size_t>(glyph_count));
           std::vector<CGPoint> positions(static_cast<std::size_t>(glyph_count));
@@ -106,14 +126,16 @@ namespace fxe::font {
           CTRunGetAdvances(run, whole, advances.data());
           CTRunGetPositions(run, whole, positions.data());
           CTRunGetStringIndices(run, whole, indices.data());
+
+          ShapeRun srun{};
+          srun.direction = opts.direction;
+          srun.face = run_face;
+          srun.glyphs.reserve(static_cast<std::size_t>(glyph_count));
           for (CFIndex j = 0; j < glyph_count; ++j) {
             ShapedGlyph g{};
             g.glyph_id = glyphs[static_cast<std::size_t>(j)];
             g.x_advance = static_cast<float>(advances[static_cast<std::size_t>(j)].width);
             g.y_advance = static_cast<float>(advances[static_cast<std::size_t>(j)].height);
-            // CoreText's positions are absolute within the line; we want
-            // per-glyph offsets (offset from baseline pen). Compute offsets by
-            // subtracting the cumulative advance up to this glyph.
             float prev_x = 0.0f;
             float prev_y = 0.0f;
             if (j > 0) {
@@ -127,14 +149,33 @@ namespace fxe::font {
             g.x_offset = static_cast<float>(pos.x) - prev_x;
             g.y_offset = static_cast<float>(pos.y) - prev_y;
             g.cluster = static_cast<std::uint32_t>(indices[static_cast<std::size_t>(j)]);
-            out.glyphs.push_back(g);
-            out.total_advance += g.x_advance;
+            srun.glyphs.push_back(g);
+            srun.total_advance += g.x_advance;
           }
+          out.push_back(std::move(srun));
         }
 
         CFRelease(line);
         return out;
       }
+
+    private:
+      // Cache substitute Faces keyed by CTFontRef pointer identity. CoreText
+      // returns the same CTFontRef for repeated cascade hits within a process,
+      // so a flat map is enough. We retain CTFonts to keep the keys valid;
+      // the wrapping Face also retains internally for glyph rendering.
+      Face* resolve_substitute_face(CTFontRef ct) {
+        auto it = substitute_faces_.find(ct);
+        if (it != substitute_faces_.end()) return it->second.get();
+        const float px = static_cast<float>(CTFontGetSize(ct));
+        auto wrapped = make_face_from_ctfont(reinterpret_cast<void*>(const_cast<__CTFont*>(ct)), px);
+        if (!wrapped) return nullptr;
+        Face* raw = wrapped.get();
+        substitute_faces_.emplace(ct, std::move(wrapped));
+        return raw;
+      }
+
+      std::unordered_map<CTFontRef, std::unique_ptr<Face>> substitute_faces_;
     };
 
   } // namespace

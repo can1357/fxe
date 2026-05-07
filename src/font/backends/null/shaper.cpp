@@ -38,10 +38,11 @@ namespace fxe::font {
 
     class NoneShaper final : public Shaper {
     public:
-      [[nodiscard]] ShapeRun shape(Face& face, std::string_view utf8,
-                                   const ShapeOptions& opts) override {
+      [[nodiscard]] std::vector<ShapeRun> shape(Face& face, std::string_view utf8,
+                                                const ShapeOptions& opts) override {
         ShapeRun out{};
         out.direction = opts.direction;
+        out.face = &face;
         const char* it = utf8.data();
         const char* end = it + utf8.size();
         while (it < end) {
@@ -58,7 +59,9 @@ namespace fxe::font {
           out.glyphs.push_back(g);
           out.total_advance += g.x_advance;
         }
-        return out;
+        std::vector<ShapeRun> runs;
+        runs.push_back(std::move(out));
+        return runs;
       }
     };
   } // namespace

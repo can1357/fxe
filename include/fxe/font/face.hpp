@@ -116,5 +116,12 @@ namespace fxe::font {
                                                          float pixel_size);
   [[nodiscard]] std::unique_ptr<Face> load_face_coretext_name(std::string_view family,
                                                               float pixel_size, Style style);
+  // CoreText only: wraps an existing CTFontRef (typically reported by the
+  // shaper's font-cascade fallback) in a Face. The Face retains a strong
+  // reference to the CTFont so the caller may release theirs after the
+  // call. Used internally by the shaper to honour multi-font runs (text
+  // mixed with emoji, CJK fallback, etc.).
+  [[nodiscard]] std::unique_ptr<Face> make_face_from_ctfont(void* ct_font_ref,
+                                                           float pixel_size);
 
 } // namespace fxe::font
