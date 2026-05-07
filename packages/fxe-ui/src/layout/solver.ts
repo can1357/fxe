@@ -129,6 +129,15 @@ type Item = {
   node: LayoutNode;
   index: number;
   margin: LayoutEdges;
+  // Pre-resolved margin offsets along the main / cross axes. Computed once
+  // in makeItem() so the hot inner loops in distributeLine / positionLine
+  // don't repeatedly branch on `main === 'width'`. Saved >5% of frame time
+  // in the stress grid (mainBefore/mainAfter were called 4× per item per
+  // layout pass).
+  marginMainBefore: number;
+  marginMainAfter: number;
+  marginCrossBefore: number;
+  marginCrossAfter: number;
   basis: number;
   main: number;
   cross: number;
@@ -187,7 +196,11 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
     if (Number.isNaN(height)) height = measured.height + padding.top + padding.bottom;
   }
 
-  const childNodes = (node.children ?? []).filter((child) => child.style?.display !== 'none');
+  // Single pass: filter display:none, build items, partition into flex /
+  // absolute. The previous pipeline allocated 4 intermediate arrays
+  // (filter → map → filter → filter) and three closures per layoutNode call,
+  // showing up as ~7% of profile self time in `(anon) solver.ts`.
+  const rawChildren = node.children ?? [];
   const contentAvailable = {
     width: Number.isNaN(width) ? undefined : Math.max(0, width - padding.left - padding.right),
     height: Number.isNaN(height) ? undefined : Math.max(0, height - padding.top - padding.bottom),
@@ -195,11 +208,19 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
   const mainParent = axis.main === 'width' ? contentAvailable.width : contentAvailable.height;
   const crossParent = axis.cross === 'width' ? contentAvailable.width : contentAvailable.height;
 
-  const items: Item[] = childNodes.map((child, index) =>
-    makeItem(child, index, axis.main, axis.cross, contentAvailable),
-  );
-  const absoluteItems = items.filter((item) => item.absolute);
-  const flexItems = items.filter((item) => !item.absolute);
+  const childNodes: LayoutNode[] = [];
+  const items: Item[] = [];
+  const flexItems: Item[] = [];
+  const absoluteItems: Item[] = [];
+  for (let i = 0; i < rawChildren.length; ++i) {
+    const ch = rawChildren[i];
+    if (ch.style?.display === 'none') continue;
+    const it = makeItem(ch, childNodes.length, axis.main, axis.cross, contentAvailable);
+    childNodes.push(ch);
+    items.push(it);
+    if (it.absolute) absoluteItems.push(it);
+    else flexItems.push(it);
+  }
 
   const lines: Item[][] = [];
   if ((style.flexWrap ?? 'nowrap') === 'nowrap' || mainParent === undefined) {
@@ -207,9 +228,9 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
   } else {
     let line: Item[] = [];
     let used = 0;
-    for (const item of flexItems) {
-      const outer =
-        item.basis + mainBefore(item.margin, axis.main) + mainAfter(item.margin, axis.main);
+    for (let i = 0; i < flexItems.length; ++i) {
+      const item = flexItems[i];
+      const outer = item.basis + item.marginMainBefore + item.marginMainAfter;
       const next = used + (line.length ? mainGap : 0) + outer;
       if (line.length && next > mainParent + EPS) {
         lines.push(line);
@@ -224,30 +245,26 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
 
   let crossCursor = 0;
   const lineCrossSizes: number[] = [];
-  for (const line of lines) {
-    distributeLine(
-      line,
-      mainParent ??
-        line.reduce(
-          (sum, item, idx) =>
-            sum +
-            item.basis +
-            (idx ? mainGap : 0) +
-            mainBefore(item.margin, axis.main) +
-            mainAfter(item.margin, axis.main),
-          0,
-        ),
-      mainGap,
-      axis.main,
-    );
-    const naturalLineCross = line.reduce(
-      (max, item) =>
-        Math.max(
-          max,
-          item.cross + crossBefore(item.margin, axis.main) + crossAfter(item.margin, axis.main),
-        ),
-      0,
-    );
+  for (let li = 0; li < lines.length; ++li) {
+    const line = lines[li];
+    let lineMain: number;
+    if (mainParent !== undefined) {
+      lineMain = mainParent;
+    } else {
+      let sum = 0;
+      for (let j = 0; j < line.length; ++j) {
+        const it = line[j];
+        sum += it.basis + (j ? mainGap : 0) + it.marginMainBefore + it.marginMainAfter;
+      }
+      lineMain = sum;
+    }
+    distributeLine(line, lineMain, mainGap, axis.main);
+    let naturalLineCross = 0;
+    for (let j = 0; j < line.length; ++j) {
+      const it = line[j];
+      const v = it.cross + it.marginCrossBefore + it.marginCrossAfter;
+      if (v > naturalLineCross) naturalLineCross = v;
+    }
     const lineCross =
       (style.flexWrap ?? 'nowrap') === 'nowrap' && crossParent !== undefined
         ? crossParent
@@ -255,8 +272,9 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
     lineCrossSizes.push(lineCross);
   }
 
-  const totalCross =
-    lineCrossSizes.reduce((sum, n) => sum + n, 0) + Math.max(0, lines.length - 1) * crossGap;
+  let totalCross = 0;
+  for (let i = 0; i < lineCrossSizes.length; ++i) totalCross += lineCrossSizes[i];
+  totalCross += Math.max(0, lines.length - 1) * crossGap;
   if (Number.isNaN(width) && axis.main === 'height')
     width = totalCross + padding.left + padding.right;
   if (Number.isNaN(height) && axis.main === 'width')
@@ -285,7 +303,11 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
   }
   crossCursor = alignContentOffset;
 
-  const children: LayoutResult[] = childNodes.map(() => emptyResult());
+  // Lazy-allocated. Slots stay `undefined` for absolute children that
+  // positionLine() never visits and get filled by the absolute pass below.
+  // Saved 1.3% of profile self time vs. preallocating emptyResult() per
+  // child (the stress grid generated 900 unused empties per frame).
+  const children: LayoutResult[] = new Array(childNodes.length);
   for (let li = 0; li < lines.length; ++li) {
     const line = lines[li];
     const lineCross = lineCrossSizes[li];
@@ -307,11 +329,23 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
   }
 
   if (Number.isNaN(width)) {
-    const maxRight = children.reduce((max, child) => Math.max(max, child.x + child.width), 0);
+    let maxRight = 0;
+    for (let i = 0; i < children.length; ++i) {
+      const ch = children[i];
+      if (ch === undefined) continue;
+      const r = ch.x + ch.width;
+      if (r > maxRight) maxRight = r;
+    }
     width = maxRight + padding.right;
   }
   if (Number.isNaN(height)) {
-    const maxBottom = children.reduce((max, child) => Math.max(max, child.y + child.height), 0);
+    let maxBottom = 0;
+    for (let i = 0; i < children.length; ++i) {
+      const ch = children[i];
+      if (ch === undefined) continue;
+      const b = ch.y + ch.height;
+      if (b > maxBottom) maxBottom = b;
+    }
     height = maxBottom + padding.bottom;
   }
 
@@ -384,10 +418,15 @@ function makeItem(
   const maxMain = resolveMax(style, main, parentMain);
   const grow = style.flexGrow ?? (style.flex && style.flex > 0 ? style.flex : 0) ?? 0;
   const shrink = style.flexShrink ?? (style.flex === 0 ? 0 : 1);
+  const isRow = main === 'width';
   return {
     node,
     index,
     margin,
+    marginMainBefore: isRow ? margin.left : margin.top,
+    marginMainAfter: isRow ? margin.right : margin.bottom,
+    marginCrossBefore: isRow ? margin.top : margin.left,
+    marginCrossAfter: isRow ? margin.bottom : margin.right,
     basis,
     main: basis,
     cross: crossSize,
@@ -437,14 +476,13 @@ function distributeLine(
   gap: number,
   main: 'width' | 'height',
 ): void {
-  for (const item of line) item.main = item.basis;
-  const occupied =
-    line.reduce(
-      (sum, item) =>
-        sum + item.basis + mainBefore(item.margin, main) + mainAfter(item.margin, main),
-      0,
-    ) +
-    Math.max(0, line.length - 1) * gap;
+  let occupied = 0;
+  for (let i = 0; i < line.length; ++i) {
+    const it = line[i];
+    it.main = it.basis;
+    occupied += it.basis + it.marginMainBefore + it.marginMainAfter;
+  }
+  occupied += Math.max(0, line.length - 1) * gap;
   const free = availableMain - occupied;
   if (free > EPS) {
     distributePositiveFreeSpace(line, free);
@@ -506,24 +544,31 @@ function positionLine(
   reversed: boolean,
   out: LayoutResult[],
 ): void {
-  const cross = main === 'width' ? 'height' : 'width';
-  const contentMain =
-    availableMain ??
-    line.reduce(
-      (sum, item, idx) =>
-        sum +
-        item.main +
-        (idx ? gap : 0) +
-        mainBefore(item.margin, main) +
-        mainAfter(item.margin, main),
-      0,
-    );
-  const used =
-    line.reduce(
-      (sum, item) => sum + item.main + mainBefore(item.margin, main) + mainAfter(item.margin, main),
-      0,
-    ) +
-    Math.max(0, line.length - 1) * gap;
+  const isRow = main === 'width';
+  // Compute contentMain + used in a single pass; previous code did two
+  // .reduce() calls back-to-back, each with its own closure.
+  let contentMain: number;
+  let used: number;
+  if (availableMain !== undefined) {
+    contentMain = availableMain;
+    let acc = 0;
+    for (let i = 0; i < line.length; ++i) {
+      const it = line[i];
+      acc += it.main + it.marginMainBefore + it.marginMainAfter;
+    }
+    used = acc + Math.max(0, line.length - 1) * gap;
+  } else {
+    let cm = 0;
+    let acc = 0;
+    for (let i = 0; i < line.length; ++i) {
+      const it = line[i];
+      const inner = it.marginMainBefore + it.marginMainAfter;
+      cm += it.main + (i ? gap : 0) + inner;
+      acc += it.main + inner;
+    }
+    contentMain = cm;
+    used = acc + Math.max(0, line.length - 1) * gap;
+  }
   let cursor = 0;
   let itemGap = gap;
   const free = contentMain - used;
@@ -546,53 +591,51 @@ function positionLine(
       cursor = itemGap;
       break;
   }
-  const ordered = reversed ? [...line].reverse() : line;
-  for (const item of ordered) {
+  const parentAlignItems = style.alignItems ?? 'stretch';
+  const lineLen = line.length;
+  for (let it_idx = 0; it_idx < lineLen; ++it_idx) {
+    const item = line[reversed ? lineLen - 1 - it_idx : it_idx];
     const childStyle = item.node.style ?? {};
     const align =
       childStyle.alignSelf && childStyle.alignSelf !== 'auto'
         ? childStyle.alignSelf
-        : (style.alignItems ?? 'stretch');
+        : parentAlignItems;
+    const mb = item.marginMainBefore;
+    const ma = item.marginMainAfter;
+    const cb = item.marginCrossBefore;
+    const ca = item.marginCrossAfter;
     let childCross = item.cross;
     if (align === 'stretch' && item.cross === 0)
-      childCross = Math.max(
-        0,
-        lineCross - crossBefore(item.margin, main) - crossAfter(item.margin, main),
-      );
-    let crossPos = crossCursor + crossBefore(item.margin, main);
-    const crossFree =
-      lineCross - childCross - crossBefore(item.margin, main) - crossAfter(item.margin, main);
+      childCross = Math.max(0, lineCross - cb - ca);
+    let crossPos = crossCursor + cb;
+    const crossFree = lineCross - childCross - cb - ca;
     if (align === 'center') crossPos += crossFree / 2;
     else if (align === 'flex-end') crossPos += crossFree;
-    const mainPos = cursor + mainBefore(item.margin, main);
-    cursor += item.main + mainBefore(item.margin, main) + mainAfter(item.margin, main) + itemGap;
-    const constraint =
-      main === 'width'
-        ? { width: item.main, height: childCross }
-        : { width: childCross, height: item.main };
+    const mainPos = cursor + mb;
+    cursor += item.main + mb + ma + itemGap;
+    const constraint = isRow
+      ? { width: item.main, height: childCross }
+      : { width: childCross, height: item.main };
     const child = layoutNode(item.node, constraint, 0, 0);
-    child.x = round(padding.left + (main === 'width' ? mainPos : crossPos));
-    child.y = round(padding.top + (main === 'width' ? crossPos : mainPos));
-    child.width = round(main === 'width' ? item.main : childCross);
-    child.height = round(main === 'width' ? childCross : item.main);
-    if (cross === 'width') child.width = clampSize(child.width, childStyle, 'width', width);
-    if (cross === 'height') child.height = clampSize(child.height, childStyle, 'height', height);
+    if (isRow) {
+      child.x = round(padding.left + mainPos);
+      child.y = round(padding.top + crossPos);
+      child.width = round(item.main);
+      child.height = round(childCross);
+      child.height = clampSize(child.height, childStyle, 'height', height);
+    } else {
+      child.x = round(padding.left + crossPos);
+      child.y = round(padding.top + mainPos);
+      child.width = round(childCross);
+      child.height = round(item.main);
+      child.width = clampSize(child.width, childStyle, 'width', width);
+    }
     out[item.index] = child;
   }
 }
 
-function mainBefore(m: LayoutEdges, main: 'width' | 'height'): number {
-  return main === 'width' ? m.left : m.top;
-}
-function mainAfter(m: LayoutEdges, main: 'width' | 'height'): number {
-  return main === 'width' ? m.right : m.bottom;
-}
-function crossBefore(m: LayoutEdges, main: 'width' | 'height'): number {
-  return main === 'width' ? m.top : m.left;
-}
-function crossAfter(m: LayoutEdges, main: 'width' | 'height'): number {
-  return main === 'width' ? m.bottom : m.right;
-}
+// mainBefore / mainAfter / crossBefore / crossAfter inlined as
+// item.marginMain{Before,After} / marginCross{Before,After} on Item.
 function round(v: number): number {
   return Math.round(v * 1000) / 1000;
 }

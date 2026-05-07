@@ -65,6 +65,7 @@ constexpr socket_t kInvalidSocket = INVALID_SOCKET;
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
 using socket_t = int;
@@ -484,7 +485,7 @@ namespace fxe::debug {
           if (opts.log_level > 0)
             std::fprintf(stderr, "fxe.debug: rejecting client %s: server full\n",
                          peer_addr.c_str());
-          if (peek_first_byte_nonblocking(s) == 'G') {
+          if (peek_first_byte_with_timeout(s, 250) == 'G') {
             cdp_ws::http_request req;
             std::string error;
             if (cdp_ws::read_http_request(s, req, error)) {
@@ -541,23 +542,21 @@ namespace fxe::debug {
       return n == 1 ? static_cast<unsigned char>(ch) : -1;
     }
 
-    int peek_first_byte_nonblocking(socket_t s) {
-      char ch = 0;
+    int peek_first_byte_with_timeout(socket_t s, int milliseconds) {
+      fd_set readfds;
+      FD_ZERO(&readfds);
+      FD_SET(s, &readfds);
+      timeval tv{};
+      tv.tv_sec = milliseconds / 1000;
+      tv.tv_usec = (milliseconds % 1000) * 1000;
 #if defined(_WIN32)
-      u_long one = 1;
-      u_long zero = 0;
-      ioctlsocket(s, FIONBIO, &one);
-      int n = ::recv(s, &ch, 1, MSG_PEEK);
-      ioctlsocket(s, FIONBIO, &zero);
+      int ready = ::select(0, &readfds, nullptr, nullptr, &tv);
 #else
-      int flags = ::fcntl(s, F_GETFL, 0);
-      if (flags < 0)
-        return -1;
-      ::fcntl(s, F_SETFL, flags | O_NONBLOCK);
-      ssize_t n = ::recv(s, &ch, 1, MSG_PEEK);
-      ::fcntl(s, F_SETFL, flags);
+      int ready = ::select(s + 1, &readfds, nullptr, nullptr, &tv);
 #endif
-      return n == 1 ? static_cast<unsigned char>(ch) : -1;
+      if (ready <= 0)
+        return -1;
+      return peek_first_byte(s);
     }
 
     std::string request_host_authority(const cdp_ws::http_request& req) const {

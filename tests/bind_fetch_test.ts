@@ -1,4 +1,4 @@
-// @ts-ignore FXE host-backed builtin
+// @ts-expect-error FXE host-backed builtin
 import net from 'node:net';
 import {
   assert,
@@ -17,10 +17,7 @@ type TestSocket = {
   destroy(): void;
 };
 
-async function expectRejectName(
-  fn: () => Promise<unknown>,
-  name: string,
-): Promise<Error> {
+async function expectRejectName(fn: () => Promise<unknown>, name: string): Promise<Error> {
   try {
     await fn();
   } catch (error) {
