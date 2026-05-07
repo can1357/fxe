@@ -1,169 +1,162 @@
-# FXE
+<h1 align="center">FXE</h1>
 
-FXE is a cross-platform application platform for building desktop apps in
-TypeScript or JavaScript on top of a native immediate-mode GPU renderer. Think
-"Electron without Chromium": an embedded V8 isolate runs your TS/JS, your UI is
-drawn directly through a 2D/3D command buffer (Dawn/WebGPU), and the OS-level
-plumbing (windows, menus, tray, dialogs, fs, networking, IPC, audio) is exposed
-as small, focused JS APIs.
+<p align="center">
+  <strong>Desktop apps in TypeScript, on a native GPU renderer.</strong><br/>
+  <em>Electron, without Chromium.</em>
+</p>
 
-The repository ships:
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#examples">Examples</a> ·
+  <a href="#api-overview">API</a> ·
+  <a href="#debugging">Debugging</a> ·
+  <a href="#building-from-source">Build</a>
+</p>
 
-- **`fxe_run`** — the runtime executable that loads a `.ts`/`.mts`/`.cts`/`.js`
-  entry script and runs it.
-- **`fxe-ui`** — a React-like JSX/TSX framework with a fiber reconciler,
-  flexbox layout, hooks, and a component library (`View`, `Text`, `Pressable`,
-  `ScrollView`, `TextInput`, `Button`, `Image`, `VirtualList`).
-- **`fxe-pack`** — a packaging tool that bundles a TS entry plus assets into a
-  shippable binary, DMG, MSI, MSIX, or AppImage.
-- **`fxe-debug-client`** (Python, stdlib-only) — a Puppeteer-style SDK that
-  drives running instances over an NDJSON / CDP-over-WebSocket debug protocol.
-- A native C++ core (`fxe_core`, `fxe_window`, `fxe_wgpu`, `fxe_font`,
-  `fxe_debug`, `fxe_runtime`, `fxe_net`, `fxe_audio`, `fxe_os`, `fxe_js`) that
-  is usable standalone for embedded GPU graphics without V8.
+<p align="center">
+  <img alt="platforms"  src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-555?style=flat-square">
+  <img alt="language"   src="https://img.shields.io/badge/language-C%2B%2B20%20%7C%20TypeScript-blue?style=flat-square">
+  <img alt="renderer"   src="https://img.shields.io/badge/renderer-Dawn%20%2F%20WebGPU-orange?style=flat-square">
+  <img alt="runtime"    src="https://img.shields.io/badge/runtime-V8-yellow?style=flat-square">
+  <img alt="status"     src="https://img.shields.io/badge/status-pre--1.0-lightgrey?style=flat-square">
+</p>
 
-## Status
+<p align="center">
+  <img src="assets/login_form.png" alt="FXE login form example" width="420">
+</p>
 
-Pre-1.0. Public C++ headers under `include/fxe/` and the TypeScript surface in
-`types/fxe.d.ts` / `types/fxe-ui.d.ts` are the source of truth; everything
-under `src/` is internal. See `TODO.md` for the running roadmap and known
-gaps.
+<table align="center"><td>
 
-## Architecture
+```tsx
+function LoginForm() {
+	const [email, setEmail] = useState("");
+	const [password, setPassword] = useState("");
+	const [message, setMessage] = useState("");
 
-Layered. Each upper layer is optional.
+	const submit = () =>
+		setMessage(
+			email.includes("@") && password.length >= 6
+				? "Credentials look ready."
+				: "Use an email and a 6+ character password.",
+		);
 
-```
-fxe_core      pure C++ primitives, command buffer, sprites
-   │
-fxe_window    GLFW window + input + native handle extraction
-   │
-fxe_wgpu      Dawn/WebGPU renderer (optional; null fallback for headless tests)
-   │
-fxe_font      FreeType / HarfBuzz / CoreText / Fontconfig (atlas, shaping)
-   │
-fxe_net       libcurl HTTP, mbedTLS, nghttp2, RFC 6455 WebSockets, cookie jar
-   │
-fxe_runtime   libuv event loop, fs FDs, fs watchers, Node.js compat, updater
-   │
-fxe_audio     miniaudio playback + capture
-   │
-fxe_os        per-platform shims (macOS / Windows / Linux)
-   │
-fxe_debug     NDJSON-over-TCP and CDP-over-WS debug server
-   │
-fxe_js        embedded V8 isolate, TS transpile, ~32 bind_*.cpp APIs
-   │
-fxe_run       CLI: parse args, launch host/window/renderer, run user script
-```
+	return (
+		<View style={s.root}>
+			<View style={s.shell}>
+				<View style={s.rail}>
+					<Text style={s.railKicker}>FXE ACCESS</Text>
+					<Text style={s.railWordmark}>Sign in</Text>
+					<Text style={s.railBody}>A compact native login surface…</Text>
+					<View style={s.railBadge}>
+						<Text style={s.railBadgeText}>🔒 ENCRYPTED</Text>
+					</View>
+				</View>
+				<View style={s.panel}>
+					<Text style={s.title}>Welcome back 👋</Text>
+					<Text style={s.copy}>Continue to your workspace …</Text>
+					<View style={s.form}>
+						<Text style={s.label}>Email address</Text>
+						<TextInput
+							style={s.input}
+							value={email}
+							placeholder="you@example.com"
+							onChange={setEmail}
+							onSubmit={submit}
+						/>
+						<Text style={s.label}>Password</Text>
+						<TextInput
+							style={s.input}
+							value={password}
+							/* … */
+						/>
+						<Button title="Continue" style={s.button} textStyle={s.buttonText} onPress={submit} />
+					</View>
+					<Text style={s.foot}>{message || "Tab between fields, then press Enter."}</Text>
+				</View>
+			</View>
+		</View>
+	);
+}
 
-**Frame data flow** (TS app → pixels):
-
-```
-TS source
-  → V8 + embedded tsc (transpile only; no type-check)
-  → JS calls Primitives.fillRect(cb, …)
-  → C++ binding writes opcodes into CommandBuffer
-  → Renderer.endFrame() uploads vertex/index buffers
-  → Dawn queue submission
-  → GPU
-  → optional Page.screenshot read-back over the debug protocol
-```
-
-**Threading.** V8 and the GPU are pinned to the main thread. The debug server
-uses an accept thread plus a session thread per connection; commands are
-posted onto a render-thread task pump that drains between frames. libuv runs
-on the main thread and handles async fs/net I/O. Network workers (HTTP,
-WebSocket, native TLS) own their own threads internally and post results
-back through the loop.
-
-## Build
-
-CMake ≥ 3.24 with the Ninja generator and vcpkg manifest mode are required.
-The repository pins a vcpkg checkout under `./vcpkg/`.
-
-```sh
-just bootstrap                      # one-time: build in-tree vcpkg
-just build dev                      # core only (no V8, no Dawn)
-just build dev-wgpu                 # + Dawn/WebGPU
-just build dev-v8                   # + embedded V8
-just build dev-v8-wgpu              # + V8 + Dawn (full runtime)
-just test dev                       # run CTest for a preset
-just ts hello                       # build dev-v8-wgpu and run examples/js/hello.ts
+const win = new Window({ width: 560, height: 440, title: "fxe-ui login form" });
+mount(<LoginForm />, win, { lazy: false });
+App.run({ animate: true, fps: 60 });
 ```
 
-Direct CMake equivalents:
+</td></table>
 
-```sh
-cmake --preset dev-v8-wgpu
-cmake --build --preset dev-v8-wgpu
-ctest --preset dev-v8-wgpu --output-on-failure
-./build/dev-v8-wgpu/fxe_run examples/js/hello.ts
+---
+
+FXE runs your `.ts`/`.tsx` script inside an embedded V8 isolate and paints
+directly to the GPU via Dawn/WebGPU — no DOM, no browser, no IPC bridge. UI is
+authored in JSX with a React-like framework (`fxe-ui`) backed by a Yoga-style
+flexbox solver, and the OS plumbing (windows, menus, tray, dialogs, fs,
+networking, audio) is exposed as small, focused JS APIs.
+
+```tsx
+/** @jsxImportSource fxe-ui */
+import { Window } from "fxe";
+import { Button, Text, View, mount, useState } from "fxe-ui";
+
+function App() {
+	const [n, setN] = useState(0);
+	return (
+		<View style={{ padding: 24, gap: 12 }}>
+			<Text style={{ fontSize: 22 }}>Count {n}</Text>
+			<Button title="Increment" onPress={() => setN(n + 1)} />
+		</View>
+	);
+}
+
+mount(<App />, new Window({ width: 480, height: 320, title: "counter" }));
 ```
 
-### CMake options
+## Why FXE
 
-| Option | Default | Effect |
-|---|---|---|
-| `FXE_BUILD_EXAMPLES` | ON | Build native C++ examples |
-| `FXE_BUILD_TESTS` | ON | Build CTest targets |
-| `FXE_FETCH_DEPS` | ON | Fetch glm/glfw/stb/nlohmann_json via FetchContent if missing |
-| `FXE_ENABLE_WGPU` | OFF | Build Dawn/WebGPU backend (`fxe_wgpu`); requires Dawn |
-| `FXE_ENABLE_V8` | OFF | Build embedded V8 host + bindings (`fxe_js`, `fxe_run`) |
-| `FXE_ENABLE_NODE_COMPAT` | OFF | Generate vendored unenv assets for Node compat shims |
-| `FXE_ENABLE_LIBUV` | ON | Build libuv-backed runtime loop (required for async fs/net) |
-| `FXE_ENABLE_NATIVE_TLS_HTTP2` | OFF | Wire mbedTLS + nghttp2 for native HTTPS/HTTP2 |
-| `FXE_OS_DBUS` | ON on Linux | D-Bus desktop integrations (notifications, tray) |
-| `FXE_FONT_BACKEND` | auto | One of `freetype`, `fontconfig_freetype`, `freetype_windows`, `coretext`, `coretext_freetype`, `coretext_harfbuzz` |
-| `FXE_ENABLE_WARNINGS` | ON | Project compiler warnings |
-| `FXE_WARNINGS_AS_ERRORS` | OFF | Promote warnings to errors |
-| `FXE_WGSL_VALIDATOR` | unset | Path to `tint`; validates embedded WGSL at build time |
-
-Presets in `CMakePresets.json`: `dev`, `release`, `dev-wgpu`, `dev-v8`,
-`dev-v8-wgpu`. `dev-v8-wgpu` additionally turns on `FXE_ENABLE_NODE_COMPAT`.
-
-### Dependencies
-
-**Required (vcpkg manifest):** `libuv`, `libsodium`, `mbedtls`. Optional
-font deps (`freetype`, `harfbuzz`, `fontconfig`) are pulled when the
-selected `FXE_FONT_BACKEND` needs them.
-
-**Fetched when `FXE_FETCH_DEPS=ON`:** `glm` 1.0.1, `glfw` 3.4,
-`nlohmann/json` 3.12.0, `stb` (image read/write/resize),
-`miniaudio` 0.11.25 (single-header audio). When
-`FXE_ENABLE_NODE_COMPAT=ON`, `unenv` v2.0.0-rc.24 and `pathe` 2.0.3
-are also fetched and embedded.
-
-**Externally supplied (not auto-fetched):**
-
-- **Dawn** — required for `FXE_ENABLE_WGPU=ON`. Configure with `-DDawn_DIR=…`
-  or an equivalent `CMAKE_PREFIX_PATH`.
-- **V8** — required for `FXE_ENABLE_V8=ON`. Prefer a system package
-  exposing headers plus `libv8`, `libv8_libbase`, `libv8_libplatform`. To
-  vendor V8, run `scripts/build_v8.sh` (or `.ps1`) — uses depot_tools and
-  installs to `.vendor/v8-install/`. Then export `V8_ROOT` or `V8_DIR`.
-- **Optional system packages:** `CURL`, `ZLIB`, `SQLite3`, `nghttp2`, `X11
-  + Xss` (Linux idle), `libdbus-1` (Linux desktop integrations), Breakpad
-  / Crashpad (enhanced minidumps).
-
-Run `just doctor` to check what's installed locally.
+- **Native GPU rendering.** Your UI compiles to a command buffer that Dawn
+  submits to Vulkan/Metal/D3D12 — not an HTML page wrapped in a window.
+- **No Chromium.** No bundled browser, no node_modules forest. Single
+  `fxe_run` binary plus your script.
+- **JSX you already know.** `fxe-ui` ships a fiber reconciler with hooks,
+  flexbox, theming, animations, and components (`View`, `Text`, `Pressable`,
+  `Button`, `ScrollView`, `TextInput`, `VirtualList`, `Image`).
+- **Batteries included.** `fetch`, `WebSocket`, `fs`, `path`, `process`,
+  `localStorage`, `sqlite`, audio, IPC, workers, timers — plus a generous
+  `node:*` compatibility layer.
+- **Puppeteer-style debugging.** A built-in NDJSON / CDP-over-WS protocol and
+  a Python SDK let you evaluate JS, screenshot, inject input, and trace
+  functions in a running app.
+- **Ships small.** `fxe-pack` produces plain executables, DMGs, MSIs, MSIX
+  packages, or AppImages from a single TS entry point.
 
 ## Quick start
 
-### Hello triangle (TypeScript)
+> Requires a `dev-v8-wgpu` build of FXE (V8 + Dawn). See
+> [Building from source](#building-from-source).
+
+Save the counter snippet above as `examples/js/counter.tsx`, then:
+
+```sh
+just ts counter
+```
+
+`just ts <name>` resolves `examples/js/<name>.{ts,tsx,mts,cts,js}`, builds the
+runtime if needed, and runs your script under `fxe_run`.
+
+For a plain (non-JSX) starter:
 
 ```ts
 // hello.ts
-import { Window, Renderer, Primitives } from 'fxe';
+import { Window, Renderer, Primitives } from "fxe";
 
-const win = new Window({ width: 480, height: 320, title: 'hello fxe' });
+const win = new Window({ width: 480, height: 320, title: "hello fxe" });
 const r = new Renderer(win);
 
 win.run(() => {
-  r.beginFrame();
-  Primitives.fillRect(r, 32, 32, 200, 80, 0x4f8df1ff);
-  Primitives.drawText(r, 32, 140, 'Hello, FXE', { fontSize: 24, color: 0xffffffff });
-  r.endFrame();
+	r.beginFrame();
+	Primitives.fillRect(r, 32, 32, 200, 80, 0x4f8df1ff);
+	Primitives.drawText(r, 32, 140, "Hello, FXE", { fontSize: 24, color: 0xffffffff });
+	r.endFrame();
 });
 ```
 
@@ -171,146 +164,102 @@ win.run(() => {
 just ts hello
 ```
 
-### Counter app (JSX with fxe-ui)
-
-```tsx
-/** @jsxImportSource fxe-ui */
-import { Window } from 'fxe';
-import { Button, StyleSheet, Text, View, mount, useState } from 'fxe-ui';
-
-const s = StyleSheet.create({
-  root: { width: '100%', height: '100%', padding: 24, gap: 12, backgroundColor: 0x0f172aff },
-  title: { color: 0xffffffff, fontSize: 22 },
-});
-
-function App() {
-  const [count, setCount] = useState(0);
-  return (
-    <View style={s.root}>
-      <Text style={s.title}>Count {count}</Text>
-      <Button title="Increment" onPress={() => setCount(n => n + 1)} />
-    </View>
-  );
-}
-
-mount(<App />, new Window({ width: 480, height: 320 }));
-```
-
-`mount(root, window)` wires layout, paint, hit-testing, hover/press/focus, and
-keyboard dispatch. It returns a disposer for listener cleanup.
-
-`fxe-ui` defaults to React Native / Yoga semantics: `flexDirection: 'column'`,
-not CSS `row`. Stable styles should go through `StyleSheet.create()` so they
-remain referentially stable across renders.
-
-## JavaScript / TypeScript API surface
-
-Authoritative declarations live in `types/fxe.d.ts` (95 KB) and
-`types/fxe-ui.d.ts`. `package.json` is a dev-only carrier for `tsc` and
-`@biomejs/biome`; **no application runtime depends on Node** — the JS engine
-is V8 embedded directly.
-
-| Module / global | Provided by | Notes |
-|---|---|---|
-| `Window` | `bind_window.cpp` | size/title/bounds/visibility, IME compose, drag-drop, clipboard, custom title-bar |
-| `Renderer`, `OffscreenRenderer`, `CommandBuffer` | `bind_renderer/offscreen/command_buffer.cpp` | Inherit a common opcode buffer; `OffscreenRenderer` for textures |
-| `Primitives` | `bind_primitives.cpp` | `fillRect`, `drawText`, `drawSprite`, `drawPath`, gradients, blur, batched `drain()` |
-| `Pipeline` | `bind_pipeline.cpp` | Custom WGSL pipelines with vertex/uniform/texture binding |
-| `Spritesheet`, `Image` | `bind_spritesheet/image.cpp` | Atlas packing, animated sprites, `Image.fromBytes` |
-| `Font` | `bind_font.cpp` | `Font.load`, `Font.system`, `Font.builtin('default')`, OpenType features/variations |
-| `App` | `bind_app.cpp` | lifecycle, windows, single-instance, deep-link, recent docs, bookmarks, update |
-| `Menu`, `Tray`, `Notification`, `dialog`, `shell`, `globalShortcut` | per-platform shims | Native UI integration |
-| `fs`, `path`, `process`, `performance` | `bind_fs/path/process/performance.cpp` | Node-shaped APIs |
-| `fetch`, `Headers`, `Request`, `Response`, `AbortController`, `Blob`, `URL`, `URLSearchParams` | `bind_fetch/url.cpp` | WHATWG subset, libcurl-backed |
-| `WebSocket` | `bind_websocket.cpp` | RFC 6455, `wss://` via mbedTLS when native TLS is enabled |
-| `localStorage`, `sessionStorage` | `bind_storage.cpp` | SQLite-backed |
-| `fxe:sqlite` | `bind_sqlite.cpp` | `Database`, `Statement` |
-| `fxe:ipc` | `bind_ipc.cpp` | `Worker`, `MessagePort`, `MessageChannel`, `BroadcastChannel` |
-| `Audio`, `Sound`, `CaptureSession` | `bind_audio.cpp` | miniaudio engine + mic capture |
-| `powerMonitor`, `Notification`, `Tray` | `bind_power/notification/tray.cpp` | OS event sources |
-| `Print` | `bind_print.cpp` | Render command buffers to PDF pages |
-| `setTimeout`/`setInterval`/`requestAnimationFrame`/`queueMicrotask` | `bind_timers.cpp` | Node + browser semantics |
-| `node:*` | `runtime/node_compat*` | Adapters for `events`, `buffer`, `stream`, `path`, `url`, `util`, `process`, `os`, `net`, `dns`, `https`, `http2`, `tls`, `crypto`, `child_process`, `worker_threads`, `dgram`, … |
-
-The runtime accepts `.ts`, `.mts`, `.cts`, and `.js` entry points.
-Transpilation runs inside V8 via embedded `tsc`; it does **not** type-check.
-Always run `just ts-check` (`tsc --noEmit -p tsconfig.json`) before relying on
-TS examples.
-
 ## Examples
 
-Native C++ (`examples/`):
+Browse [`examples/js/`](examples/js/) — run any of them with `just ts <name>`:
 
-| Example | Purpose |
-|---|---|
-| `hello_triangle.cpp` | Smallest demo: one triangle, paint-on-demand |
-| `hello_sprite.cpp` | Sprite rendering |
-| `primitives_showcase.cpp` | Rects, lines, triangles, text, sprites in one window |
+| Example                 | What it shows                                    |
+| ----------------------- | ------------------------------------------------ |
+| `hello.ts`              | Smallest renderer + primitives loop              |
+| `showcase.ts`           | Rects, text, gradients, blur                     |
+| `sprite_demo.ts`        | `Image.fromBytes`, spritesheets, `drawSprite`    |
+| `custom_pipeline.ts`    | Custom WGSL pipeline with vertex/uniform binding |
+| `custom_titlebar.ts`    | Frameless window with a custom title bar         |
+| `transparent_demo.ts`   | Transparent window                               |
+| `two_windows.ts`        | Multi-window via `App.run`                       |
+| `window_chat.ts`        | `BroadcastChannel` cross-window IPC              |
+| `git_log.ts`            | `node:child_process` spawning `git log`          |
+| `audio_demo.ts`         | Audio playback + mic capture                     |
+| `jsx_demo.tsx`          | JSX counter with hooks                           |
+| `ui_kit_demo.tsx`       | `Button` / `ScrollView` / `StyleSheet` form      |
+| `login_form.tsx`        | Realistic form layout (screenshot above)         |
+| `ui_reconciler_demo.ts` | Low-level reconciler `Layer` / `Draw` API        |
 
-TypeScript / JSX (`examples/js/`):
+Native C++ demos live in [`examples/`](examples/) for embedding `fxe_core`
+without V8.
 
-| Example | Purpose |
-|---|---|
-| `hello.ts` | Triangle via Renderer + Primitives |
-| `showcase.ts` | Multiple rect/text primitives |
-| `bench.ts` | CommandBuffer allocate/drain benchmark |
-| `loop.ts` | Lazy vs animated event-driven main loops |
-| `sprite_demo.ts` | `Image.fromBytes`, `Spritesheet.add`, `drawSprite` |
-| `custom_pipeline.ts` | Custom WGSL pipeline with vertex/attr binding |
-| `custom_titlebar.ts` | Frameless window with a custom title bar |
-| `transparent_demo.ts` | Transparent window |
-| `two_windows.ts` | Multi-window via `App.run` |
-| `window_chat.ts` | `BroadcastChannel` cross-window IPC |
-| `audio_demo.ts` | Audio API typecheck (guarded) |
-| `git_log.ts` | `node:child_process` spawning `git log` |
-| `jsx_demo.tsx` | JSX with fxe-ui counter + hooks |
-| `ui_demo.ts` | Custom-canvas UI with hit testing |
-| `ui_kit_demo.tsx` | Button / ScrollView / StyleSheet / form |
-| `ui_reconciler_demo.ts` | Low-level reconciler `Layer` / `Draw` API |
-| `login_form.tsx` | Form layout with fxe-ui |
+## API overview
 
-Run any TS example with `just ts <name>` (resolves `examples/js/<name>.{ts,tsx,mts,cts,js}`).
+Authoritative TypeScript declarations live in
+[`types/fxe.d.ts`](types/fxe.d.ts) and
+[`types/fxe-ui.d.ts`](types/fxe-ui.d.ts).
 
-## fxe-ui
+### `fxe` — runtime globals
 
-Single JSX/TSX UI package shipped under `packages/fxe-ui/`. It owns:
+| Module                                            | Purpose                                                                                                                                                   |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Window`                                          | Size, title, bounds, IME, drag-drop, clipboard, custom title-bar                                                                                          |
+| `Renderer`, `OffscreenRenderer`, `CommandBuffer`  | Frame submission and offscreen targets                                                                                                                    |
+| `Primitives`                                      | `fillRect`, `drawText`, `drawSprite`, `drawPath`, gradients, blur                                                                                         |
+| `Pipeline`                                        | Custom WGSL pipelines                                                                                                                                     |
+| `Spritesheet`, `Image`                            | Atlas packing, animated sprites, `Image.fromBytes`                                                                                                        |
+| `Font`                                            | `Font.load` / `Font.system` / `Font.builtin`, OpenType features                                                                                           |
+| `App`                                             | Lifecycle, single-instance, deep-links, recent docs, auto-update                                                                                          |
+| `Menu`, `Tray`, `Notification`, `dialog`, `shell` | Native UI integration                                                                                                                                     |
+| `globalShortcut`, `powerMonitor`                  | OS event sources                                                                                                                                          |
+| `fs`, `path`, `process`, `performance`            | Node-shaped APIs                                                                                                                                          |
+| `fetch`, `Headers`, `Request`, `Response`, `Blob` | WHATWG subset (libcurl-backed)                                                                                                                            |
+| `WebSocket`, `URL`, `URLSearchParams`             | Standard web APIs                                                                                                                                         |
+| `localStorage`, `sessionStorage`                  | SQLite-backed storage                                                                                                                                     |
+| `setTimeout` / `requestAnimationFrame` / …        | Browser + Node timer semantics                                                                                                                            |
+| `fxe:sqlite`                                      | `Database`, `Statement`                                                                                                                                   |
+| `fxe:ipc`                                         | `Worker`, `MessagePort`, `MessageChannel`, `BroadcastChannel`                                                                                             |
+| `Audio`, `Sound`, `CaptureSession`                | miniaudio engine + microphone capture                                                                                                                     |
+| `Print`                                           | Render command buffers to PDF                                                                                                                             |
+| `node:*`                                          | `events`, `buffer`, `stream`, `path`, `url`, `util`, `os`, `net`, `dns`, `https`, `http2`, `tls`, `crypto`, `child_process`, `worker_threads`, `dgram`, … |
 
-- **Reconciler:** fiber tree, hooks, signals, scheduler, frame loop, devtools
-  hooks (`reconciler/`).
-- **Layout solver:** Yoga-style flexbox in TypeScript (`layout/solver.ts`,
-  `layout/measure.ts`).
-- **Style system:** CSS-like `Style` objects, `StyleSheet.create()`, color
-  parsing (`style/`).
-- **Components:** `View`, `Text`, `Image`, `Pressable`, `Button`,
-  `ScrollView`, `TextInput`, `VirtualList` (`components/`).
-- **Painting:** `view_painter`, `text_painter`, `image_painter`, `clip`
-  (`paint/`).
-- **Mount pipeline:** `mount(root, window)` wires layout, paint, hit-test,
-  hover/press, focus, cursor (`mount/`).
-- **Theme:** provider + text context (`theme/`).
-- **Animated:** `Animated.timing`, `Animated.spring` (`animated/`).
-- **Hooks:** `useState`, `useReducer`, `useRef`, `useEffect`, `useMemo`,
+Entry points may be `.ts`, `.mts`, `.cts`, or `.js`. Transpilation runs inside
+V8 via embedded `tsc` and **does not type-check** — run `just ts-check`
+(`tsc --noEmit`) before committing TS changes.
+
+### `fxe-ui` — JSX UI framework
+
+Imported via `/** @jsxImportSource fxe-ui */` from
+[`packages/fxe-ui/`](packages/fxe-ui/). Includes:
+
+- **Components** — `View`, `Text`, `Image`, `Pressable`, `Button`,
+  `ScrollView`, `TextInput`, `VirtualList`.
+- **Layout** — Yoga-style flexbox solver in TypeScript. Default direction is
+  `column` (React Native semantics), not CSS `row`.
+- **Styles** — CSS-like `Style` objects; freeze stable styles with
+  `StyleSheet.create()`.
+- **Hooks** — `useState`, `useReducer`, `useRef`, `useEffect`, `useMemo`,
   `useContext`, `useId`, `useFrame`, `useEvent`, `useDeferredValue`,
   `useTransition`.
+- **Animation** — `Animated.timing`, `Animated.spring`.
+- **Theming** — provider + text context.
 
-JSX is shipped via `jsx-runtime.ts`; use `/** @jsxImportSource fxe-ui */`.
+`mount(root, window)` wires layout, paint, hit-testing, hover/press/focus,
+cursor, and keyboard dispatch. It returns a disposer for cleanup.
 
-## Debugging running apps
+## Debugging
 
-The debug protocol (NDJSON-over-TCP + CDP-over-WebSocket) covers Puppeteer-style
-flows: evaluate JS, screenshot, mouse/keyboard injection, console tail,
-pause/resume/step, fiber inspection, heap snapshots, CPU profiling.
+FXE ships with a Puppeteer-style debug protocol (NDJSON-over-TCP and
+CDP-over-WebSocket) and a stdlib-only Python SDK in
+[`clients/python/`](clients/python/).
+
+### CLI
 
 ```sh
 just debug ui_demo 9333          # spawn paused on port 9333
-just pycli inspect --port 9333   # handshake + globals + framebuffer
+just pycli inspect    --port 9333    # handshake + globals + framebuffer size
 just pycli screenshot --port 9333 --out shot.png
-just pycli eval --port 9333 'window.foo'
-just pycli console --port 9333   # tail console.* until Ctrl-C
-just pycli resume --port 9333
+just pycli eval       --port 9333 'window.foo'
+just pycli console    --port 9333    # tail console.* until Ctrl-C
+just pycli resume     --port 9333
 ```
 
-Programmatic access via the Python SDK in `clients/python/`:
+### Python SDK
 
 ```python
 import asyncio
@@ -329,81 +278,90 @@ async def main():
 asyncio.run(main())
 ```
 
-The SDK exposes `Page` (evaluate / screenshot / console_messages / pause /
-resume / step / close / framebuffer_size / globals), `Mouse` (move / click /
-wheel), `Keyboard` (down / up / press / type), function tracing
-(`trace_install` / `trace_drain`), layout tracing
-(`layout_trace_enable` / `layout_trace_drain`), reconciler snapshots, and
-heap snapshots. See `AGENTS.md` for in-depth recipes and troubleshooting
-tables.
+The SDK exposes `Page` (evaluate, screenshot, console tail, pause/resume/step,
+framebuffer size), `Mouse`, `Keyboard`, function tracing
+(`trace_install` / `trace_drain`), layout tracing, reconciler snapshots, and
+heap snapshots. See [`AGENTS.md`](AGENTS.md) for in-depth recipes.
 
 ## Packaging
 
-`tools/fxe-pack/` bundles a TS entry plus assets onto a copy of `fxe_run` and
-emits one of:
+[`tools/fxe-pack/`](tools/fxe-pack/) bundles a TS entry plus assets onto a
+copy of `fxe_run` and produces:
 
-- plain executable
-- macOS DMG (via `hdiutil`)
-- Windows MSI (via WiX, template `tools/fxe-pack/templates/wix_product.wxs.in`)
-- Windows MSIX (`AppxManifest.xml.in`)
-- Linux AppImage (`AppRun.in`)
+- a plain executable
+- a **macOS** DMG (via `hdiutil`)
+- a **Windows** MSI (WiX) or MSIX (`AppxManifest.xml`)
+- a **Linux** AppImage
 
-Code-sign + notarize automation, signed bundle archives (`.fxa`), and binary
-delta updates are tracked under Phase 8 in `TODO.md`.
+## Building from source
 
-## Testing
-
-Hand-written assert harness on top of CTest — no gtest, no catch2 — chosen to
-keep test binaries small.
+Requires **CMake ≥ 3.24**, **Ninja**, and **vcpkg manifest mode**. The
+repository pins an in-tree vcpkg checkout under `./vcpkg/`.
 
 ```sh
-just test dev                      # full preset
-just test-core dev                 # fxe_core_tests directly
-just pytest                        # Python SDK unit tests (stdlib only)
-just ts-check                      # tsc --noEmit
-just ci                            # format-check + test + ts-check
-just ci-quick                      # format/lint/typecheck (no build)
+just bootstrap                      # one-time: build in-tree vcpkg
+just build dev-v8-wgpu              # full runtime (V8 + Dawn)
+just test  dev-v8-wgpu              # run CTest for the preset
+just ts hello                       # build + run examples/js/hello.ts
 ```
 
-C++ test targets (selection): `fxe_core_tests`, `fxe_font_tests`,
-`fxe_font_render_tests`, `fxe_uv_loop_tests`, `fxe_uv_microtask_flush_tests`,
-`fxe_net_http_advanced_tests`, `fxe_native_tls_tests`,
-`fxe_ws_deflate_tests`, `fxe_wgpu_pipeline_cache_tests`,
-`fxe_wgpu_blur_smoke`, `fxe_os_linux_smoke_tests`, `fxe_debug_tests`,
-`fxe_debug_cdp_ws_tests`. TypeScript tests under `tests/*_test.ts` are
-auto-registered via `fxe_add_v8_ts_test()` and run inside `fxe_run`.
+Direct CMake equivalents:
 
-CI (`.github/workflows/ci.yml`) runs `ci-quick` on every PR and a build
-matrix across `ubuntu-24.04` / `macos-14` / `windows-2022` with
-`FXE_FETCH_DEPS=ON FXE_ENABLE_WGPU=OFF` for a core-only smoke. Headless
-Linux uses `xvfb-run`.
-
-## Repository layout
-
+```sh
+cmake --preset dev-v8-wgpu
+cmake --build --preset dev-v8-wgpu
+ctest --preset dev-v8-wgpu --output-on-failure
+./build/dev-v8-wgpu/fxe_run examples/js/hello.ts
 ```
-include/fxe/         public C++ headers (renderer, primitives, window, font/, …)
-src/core/            primitives, command buffer, spritesheet, fonts, stb impl
-src/window/          GLFW window, input, IME, drag-drop
-src/wgpu/            Dawn renderer, offscreen, pipeline cache, WGSL shaders
-src/font/            FreeType / HarfBuzz / CoreText / Fontconfig + atlas
-src/net/             HTTP, HTTP/2, WebSocket, mbedTLS client+server, cookies
-src/audio/           miniaudio engine + capture
-src/os/              macOS / Windows / Linux platform shims, crash handling
-src/runtime/         libuv loop, fs FDs, fs watchers, node_compat, updater,
-                     fxe_native (Node-like bindings), bundle_loader
-src/debug/           NDJSON/TCP server, CDP-over-WS, dispatch, screenshot
-src/js/              V8 host, TS transpile bridge, ~32 bind_*.cpp, fxe_run
-tests/               *.cpp + *_test.ts + golden/ fixtures
-examples/            native C++ demos
-examples/js/         TS/TSX demos
-packages/fxe-ui/     JSX UI framework (TypeScript)
-clients/python/      fxe-debug-client SDK (stdlib only) + CLI + tests
-tools/fxe-pack/      packaging tool + platform templates
-types/               fxe.d.ts, fxe-ui.d.ts
-cmake/               deps.cmake, shaders.cmake, embed_*.cmake, FindV8.cmake
-scripts/             doctor.sh, build_v8.sh, build_v8.ps1
-third_party/         miniaudio
-vendor/              unenv (Node compat shims, generated)
+
+Run `just doctor` to check for required and optional tooling.
+
+### Build presets
+
+| Preset        | Includes                               |
+| ------------- | -------------------------------------- |
+| `dev`         | Core only (no V8, no Dawn)             |
+| `dev-wgpu`    | + Dawn / WebGPU                        |
+| `dev-v8`      | + Embedded V8                          |
+| `dev-v8-wgpu` | Full runtime (V8 + Dawn + node compat) |
+| `release`     | Optimized release build                |
+
+### External dependencies
+
+- **Dawn** — required for `FXE_ENABLE_WGPU`. Supply via `-DDawn_DIR=…` or
+  `CMAKE_PREFIX_PATH`.
+- **V8** — required for `FXE_ENABLE_V8`. Use a system package, or vendor it
+  with `scripts/build_v8.sh` (`build_v8.ps1` on Windows) which installs to
+  `.vendor/v8-install/`.
+
+Other native deps (libuv, mbedtls, libsodium, optional FreeType / HarfBuzz /
+Fontconfig) are pulled by vcpkg. Header-only deps (glm, glfw, stb,
+nlohmann/json, miniaudio) are fetched automatically when
+`FXE_FETCH_DEPS=ON` (the default).
+
+### Common CMake options
+
+| Option                        | Default | Effect                                                |
+| ----------------------------- | ------- | ----------------------------------------------------- |
+| `FXE_ENABLE_WGPU`             | OFF     | Build Dawn/WebGPU backend                             |
+| `FXE_ENABLE_V8`               | OFF     | Build embedded V8 host + JS bindings                  |
+| `FXE_ENABLE_NODE_COMPAT`      | OFF     | Vendor unenv assets for `node:*` shims                |
+| `FXE_ENABLE_NATIVE_TLS_HTTP2` | OFF     | Native HTTPS/HTTP2 via mbedTLS + nghttp2              |
+| `FXE_FONT_BACKEND`            | auto    | `freetype`, `coretext`, `coretext_harfbuzz`, …        |
+| `FXE_BUILD_EXAMPLES`          | ON      | Build native C++ examples                             |
+| `FXE_BUILD_TESTS`             | ON      | Build CTest targets                                   |
+| `FXE_WGSL_VALIDATOR`          | unset   | Path to `tint`; validates embedded WGSL at build time |
+
+## Contributing
+
+See [`AGENTS.md`](AGENTS.md) for a full contributor guide — architecture,
+coding conventions, testing, and the Python debugging SDK in detail.
+
+Quick checks before sending a PR:
+
+```sh
+just ci-quick     # format + lint + typecheck (no build)
+just ci           # full local pipeline (adds build + tests)
 ```
 
 ## License
