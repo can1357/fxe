@@ -32,7 +32,6 @@ function Cell({ i, tick }: { i: number; tick: number }): Node {
 function App2(): Node {
   const [tick, setTick] = useState(0);
   useFrame(() => setTick((t) => t + 1));
-  if (tick % 60 === 0) console.log('App2 render tick=', tick);
   const cells: Node[] = [];
   for (let i = 0; i < COLS * ROWS; i++) cells.push(<Cell key={i} i={i} tick={tick} />);
   return (

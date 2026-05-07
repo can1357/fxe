@@ -66,6 +66,11 @@ export function paintText(
   const baseY = rect.y;
   let caretBaseX = alignedX(rect, 0, align);
   let caretY = baseY;
+  // Collect text lines and emit them in a single drawTextRun() call to skip
+  // a V8 trampoline per line. Selection / caret rects still emit inline so
+  // their z-order relative to the text stays correct (they render before
+  // the run, behind the glyphs).
+  const runs: { x: number; y: number; text: string; size: number; color: Color }[] = [];
   for (let i = 0; i < wrapped.lines.length; i++) {
     const line = wrapped.lines[i];
     const lineStart = wrapped.lineStartIndices[i] ?? 0;
@@ -102,7 +107,15 @@ export function paintText(
       }
     }
     if (line.length === 0) continue;
-    Primitives.drawText(cb, x, caretY, 0, line, fontSize, color);
+    runs.push({ x, y: caretY, text: line, size: fontSize, color });
+  }
+  if (runs.length === 1) {
+    // Avoid the array-iteration cost in the binding for the single-line case
+    // (overwhelmingly common for UI labels).
+    const r = runs[0];
+    Primitives.drawText(cb, r.x, r.y, 0, r.text, r.size, r.color);
+  } else if (runs.length > 1) {
+    Primitives.drawTextRun(cb, runs);
   }
 
   if (!preedit?.text) return;

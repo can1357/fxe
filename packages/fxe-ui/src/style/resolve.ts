@@ -89,11 +89,28 @@ export function flattenStyle(value: StyleValue): Style {
   return value;
 }
 
+// Memo cache for splitStyle. StyleSheet.create() returns frozen, stable
+// object refs that flow through every component render; splitting them
+// into layout/paint/text buckets is deterministic per ref. WeakMap so
+// transient style objects can still be GC'd.
+//
+// Hot in scenes with many identical components (stress grid: 900 cells
+// × splitStyle on render = 900 splits per frame, all identical inputs).
+// Cache hits skip the Object.entries walk + Set lookups + 3 output objects.
+type SplitResult = { layout: LayoutStyle; paint: PaintStyle; text: TextStyle };
+const SPLIT_CACHE = new WeakMap<object, SplitResult>();
+
 export function splitStyle(value: StyleValue): {
   layout: LayoutStyle;
   paint: PaintStyle;
   text: TextStyle;
 } {
+  // Fast path: cached result for stable object refs (the StyleSheet.create()
+  // case). Arrays of styles or fresh literals every render skip this.
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const cached = SPLIT_CACHE.get(value as object);
+    if (cached !== undefined) return cached;
+  }
   const flat = flattenStyle(value);
   const layout: LayoutStyle = {};
   const paint: PaintStyle = {};
@@ -117,7 +134,11 @@ export function splitStyle(value: StyleValue): {
     }
   }
   validateLayout(layout);
-  return { layout, paint, text };
+  const result: SplitResult = { layout, paint, text };
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    SPLIT_CACHE.set(value as object, result);
+  }
+  return result;
 }
 
 const paintColorKeys = new Set<keyof PaintStyle>([

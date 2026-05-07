@@ -753,6 +753,26 @@ declare namespace FXE {
       pointSize?: number,
       color?: Color,
     ): [number, number, number, number];
+    /**
+     * Batched draw_text. Collapses N V8 trampolines into one. Each run is
+     * drawn as if `drawText(cb, run.x, run.y, run.depth ?? 0, run.text,
+     * run.size ?? 16, run.color ?? <default>)` were called individually,
+     * but without the per-call boundary cost.
+     *
+     * Does NOT support OpenType features / variations / fontId — keep using
+     * the scalar drawText() for those.
+     */
+    drawTextRun(
+      cb: CommandBuffer | Renderer,
+      runs: ReadonlyArray<{
+        x: number;
+        y: number;
+        text: string;
+        size?: number;
+        color?: Color;
+        depth?: number;
+      }>,
+    ): void;
     linearGradient(p0: Vec2, p1: Vec2, stops: Float32Array): GradientPaint;
     radialGradient(center: Vec2, radius: number, stops: Float32Array): GradientPaint;
     conicGradient(center: Vec2, angle: number, stops: Float32Array): GradientPaint;

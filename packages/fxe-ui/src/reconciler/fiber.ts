@@ -438,6 +438,19 @@ function summarizeDebugValue(value: unknown): unknown {
   return 'object';
 }
 
+// Read lazily on first invocation so users can set globalThis.__FXE_DEV
+// before mount() (which runs after their entry script's top-level code).
+// Cached on first read; toggling later requires a reload.
+let g_dev_mode_cached: boolean | undefined;
+function devMode(): boolean {
+  if (g_dev_mode_cached === undefined) {
+    g_dev_mode_cached =
+      typeof globalThis !== 'undefined' &&
+      (globalThis as { __FXE_DEV?: boolean }).__FXE_DEV !== false;
+  }
+  return g_dev_mode_cached;
+}
+
 function summarizeProps(props: unknown): string {
   let summary: unknown;
   if (typeof props === 'object' && props !== null) {
@@ -506,6 +519,7 @@ function ensureFiberDebugMetadata(fiber: Fiber): FiberDebugMetadata {
 }
 
 function updateFiberDebugNode(fiber: Fiber, node: Node): void {
+  if (!devMode()) return; // skip in production: summarize + stringify per render
   const metadata = ensureFiberDebugMetadata(fiber);
   metadata.type = node.type;
   metadata.displayName = displayNameForNode(node);
@@ -513,12 +527,12 @@ function updateFiberDebugNode(fiber: Fiber, node: Node): void {
   metadata.propsSummary = metadata.props;
   if (node.type !== 'component') metadata.deps = depsForNode(node);
 }
-
 function recordFiberCacheStatus(
   fiber: Fiber,
   cacheHitMiss: FiberCacheHitMiss,
   rebuilt: boolean,
 ): void {
+  if (!devMode()) return;
   const metadata = ensureFiberDebugMetadata(fiber);
   metadata.cacheHitMiss = cacheHitMiss;
   metadata.cacheHit = cacheHitMiss === null ? null : cacheHitMiss === 'hit';
@@ -1112,8 +1126,16 @@ function renderNode(
   }
   if (node.type === 'provider') {
     const providerCtx = node.props.ctx as ContextImpl<unknown>;
+    // Use shallow-equal (not Object.is): callers like View build a fresh
+    // textStyle object every render via spread (`{...inherited, ...resolved}`)
+    // so two structurally-identical values would still fail Object.is and
+    // force a markDirty walk over every consumer fiber. In a stress scene
+    // (1800 Text consumers × full root walk per frame) that previously
+    // dominated the profile at ~37%. shallowEqual catches the common case
+    // and falls back to inequality for primitives / different shapes.
     const valueChanged =
-      fiber.providedContext !== providerCtx || !Object.is(fiber.providedValue, node.props.value);
+      fiber.providedContext !== providerCtx ||
+      !shallowEqualProps(fiber.providedValue, node.props.value);
     fiber.providedContext = providerCtx;
     fiber.providedValue = node.props.value;
     if (valueChanged) {

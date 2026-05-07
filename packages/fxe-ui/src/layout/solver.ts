@@ -160,11 +160,88 @@ function emptyResult(): LayoutResult {
   };
 }
 
+// Cross-frame layout cache. layoutNode results depend only on
+// (node._sig, available.width, available.height) — top-level x/y are
+// overwritten by callers (positionLine sets child.x/y after returning).
+// We swap-evict to bound memory; a 4096-entry working set is plenty for
+// typical UIs and the stress grid (1800 cells fit easily).
+//
+// Cache hits return a shallow clone so positionLine's child.width/height
+// clamp doesn't clobber shared state. Children references are shared
+// (positionLine never mutates result.children).
+const LAYOUT_CACHE_MAX = 4096;
+let g_layout_cache = new Map<string, LayoutResult>();
+let g_layout_cache_old = new Map<string, LayoutResult>();
+let g_layout_hits = 0;
+let g_layout_misses = 0;
+// biome-ignore lint/suspicious/noExplicitAny: dev-only diagnostic shim.
+(globalThis as any).__fxeLayoutCacheStats = () => ({
+  hits: g_layout_hits,
+  misses: g_layout_misses,
+  size: g_layout_cache.size,
+  oldSize: g_layout_cache_old.size,
+});
+
+function layoutCacheKey(sig: string, w: number | undefined, h: number | undefined): string {
+  return `${sig}|${w ?? -1}|${h ?? -1}`;
+}
+
+function cloneLayoutResult(src: LayoutResult): LayoutResult {
+  // Shallow clone: callers (positionLine) mutate top-level x/y/width/height.
+  // Children references are shared; downstream paint never mutates them.
+  return {
+    x: src.x,
+    y: src.y,
+    width: src.width,
+    height: src.height,
+    paddingLeft: src.paddingLeft,
+    paddingTop: src.paddingTop,
+    paddingRight: src.paddingRight,
+    paddingBottom: src.paddingBottom,
+    children: src.children,
+  };
+}
+
+function storeLayoutResult(key: string, result: LayoutResult): void {
+  g_layout_cache.set(key, result);
+  if (g_layout_cache.size >= LAYOUT_CACHE_MAX) {
+    g_layout_cache_old = g_layout_cache;
+    g_layout_cache = new Map();
+  }
+}
+
+function lookupLayoutCache(key: string): LayoutResult | undefined {
+  const hit = g_layout_cache.get(key);
+  if (hit !== undefined) return hit;
+  const old = g_layout_cache_old.get(key);
+  if (old !== undefined) {
+    g_layout_cache.set(key, old);
+    if (g_layout_cache.size >= LAYOUT_CACHE_MAX) {
+      g_layout_cache_old = g_layout_cache;
+      g_layout_cache = new Map();
+    }
+  }
+  return old;
+}
+
 export function solveLayout(root: LayoutNode, available: Constraint = {}): LayoutResult {
   return layoutNode(root, available, 0, 0);
 }
 
 function layoutNode(node: LayoutNode, available: Constraint, x: number, y: number): LayoutResult {
+  const sig = node._sig;
+  const cacheKey = sig === undefined ? '' : layoutCacheKey(sig, available.width, available.height);
+  if (sig !== undefined) {
+    const hit = lookupLayoutCache(cacheKey);
+    if (hit !== undefined) {
+      g_layout_hits++;
+      const out = cloneLayoutResult(hit);
+      out.x = x;
+      out.y = y;
+      return out;
+    }
+    g_layout_misses++;
+  }
   const style = node.style ?? {};
   if (style.display === 'none') return emptyResult();
   if (style.display !== undefined && style.display !== 'flex' && style.display !== 'none') {
@@ -369,7 +446,7 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
     children[item.index] = child;
   }
 
-  return {
+  const result: LayoutResult = {
     x,
     y,
     width: round(width),
@@ -380,6 +457,8 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
     paddingBottom: padding.bottom,
     children,
   };
+  if (sig !== undefined) storeLayoutResult(cacheKey, result);
+  return result;
 }
 
 function makeItem(

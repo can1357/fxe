@@ -72,6 +72,13 @@ export interface LayoutNode {
   children?: readonly LayoutNode[];
   measure?: (constraint: Constraint) => { width: number; height: number };
   key?: string;
+  // Optional structural signature populated by layoutNodeFor() so the
+  // solver can memoize results across frames. Two LayoutNodes with the
+  // same _sig laid out under the same constraint produce identical
+  // results (modulo top-level x/y, which the caller overwrites). Only
+  // populated by trusted producers — solver only consults it, never
+  // mutates.
+  _sig?: string;
 }
 
 export interface LayoutResult {

@@ -1,6 +1,6 @@
 import { CommandBuffer } from 'fxe';
 import { layout } from '../layout/index.ts';
-import type { LayoutNode, LayoutResult } from '../layout/types.ts';
+import type { LayoutNode, LayoutResult, LayoutStyle } from '../layout/types.ts';
 import { paintView } from '../paint/view_painter.ts';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { coarseClip } from '../paint/clip.ts';
@@ -99,6 +99,91 @@ function clipChildHitTargets(start: number, clip: LayoutResult): void {
   }
 }
 
+// Stable IDs for reference-equal objects so we can compose structural
+// signatures cheaply. Used by the solver's cross-frame layout cache:
+// LayoutNodes with identical _sig laid out under the same constraint
+// produce identical results.
+const g_obj_sig_cache = new WeakMap<object, string>();
+let g_next_sig = 0;
+
+// Content-derived signature for a LayoutStyle. We cache by ref first so
+// stable StyleSheet.create() refs hit immediately; on a fresh ref (e.g.
+// the synthetic object produced by `[s.cell, {bg}]` going through
+// splitStyle) we fall back to a JSON of the layout-affecting fields.
+// Two different objects with identical layout content share a sig, so
+// the layout cache can reuse cells whose only delta is paint state.
+//
+// Field list mirrors the LayoutStyle keys in style/resolve.ts. Adding
+// a layout-affecting field there requires adding it here too.
+const LAYOUT_SIG_FIELDS: readonly (keyof LayoutStyle)[] = [
+  'display',
+  'width',
+  'height',
+  'minWidth',
+  'minHeight',
+  'maxWidth',
+  'maxHeight',
+  'padding',
+  'paddingX',
+  'paddingY',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'margin',
+  'marginX',
+  'marginY',
+  'marginTop',
+  'marginRight',
+  'marginBottom',
+  'marginLeft',
+  'flexDirection',
+  'flexWrap',
+  'justifyContent',
+  'alignItems',
+  'alignSelf',
+  'alignContent',
+  'flex',
+  'flexGrow',
+  'flexShrink',
+  'flexBasis',
+  'gap',
+  'rowGap',
+  'columnGap',
+  'position',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'aspectRatio',
+  'overflow',
+];
+
+function layoutStyleSig(style: LayoutStyle | undefined): string {
+  if (style === undefined) return '0';
+  const cached = g_obj_sig_cache.get(style);
+  if (cached !== undefined) return cached;
+  let sig = '';
+  for (let i = 0; i < LAYOUT_SIG_FIELDS.length; ++i) {
+    const k = LAYOUT_SIG_FIELDS[i];
+    const v = style[k];
+    if (v === undefined) continue;
+    sig += `${i}:${typeof v === 'object' ? JSON.stringify(v) : String(v)};`;
+  }
+  // Memoize so repeat refs don't re-walk. New ref with identical content
+  // pays the walk once but still produces an interned string V8 will
+  // canonicalize.
+  const id = sig === '' ? '0' : sig;
+  g_obj_sig_cache.set(style, id);
+  g_next_sig++;
+  return id;
+}
+
+function textStyleSig(style: TextStyle): string {
+  // Only the layout-affecting fields. Color etc. don't change layout.
+  return `${style.fontSize ?? 16}|${style.letterSpacing ?? 0}|${style.lineHeight ?? -1}|${style.fontFamily ?? ''}|${style.fontWeight ?? ''}`;
+}
+
 function layoutNodeFor(node: Node, inheritedTextStyle: TextStyle): LayoutNode {
   if (node.type === 'component') {
     const childProps = node.props as ComponentProps;
@@ -109,16 +194,35 @@ function layoutNodeFor(node: Node, inheritedTextStyle: TextStyle): LayoutNode {
       ...resolved.text,
     };
     if (node.displayName === 'Text') {
+      const text = textFromChildren(childProps.children);
       return {
         style: resolved.layout,
-        measure: measureText(textFromChildren(childProps.children), textStyle),
+        measure: measureText(text, textStyle),
+        // Sig: leaf depends on layout style + text content + text-style
+        // fields that affect layout. resolved.layout is shared across
+        // renders via splitStyle's WeakMap, so refSig is stable.
+        _sig: `T|${layoutStyleSig(resolved.layout)}|${textStyleSig(textStyle)}|${text}`,
       };
+    }
+    const childLayoutNodes = normalizeLayoutChildren(childProps.children).map((child) =>
+      layoutNodeFor(child, textStyle),
+    );
+    let allChildSigs = '';
+    let anyMissing = false;
+    for (let i = 0; i < childLayoutNodes.length; ++i) {
+      const cs = childLayoutNodes[i]._sig;
+      if (cs === undefined) {
+        anyMissing = true;
+        break;
+      }
+      allChildSigs += i === 0 ? cs : `~${cs}`;
     }
     return {
       style: resolved.layout,
-      children: normalizeLayoutChildren(childProps.children).map((child) =>
-        layoutNodeFor(child, textStyle),
-      ),
+      children: childLayoutNodes,
+      // Only emit a sig when every child contributed one; otherwise it
+      // wouldn't be safe to memoize against.
+      _sig: anyMissing ? undefined : `V|${layoutStyleSig(resolved.layout)}|${allChildSigs}`,
     };
   }
 

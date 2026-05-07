@@ -681,6 +681,68 @@ namespace fxe::js {
       info.GetReturnValue().Set(arr);
     }
 
+    // drawTextRun(cb, runs: Array<{ x, y, text, size?, color?, depth? }>)
+    //
+    // Batched draw_text — collapses N V8↔C++ trampolines per frame into one.
+    // The text-painter in fxe-ui issues one drawText per wrapped line per
+    // Text component per frame; in stress scenes that is ~2k calls/frame and
+    // the boundary cost (HandleScope setup, arg validation, utf8 decode
+    // dispatch) dominates the actual shaping work. This entry takes the
+    // entire run set, decodes each entry once, and drives primitives::draw_text
+    // back-to-back against the same CommandBuffer.
+    //
+    // Trade-off vs. the scalar drawText: this path does *not* accept
+    // OpenType features / variations / fontId. Callers needing those (rare)
+    // should keep using drawText().
+    void p_drawTextRun(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      if (info.Length() < 2 || !info[1]->IsArray()) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "drawTextRun: expected (cb, runs[])")));
+        return;
+      }
+      auto runs = info[1].As<Array>();
+      const u32 n = runs->Length();
+      const auto& default_font = get_font_info();
+      // Reused property keys.
+      auto k_x = String::NewFromUtf8Literal(iso, "x");
+      auto k_y = String::NewFromUtf8Literal(iso, "y");
+      auto k_text = String::NewFromUtf8Literal(iso, "text");
+      auto k_size = String::NewFromUtf8Literal(iso, "size");
+      auto k_color = String::NewFromUtf8Literal(iso, "color");
+      auto k_depth = String::NewFromUtf8Literal(iso, "depth");
+      for (u32 i = 0; i < n; ++i) {
+        Local<Value> ev;
+        if (!runs->Get(ctx, i).ToLocal(&ev) || !ev->IsObject())
+          continue;
+        auto o = ev.As<Object>();
+        Local<Value> field;
+        math::vec2 at{0, 0};
+        if (o->Get(ctx, k_x).ToLocal(&field) && field->IsNumber())
+          at.x = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+        if (o->Get(ctx, k_y).ToLocal(&field) && field->IsNumber())
+          at.y = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+        float depth = 0.0f;
+        if (o->Get(ctx, k_depth).ToLocal(&field) && field->IsNumber())
+          depth = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+        std::string text;
+        if (o->Get(ctx, k_text).ToLocal(&field) && !field->IsUndefined()) {
+          text = utf8(iso, field);
+        }
+        primitives::text_style style{};
+        if (o->Get(ctx, k_size).ToLocal(&field) && field->IsNumber())
+          style.pt = static_cast<float>(field->NumberValue(ctx).FromMaybe(16.0));
+        if (o->Get(ctx, k_color).ToLocal(&field) && !field->IsUndefined())
+          style.color = decode_color(iso, ctx, field);
+        (void)primitives::draw_text(*cb, at, depth, text, default_font, style);
+      }
+    }
+
     void path_ctor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -1411,6 +1473,7 @@ namespace fxe::js {
     P("fillRectRounded", p_fillRectRounded);
     P("drawRectRounded", p_drawRectRounded);
     P("drawText", p_drawText);
+    P("drawTextRun", p_drawTextRun);
     P("calcText", p_calcText);
     P("wrapTextNative", p_wrapTextNative);
     P("xAtGlyphIndexNative", p_xAtGlyphIndexNative);

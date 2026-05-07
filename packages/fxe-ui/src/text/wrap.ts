@@ -70,9 +70,39 @@ function measureLineWidth(text: string, fontSize: number, letterSpacing: number)
   return w + Math.max(0, text.length - 1) * letterSpacing;
 }
 
+// Memo for the (text, fontSize, letterSpacing, idx===text.length) case —
+// paint emits one measuredWidth() call per wrapped line per text per frame.
+// Lines come straight out of the wrapText cache so their string identity
+// is stable; key is therefore safe to compose.
+const TAIL_WIDTH_CACHE = new Map<string, number>();
+const TAIL_WIDTH_CACHE_MAX = 4096;
+let g_tail_width_old = new Map<string, number>();
+
 export function xAtGlyphIndex(text: string, style: TextStyle, idx: number): number {
   const fontSize = style.fontSize ?? 16;
   const letterSpacing = style.letterSpacing ?? 0;
+  // Hot path: full-line measurement for alignment and selection edges.
+  if (idx === text.length) {
+    const k = `${fontSize}|${letterSpacing}|${text}`;
+    const hit = TAIL_WIDTH_CACHE.get(k);
+    if (hit !== undefined) return hit;
+    const old = g_tail_width_old.get(k);
+    if (old !== undefined) {
+      TAIL_WIDTH_CACHE.set(k, old);
+      return old;
+    }
+    const native = nativeXAtGlyphIndex(text, fontSize, letterSpacing, idx);
+    const v =
+      native !== null
+        ? native
+        : measureLineWidth(text, fontSize, letterSpacing);
+    TAIL_WIDTH_CACHE.set(k, v);
+    if (TAIL_WIDTH_CACHE.size >= TAIL_WIDTH_CACHE_MAX) {
+      g_tail_width_old = TAIL_WIDTH_CACHE;
+      TAIL_WIDTH_CACHE.clear();
+    }
+    return v;
+  }
   const native = nativeXAtGlyphIndex(text, fontSize, letterSpacing, idx);
   if (native !== null) return native;
   const clamped = Math.max(0, Math.min(Math.trunc(idx), text.length));
@@ -127,6 +157,17 @@ function breakLongWord(
 // We swap-evict instead of LRU: when `g_cache` reaches MAX, demote it to
 // `g_old` and start fresh. Lookups check the new cache first, then fall
 // back to the old one (and promote on hit). Memory is bounded to 2*MAX.
+// Diagnostic counters; observable via globalThis.__fxeWrapStats() so we
+// can verify the cache is actually firing in production.
+let g_wrap_hits = 0;
+let g_wrap_misses = 0;
+// biome-ignore lint/suspicious/noExplicitAny: dev-only diagnostic shim.
+(globalThis as any).__fxeWrapStats = () => ({
+  hits: g_wrap_hits,
+  misses: g_wrap_misses,
+  size: g_wrap_cache.size,
+  oldSize: g_wrap_cache_old.size,
+});
 const WRAP_CACHE_MAX = 4096;
 let g_wrap_cache = new Map<string, WrappedText>();
 let g_wrap_cache_old = new Map<string, WrappedText>();
@@ -189,7 +230,11 @@ export function wrapText(text: string, style: TextStyle, options: WrapOptions = 
     breakWords,
   );
   const cached = cachedWrap(key);
-  if (cached !== undefined) return cached;
+  if (cached !== undefined) {
+    g_wrap_hits++;
+    return cached;
+  }
+  g_wrap_misses++;
   const native = nativeWrapText(
     text,
     fontSize,
@@ -212,7 +257,11 @@ export function wrapText(text: string, style: TextStyle, options: WrapOptions = 
 
   if (text.length === 0) {
     return storeWrap(key, {
-      lines: [''], width: 0, height: lineHeight, lineHeight, lineStartIndices: [0],
+      lines: [''],
+      width: 0,
+      height: lineHeight,
+      lineHeight,
+      lineStartIndices: [0],
     });
   }
 
@@ -290,6 +339,10 @@ export function wrapText(text: string, style: TextStyle, options: WrapOptions = 
 
   if (lines.length === 0) pushLine('', 0);
   return storeWrap(key, {
-    lines, width: widest, height: lineHeight * lines.length, lineHeight, lineStartIndices,
+    lines,
+    width: widest,
+    height: lineHeight * lines.length,
+    lineHeight,
+    lineStartIndices,
   });
 }
