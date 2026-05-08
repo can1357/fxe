@@ -723,18 +723,17 @@ namespace fxe::js {
         return;
       }
       if (!state->error.empty() || !state->has_register_result) {
-        const auto message = state->error.empty() ? std::string("WebAuthn registration failed")
-                                                  : state->error;
+        const auto message =
+            state->error.empty() ? std::string("WebAuthn registration failed") : state->error;
         reject_webauthn_state(iso, *state, make_named_error(iso, "NotAllowedError", message));
         return;
       }
       auto resolver = state->resolver.Get(iso);
       auto response_obj =
           make_attestation_response(iso, ctx, state->register_result, state->transports);
-      auto credential =
-          wrap_public_key_credential(iso, ctx, base64url_encode(state->register_result.credential_id),
-                                     state->register_result.credential_id, state->attachment,
-                                     response_obj);
+      auto credential = wrap_public_key_credential(
+          iso, ctx, base64url_encode(state->register_result.credential_id),
+          state->register_result.credential_id, state->attachment, response_obj);
       clear_webauthn_abort_listener(iso, *state);
       resolver->Resolve(ctx, credential).Check();
       state->resolver.Reset();
@@ -771,10 +770,9 @@ namespace fxe::js {
       }
       auto resolver = state->resolver.Get(iso);
       auto response_obj = make_assertion_response(iso, ctx, state->assert_result);
-      auto credential =
-          wrap_public_key_credential(iso, ctx, base64url_encode(state->assert_result.credential_id),
-                                     state->assert_result.credential_id, state->attachment,
-                                     response_obj);
+      auto credential = wrap_public_key_credential(
+          iso, ctx, base64url_encode(state->assert_result.credential_id),
+          state->assert_result.credential_id, state->attachment, response_obj);
       clear_webauthn_abort_listener(iso, *state);
       resolver->Resolve(ctx, credential).Check();
       state->resolver.Reset();
@@ -904,8 +902,8 @@ namespace fxe::js {
 
       auto backend = select_webauthn_backend(*policy);
       if (!backend) {
-        resolver->Reject(ctx, make_named_error(iso, "NotAllowedError",
-                                               "No WebAuthn backend available"))
+        resolver
+            ->Reject(ctx, make_named_error(iso, "NotAllowedError", "No WebAuthn backend available"))
             .Check();
         return;
       }
@@ -953,7 +951,8 @@ namespace fxe::js {
           state->register_result = std::move(response);
           state->has_register_result = true;
         }
-        runtime::uv_loop_runtime::instance().post([state] { resolve_webauthn_create_state(state); });
+        runtime::uv_loop_runtime::instance().post(
+            [state] { resolve_webauthn_create_state(state); });
         state->done.store(true, std::memory_order_release);
       }).detach();
     }
@@ -1014,8 +1013,8 @@ namespace fxe::js {
 
       auto backend = select_webauthn_backend(*policy);
       if (!backend) {
-        resolver->Reject(ctx, make_named_error(iso, "NotAllowedError",
-                                               "No WebAuthn backend available"))
+        resolver
+            ->Reject(ctx, make_named_error(iso, "NotAllowedError", "No WebAuthn backend available"))
             .Check();
         return;
       }

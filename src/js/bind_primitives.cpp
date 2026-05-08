@@ -799,8 +799,7 @@ namespace fxe::js {
       if (!cb)
         return;
       if (info.Length() < 5 || !info[4]->IsArray()) {
-        (void)throw_type_error(iso,
-                               "drawTextSpans: expected (cb, x, y, depth, spans[], opts?)");
+        (void)throw_type_error(iso, "drawTextSpans: expected (cb, x, y, depth, spans[], opts?)");
         return;
       }
       const float x = static_cast<float>(num(ctx, info[1]));
@@ -868,8 +867,8 @@ namespace fxe::js {
       if (!cb)
         return;
       if (info.Length() < 2 || !info[1]->IsFloat32Array()) {
-        (void)throw_type_error(
-            iso, "drawSelectionRects: expected (cb, Float32Array, color?, depth?)");
+        (void)throw_type_error(iso,
+                               "drawSelectionRects: expected (cb, Float32Array, color?, depth?)");
         return;
       }
       auto a = info[1].As<Float32Array>();

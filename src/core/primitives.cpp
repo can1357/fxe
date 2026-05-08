@@ -1648,8 +1648,8 @@ namespace fxe::primitives {
     // the next tab stop. Returns end pen.x. Single-line only; callers handle
     // newlines.
     float draw_text_line_with_tabs(command_buffer& r, math::vec2 at, float depth,
-                                   std::string_view text, const font_info& font,
-                                   text_style style, float origin_x_for_tabs) {
+                                   std::string_view text, const font_info& font, text_style style,
+                                   float origin_x_for_tabs) {
       if (text.empty())
         return at.x;
       if (style.tab_size <= 0.0f) {
@@ -1693,8 +1693,7 @@ namespace fxe::primitives {
   } // namespace
 
   math::vec4 draw_text_spans(command_buffer& r, math::vec2 at, float depth,
-                             std::span<const text_span> spans,
-                             const font_info& fallback_font) {
+                             std::span<const text_span> spans, const font_info& fallback_font) {
     float pen_x = at.x;
     float max_pt = 0.0f;
     u32 glyph_count = 0;
@@ -1718,13 +1717,13 @@ namespace fxe::primitives {
       // strikethrough across [seg_start, pen_x].
       if (span.underline && pen_x > seg_start) {
         const float y = at.y + s.pt * 1.05f;
-        draw_line(r, math::vec4{seg_start, y, depth, 0.0f},
-                  math::vec4{pen_x, y, depth, 0.0f}, s.color, 1.0f);
+        draw_line(r, math::vec4{seg_start, y, depth, 0.0f}, math::vec4{pen_x, y, depth, 0.0f},
+                  s.color, 1.0f);
       }
       if (span.strikethrough && pen_x > seg_start) {
         const float y = at.y + s.pt * 0.55f;
-        draw_line(r, math::vec4{seg_start, y, depth, 0.0f},
-                  math::vec4{pen_x, y, depth, 0.0f}, s.color, 1.0f);
+        draw_line(r, math::vec4{seg_start, y, depth, 0.0f}, math::vec4{pen_x, y, depth, 0.0f},
+                  s.color, 1.0f);
       }
       glyph_count += static_cast<u32>(span.text.size());
     }
@@ -1779,15 +1778,15 @@ namespace fxe::primitives {
       for (float x = x1 + period * 0.5f; x <= x2 + 0.001f; x += period * 0.5f) {
         const float yn = up ? y - amp : y + amp;
         const float xn = math::fmin(x, x2);
-        draw_line(r, math::vec4{prev_x, prev_y, depth, 0.0f},
-                  math::vec4{xn, yn, depth, 0.0f}, color, t);
+        draw_line(r, math::vec4{prev_x, prev_y, depth, 0.0f}, math::vec4{xn, yn, depth, 0.0f},
+                  color, t);
         prev_x = xn;
         prev_y = yn;
         up = !up;
       }
       if (prev_x < x2) {
-        draw_line(r, math::vec4{prev_x, prev_y, depth, 0.0f},
-                  math::vec4{x2, y, depth, 0.0f}, color, t);
+        draw_line(r, math::vec4{prev_x, prev_y, depth, 0.0f}, math::vec4{x2, y, depth, 0.0f}, color,
+                  t);
       }
       break;
     }

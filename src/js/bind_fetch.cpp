@@ -8,8 +8,8 @@
 #include "bind_fetch.hpp"
 #include "weak_holder.hpp"
 
-#include "../net/http_client.hpp"
 #include "../debug/dispatch.hpp"
+#include "../net/http_client.hpp"
 #include "runtime/capabilities.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
@@ -112,6 +112,7 @@ namespace fxe::js {
       for (char& c : s)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       return s;
+    }
 
     std::string header_value(const net::header_list& headers, std::string_view key) {
       const std::string want = ascii_lower(std::string(key));
@@ -121,6 +122,7 @@ namespace fxe::js {
       }
       return {};
     }
+
     void throw_type(Isolate* iso, const char* m) {
       (void)throw_type_error(iso, m);
     }
@@ -1113,8 +1115,7 @@ namespace fxe::js {
       fxe::debug::network::emit_response_received(
           st.debug_request_id, resp.final_url.empty() ? st.request_url : resp.final_url,
           static_cast<int>(resp.status), resp.status_text, resp.headers,
-          header_value(resp.headers, "content-type"), "Fetch",
-                                                  encoded_length);
+          header_value(resp.headers, "content-type"), "Fetch", encoded_length);
       fxe::debug::network::emit_loading_finished(st.debug_request_id, encoded_length);
       auto h_data = std::make_unique<headers_data>();
       for (auto& [k, v] : resp.headers)

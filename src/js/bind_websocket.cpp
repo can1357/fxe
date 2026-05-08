@@ -9,8 +9,8 @@
 #include "bind_websocket.hpp"
 #include "bind_blob.hpp"
 
-#include "../net/websocket_client.hpp"
 #include "../debug/dispatch.hpp"
+#include "../net/websocket_client.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
@@ -113,8 +113,11 @@ namespace fxe::js {
         return {};
       String::Utf8Value u(iso, str);
       return std::string(*u ? *u : "", *u ? u.length() : 0);
+    }
 
     std::string b64_encode_bytes(const u8* data, usize size) {
+      if (size == 0)
+        return {};
       const usize out_len = sodium_base64_ENCODED_LEN(size, sodium_base64_VARIANT_ORIGINAL) - 1u;
       std::string out(out_len, '\0');
       sodium_bin2base64(out.data(), out_len + 1u, data, size, sodium_base64_VARIANT_ORIGINAL);
@@ -129,8 +132,8 @@ namespace fxe::js {
       const usize scheme = url.find("://");
       const usize authority = scheme == std::string_view::npos ? 0 : scheme + 3;
       const usize end = url.find('/', authority);
-      return std::string(url.substr(authority, end == std::string_view::npos ? url.size() - authority
-                                                                             : end - authority));
+      return std::string(url.substr(
+          authority, end == std::string_view::npos ? url.size() - authority : end - authority));
     }
 
     net::header_list ws_handshake_request_headers(std::string_view url,
@@ -152,8 +155,9 @@ namespace fxe::js {
         headers.emplace_back("Sec-WebSocket-Protocol", std::move(joined));
       }
       if (compress) {
-        headers.emplace_back("Sec-WebSocket-Extensions",
-                             "permessage-deflate; client_max_window_bits; server_max_window_bits=15");
+        headers.emplace_back(
+            "Sec-WebSocket-Extensions",
+            "permessage-deflate; client_max_window_bits; server_max_window_bits=15");
       }
       return headers;
     }
@@ -169,7 +173,7 @@ namespace fxe::js {
         headers.emplace_back("Sec-WebSocket-Extensions", ext);
       return headers;
     }
-    }
+
     void throw_type(Isolate* iso, const char* m) {
       (void)throw_type_error(iso, m);
     }

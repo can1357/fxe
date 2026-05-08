@@ -21,8 +21,8 @@
 #include <fxe/v8_host.hpp>
 #include <fxe/window.hpp>
 
-#include <unordered_map>
 #include <atomic>
+#include <unordered_map>
 
 #include "screenshot.hpp"
 #include "server_internal.hpp"
@@ -36,8 +36,8 @@
 #include <cstdio>
 #include <cstring>
 #include <fxe/types.hpp>
-#include <utility>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace fxe::debug {
@@ -91,7 +91,7 @@ namespace fxe::debug {
     }
 
     using handler_fn = json (*)(dispatch_context&, const json&);
-  }
+  } // namespace
 
   namespace {
 
@@ -1034,10 +1034,11 @@ namespace fxe::debug {
       return std::to_string(g_network_request_counter.fetch_add(1, std::memory_order_acq_rel) + 1u);
     }
 
-    void emit_request_will_be_sent(
-        std::string_view req_id, std::string_view url, std::string_view method,
-        const std::vector<std::pair<std::string, std::string>>& headers,
-        std::optional<std::string_view> post_data, std::string_view type) {
+    void emit_request_will_be_sent(std::string_view req_id, std::string_view url,
+                                   std::string_view method,
+                                   const std::vector<std::pair<std::string, std::string>>& headers,
+                                   std::optional<std::string_view> post_data,
+                                   std::string_view type) {
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1104,9 +1105,9 @@ namespace fxe::debug {
       emit_network_event("Network.webSocketCreated", std::move(params));
     }
 
-    void emit_ws_handshake_request(
-        std::string_view req_id,
-        const std::vector<std::pair<std::string, std::string>>& headers) {
+    void
+    emit_ws_handshake_request(std::string_view req_id,
+                              const std::vector<std::pair<std::string, std::string>>& headers) {
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1115,9 +1116,9 @@ namespace fxe::debug {
       emit_network_event("Network.webSocketWillSendHandshakeRequest", std::move(params));
     }
 
-    void emit_ws_handshake_response(
-        std::string_view req_id, int status, std::string_view status_text,
-        const std::vector<std::pair<std::string, std::string>>& headers) {
+    void
+    emit_ws_handshake_response(std::string_view req_id, int status, std::string_view status_text,
+                               const std::vector<std::pair<std::string, std::string>>& headers) {
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1133,7 +1134,8 @@ namespace fxe::debug {
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
-      params["response"] = {{"opcode", opcode}, {"mask", true}, {"payloadData", std::string(payload_b64)}};
+      params["response"] = {
+          {"opcode", opcode}, {"mask", true}, {"payloadData", std::string(payload_b64)}};
       emit_network_event("Network.webSocketFrameSent", std::move(params));
     }
 

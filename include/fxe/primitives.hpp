@@ -282,13 +282,12 @@ namespace fxe::primitives {
     bool strikethrough = false;      // mid-x strike line
   };
   math::vec4 draw_text_spans(command_buffer& r, math::vec2 at, float depth,
-                             std::span<const text_span> spans,
-                             const font_info& fallback_font);
+                             std::span<const text_span> spans, const font_info& fallback_font);
 
   // Paint many axis-aligned rects in one trampoline. Used by editor
   // selections (one rect per visible line per cursor).
-  void draw_selection_rects(command_buffer& r, std::span<const math::vec4> rects,
-                            r8g8b8a8 color, float depth = 0.0f);
+  void draw_selection_rects(command_buffer& r, std::span<const math::vec4> rects, r8g8b8a8 color,
+                            float depth = 0.0f);
 
   // Decoration underline (squiggle / dashed / dotted / solid) for diagnostics
   // and spell-check. `y` is the baseline at which the decoration sits.
@@ -299,8 +298,8 @@ namespace fxe::primitives {
     wavy = 3,
   };
   void draw_decoration_underline(command_buffer& r, float x1, float x2, float y,
-                                 decoration_style style, r8g8b8a8 color,
-                                 float thickness = 1.0f, float depth = 0.0f);
+                                 decoration_style style, r8g8b8a8 color, float thickness = 1.0f,
+                                 float depth = 0.0f);
 
   // ---------------------------------------------------------------------------
   // Blur helpers — emit textured quads that the post-process chain blurs in the

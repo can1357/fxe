@@ -7,7 +7,9 @@
 //            [--identity <codesign-id>] [--notarize-profile <profile>]
 //            [--cert <path-or-subject>] [--appimage] [--dmg] [--msi] [--msix]
 //            [--update-url <url>] [--public-key <key>] [--channel stable|beta|alpha]
-//            [--version <semver>] [--manufacturer <name>|--publisher <name>] [--compress zstd|none]
+//            [--version <semver> REQUIRED for --appimage/--dmg/--msi/--msix]
+//            [--manufacturer <name>|--publisher <name> REQUIRED for --appimage/--dmg/--msi/--msix]
+//            [--compress zstd|none]
 
 #include <algorithm>
 #include <cctype>
@@ -52,12 +54,15 @@ namespace {
     std::string update_url;
     std::string public_key;
     std::string channel = "stable";
-    std::string version = "0.1.0";
-    std::string manufacturer = "fxe";
+    std::string version;
+    std::string manufacturer;
     Compression compress = Compression::None;
     std::vector<std::string> includes;
   };
 
+  bool produces_installer(const Args& a) {
+    return a.appimage || a.dmg || a.msi || a.msix;
+  }
   [[noreturn]] void die(const std::string& msg) {
     std::cerr << "fxe-pack: " << msg << "\n";
     std::exit(1);
@@ -132,7 +137,7 @@ namespace {
     }
     return "none";
   }
-  std::string four_part_version(const std::string& version) {
+  [[maybe_unused]] std::string four_part_version(const std::string& version) {
     const usize dot_count = static_cast<usize>(std::count(version.begin(), version.end(), '.'));
     if (dot_count == 2)
       return version + ".0";
@@ -326,7 +331,9 @@ namespace {
             << "                [--cert PATH_OR_SUBJECT] [--appimage] [--dmg] [--msi] [--msix]\n"
             << "                [--update-url URL] [--public-key KEY] [--channel "
                "stable|beta|alpha]\n"
-            << "                [--version SEMVER] [--manufacturer NAME|--publisher NAME]\n"
+            << "                [--version SEMVER REQUIRED for --appimage/--dmg/--msi/--msix]\n"
+            << "                [--manufacturer NAME|--publisher NAME REQUIRED for "
+               "--appimage/--dmg/--msi/--msix]\n"
             << "                [--compress zstd|none]\n"
             << "\nExamples:\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.app --platform macos\n"
@@ -1179,6 +1186,14 @@ namespace {
 
 int main(int argc, char** argv) {
   Args a = parse(argc, argv);
+  if (produces_installer(a) && a.version.empty())
+    die("--version is required when producing an installer (.dmg/.msi/.msix/.appimage)");
+  if (produces_installer(a) && a.manufacturer.empty())
+    die("--manufacturer/--publisher is required when producing an installer");
+  if (!produces_installer(a) && a.version.empty())
+    a.version = "0.0.0"; // non-installer fallback
+  if (!produces_installer(a) && a.manufacturer.empty())
+    a.manufacturer = "unknown"; // non-installer fallback
   validate_requested_tools(a);
 
   fs::path self = fs::weakly_canonical(fs::path(argv[0]));
