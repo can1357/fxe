@@ -1,0 +1,6 @@
+{
+  "name": "fxe-devtools",
+  "private": true,
+  "type": "module",
+  "main": "src/main.tsx"
+}
