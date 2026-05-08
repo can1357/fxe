@@ -717,6 +717,84 @@ declare module 'fxe-ui' {
     tabBehavior?: 'focus' | 'insert';
   }
 
+  // Editor primitives ------------------------------------------------------
+  export interface LineSpan {
+    start: number;
+    end: number;
+    color?: number;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strikethrough?: boolean;
+  }
+  export interface DiagnosticUnderline {
+    x1: number;
+    x2: number;
+    style: 'solid' | 'dashed' | 'dotted' | 'wavy';
+    color?: number;
+    thickness?: number;
+  }
+  export interface LineDecorations {
+    spans?: ReadonlyArray<LineSpan>;
+    selectionRects?: Float32Array;
+    background?: number;
+    diagnostics?: ReadonlyArray<DiagnosticUnderline>;
+  }
+  export type LineDecorationFn = (line: number) => LineDecorations | null;
+  export interface LineViewportProps extends AccessibilityProps {
+    key?: string;
+    style?: StyleValue;
+    document: FXE.TextDocument;
+    lineHeight: number;
+    getLineDecorations?: LineDecorationFn;
+    overscan?: number;
+    tabSize?: number;
+    showWhitespace?: boolean;
+    textColor?: number;
+    scrollY?: number;
+    onClickPosition?: (line: number, col: number, ev: unknown) => void;
+  }
+  export interface GutterMark {
+    color: number;
+    size?: number;
+  }
+  export type GutterMarkFn = (line: number) => GutterMark | null;
+  export interface GutterProps extends AccessibilityProps {
+    key?: string;
+    style?: StyleValue;
+    document: FXE.TextDocument;
+    lineHeight: number;
+    scrollY?: number;
+    startLineNumber?: number;
+    textColor?: number;
+    focusedLineColor?: number;
+    focusedLine?: number;
+    getMark?: GutterMarkFn;
+  }
+  export interface EditableAreaProps extends AccessibilityProps {
+    key?: string;
+    style?: StyleValue;
+    document: FXE.TextDocument;
+    history?: {
+      dispatch(
+        edits: ReadonlyArray<{ start: number; removed: number; inserted: string }>,
+        opts?: { origin?: string; break?: boolean },
+      ): unknown;
+      undo(): boolean;
+      redo(): boolean;
+      breakCoalescing?(): void;
+    };
+    lineHeight: number;
+    tabString?: string;
+    tabSize?: number;
+    showWhitespace?: boolean;
+    textColor?: number;
+    getLineDecorations?: LineDecorationFn;
+    onCursorChange?: (line: number, col: number) => void;
+    scrollY?: number;
+    onScrollChange?: (scrollY: number) => void;
+  }
+
   export function View(props: ViewProps): Node;
   export function Text(props: TextProps): Node;
   export function Image(props: ImageProps): Node;
@@ -726,6 +804,9 @@ declare module 'fxe-ui' {
   export function VirtualList<T>(props: VirtualListProps<T>): Node;
   export function TextInput(props: TextInputProps): Node;
   export function TextArea(props: TextAreaProps): Node;
+  export function LineViewport(props: LineViewportProps): Node;
+  export function Gutter(props: GutterProps): Node;
+  export function EditableArea(props: EditableAreaProps): Node;
   export function usePressableState(): PressableState;
   export function useHover(): boolean;
   export function useFocus(): boolean;
