@@ -7,12 +7,12 @@
 #include <unordered_map>
 
 #if defined(__APPLE__) || defined(__linux__)
-#  include <cxxabi.h>
-#  include <dlfcn.h>
-#  include <execinfo.h>
-#  include <signal.h>
-#  include <time.h>
-#  include <unistd.h>
+#include <cxxabi.h>
+#include <dlfcn.h>
+#include <execinfo.h>
+#include <signal.h>
+#include <time.h>
+#include <unistd.h>
 #endif
 
 namespace fxe::runner {
@@ -39,6 +39,11 @@ namespace fxe::runner {
       std::atomic<std::size_t> head{0};
       std::atomic<std::uint64_t> dropped{0};
       std::atomic<bool> active{false};
+      // Saved sigaction at install time. V8's CpuProfiler also hooks
+      // SIGPROF on POSIX; if it was active when we installed, this points
+      // at V8's handler so we can chain through after capturing our sample.
+      struct sigaction prior{};
+      bool have_prior = false;
     };
 
     sampler_ring& ring() {
@@ -53,22 +58,31 @@ namespace fxe::runner {
              static_cast<std::uint64_t>(ts.tv_nsec) / 1000ull;
     }
 
-    void sigprof_handler(int /*sig*/, siginfo_t* /*info*/, void* /*ctx*/) {
+    void sigprof_handler(int sig, siginfo_t* info, void* ctx) {
       auto& r = ring();
-      if (!r.active.load(std::memory_order_acquire))
-        return;
-      // Reserve a slot. If the ring is full, drop and bail. We avoid
-      // fetch_sub on overflow (which would race with concurrent signals on
-      // multi-threaded targets); instead we size the ring generously up
-      // front via max_samples.
-      std::size_t idx = r.head.fetch_add(1, std::memory_order_acq_rel);
-      if (idx >= r.cap) {
-        r.dropped.fetch_add(1, std::memory_order_relaxed);
-        return;
+      if (r.active.load(std::memory_order_acquire)) {
+        std::size_t idx = r.head.fetch_add(1, std::memory_order_acq_rel);
+        if (idx < r.cap) {
+          sample_slot& s = r.slots[idx];
+          s.t_us = now_us();
+          s.n_frames = backtrace(s.frames, kMaxFrames);
+        } else {
+          r.dropped.fetch_add(1, std::memory_order_relaxed);
+        }
       }
-      sample_slot& s = r.slots[idx];
-      s.t_us = now_us();
-      s.n_frames = backtrace(s.frames, kMaxFrames);
+      // Chain to whatever handler was installed before us (typically V8's
+      // CpuProfiler) so its sample collector keeps running. Without this,
+      // V8's profile shows up empty whenever native profiling is also on.
+      if (r.have_prior) {
+        if (r.prior.sa_flags & SA_SIGINFO) {
+          if (r.prior.sa_sigaction)
+            r.prior.sa_sigaction(sig, info, ctx);
+        } else {
+          if (r.prior.sa_handler != SIG_IGN && r.prior.sa_handler != SIG_DFL &&
+              r.prior.sa_handler != nullptr)
+            r.prior.sa_handler(sig);
+        }
+      }
     }
 
     void install_handler() {
@@ -76,19 +90,32 @@ namespace fxe::runner {
       sa.sa_sigaction = &sigprof_handler;
       sa.sa_flags = SA_SIGINFO | SA_RESTART;
       sigemptyset(&sa.sa_mask);
-      sigaction(SIGPROF, &sa, nullptr);
+      auto& r = ring();
+      r.have_prior = (sigaction(SIGPROF, &sa, &r.prior) == 0);
+      // Don't chain back into ourselves if for some reason install runs twice.
+      if (r.have_prior && (r.prior.sa_flags & SA_SIGINFO) &&
+          r.prior.sa_sigaction == &sigprof_handler)
+        r.have_prior = false;
     }
 
     void restore_handler() {
-      // Use SIG_IGN (not SIG_DFL) so any SIGPROF delivered after we stop —
-      // either from a pthread_kill that was in flight when the sampler
-      // thread exited, or queued by the kernel while the target thread had
-      // SIGPROF transiently masked — does not terminate the process.
-      struct sigaction sa{};
-      sa.sa_handler = SIG_IGN;
-      sa.sa_flags = 0;
-      sigemptyset(&sa.sa_mask);
-      sigaction(SIGPROF, &sa, nullptr);
+      // Restore whatever was installed before us (typically V8's CpuProfiler
+      // handler) so V8 keeps receiving SIGPROF samples until it runs its own
+      // teardown. If nothing was previously installed, fall back to SIG_IGN
+      // so any in-flight pthread_kill from our just-joined sampler thread —
+      // or a signal queued by the kernel while the target thread had SIGPROF
+      // transiently masked — doesn't terminate the process.
+      auto& r = ring();
+      if (r.have_prior) {
+        sigaction(SIGPROF, &r.prior, nullptr);
+        r.have_prior = false;
+      } else {
+        struct sigaction sa{};
+        sa.sa_handler = SIG_IGN;
+        sa.sa_flags = 0;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGPROF, &sa, nullptr);
+      }
     }
 
     std::string demangle(const char* sym) {

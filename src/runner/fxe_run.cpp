@@ -79,6 +79,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -315,6 +316,44 @@ namespace {
       }
     }
     return o;
+  }
+
+  // Runner signal handling is deliberately tiny in the signal handler: record
+  // the requested shutdown, then let the normal render-thread pump close
+  // windows and unwind profiling/debug teardown in order.
+  volatile std::sig_atomic_t& shutdown_signal() {
+    static volatile std::sig_atomic_t sig = 0;
+    return sig;
+  }
+
+  void request_shutdown_from_signal(int sig) {
+    if (shutdown_signal() == 0)
+      shutdown_signal() = sig;
+  }
+
+  void install_runner_signal_handlers() {
+    std::signal(SIGINT, &request_shutdown_from_signal);
+    std::signal(SIGTERM, &request_shutdown_from_signal);
+#ifdef SIGHUP
+    std::signal(SIGHUP, &request_shutdown_from_signal);
+#endif
+  }
+
+  int requested_shutdown_signal() {
+    return static_cast<int>(shutdown_signal());
+  }
+
+  void close_windows_for_signal(fxe::js::host* host) {
+    if (!host || requested_shutdown_signal() == 0)
+      return;
+    for (auto* win : host->windows()) {
+      if (win && !win->should_close())
+        win->close();
+    }
+  }
+
+  int signal_exit_status(int sig) {
+    return sig > 0 ? 128 + sig : 0;
   }
 
   // Console sink: forward V8 console output to the debug server. Trampolines
@@ -576,6 +615,7 @@ namespace {
   // Combined trampoline: drains the debug server (if any) and then steps the
   // screenshot watchdog. Both attach through the host's single pump slot.
   struct combined_pump {
+    fxe::js::host* host = nullptr;
     fxe::debug::server* srv = nullptr;
     screenshot_watchdog* shot = nullptr;
     hmr_watcher* hmr = nullptr;
@@ -589,6 +629,7 @@ namespace {
       cp->shot->step();
     if (cp->hmr)
       cp->hmr->step();
+    close_windows_for_signal(cp->host);
   }
   bool combined_paused_trampoline(void* user) {
     auto* cp = static_cast<combined_pump*>(user);
@@ -619,6 +660,7 @@ int main(int argc, char** argv) {
   fxe::js::initialize(argv[0], icudtl);
 
   int status = 0;
+  install_runner_signal_handlers();
   {
     fxe::js::host host;
 
@@ -654,16 +696,19 @@ int main(int argc, char** argv) {
       if (opts.debug_pause) {
         std::fprintf(stderr, "fxe_run: paused; awaiting Debugger.resume...\n");
         std::fflush(stderr);
-        while (debug_srv->is_paused()) {
+        while (debug_srv->is_paused() && requested_shutdown_signal() == 0) {
           debug_srv->pump_tasks();
+          close_windows_for_signal(&host);
           std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
+        if (requested_shutdown_signal() != 0)
+          status = signal_exit_status(requested_shutdown_signal());
       }
     }
 
     // ----- Screenshot watchdog + combined pump ------------------------------
     screenshot_watchdog shot;
-    combined_pump pump_state{debug_srv.get(), nullptr, nullptr};
+    combined_pump pump_state{&host, debug_srv.get(), nullptr, nullptr};
     if (opts.screenshot) {
       shot.host = &host;
       shot.debug_srv = debug_srv.get();
@@ -737,8 +782,10 @@ int main(int argc, char** argv) {
         // Size the ring for ~ hz * 120s of headroom; capped to keep the
         // resident set bounded.
         std::size_t cap = static_cast<std::size_t>(opts.cpu_prof_hz) * 120u;
-        if (cap < 4096) cap = 4096;
-        if (cap > (1u << 20)) cap = (1u << 20);
+        if (cap < 4096)
+          cap = 4096;
+        if (cap > (1u << 20))
+          cap = (1u << 20);
         std::string err;
         if (!nprof.start(opts.cpu_prof_hz, cap, err)) {
           std::fprintf(stderr, "fxe_run: --cpu-prof: native profiler start failed: %s\n",
@@ -749,8 +796,8 @@ int main(int argc, char** argv) {
         }
       }
       std::fprintf(stderr, "fxe_run: --cpu-prof: js=%s native=%s hz=%d -> %s\n",
-                   jsprof_started ? "on" : "off", nprof_started ? "on" : "off",
-                   opts.cpu_prof_hz, opts.cpu_prof_path.c_str());
+                   jsprof_started ? "on" : "off", nprof_started ? "on" : "off", opts.cpu_prof_hz,
+                   opts.cpu_prof_path.c_str());
       std::fflush(stderr);
     }
 
@@ -765,7 +812,15 @@ int main(int argc, char** argv) {
     // ----- Script execution -------------------------------------------------
     if (status == 0) {
       for (auto& s : opts.scripts) {
+        if (requested_shutdown_signal() != 0) {
+          status = signal_exit_status(requested_shutdown_signal());
+          break;
+        }
         auto r = host.run_file(s);
+        if (requested_shutdown_signal() != 0 && r.ok) {
+          status = signal_exit_status(requested_shutdown_signal());
+          break;
+        }
         if (!r.ok) {
           std::fprintf(stderr, "fxe_run: %s: %s\n", s.c_str(), r.message.c_str());
           status = 1;
@@ -846,8 +901,8 @@ int main(int argc, char** argv) {
           std::fclose(f);
           std::fprintf(stderr, "fxe_run: --cpu-prof-md: wrote %s\n", md_path.c_str());
         } else {
-          std::fprintf(stderr, "fxe_run: --cpu-prof-md: cannot open %s: %s\n",
-                       md_path.c_str(), std::strerror(errno));
+          std::fprintf(stderr, "fxe_run: --cpu-prof-md: cannot open %s: %s\n", md_path.c_str(),
+                       std::strerror(errno));
         }
       }
       std::fflush(stderr);

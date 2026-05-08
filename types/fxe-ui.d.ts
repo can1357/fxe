@@ -569,6 +569,19 @@ declare module 'fxe-ui' {
   export interface MountOptions {
     renderer?: Renderer;
     theme?: Theme;
+    /**
+     * When `false`, mount runs a continuous requestAnimationFrame loop that
+     * re-renders every tick — necessary for animated/realtime apps that
+     * read clocks or external state outside the reconciler.
+     *
+     * When `undefined` (default) or `true`, mount renders **on demand**:
+     * once at startup, then again only when state changes (setState,
+     * external store updates, focus / hover / press dispatch, or an
+     * explicit `window.requestRedraw()`). Idle CPU cost is zero.
+     *
+     * Static UIs and form-style apps want the default. Only flip to
+     * `lazy: false` if you genuinely need every frame.
+     */
     lazy?: boolean;
   }
   export function mount(root: Node, window: Window, opts?: MountOptions): () => void;

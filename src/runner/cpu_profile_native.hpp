@@ -41,7 +41,9 @@ namespace fxe::runner {
     profile_data stop();
 
     // True between successful start() and stop().
-    [[nodiscard]] bool running() const noexcept { return running_; }
+    [[nodiscard]] bool running() const noexcept {
+      return running_;
+    }
 
   private:
     bool running_ = false;

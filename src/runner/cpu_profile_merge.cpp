@@ -45,11 +45,46 @@ namespace fxe::runner {
       return it->get<std::string>();
     }
 
+    // V8's CpuProfile::Serialize sometimes emits raw regex bodies inside
+    // function-name strings without escaping the backslash, e.g.
+    //   "functionName": "RegExp: ^class\s"
+    // which is not valid JSON. Walk the input and double any backslash
+    // that doesn't introduce one of JSON's recognized escape sequences.
+    std::string sanitize_v8_json(std::string_view src) {
+      std::string out;
+      out.reserve(src.size());
+      bool in_string = false;
+      for (std::size_t i = 0; i < src.size(); ++i) {
+        char c = src[i];
+        out.push_back(c);
+        if (c == '"') {
+          in_string = !in_string;
+          continue;
+        }
+        if (!in_string)
+          continue;
+        if (c == '\\' && i + 1 < src.size()) {
+          char n = src[i + 1];
+          if (n == '"' || n == '\\' || n == '/' || n == 'b' || n == 'f' || n == 'n' || n == 'r' ||
+              n == 't' || n == 'u') {
+            // Valid escape: copy as-is.
+            out.push_back(n);
+            ++i;
+          } else {
+            // Invalid escape (e.g. \s, \d, \., \w): double the backslash so
+            // the parser treats the original byte as data.
+            out.push_back('\\');
+          }
+        }
+      }
+      return out;
+    }
+
   } // namespace
 
   bool parse_v8_profile(std::string_view jstr, profile_data& out, std::string& err) {
     try {
-      auto j = json::parse(jstr);
+      auto j = json::parse(sanitize_v8_json(jstr));
       out = profile_data{};
 
       const auto& jnodes = j.at("nodes");
@@ -257,7 +292,8 @@ namespace fxe::runner {
       if (den <= 0)
         return "0.0%";
       char buf[16];
-      std::snprintf(buf, sizeof(buf), "%.1f%%", 100.0 * static_cast<double>(num) / static_cast<double>(den));
+      std::snprintf(buf, sizeof(buf), "%.1f%%",
+                    100.0 * static_cast<double>(num) / static_cast<double>(den));
       return buf;
     }
 
@@ -367,7 +403,9 @@ namespace fxe::runner {
     struct key_t {
       std::string fn;
       std::string url;
-      bool operator==(const key_t& o) const { return fn == o.fn && url == o.url; }
+      bool operator==(const key_t& o) const {
+        return fn == o.fn && url == o.url;
+      }
     };
     struct key_hash {
       std::size_t operator()(const key_t& k) const noexcept {
@@ -431,14 +469,12 @@ namespace fxe::runner {
       rows.push_back(v);
 
     auto sort_self = [&] {
-      std::sort(rows.begin(), rows.end(), [](const agg& a, const agg& b) {
-        return a.self_us > b.self_us;
-      });
+      std::sort(rows.begin(), rows.end(),
+                [](const agg& a, const agg& b) { return a.self_us > b.self_us; });
     };
     auto sort_total = [&] {
-      std::sort(rows.begin(), rows.end(), [](const agg& a, const agg& b) {
-        return a.total_us > b.total_us;
-      });
+      std::sort(rows.begin(), rows.end(),
+                [](const agg& a, const agg& b) { return a.total_us > b.total_us; });
     };
 
     std::string out;

@@ -1023,6 +1023,18 @@ if(FXE_BUILD_TESTS)
                 --screenshot-delay=50
                 ${CMAKE_CURRENT_SOURCE_DIR}/examples/js/hello.ts
         )
+        if(UNIX)
+            add_test(
+                NAME fxe_run_cpu_prof_sigterm_flush
+                COMMAND
+                    /bin/sh -c
+                    "set -eu; run=\"$1\"; prof=\"$2\"; md=\"$3\"; script=\"$4\"; rm -f \"$prof\" \"$md\"; \"$run\" --cpu-prof=\"$prof\" --cpu-prof-md=\"$md\" --cpu-prof-hz=500 \"$script\" & pid=$!; sleep 0.5; kill -TERM \"$pid\"; code=0; wait \"$pid\" || code=$?; test \"$code\" -eq 143; test -s \"$prof\"; test -s \"$md\""
+                    sh $<TARGET_FILE:fxe_run>
+                    ${CMAKE_CURRENT_BINARY_DIR}/fxe_run_cpu_prof_sigterm.cpuprofile
+                    ${CMAKE_CURRENT_BINARY_DIR}/fxe_run_cpu_prof_sigterm.md
+                    ${CMAKE_CURRENT_SOURCE_DIR}/examples/js/login_form.tsx
+            )
+        endif()
     endif()
 
     # ---------------------------------------------------------------------

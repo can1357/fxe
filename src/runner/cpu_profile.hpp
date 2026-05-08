@@ -19,8 +19,8 @@ namespace fxe::runner {
   struct call_frame {
     std::string function_name;
     std::string url;
-    int script_id = 0;     // 0 = unknown / native
-    int line_number = -1;  // CDP convention: 0-based, -1 = unknown
+    int script_id = 0;    // 0 = unknown / native
+    int line_number = -1; // CDP convention: 0-based, -1 = unknown
     int column_number = -1;
   };
 
@@ -37,7 +37,7 @@ namespace fxe::runner {
     std::vector<std::int64_t> time_deltas; // microseconds between samples
     std::int64_t start_time = 0;           // microseconds (monotonic)
     std::int64_t end_time = 0;
-    std::uint64_t dropped_samples = 0;     // sampler dropped (overflow)
+    std::uint64_t dropped_samples = 0; // sampler dropped (overflow)
     // Average per-sample period; lets renderers reason about self time
     // without trusting wall-clock stamps that may live on different
     // epochs (V8's startTime counter vs CLOCK_MONOTONIC).
