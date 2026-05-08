@@ -168,4 +168,41 @@ namespace fxe::webauthn {
     std::unique_ptr<impl> impl_;
   };
 
+
+  // Platform backend that drives real authenticators (Touch ID / Face ID /
+  // Windows Hello / USB security keys / etc.). Selected per OS:
+  //   macOS  → ASAuthorizationController (AuthenticationServices.framework)
+  //   Win32  → webauthn.dll (runtime-bound; requires API v1+)
+  //   Linux  → libfido2 over USB HID (when FXE_HAS_LIBFIDO2)
+  //
+  // Threading contract: register_credential / assert_credential are blocking
+  // and may take seconds (user gesture). On macOS they MUST be called from a
+  // worker thread because the underlying delegate fires on the main queue;
+  // calling from main would deadlock. cancel() is safe from any thread.
+  class platform_authenticator {
+  public:
+    // True when a backend is compiled in for this OS.
+    static bool is_available();
+    // True when the OS reports a user-verifying platform authenticator
+    // (TouchID/FaceID/Windows Hello). Polls the OS each call.
+    static bool is_user_verifying_platform_available();
+    // Returns nullptr when is_available() is false.
+    static std::unique_ptr<platform_authenticator> create();
+
+    virtual ~platform_authenticator() = default;
+    platform_authenticator(const platform_authenticator&) = delete;
+    platform_authenticator& operator=(const platform_authenticator&) = delete;
+
+    virtual std::string_view backend_name() const = 0;
+    virtual std::string register_credential(const creation_options& opts,
+                                            std::string_view origin,
+                                            register_response& out) = 0;
+    virtual std::string assert_credential(const request_options& opts,
+                                          std::string_view origin,
+                                          assert_response& out) = 0;
+    virtual void cancel() = 0;
+
+  protected:
+    platform_authenticator() = default;
+  };
 } // namespace fxe::webauthn
