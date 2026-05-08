@@ -12,10 +12,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
       - run: npm ci
       - name: Add node_modules/.bin to PATH
         run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
       - uses: extractions/setup-just@v2
+      - name: Cache pipx tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/pipx
+            /opt/pipx
+          key: pipx-${{ runner.os }}-clang-format-22.1.4
       - name: Install lint/format toolchain
         run: |
           sudo apt-get update
@@ -45,7 +53,7 @@ jobs:
           sudo apt-get install -y \
             xvfb pkg-config autoconf autoconf-archive automake libtool \
             libxinerama-dev libxcursor-dev libxrandr-dev libxi-dev \
-            libgl1-mesa-dev
+            libwayland-dev libxkbcommon-dev libgl1-mesa-dev
 
       - name: Install macOS build deps
         if: runner.os == 'macOS'
@@ -63,6 +71,14 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      - name: Cache vcpkg checkout
+        uses: actions/cache@v4
+        with:
+          path: vcpkg
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
       - name: Bootstrap in-tree vcpkg
         shell: bash
         run: |
@@ -70,10 +86,29 @@ jobs:
             git clone https://github.com/microsoft/vcpkg.git vcpkg
           fi
           if [ "$RUNNER_OS" = "Windows" ]; then
-            ./vcpkg/bootstrap-vcpkg.bat -disableMetrics
+            if [ ! -x vcpkg/vcpkg.exe ]; then
+              ./vcpkg/bootstrap-vcpkg.bat -disableMetrics
+            fi
           else
-            ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+            if [ ! -x vcpkg/vcpkg ]; then
+              ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+            fi
           fi
+
+      - name: Set up compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.os }}-release
+          variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+          max-size: 500M
+
+      - name: Cache CMake FetchContent deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: cmake-deps-${{ runner.os }}-${{ hashFiles('cmake/deps.cmake', 'CMakeLists.txt') }}
+          restore-keys: |
+            cmake-deps-${{ runner.os }}-
 
       - name: Configure (Unix)
         if: runner.os != 'Windows'
@@ -81,6 +116,8 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DFXE_FETCH_DEPS=ON \
             -DFXE_ENABLE_WGPU=OFF \
             -DFXE_ENABLE_V8=OFF \
@@ -94,6 +131,8 @@ jobs:
           cmake -S . -B build -G Ninja `
             -DCMAKE_TOOLCHAIN_FILE="$pwd/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
             -DFXE_FETCH_DEPS=ON `
             -DFXE_ENABLE_WGPU=OFF `
             -DFXE_ENABLE_V8=OFF `
