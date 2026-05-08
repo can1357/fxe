@@ -24,6 +24,16 @@ export interface TextSelectionOptions {
  *
  * `caretOpacity` lets callers drive caret blink animation over time. The
  * painter is stateless and applies opacity only to the caret draw.
+ *
+ * `scrollOffset` shifts every emitted draw call (text runs, selection rects,
+ * caret, IME preedit) by `-scrollOffset.{x,y}` so callers can render
+ * horizontally-scrolled (single-line `TextInput`) or vertically-scrolled
+ * (multi-line `TextArea`) content without touching the rect.
+ *
+ * `wrapWidth` overrides the wrap budget: pass `null` to disable wrapping
+ * entirely (the painter then emits a single line regardless of `rect.width`),
+ * or a positive number to wrap at a width different from `rect.width`. When
+ * omitted, the painter wraps at `rect.width` as before.
  */
 export interface PaintTextOptions {
   imePreedit?: TextPreeditOptions;
@@ -31,6 +41,8 @@ export interface PaintTextOptions {
   caretIndex?: number;
   caretColor?: Color;
   caretOpacity?: number;
+  scrollOffset?: { x?: number; y?: number };
+  wrapWidth?: number | null;
 }
 
 function measuredWidth(text: string, style: TextStyle): number {
@@ -84,12 +96,21 @@ export function paintText(
         ? Math.max(0, Math.min(1, options.caretOpacity))
         : 1;
   const visibleCaretColor = scaleAlpha(caretColor, caretOpacity);
-  const wrapWidth = rect.width > 0 ? rect.width : undefined;
+  const wrapWidth =
+    options.wrapWidth === null
+      ? undefined
+      : options.wrapWidth !== undefined
+        ? options.wrapWidth
+        : rect.width > 0
+          ? rect.width
+          : undefined;
+  const scrollX = options.scrollOffset?.x ?? 0;
+  const scrollY = options.scrollOffset?.y ?? 0;
   let caretAnchorX: number | undefined;
   let caretAnchorY: number | undefined;
   const wrapped = wrapText(text, style, { maxWidth: wrapWidth });
-  const baseY = rect.y;
-  let caretBaseX = alignedX(rect, 0, align);
+  const baseY = rect.y - scrollY;
+  let caretBaseX = alignedX(rect, 0, align) - scrollX;
   let caretY = baseY;
   // Collect text lines and emit them in a single drawTextRun() call to skip
   // a V8 trampoline per line. Selection / caret rects still emit inline so
@@ -100,7 +121,7 @@ export function paintText(
     const line = wrapped.lines[i];
     const lineStart = wrapped.lineStartIndices[i] ?? 0;
     const lineWidth = measuredWidth(line, style);
-    const x = alignedX(rect, lineWidth, align);
+    const x = alignedX(rect, lineWidth, align) - scrollX;
     caretBaseX = x + lineWidth;
     caretY = baseY + i * wrapped.lineHeight;
     if (selection && selectionEnd > selectionStart) {

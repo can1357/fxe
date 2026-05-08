@@ -32,7 +32,7 @@ import {
   undo as undoHistory,
   wordRangeAt,
 } from '../text/edit_model.ts';
-import { pointToTextIndex, wrapText } from '../text/wrap.ts';
+import { pointToTextIndex, wrapText, xAtGlyphIndex } from '../text/wrap.ts';
 import { useTheme } from '../theme/provider.ts';
 import { useTextStyle } from '../theme/text_context.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
@@ -88,6 +88,9 @@ interface TextInputTextProps extends InternalLayoutProps {
   caretIndex?: number;
   caretOpacity?: number;
   selectionColor?: number;
+  scrollX?: number;
+  /** Override wrap budget. `null` disables wrap entirely (single-line). */
+  wrapWidth?: number | null;
 }
 
 type ClipboardKeyEvent = {
@@ -105,6 +108,15 @@ const KEY_RIGHT = 262;
 const KEY_LEFT = 263;
 const KEY_HOME = 268;
 const KEY_END = 269;
+const KEY_A = 65;
+const KEY_C = 67;
+const KEY_V = 86;
+const KEY_X = 88;
+const KEY_Y = 89;
+const KEY_Z = 90;
+// Letter keys arrive as uppercase GLFW codes from key events, but lowercase
+// ASCII char codes from typed-character events. Match both.
+const isLetter = (key: number, upper: number) => key === upper || key === upper + 32;
 const DOUBLE_CLICK_MS = 500;
 const CLICK_SLOP = 4;
 
@@ -116,8 +128,11 @@ const TextInputText = Component((props: TextInputTextProps): Node => {
   const rect = props.__layout
     ? { ...props.__layout }
     : rectFromStyle(resolved.layout, props.__layout);
+  const wrapWidth = props.wrapWidth;
   if (rect.width === 0 || rect.height === 0) {
-    const intrinsic = wrapText(text, textStyle, { maxWidth: undefined });
+    const intrinsic = wrapText(text, textStyle, {
+      maxWidth: wrapWidth === null ? undefined : (wrapWidth ?? undefined),
+    });
     if (rect.width === 0) rect.width = intrinsic.width;
     if (rect.height === 0) rect.height = intrinsic.height;
   }
@@ -143,6 +158,8 @@ const TextInputText = Component((props: TextInputTextProps): Node => {
         props.caretIndex,
         props.caretOpacity,
         props.selectionColor,
+        props.scrollX,
+        wrapWidth ?? undefined,
       ],
       fn: (cb: CommandBuffer) =>
         paintText(cb, rect, text, textStyle, {
@@ -156,6 +173,8 @@ const TextInputText = Component((props: TextInputTextProps): Node => {
             : undefined,
           caretIndex: props.caretIndex,
           caretOpacity: props.caretOpacity,
+          scrollOffset: props.scrollX ? { x: props.scrollX } : undefined,
+          wrapWidth: wrapWidth,
         }),
     },
   } as Node;
@@ -173,6 +192,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
   const [selectionEnd, setSelectionEnd] = useState(initial.length);
   const [focused, setFocused] = useState(false);
   const [caretPhase, setCaretPhase] = useState(true);
+  const [scrollX, setScrollX] = useState(0);
   const [imePreedit, setImePreedit] = useState<{ preedit: string; cursor: number }>({
     preedit: '',
     cursor: 0,
@@ -183,6 +203,14 @@ export const TextInput = Component((props: TextInputProps): Node => {
   const blinkAccum = useRef({ ms: 0 });
   const firstFocus = useRef(true);
   const historyRef = useRef(createHistory());
+  // Auto-scroll while drag-selecting outside the visible viewport.
+  // `dir` is the side the mouse exited; `lastX/Y` keep the last drag
+  // coords so useFrame can re-extend selection as scrollX advances.
+  const dragEdge = useRef<{ dir: -1 | 1; lastX: number; lastY: number } | null>(null);
+  // Drag-from-selection state: mousedown happened inside the existing
+  // selection range, so we defer caret reset until we know whether the
+  // gesture is a click (collapse selection) or a drag-out (startDrag).
+  const pendingDragOut = useRef<{ x: number; y: number; text: string } | null>(null);
   const platform = useMemo(() => detectPlatform(), []);
 
   const rect = rectFromStyle(resolved.layout, props.__layout);
@@ -202,6 +230,24 @@ export const TextInput = Component((props: TextInputProps): Node => {
   if (a11yState.readOnly === undefined && readOnly) a11yState.readOnly = true;
   const a11yValue = a11y.accessibilityValue ?? { text: value };
 
+  const visibleWidth = (): number => {
+    const padL = rect.paddingLeft ?? 0;
+    const padR = rect.paddingRight ?? 0;
+    return Math.max(0, rect.width - padL - padR);
+  };
+
+  // Adjust scrollX so the caret at glyph index `idx` is inside the visible
+  // viewport. Uses unscrolled (text-local) coordinates.
+  const ensureCaretInView = (idx: number): void => {
+    const w = visibleWidth();
+    if (w <= 0) return;
+    const caretX = xAtGlyphIndex(value, textStyle, clampIndex(idx, value));
+    let next = scrollX;
+    if (caretX < next) next = Math.max(0, caretX - 8);
+    else if (caretX > next + w - 1) next = Math.max(0, caretX - w + 8);
+    if (next !== scrollX) setScrollX(next);
+  };
+
   const setSelection = (anchor: number, focus: number, fire = true): void => {
     const a = clampIndex(anchor, value);
     const f = clampIndex(focus, value);
@@ -209,6 +255,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
     setSelectionEnd(f);
     blinkAccum.current.ms = 0;
     setCaretPhase(true);
+    ensureCaretInView(f);
     if (fire) props.onSelectionChange?.({ start: a, end: f });
   };
 
@@ -253,8 +300,13 @@ export const TextInput = Component((props: TextInputProps): Node => {
   const indexFromPoint = (x: number, y: number): number => {
     const padX = rect.paddingLeft ?? 0;
     const padY = rect.paddingTop ?? 0;
-    const wrapped = wrapText(value, textStyle, { maxWidth: rect.width });
-    return pointToTextIndex(wrapped, textStyle, x - rect.x - padX, y - rect.y - padY);
+    const wrapped = wrapText(value, textStyle, { maxWidth: undefined });
+    return pointToTextIndex(
+      wrapped,
+      textStyle,
+      x - rect.x - padX + scrollX,
+      y - rect.y - padY,
+    );
   };
 
   const doUndo = (): void => {
@@ -308,15 +360,44 @@ export const TextInput = Component((props: TextInputProps): Node => {
     );
   };
 
-  // Caret blink — only ticks when focused, no selection range, no IME preedit.
+  // Caret blink + drag-edge autoscroll. Both run on the frame clock; the
+  // blink fast-paths out when not applicable, and the autoscroll fast-paths
+  // out when not actively dragging at an edge.
   useFrame((dt) => {
-    if (!focused || disabled || blinkMs <= 0) return;
-    if (selectionStart !== selectionEnd) return;
-    if (imePreedit.preedit.length > 0) return;
-    blinkAccum.current.ms += dt;
-    if (blinkAccum.current.ms >= blinkMs) {
-      blinkAccum.current.ms = 0;
-      setCaretPhase((p) => !p);
+    if (focused && !disabled && blinkMs > 0) {
+      if (
+        selectionStart === selectionEnd &&
+        imePreedit.preedit.length === 0
+      ) {
+        blinkAccum.current.ms += dt;
+        if (blinkAccum.current.ms >= blinkMs) {
+          blinkAccum.current.ms = 0;
+          setCaretPhase((p) => !p);
+        }
+      }
+    }
+    if (dragEdge.current && !disabled) {
+      const SPEED_PX_PER_SEC = 600;
+      const delta = (SPEED_PX_PER_SEC * dt) / 1000;
+      const next = Math.max(0, scrollX + dragEdge.current.dir * delta);
+      // Clamp at the right edge so we don't scroll past the text width.
+      const maxScroll = Math.max(
+        0,
+        xAtGlyphIndex(value, textStyle, value.length) - visibleWidth() + 8,
+      );
+      const clamped = Math.min(next, maxScroll);
+      if (clamped !== scrollX) setScrollX(clamped);
+      // Re-extend selection toward the new visible end.
+      const idx = indexFromPoint(dragEdge.current.lastX, dragEdge.current.lastY);
+      if (idx !== selectionEnd) {
+        const a = clampIndex(dragAnchor.current, value);
+        const f = clampIndex(idx, value);
+        setSelectionStart(a);
+        setSelectionEnd(f);
+        blinkAccum.current.ms = 0;
+        setCaretPhase(true);
+        props.onSelectionChange?.({ start: a, end: f });
+      }
     }
   });
 
@@ -359,6 +440,8 @@ export const TextInput = Component((props: TextInputProps): Node => {
           ? lastClick.current.count + 1
           : 1;
       lastClick.current = { time: now, x: ev.x, y: ev.y, count };
+      pendingDragOut.current = null;
+      dragEdge.current = null;
       if (count >= 3) {
         dragAnchor.current = 0;
         setSelection(0, value.length);
@@ -367,18 +450,66 @@ export const TextInput = Component((props: TextInputProps): Node => {
         dragAnchor.current = start;
         setSelection(start, end);
       } else {
-        dragAnchor.current = idx;
-        setSelection(idx, idx);
+        // If the press lands inside an existing selection, defer caret
+        // reset: a click without movement collapses the selection at the
+        // hit point (in onPressOut), and a drag past the slop initiates a
+        // text drag-out (in onDrag) via the event_pipeline drag sink.
+        const [s, e] = orderedRange(selectionStart, selectionEnd);
+        const insideSelection = !secure && s !== e && idx >= s && idx <= e;
+        if (insideSelection) {
+          pendingDragOut.current = { x: ev.x, y: ev.y, text: selectedText() };
+          dragAnchor.current = idx;
+        } else {
+          dragAnchor.current = idx;
+          setSelection(idx, idx);
+        }
       }
     },
     onDrag: (ev) => {
       if (disabled) return;
-      // TODO(textarea): autoscroll when drag goes outside visible bounds.
+      // If we deferred selection-collapse on press inside a selection, a
+      // drag past the slop turns into a drag-out.
+      const pend = pendingDragOut.current;
+      if (pend) {
+        const dx = ev.x - pend.x;
+        const dy = ev.y - pend.y;
+        if (dx * dx + dy * dy > CLICK_SLOP * CLICK_SLOP) {
+          const drag = (
+            ev as { requestDragOut?: (payload: { text: string }) => boolean }
+          ).requestDragOut;
+          if (drag) drag({ text: pend.text });
+          pendingDragOut.current = null;
+          dragEdge.current = null;
+          return;
+        }
+        // Stay deferred until movement exceeds slop or button releases.
+        return;
+      }
+      const padL = rect.paddingLeft ?? 0;
+      const padR = rect.paddingRight ?? 0;
+      const leftEdge = rect.x + padL;
+      const rightEdge = rect.x + rect.width - padR;
+      if (ev.x < leftEdge) {
+        dragEdge.current = { dir: -1, lastX: ev.x, lastY: ev.y };
+      } else if (ev.x > rightEdge) {
+        dragEdge.current = { dir: 1, lastX: ev.x, lastY: ev.y };
+      } else {
+        dragEdge.current = null;
+      }
       setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y));
     },
     onPressOut: (ev) => {
+      dragEdge.current = null;
       if (disabled) return;
       if ((ev.nativeEvent as { button?: number }).button !== 0) return;
+      // Press-then-release inside a selection without crossing the drag
+      // slop collapses the selection at the click point.
+      if (pendingDragOut.current) {
+        const idx = indexFromPoint(ev.x, ev.y);
+        pendingDragOut.current = null;
+        setSelection(idx, idx);
+        return;
+      }
       if (lastClick.current.count === 1) {
         setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y));
       }
@@ -471,12 +602,12 @@ export const TextInput = Component((props: TextInputProps): Node => {
       const lineJump = isLineJumpModifier(mods, platform);
 
       // Primary+A select all.
-      if (primary && (key === 65 || key === 97)) {
+      if (primary && isLetter(key, KEY_A)) {
         setSelection(0, value.length);
         return;
       }
       // Primary+C copy.
-      if (primary && (key === 67 || key === 99)) {
+      if (primary && isLetter(key, KEY_C)) {
         if (!secure) {
           const t = selectedText();
           if (t.length > 0) keyEvent.setClipboardText?.(t);
@@ -484,7 +615,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
         return;
       }
       // Primary+X cut.
-      if (primary && (key === 88 || key === 120)) {
+      if (primary && isLetter(key, KEY_X)) {
         if (readOnly || secure) return;
         const t = selectedText();
         if (t.length > 0) {
@@ -494,7 +625,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
         return;
       }
       // Primary+V paste.
-      if (primary && (key === 86 || key === 118)) {
+      if (primary && isLetter(key, KEY_V)) {
         if (readOnly) return;
         let t = keyEvent.clipboardText?.() ?? '';
         t = t.replace(/\n/g, '');
@@ -507,13 +638,13 @@ export const TextInput = Component((props: TextInputProps): Node => {
         return;
       }
       // Primary+Z undo (Shift = redo).
-      if (primary && (key === 90 || key === 122)) {
+      if (primary && isLetter(key, KEY_Z)) {
         if (shift) doRedo();
         else doUndo();
         return;
       }
       // Primary+Y redo (Windows convention; harmless on macOS).
-      if (primary && (key === 89 || key === 121)) {
+      if (primary && isLetter(key, KEY_Y)) {
         doRedo();
         return;
       }
@@ -607,6 +738,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
         borderColor: focused ? theme.colors.primary : theme.colors.border,
         backgroundColor: theme.colors.surface,
         opacity: disabled ? 0.5 : 1,
+        overflow: 'hidden',
       },
       props.style,
     ],
@@ -618,6 +750,10 @@ export const TextInput = Component((props: TextInputProps): Node => {
       caretIndex: showCaret ? selectionEnd : undefined,
       caretOpacity,
       selectionColor: props.selectionColor,
+      // Single-line: disable wrap so long text scrolls horizontally instead
+      // of breaking onto wrapped visual lines.
+      wrapWidth: showPlaceholder ? undefined : null,
+      scrollX: showPlaceholder ? 0 : scrollX,
       imePreedit:
         imePreedit.preedit.length > 0
           ? {

@@ -90,6 +90,7 @@ interface TextAreaInnerProps extends InternalLayoutProps {
   caretOpacity?: number;
   selectionColor?: number;
   softWrap?: boolean;
+  scrollY?: number;
 }
 
 type ClipboardKeyEvent = {
@@ -109,6 +110,15 @@ const KEY_DOWN = 264;
 const KEY_UP = 265;
 const KEY_HOME = 268;
 const KEY_END = 269;
+const KEY_A = 65;
+const KEY_C = 67;
+const KEY_V = 86;
+const KEY_X = 88;
+const KEY_Y = 89;
+const KEY_Z = 90;
+// Letter keys arrive as uppercase GLFW codes from key events, but lowercase
+// ASCII char codes from typed-character events. Match both.
+const isLetter = (key: number, upper: number) => key === upper || key === upper + 32;
 const DOUBLE_CLICK_MS = 500;
 const CLICK_SLOP = 4;
 
@@ -149,6 +159,7 @@ const TextAreaInner = Component((props: TextAreaInnerProps): Node => {
         props.caretOpacity,
         props.selectionColor,
         props.softWrap,
+        props.scrollY,
       ],
       fn: (cb: CommandBuffer) =>
         paintText(cb, rect, text, textStyle, {
@@ -162,6 +173,7 @@ const TextAreaInner = Component((props: TextAreaInnerProps): Node => {
             : undefined,
           caretIndex: props.caretIndex,
           caretOpacity: props.caretOpacity,
+          scrollOffset: props.scrollY ? { y: props.scrollY } : undefined,
         }),
     },
   } as Node;
@@ -179,6 +191,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
   const [selectionEnd, setSelectionEnd] = useState(initial.length);
   const [focused, setFocused] = useState(false);
   const [caretPhase, setCaretPhase] = useState(true);
+  const [scrollY, setScrollY] = useState(0);
   const [imePreedit, setImePreedit] = useState<{ preedit: string; cursor: number }>({
     preedit: '',
     cursor: 0,
@@ -189,6 +202,9 @@ export const TextArea = Component((props: TextAreaProps): Node => {
   const blinkAccum = useRef({ ms: 0 });
   const firstFocus = useRef(true);
   const historyRef = useRef(createHistory());
+  // Drag-edge auto-scroll on the Y axis (vertical scroll for multi-line).
+  const dragEdge = useRef<{ dir: -1 | 1; lastX: number; lastY: number } | null>(null);
+  const pendingDragOut = useRef<{ x: number; y: number; text: string } | null>(null);
   const platform = useMemo(() => detectPlatform(), []);
 
   const rect = rectFromStyle(resolved.layout, props.__layout);
@@ -210,6 +226,30 @@ export const TextArea = Component((props: TextAreaProps): Node => {
   if (a11yState.readOnly === undefined && readOnly) a11yState.readOnly = true;
   const a11yValue = a11y.accessibilityValue ?? { text: value };
 
+  const visibleHeight = (): number => {
+    const padT = rect.paddingTop ?? 0;
+    const padB = rect.paddingBottom ?? 0;
+    return Math.max(0, rect.height - padT - padB);
+  };
+
+  // Adjust scrollY so the caret at glyph index `idx` is inside the visible
+  // viewport. Uses unscrolled (text-local) coordinates.
+  const ensureCaretInView = (idx: number): void => {
+    const h = visibleHeight();
+    if (h <= 0) return;
+    const wrapped = wrapText(value, textStyle, { maxWidth: wrapMaxForHit() });
+    if (wrapped.lines.length === 0) {
+      if (scrollY !== 0) setScrollY(0);
+      return;
+    }
+    const point = textIndexToPoint(wrapped, textStyle, clampIndex(idx, value));
+    let next = scrollY;
+    if (point.y < next) next = Math.max(0, point.y);
+    else if (point.y + wrapped.lineHeight > next + h)
+      next = Math.max(0, point.y + wrapped.lineHeight - h);
+    if (next !== scrollY) setScrollY(next);
+  };
+
   const setSelection = (anchor: number, focus: number, fire = true): void => {
     const a = clampIndex(anchor, value);
     const f = clampIndex(focus, value);
@@ -217,6 +257,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
     setSelectionEnd(f);
     blinkAccum.current.ms = 0;
     setCaretPhase(true);
+    ensureCaretInView(f);
     if (fire) props.onSelectionChange?.({ start: a, end: f });
   };
 
@@ -267,7 +308,12 @@ export const TextArea = Component((props: TextAreaProps): Node => {
     const padX = rect.paddingLeft ?? 0;
     const padY = rect.paddingTop ?? 0;
     const wrapped = wrapText(value, textStyle, { maxWidth: wrapMaxForHit() });
-    return pointToTextIndex(wrapped, textStyle, x - rect.x - padX, y - rect.y - padY);
+    return pointToTextIndex(
+      wrapped,
+      textStyle,
+      x - rect.x - padX,
+      y - rect.y - padY + scrollY,
+    );
   };
 
   const moveCaretVertical = (idx: number, dir: 1 | -1): number => {
@@ -323,13 +369,37 @@ export const TextArea = Component((props: TextAreaProps): Node => {
   };
 
   useFrame((dt) => {
-    if (!focused || disabled || blinkMs <= 0) return;
-    if (selectionStart !== selectionEnd) return;
-    if (imePreedit.preedit.length > 0) return;
-    blinkAccum.current.ms += dt;
-    if (blinkAccum.current.ms >= blinkMs) {
-      blinkAccum.current.ms = 0;
-      setCaretPhase((p) => !p);
+    if (focused && !disabled && blinkMs > 0) {
+      if (
+        selectionStart === selectionEnd &&
+        imePreedit.preedit.length === 0
+      ) {
+        blinkAccum.current.ms += dt;
+        if (blinkAccum.current.ms >= blinkMs) {
+          blinkAccum.current.ms = 0;
+          setCaretPhase((p) => !p);
+        }
+      }
+    }
+    if (dragEdge.current && !disabled) {
+      const SPEED_PX_PER_SEC = 600;
+      const delta = (SPEED_PX_PER_SEC * dt) / 1000;
+      const next = Math.max(0, scrollY + dragEdge.current.dir * delta);
+      const wrapped = wrapText(value, textStyle, { maxWidth: wrapMaxForHit() });
+      const contentH = wrapped.lines.length * wrapped.lineHeight;
+      const maxScroll = Math.max(0, contentH - visibleHeight() + 8);
+      const clamped = Math.min(next, maxScroll);
+      if (clamped !== scrollY) setScrollY(clamped);
+      const idx = indexFromPoint(dragEdge.current.lastX, dragEdge.current.lastY);
+      if (idx !== selectionEnd) {
+        const a = clampIndex(dragAnchor.current, value);
+        const f = clampIndex(idx, value);
+        setSelectionStart(a);
+        setSelectionEnd(f);
+        blinkAccum.current.ms = 0;
+        setCaretPhase(true);
+        props.onSelectionChange?.({ start: a, end: f });
+      }
     }
   });
 
@@ -372,6 +442,8 @@ export const TextArea = Component((props: TextAreaProps): Node => {
           ? lastClick.current.count + 1
           : 1;
       lastClick.current = { time: now, x: ev.x, y: ev.y, count };
+      pendingDragOut.current = null;
+      dragEdge.current = null;
       if (count >= 3) {
         dragAnchor.current = 0;
         setSelection(0, value.length);
@@ -380,18 +452,57 @@ export const TextArea = Component((props: TextAreaProps): Node => {
         dragAnchor.current = start;
         setSelection(start, end);
       } else {
-        dragAnchor.current = idx;
-        setSelection(idx, idx);
+        const [s, e] = orderedRange(selectionStart, selectionEnd);
+        const insideSelection = !secure && s !== e && idx >= s && idx <= e;
+        if (insideSelection) {
+          pendingDragOut.current = { x: ev.x, y: ev.y, text: selectedText() };
+          dragAnchor.current = idx;
+        } else {
+          dragAnchor.current = idx;
+          setSelection(idx, idx);
+        }
       }
     },
     onDrag: (ev) => {
       if (disabled) return;
-      // TODO(textarea): autoscroll when drag goes outside visible bounds.
+      const pend = pendingDragOut.current;
+      if (pend) {
+        const dx = ev.x - pend.x;
+        const dy = ev.y - pend.y;
+        if (dx * dx + dy * dy > CLICK_SLOP * CLICK_SLOP) {
+          const drag = (
+            ev as { requestDragOut?: (payload: { text: string }) => boolean }
+          ).requestDragOut;
+          if (drag) drag({ text: pend.text });
+          pendingDragOut.current = null;
+          dragEdge.current = null;
+          return;
+        }
+        return;
+      }
+      const padT = rect.paddingTop ?? 0;
+      const padB = rect.paddingBottom ?? 0;
+      const topEdge = rect.y + padT;
+      const botEdge = rect.y + rect.height - padB;
+      if (ev.y < topEdge) {
+        dragEdge.current = { dir: -1, lastX: ev.x, lastY: ev.y };
+      } else if (ev.y > botEdge) {
+        dragEdge.current = { dir: 1, lastX: ev.x, lastY: ev.y };
+      } else {
+        dragEdge.current = null;
+      }
       setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y));
     },
     onPressOut: (ev) => {
+      dragEdge.current = null;
       if (disabled) return;
       if ((ev.nativeEvent as { button?: number }).button !== 0) return;
+      if (pendingDragOut.current) {
+        const idx = indexFromPoint(ev.x, ev.y);
+        pendingDragOut.current = null;
+        setSelection(idx, idx);
+        return;
+      }
       if (lastClick.current.count === 1) {
         setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y));
       }
@@ -483,18 +594,18 @@ export const TextArea = Component((props: TextAreaProps): Node => {
       const wordJump = isWordJumpModifier(mods, platform);
       const lineJump = isLineJumpModifier(mods, platform);
 
-      if (primary && (key === 65 || key === 97)) {
+      if (primary && isLetter(key, KEY_A)) {
         setSelection(0, value.length);
         return;
       }
-      if (primary && (key === 67 || key === 99)) {
+      if (primary && isLetter(key, KEY_C)) {
         if (!secure) {
           const t = selectedText();
           if (t.length > 0) keyEvent.setClipboardText?.(t);
         }
         return;
       }
-      if (primary && (key === 88 || key === 120)) {
+      if (primary && isLetter(key, KEY_X)) {
         if (readOnly || secure) return;
         const t = selectedText();
         if (t.length > 0) {
@@ -503,7 +614,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
         }
         return;
       }
-      if (primary && (key === 86 || key === 118)) {
+      if (primary && isLetter(key, KEY_V)) {
         if (readOnly) return;
         let t = keyEvent.clipboardText?.() ?? '';
         if (props.onPaste) {
@@ -514,12 +625,12 @@ export const TextArea = Component((props: TextAreaProps): Node => {
         if (t.length > 0) replaceSelection(t, 'paste');
         return;
       }
-      if (primary && (key === 90 || key === 122)) {
+      if (primary && isLetter(key, KEY_Z)) {
         if (shift) doRedo();
         else doUndo();
         return;
       }
-      if (primary && (key === 89 || key === 121)) {
+      if (primary && isLetter(key, KEY_Y)) {
         doRedo();
         return;
       }
@@ -624,6 +735,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
         borderColor: focused ? theme.colors.primary : theme.colors.border,
         backgroundColor: theme.colors.surface,
         opacity: disabled ? 0.5 : 1,
+        overflow: 'hidden',
       },
       props.style,
     ],
@@ -636,6 +748,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
       caretOpacity,
       selectionColor: props.selectionColor,
       softWrap,
+      scrollY: showPlaceholder ? 0 : scrollY,
       imePreedit:
         imePreedit.preedit.length > 0
           ? {
