@@ -4,10 +4,10 @@
 #include "../src/debug/dispatch.hpp"
 #include "../src/debug/server.hpp"
 
-#include <libbase64.h>
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/window.hpp>
+#include <libbase64.h>
 
 #include <chrono>
 #include <cstdio>
@@ -243,8 +243,8 @@ namespace {
     const auto b64 = out.at("dataBase64").get<std::string>();
     std::vector<u8> png(b64.size() / 4 * 3 + 3);
     usize png_len = 0;
-    const int rc = ::base64_decode(b64.data(), b64.size(),
-                                   reinterpret_cast<char*>(png.data()), &png_len, 0);
+    const int rc =
+        ::base64_decode(b64.data(), b64.size(), reinterpret_cast<char*>(png.data()), &png_len, 0);
     CHECK(rc == 1);
     png.resize(png_len);
     CHECK(png_has_ihdr_size(png, 2, 1));

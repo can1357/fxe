@@ -23,9 +23,9 @@
 
 #include <unordered_map>
 
-#include <libbase64.h>
 #include "screenshot.hpp"
 #include "server_internal.hpp"
+#include <libbase64.h>
 
 #include <algorithm>
 #include <cerrno>

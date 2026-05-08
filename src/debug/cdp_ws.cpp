@@ -107,8 +107,8 @@ namespace fxe::debug::cdp_ws {
     // Sec-WebSocket-Accept: base64 of a 20-byte SHA-1 digest = 28 chars padded.
     std::array<char, 32> accept_buf{};
     usize accept_len = 0;
-    ::base64_encode(reinterpret_cast<const char*>(digest.data()), digest.size(),
-                    accept_buf.data(), &accept_len, 0);
+    ::base64_encode(reinterpret_cast<const char*>(digest.data()), digest.size(), accept_buf.data(),
+                    &accept_len, 0);
     return std::string(accept_buf.data(), accept_len);
   }
 

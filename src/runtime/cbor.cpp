@@ -29,6 +29,59 @@ namespace fxe::runtime::cbor {
       }
     }
 
+    void encode_key_into(std::vector<uint8_t>& out, const key& k) {
+      std::visit(
+          [&](const auto& inner) {
+            using T = std::decay_t<decltype(inner)>;
+            if constexpr (std::is_same_v<T, uint64_t>) {
+              append_uint(out, 0, inner);
+            } else if constexpr (std::is_same_v<T, int64_t>) {
+              if (inner >= 0)
+                append_uint(out, 0, static_cast<uint64_t>(inner));
+              else
+                append_uint(out, 1, static_cast<uint64_t>(-(inner + 1)));
+            } else if constexpr (std::is_same_v<T, std::string>) {
+              append_uint(out, 3, inner.size());
+              out.insert(out.end(), inner.begin(), inner.end());
+            } else if constexpr (std::is_same_v<T, std::vector<uint8_t>>) {
+              append_uint(out, 2, inner.size());
+              out.insert(out.end(), inner.begin(), inner.end());
+            }
+          },
+          k);
+    }
+
+    bool key_less(const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
+      if (a.size() != b.size())
+        return a.size() < b.size();
+      return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end());
+    }
+
+    bool encode_decoded_key(const value& v, key& out_key, std::vector<uint8_t>& out_bytes) {
+      const storage& inner = static_cast<const storage&>(v);
+      if (const auto* signed_key = std::get_if<int64_t>(&inner)) {
+        out_key = *signed_key;
+      } else if (const auto* unsigned_key = std::get_if<uint64_t>(&inner)) {
+        out_key = *unsigned_key;
+      } else if (const auto* text = std::get_if<std::string>(&inner)) {
+        out_key = *text;
+      } else if (const auto* bytes = std::get_if<std::vector<uint8_t>>(&inner)) {
+        out_key = *bytes;
+      } else {
+        return false;
+      }
+      encode_key_into(out_bytes, out_key);
+      return true;
+    }
+
+    bool numeric_key_equals(const key& candidate, int64_t wanted) {
+      if (const auto* n = std::get_if<int64_t>(&candidate))
+        return *n == wanted;
+      if (const auto* n = std::get_if<uint64_t>(&candidate))
+        return wanted >= 0 && *n == static_cast<uint64_t>(wanted);
+      return false;
+    }
+
     void encode_into(std::vector<uint8_t>& out, const value& v) {
       std::visit(
           [&](const auto& inner) {
@@ -69,6 +122,26 @@ namespace fxe::runtime::cbor {
                 append_uint(out, 3, key.size());
                 out.insert(out.end(), key.begin(), key.end());
                 encode_into(out, *item);
+              }
+            } else if constexpr (std::is_same_v<T, cmap>) {
+              struct cmap_entry {
+                std::vector<uint8_t> encoded_key;
+                const value* item;
+              };
+              std::vector<cmap_entry> items;
+              items.reserve(inner.size());
+              for (const auto& [map_key, item] : inner) {
+                auto& entry = items.emplace_back();
+                encode_key_into(entry.encoded_key, map_key);
+                entry.item = &item;
+              }
+              std::sort(items.begin(), items.end(), [](const auto& a, const auto& b) {
+                return key_less(a.encoded_key, b.encoded_key);
+              });
+              append_uint(out, 5, items.size());
+              for (const auto& entry : items) {
+                out.insert(out.end(), entry.encoded_key.begin(), entry.encoded_key.end());
+                encode_into(out, *entry.item);
               }
             }
           },
@@ -148,18 +221,40 @@ namespace fxe::runtime::cbor {
           const auto n = read_uint(ai);
           if (!n)
             return std::nullopt;
-          map items;
+          map text_items;
+          cmap mixed_items;
+          std::vector<std::vector<uint8_t>> seen_keys;
+          text_items.clear();
+          mixed_items.reserve(static_cast<size_t>(*n));
+          seen_keys.reserve(static_cast<size_t>(*n));
+          bool all_text = true;
           for (uint64_t i = 0; i < *n; ++i) {
-            auto key = read();
+            auto parsed_key = read();
             auto item = read();
-            if (!key || !item)
+            if (!parsed_key || !item)
               return std::nullopt;
-            const auto* text = std::get_if<std::string>(&static_cast<const storage&>(*key));
-            if (!text || items.contains(*text))
+
+            key map_key;
+            std::vector<uint8_t> encoded_key;
+            if (!encode_decoded_key(*parsed_key, map_key, encoded_key))
               return std::nullopt;
-            items.emplace(*text, std::move(*item));
+            if (std::any_of(seen_keys.begin(), seen_keys.end(),
+                            [&](const auto& seen) { return seen == encoded_key; })) {
+              return std::nullopt;
+            }
+            seen_keys.push_back(encoded_key);
+            mixed_items.push_back({std::move(map_key), std::move(*item)});
+
+            if (const auto* text =
+                    std::get_if<std::string>(&static_cast<const storage&>(*parsed_key))) {
+              text_items.emplace(*text, mixed_items.back().second);
+            } else {
+              all_text = false;
+            }
           }
-          return value(std::move(items));
+          if (all_text)
+            return value(std::move(text_items));
+          return value(std::move(mixed_items));
         }
         if (major == 7) {
           if (ai == 20)
@@ -187,6 +282,32 @@ namespace fxe::runtime::cbor {
     if (!v || d.cur != d.end)
       return std::nullopt;
     return v;
+  }
+
+  const value* find(const cmap& m, int64_t k) {
+    for (const auto& [map_key, item] : m) {
+      if (numeric_key_equals(map_key, k))
+        return &item;
+    }
+    return nullptr;
+  }
+
+  const value* find(const cmap& m, std::string_view k) {
+    for (const auto& [map_key, item] : m) {
+      const auto* text = std::get_if<std::string>(&map_key);
+      if (text && *text == k)
+        return &item;
+    }
+    return nullptr;
+  }
+
+  const value* find(const cmap& m, const std::vector<uint8_t>& k) {
+    for (const auto& [map_key, item] : m) {
+      const auto* bytes = std::get_if<std::vector<uint8_t>>(&map_key);
+      if (bytes && *bytes == k)
+        return &item;
+    }
+    return nullptr;
   }
 
 } // namespace fxe::runtime::cbor
