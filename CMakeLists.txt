@@ -14,6 +14,11 @@ option(FXE_BUILD_TESTS "Build fxe tests" ON)
 option(FXE_ENABLE_WGPU "Build Dawn/WebGPU backend when Dawn is available" ON)
 option(FXE_ENABLE_V8 "Build embedded V8 host/bindings when V8 is available" ON)
 option(
+    FXE_ENABLE_WEBAUTHN
+    "Build the platform-agnostic WebAuthn core library"
+    ${FXE_ENABLE_V8}
+)
+option(
     FXE_ENABLE_NODE_COMPAT
     "Generate vendored unenv assets for V8 Node compatibility shims"
     ON
@@ -851,6 +856,15 @@ if(FXE_BUILD_EXAMPLES)
         DESTINATION share/fxe/examples/js
     )
 endif()
+if(FXE_ENABLE_WEBAUTHN)
+    file(GLOB _fxe_webauthn_sources CONFIGURE_DEPENDS src/webauthn/*.cpp)
+    add_library(fxe_webauthn STATIC ${_fxe_webauthn_sources})
+    add_library(fxe::webauthn ALIAS fxe_webauthn)
+    target_include_directories(fxe_webauthn PUBLIC include src)
+    target_compile_features(fxe_webauthn PUBLIC cxx_std_20)
+    target_link_libraries(fxe_webauthn PUBLIC fxe_runtime PRIVATE MbedTLS::mbedcrypto)
+    target_compile_definitions(fxe_webauthn PUBLIC FXE_HAS_WEBAUTHN=1)
+endif()
 
 if(FXE_BUILD_TESTS)
     enable_testing()
@@ -965,6 +979,26 @@ if(FXE_BUILD_TESTS)
     fxe_add_cpp_test(fxe_uv_loop_tests tests/uv_loop_test.cpp fxe_runtime)
     fxe_add_cpp_test(fxe_update_manifest_v2_tests tests/update_manifest_v2_test.cpp fxe_runtime fxe_os)
     fxe_add_cpp_test(fxe_cbor_canonical_tests tests/cbor_canonical_test.cpp fxe_runtime)
+    if(TARGET fxe_webauthn)
+        fxe_add_cpp_test(
+            fxe_webauthn_auth_data_tests
+            tests/webauthn_auth_data_test.cpp
+            fxe_webauthn
+            fxe_runtime
+        )
+        fxe_add_cpp_test(
+            fxe_webauthn_attestation_tests
+            tests/webauthn_attestation_test.cpp
+            fxe_webauthn
+            fxe_runtime
+        )
+        fxe_add_cpp_test(
+            fxe_webauthn_virtual_tests
+            tests/webauthn_virtual_test.cpp
+            fxe_webauthn
+            fxe_runtime
+        )
+    endif()
     if(UNIX)
         fxe_add_cpp_test(fxe_net_http_advanced_tests tests/net_http_advanced_test.cpp fxe_net fxe_runtime)
     endif()
