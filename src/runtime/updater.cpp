@@ -1,4 +1,5 @@
 #include "updater.hpp"
+#include "cbor.hpp"
 
 #include "../os/os.hpp"
 
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <fxe/types.hpp>
+#include <limits>
 #include <mutex>
 #include <sodium.h>
 #include <sstream>
@@ -101,6 +103,77 @@ namespace fxe::runtime {
         return false;
       }
       return true;
+    }
+    bool read_all(const std::filesystem::path& path, std::vector<u8>& bytes,
+                  std::string& error_out) {
+      std::ifstream f(path, std::ios::binary);
+      if (!f) {
+        error_out = "cannot open file for read: " + path.string();
+        return false;
+      }
+      f.seekg(0, std::ios::end);
+      const auto end = f.tellg();
+      if (end < 0) {
+        error_out = "cannot determine file size: " + path.string();
+        return false;
+      }
+      bytes.resize(static_cast<size_t>(end));
+      f.seekg(0, std::ios::beg);
+      if (!bytes.empty())
+        f.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+      if (!f && !bytes.empty()) {
+        error_out = "failed to read file: " + path.string();
+        return false;
+      }
+      return true;
+    }
+
+    std::string sha256_hex(std::span<const u8> bytes) {
+      ensure_sodium_initialized();
+      std::array<u8, crypto_hash_sha256_BYTES> digest{};
+      crypto_hash_sha256(digest.data(), bytes.data(), bytes.size());
+      static constexpr char k_hex[] = "0123456789abcdef";
+      std::string out;
+      out.reserve(digest.size() * 2);
+      for (u8 byte : digest) {
+        out.push_back(k_hex[byte >> 4]);
+        out.push_back(k_hex[byte & 0x0f]);
+      }
+      return out;
+    }
+
+    bool is_hex_sha256(std::string_view value) {
+      if (value.size() != 64)
+        return false;
+      for (char c : value) {
+        if (!std::isxdigit(static_cast<unsigned char>(c)))
+          return false;
+      }
+      return true;
+    }
+
+    const cbor::map* cbor_map(const cbor::value& v) {
+      return std::get_if<cbor::map>(&static_cast<const cbor::storage&>(v));
+    }
+
+    const cbor::array* cbor_array(const cbor::value& v) {
+      return std::get_if<cbor::array>(&static_cast<const cbor::storage&>(v));
+    }
+
+    const std::string* cbor_text(const cbor::value& v) {
+      return std::get_if<std::string>(&static_cast<const cbor::storage&>(v));
+    }
+
+    const std::vector<uint8_t>* cbor_bytes(const cbor::value& v) {
+      return std::get_if<std::vector<uint8_t>>(&static_cast<const cbor::storage&>(v));
+    }
+
+    std::optional<uint64_t> cbor_uint(const cbor::value& v) {
+      if (const auto* n = std::get_if<uint64_t>(&static_cast<const cbor::storage&>(v)))
+        return *n;
+      if (const auto* n = std::get_if<int64_t>(&static_cast<const cbor::storage&>(v)); n && *n >= 0)
+        return static_cast<uint64_t>(*n);
+      return std::nullopt;
     }
 
     bool rename_or_copy(const std::filesystem::path& from, const std::filesystem::path& to,
@@ -240,6 +313,31 @@ namespace fxe::runtime {
       }
       f << payload.string() << "\n";
       return static_cast<bool>(f);
+    }
+
+    std::filesystem::path pending_first_launch_flag_path(const std::filesystem::path& root) {
+      return root / "first-launch.flag";
+    }
+
+    bool write_pending_first_launch_flag(const std::filesystem::path& root,
+                                         std::string_view version, std::string& error_out) {
+      std::error_code ec;
+      std::filesystem::create_directories(root, ec);
+      if (ec) {
+        error_out = "cannot create updates directory for first-launch marker: " + ec.message();
+        return false;
+      }
+      std::ofstream f(pending_first_launch_flag_path(root), std::ios::binary | std::ios::trunc);
+      if (!f) {
+        error_out = "cannot write first-launch marker";
+        return false;
+      }
+      f << version << "\n";
+      if (!f) {
+        error_out = "cannot write first-launch marker";
+        return false;
+      }
+      return true;
     }
 
     std::mutex& channel_mutex() {
@@ -423,6 +521,180 @@ namespace fxe::runtime {
     return true;
   }
 
+  std::optional<update_manifest_v2> parse_manifest_v2_cbor(const std::vector<uint8_t>& bytes,
+                                                           std::string& error_out) {
+    const auto decoded = cbor::decode(bytes.data(), bytes.size());
+    if (!decoded) {
+      error_out = "manifest v2 CBOR decode failed";
+      return std::nullopt;
+    }
+    const auto* root = cbor_map(*decoded);
+    if (!root) {
+      error_out = "manifest v2 root must be a map";
+      return std::nullopt;
+    }
+
+    update_manifest_v2 out;
+    cbor::map signed_map = *root;
+    if (const auto it = root->find("signature"); it != root->end()) {
+      const auto* sig = cbor_bytes(it->second);
+      if (!sig) {
+        error_out = "manifest v2 signature must be bytes";
+        return std::nullopt;
+      }
+      out.signature = *sig;
+      signed_map.erase("signature");
+    }
+    out.canonical_bytes = cbor::encode(cbor::value(std::move(signed_map)));
+
+    if (const auto it = root->find("version"); it != root->end()) {
+      const auto* text = cbor_text(it->second);
+      if (!text || text->empty()) {
+        error_out = "manifest v2 version must be text";
+        return std::nullopt;
+      }
+      out.version = *text;
+    }
+    if (out.version.empty()) {
+      error_out = "manifest v2 version is required";
+      return std::nullopt;
+    }
+    if (const auto it = root->find("channel"); it != root->end()) {
+      const auto* text = cbor_text(it->second);
+      if (!text) {
+        error_out = "manifest v2 channel must be text";
+        return std::nullopt;
+      }
+      const auto channel = updater::parse_channel(*text);
+      if (!channel) {
+        error_out = "manifest v2 channel is invalid";
+        return std::nullopt;
+      }
+      out.channel = *channel;
+    }
+    if (const auto it = root->find("rollout_percent"); it != root->end()) {
+      const auto percent = cbor_uint(it->second);
+      if (!percent || *percent > 100) {
+        error_out = "manifest v2 rollout_percent must be 0..100";
+        return std::nullopt;
+      }
+      out.rollout_percent = static_cast<uint32_t>(*percent);
+    }
+    if (const auto it = root->find("platform"); it != root->end()) {
+      const auto* text = cbor_text(it->second);
+      if (!text) {
+        error_out = "manifest v2 platform must be text";
+        return std::nullopt;
+      }
+      out.platform = *text;
+    }
+    if (const auto it = root->find("arch"); it != root->end()) {
+      const auto* text = cbor_text(it->second);
+      if (!text) {
+        error_out = "manifest v2 arch must be text";
+        return std::nullopt;
+      }
+      out.arch = *text;
+    }
+    const auto artifacts_it = root->find("artifacts");
+    if (artifacts_it == root->end()) {
+      error_out = "manifest v2 artifacts are required";
+      return std::nullopt;
+    }
+    const auto* artifacts = cbor_array(artifacts_it->second);
+    if (!artifacts) {
+      error_out = "manifest v2 artifacts must be an array";
+      return std::nullopt;
+    }
+    out.artifacts.reserve(artifacts->size());
+    for (const auto& entry : *artifacts) {
+      const auto* artifact_map = cbor_map(entry);
+      if (!artifact_map) {
+        error_out = "manifest v2 artifact must be a map";
+        return std::nullopt;
+      }
+      update_manifest_v2::artifact artifact;
+      auto load_text = [&](std::string_view key, std::string& field, bool required) -> bool {
+        const auto it = artifact_map->find(std::string(key));
+        if (it == artifact_map->end()) {
+          if (required) {
+            error_out = "manifest v2 artifact missing " + std::string(key);
+            return false;
+          }
+          return true;
+        }
+        const auto* text = cbor_text(it->second);
+        if (!text) {
+          error_out = "manifest v2 artifact field " + std::string(key) + " must be text";
+          return false;
+        }
+        field = *text;
+        return true;
+      };
+      if (!load_text("kind", artifact.kind, true) || !load_text("url", artifact.url, true) ||
+          !load_text("sha256", artifact.sha256, true) ||
+          !load_text("from_version", artifact.from_version, false) ||
+          !load_text("target_sha256", artifact.target_sha256, false) ||
+          !load_text("code_signature", artifact.code_signature, false)) {
+        return std::nullopt;
+      }
+      if (!is_hex_sha256(artifact.sha256)) {
+        error_out = "manifest v2 artifact sha256 is invalid";
+        return std::nullopt;
+      }
+      if (const auto it = artifact_map->find("size"); it != artifact_map->end()) {
+        const auto size = cbor_uint(it->second);
+        if (!size || *size > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+          error_out = "manifest v2 artifact size is invalid";
+          return std::nullopt;
+        }
+        artifact.size = static_cast<int64_t>(*size);
+      }
+      if (artifact.kind != "full" && artifact.kind != "bsdiff") {
+        error_out = "manifest v2 artifact kind is invalid";
+        return std::nullopt;
+      }
+      if (artifact.kind == "bsdiff") {
+        if (artifact.from_version.empty() || !is_hex_sha256(artifact.target_sha256)) {
+          error_out = "manifest v2 bsdiff artifact fields are invalid";
+          return std::nullopt;
+        }
+      }
+      out.artifacts.push_back(std::move(artifact));
+    }
+    return out;
+  }
+
+  bool apply_bsdiff_delta(const std::filesystem::path& patch_path,
+                          const std::filesystem::path& current_path,
+                          const std::filesystem::path& staged_path,
+                          std::string_view expected_target_sha256, std::string& error_out) {
+    if (!is_hex_sha256(expected_target_sha256)) {
+      error_out = "expected bsdiff target sha256 is invalid";
+      return false;
+    }
+    std::vector<u8> patch_bytes;
+    if (!read_all(patch_path, patch_bytes, error_out))
+      return false;
+    std::vector<u8> current_bytes;
+    if (!read_all(current_path, current_bytes, error_out))
+      return false;
+    std::vector<u8> staged_bytes;
+    if (!apply_bsdiff(current_bytes, patch_bytes, staged_bytes, error_out))
+      return false;
+    if (sha256_hex(staged_bytes) != ascii_lower(std::string(expected_target_sha256))) {
+      error_out = "bsdiff reconstructed target sha256 mismatch";
+      return false;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(staged_path.parent_path(), ec);
+    if (ec) {
+      error_out = "cannot create staged delta directory: " + ec.message();
+      return false;
+    }
+    return write_all(staged_path, staged_bytes, error_out);
+  }
+
   std::optional<std::string> updater::stage(const update_descriptor& d, std::string& error_out) {
     if (d.version.empty()) {
       error_out = "update manifest version is required";
@@ -521,12 +793,59 @@ namespace fxe::runtime {
           error_out = "failed to mark staged update pending: " + ec.message();
           return false;
         }
-        return record_installed_version(root, entry.path().filename().string(), error_out);
+        const std::string version = entry.path().filename().string();
+        if (!record_installed_version(root, version, error_out))
+          return false;
+        return write_pending_first_launch_flag(root, version, error_out);
       }
     }
     return true;
   }
 
+  bool updater::mark_ready() {
+    const auto flag = pending_first_launch_flag_path(updates_root());
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(flag, ec);
+    if (ec || !exists)
+      return false;
+    const bool removed = std::filesystem::remove(flag, ec);
+    if (ec)
+      return false;
+    return removed;
+  }
+
+  bool updater::has_pending_first_launch() {
+    std::error_code ec;
+    const bool exists = std::filesystem::exists(pending_first_launch_flag_path(updates_root()), ec);
+    return !ec && exists;
+  }
+
+  std::string updater::auto_rollback_if_unready() {
+    const auto root = updates_root();
+    const auto flag = pending_first_launch_flag_path(root);
+    std::error_code ec;
+    if (!std::filesystem::exists(flag, ec) || ec)
+      return {};
+
+    std::string rolled_from = read_first_line(flag);
+    if (rolled_from.empty()) {
+      auto versions = read_history_file(root);
+      if (!versions.empty())
+        rolled_from = versions.front();
+    }
+
+    std::string error;
+    if (!rollback(error))
+      return {};
+
+    (void)mark_ready();
+    if (rolled_from.empty()) {
+      auto versions = read_history_file(root);
+      if (versions.size() > 1)
+        rolled_from = versions[1];
+    }
+    return rolled_from;
+  }
   bool updater::rollback(std::string& error_out) {
     const auto root = updates_root();
     auto versions = read_history_file(root);

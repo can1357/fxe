@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <fxe/types.hpp>
 #include <optional>
 #include <span>
@@ -27,12 +28,43 @@ namespace fxe::runtime {
     std::vector<u8> artifact;
   };
 
+  struct update_manifest_v2 {
+    std::string version;
+    update_channel channel = update_channel::stable;
+    uint32_t rollout_percent = 100;
+    std::string platform;
+    std::string arch;
+    struct artifact {
+      std::string kind;
+      std::string url;
+      std::string sha256;
+      int64_t size = 0;
+      std::string from_version;
+      std::string target_sha256;
+      std::string code_signature;
+    };
+    std::vector<artifact> artifacts;
+    std::vector<uint8_t> signature;
+    std::vector<uint8_t> canonical_bytes;
+  };
+
   bool ed25519_verify(std::span<const u8> sig, std::span<const u8> message,
                       std::span<const u8> public_key);
 
   bool verify_manifest_signature(std::string_view signature_b64,
                                  std::string_view canonical_manifest,
                                  std::string_view expected_public_key_b64, std::string& error_out);
+
+  std::optional<update_manifest_v2> parse_manifest_v2_cbor(const std::vector<uint8_t>& bytes,
+                                                           std::string& error_out);
+
+  bool apply_bsdiff(const std::vector<uint8_t>& old_bytes, const std::vector<uint8_t>& patch,
+                    std::vector<uint8_t>& out, std::string& err);
+
+  bool apply_bsdiff_delta(const std::filesystem::path& patch_path,
+                          const std::filesystem::path& current_path,
+                          const std::filesystem::path& staged_path,
+                          std::string_view expected_target_sha256, std::string& error_out);
 
   class updater {
   public:
@@ -42,6 +74,19 @@ namespace fxe::runtime {
     // v1 apply records the pending marker as consumed; platform relauncher swap is intentionally
     // later.
     static bool apply_pending(std::string& error_out);
+
+    // After apply_pending(), the next launch must call mark_ready() within a
+    // configurable health window or the launcher rolls back. Returns true if a
+    // pending-first-launch flag existed and was cleared.
+    static bool mark_ready();
+
+    // Inspect: pending-first-launch flag set?
+    static bool has_pending_first_launch();
+
+    // Auto-rollback if the previous launch didn't mark ready. Call this once at
+    // startup. Returns the version that was rolled back FROM, or empty string if
+    // no rollback occurred. Caller should record this in history / alert the user.
+    static std::string auto_rollback_if_unready();
 
     static bool rollback(std::string& error_out);
     static std::vector<std::string> history(std::string& error_out);

@@ -110,6 +110,19 @@ test('App.installUpdate stages a fetched artifact from a checked manifest', asyn
     globalThis.fetch = originalFetch;
     restoreUpdateSignatureVerifier();
     rmSync(dir, { recursive: true, force: true });
+    // Clean up the persisted updates/99.99.99 directory + history entry +
+    // first-launch.flag so subsequent tests don't see stale state.
+    const updatesRoot = `${App.getPath('userData')}/updates`;
+    rmSync(`${updatesRoot}/99.99.99`, { recursive: true, force: true });
+    rmSync(`${updatesRoot}/first-launch.flag`, { force: true });
+    const histPath = `${updatesRoot}/history.txt`;
+    if (existsSync(histPath)) {
+      const next = readFileSync(histPath, 'utf8')
+        .split('\n')
+        .filter((line) => line.length > 0 && line !== '99.99.99')
+        .join('\n');
+      writeFileSync(histPath, next.length > 0 ? `${next}\n` : '');
+    }
   }
 });
 

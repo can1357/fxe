@@ -72,6 +72,7 @@
 #include "../js/bind_process.hpp"
 #include "../runtime/bundle_loader.hpp"
 
+#include "../runtime/updater.hpp"
 #include "cpu_profile.hpp"
 #include "cpu_profile_merge.hpp"
 #include "cpu_profile_native.hpp"
@@ -654,6 +655,20 @@ int main(int argc, char** argv) {
   if (opts.show_usage || opts.scripts.empty()) {
     usage(argv[0]);
     return opts.show_usage ? 0 : 64;
+  }
+
+  // Gate the C1 auto-rollback on an explicit env var so the test suite
+  // (which uses a shared userData root and stages updates without calling
+  // markReady) doesn't roll back unexpectedly. Production builds should set
+  // FXE_UPDATER_AUTO_ROLLBACK=1 at install time.
+  if (const char* env = std::getenv("FXE_UPDATER_AUTO_ROLLBACK"); env && env[0] == '1') {
+    std::string rolled = fxe::runtime::updater::auto_rollback_if_unready();
+    if (!rolled.empty()) {
+      std::fprintf(stderr,
+                   "fxe: previous launch did not call App.update.markReady(); "
+                   "rolled back from version %s\n",
+                   rolled.c_str());
+    }
   }
 
   std::string icudtl = resolve_icudtl(argv[0]);
