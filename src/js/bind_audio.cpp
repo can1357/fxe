@@ -79,6 +79,7 @@ namespace fxe::js {
     struct sound_holder {
       audio::sound_handle handle;
       bool disposed = false;
+      Global<Object>* persistent = nullptr;
     };
 
     struct capture_chunk {
@@ -97,12 +98,17 @@ namespace fxe::js {
       std::deque<capture_chunk> chunks;
       Global<Function> callback;
       Global<Context> context;
+      Global<Object>* persistent = nullptr;
     };
 
     void sound_finalizer(const WeakCallbackInfo<sound_holder>& info) {
       auto* h = info.GetParameter();
       if (h && !h->disposed && h->handle.valid())
         (void)audio::unload(h->handle);
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
       delete h;
     }
 
@@ -119,6 +125,7 @@ namespace fxe::js {
       obj->SetInternalField(0, External::New(iso, holder, v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_AUDIO_SOUND));
       auto* persistent = new Global<Object>(iso, obj);
+      holder->persistent = persistent;
       persistent->SetWeak(holder, sound_finalizer, WeakCallbackType::kParameter);
       return hs.Escape(obj);
     }
@@ -144,6 +151,11 @@ namespace fxe::js {
     void capture_finalizer(const WeakCallbackInfo<std::shared_ptr<capture_holder>>& info) {
       auto* ref = info.GetParameter();
       if (ref) {
+        if (*ref && (*ref)->persistent) {
+          (*ref)->persistent->Reset();
+          delete (*ref)->persistent;
+          (*ref)->persistent = nullptr;
+        }
         stop_capture_holder(*ref);
         delete ref;
       }
@@ -272,6 +284,7 @@ namespace fxe::js {
       obj->SetInternalField(0, External::New(iso, ref, v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_AUDIO_CAPTURE));
       auto* persistent = new Global<Object>(iso, obj);
+      (*ref)->persistent = persistent;
       persistent->SetWeak(ref, capture_finalizer, WeakCallbackType::kParameter);
       return hs.Escape(obj);
     }

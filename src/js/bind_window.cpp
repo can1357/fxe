@@ -80,6 +80,7 @@ namespace fxe::js {
       Global<Object> self_strong; // strong ref held by app_run_loop while running
       int capability_id = 0;
       bool capabilities_registered = false;
+      Global<Object>* persistent = nullptr;
     };
 
     // Map raw window pointer -> holder. Lets free-function helpers (App.run,
@@ -115,6 +116,10 @@ namespace fxe::js {
         h->listeners.clear();
         h->on_frame.Reset();
         h->self_strong.Reset();
+        if (h->persistent) {
+          h->persistent->Reset();
+          delete h->persistent;
+        }
       }
       delete h;
     }
@@ -687,6 +692,7 @@ namespace fxe::js {
         return;
       }
       auto* persistent = new Global<Object>(iso, self);
+      h->persistent = persistent;
       persistent->SetWeak(h, win_finalizer, WeakCallbackType::kParameter);
     }
 

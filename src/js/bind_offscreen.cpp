@@ -45,10 +45,16 @@ namespace fxe::js {
 
     struct offscreen_holder {
       std::unique_ptr<offscreen_renderer> owned;
+      Global<Object>* persistent = nullptr;
     };
 
     void offscreen_finalizer(const WeakCallbackInfo<offscreen_holder>& info) {
-      delete info.GetParameter();
+      auto* h = info.GetParameter();
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
+      delete h;
     }
 
     void throw_type(Isolate* iso, const char* msg) {
@@ -142,6 +148,7 @@ namespace fxe::js {
           0, External::New(iso, h->owned.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RENDERER));
       auto* persistent = new Global<Object>(iso, self);
+      h->persistent = persistent;
       persistent->SetWeak(h, offscreen_finalizer, WeakCallbackType::kParameter);
     }
 

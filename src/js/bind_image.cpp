@@ -54,7 +54,12 @@ namespace fxe::js {
     }
 
     void image_finalizer(const WeakCallbackInfo<image_holder>& info) {
-      delete info.GetParameter();
+      auto* h = info.GetParameter();
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
+      delete h;
     }
 
     Local<Object> wrap_image(Isolate* iso, Local<Context> ctx, image_holder* h) {
@@ -63,6 +68,7 @@ namespace fxe::js {
       inst->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       inst->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_IMAGE));
       auto* persistent = new Global<Object>(iso, inst);
+      h->persistent = persistent;
       persistent->SetWeak(h, image_finalizer, WeakCallbackType::kParameter);
       return inst;
     }

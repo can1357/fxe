@@ -410,19 +410,31 @@ namespace fxe::js {
 
     struct url_holder {
       std::unique_ptr<url_data> data;
+      Global<Object>* persistent = nullptr;
     };
     struct usp_holder {
       std::unique_ptr<usp_data> data;
       // Optional weak reference to a parent URL holder so writes to the
       // search params propagate back to the URL's `search`.
       url_holder* parent = nullptr;
+      Global<Object>* persistent = nullptr;
     };
 
     void url_finalizer(const WeakCallbackInfo<url_holder>& info) {
-      delete info.GetParameter();
+      auto* h = info.GetParameter();
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
+      delete h;
     }
     void usp_finalizer(const WeakCallbackInfo<usp_holder>& info) {
-      delete info.GetParameter();
+      auto* h = info.GetParameter();
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
+      delete h;
     }
 
     Local<Object> wrap_usp(Isolate* iso, Local<Context> ctx, std::unique_ptr<usp_data> d) {
@@ -433,6 +445,7 @@ namespace fxe::js {
                             External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URLSEARCH));
       auto* persistent = new Global<Object>(iso, obj);
+      h->persistent = persistent;
       persistent->SetWeak(h, usp_finalizer, WeakCallbackType::kParameter);
       return obj;
     }
@@ -484,6 +497,7 @@ namespace fxe::js {
                              External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URL));
       auto* persistent = new Global<Object>(iso, self);
+      h->persistent = persistent;
       persistent->SetWeak(h, url_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }
@@ -683,6 +697,7 @@ namespace fxe::js {
                              External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URLSEARCH));
       auto* persistent = new Global<Object>(iso, self);
+      h->persistent = persistent;
       persistent->SetWeak(h, usp_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }

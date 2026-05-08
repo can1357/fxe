@@ -46,12 +46,17 @@ namespace fxe::js {
     // ownership so the engine retains lifetime control.
     struct rend_holder {
       std::unique_ptr<renderer> owned;
+      Global<Object>* persistent = nullptr;
     };
 
     void rend_finalizer(const WeakCallbackInfo<rend_holder>& info) {
       auto* h = info.GetParameter();
       if (h && h->owned)
         unregister_renderer_for_isolate(info.GetIsolate(), h->owned.get());
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
       delete h;
     }
 
@@ -120,6 +125,7 @@ namespace fxe::js {
           0, External::New(iso, h->owned.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RENDERER));
       auto* persistent = new Global<Object>(iso, self);
+      h->persistent = persistent;
       persistent->SetWeak(h, rend_finalizer, WeakCallbackType::kParameter);
       register_renderer_for_isolate(iso, win, h->owned.get());
     }

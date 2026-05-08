@@ -84,6 +84,7 @@ namespace fxe::js {
       // Transaction nesting depth; depth 0 uses BEGIN/COMMIT/ROLLBACK, depth>0
       // uses SAVEPOINT/RELEASE/ROLLBACK TO.
       int txn_depth = 0;
+      Global<Object>* persistent = nullptr;
     };
 
     struct stmt_holder {
@@ -95,6 +96,7 @@ namespace fxe::js {
       std::vector<std::string> column_names;
       // `as` class prototype, if any; column name keys are reused across rows.
       Global<Function> as_class;
+      Global<Object>* persistent = nullptr;
     };
 
     // --- utilities -----------------------------------------------------------
@@ -211,12 +213,20 @@ namespace fxe::js {
     void db_finalizer(const WeakCallbackInfo<db_holder>& info) {
       auto* h = info.GetParameter();
       close_db_holder(h);
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
       delete h;
     }
 
     void stmt_finalizer(const WeakCallbackInfo<stmt_holder>& info) {
       auto* h = info.GetParameter();
       mark_stmt_finalized(h);
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
       delete h;
     }
 
@@ -758,6 +768,7 @@ namespace fxe::js {
       obj->SetInternalField(0, External::New(iso, sh, v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_STATEMENT));
       auto* persistent = new Global<Object>(iso, obj);
+      sh->persistent = persistent;
       persistent->SetWeak(sh, stmt_finalizer, WeakCallbackType::kParameter);
       return obj;
     }
@@ -993,10 +1004,16 @@ namespace fxe::js {
       Global<Function> fn;
       Global<Object> db_obj;
       begin_kind kind = begin_kind::Default;
+      Global<Function>* persistent = nullptr;
     };
 
     void txn_data_finalizer(const WeakCallbackInfo<txn_data>& info) {
-      delete info.GetParameter();
+      auto* td = info.GetParameter();
+      if (td && td->persistent) {
+        td->persistent->Reset();
+        delete td->persistent;
+      }
+      delete td;
     }
 
     const char* begin_sql(begin_kind k) {
@@ -1105,6 +1122,7 @@ namespace fxe::js {
       auto wrapper = Function::New(ctx, txn_invoke, ext).ToLocalChecked();
       // Tie td lifetime to the wrapper Function GC.
       auto* persistent = new Global<Function>(iso, wrapper);
+      td->persistent = persistent;
       persistent->SetWeak(td, txn_data_finalizer, WeakCallbackType::kParameter);
       return wrapper;
     }
@@ -1231,6 +1249,7 @@ namespace fxe::js {
       self->SetInternalField(0, External::New(iso, dh, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_DATABASE));
       auto* persistent = new Global<Object>(iso, self);
+      dh->persistent = persistent;
       persistent->SetWeak(dh, db_finalizer, WeakCallbackType::kParameter);
 
       // Stash filename for diagnostics.
@@ -1297,6 +1316,7 @@ namespace fxe::js {
       self->SetInternalField(0, External::New(iso, dh, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_DATABASE));
       auto* persistent = new Global<Object>(iso, self);
+      dh->persistent = persistent;
       persistent->SetWeak(dh, db_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }

@@ -63,6 +63,7 @@ namespace fxe::js {
       Global<Context> context;
       Global<Function> on_action;
       fxe::os::notification_options opts;
+      v8::Global<v8::Object>* persistent = nullptr;
     };
 
     void finalizer_cb(const WeakCallbackInfo<opts_holder>& data) {
@@ -70,6 +71,10 @@ namespace fxe::js {
       if (h && h->isolate) {
         h->context.Reset();
         h->on_action.Reset();
+      }
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
       }
       delete h;
     }
@@ -124,6 +129,7 @@ namespace fxe::js {
       auto self = info.This();
       self->SetInternalField(kSlotOpts, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       auto* gp = new Global<Object>(iso, self);
+      h->persistent = gp;
       gp->SetWeak(h, finalizer_cb, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }

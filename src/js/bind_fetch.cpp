@@ -156,10 +156,16 @@ namespace fxe::js {
     struct headers_data {
       // case-insensitive: stored lower-cased
       std::vector<std::pair<std::string, std::string>> entries;
+      Global<Object>* persistent = nullptr;
     };
 
     void headers_finalizer(const WeakCallbackInfo<headers_data>& info) {
-      delete info.GetParameter();
+      auto* d = info.GetParameter();
+      if (d && d->persistent) {
+        d->persistent->Reset();
+        delete d->persistent;
+      }
+      delete d;
     }
 
     headers_data* unwrap_headers(Local<Object> o) {
@@ -172,6 +178,7 @@ namespace fxe::js {
       obj->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_HEADERS));
       auto* persistent = new Global<Object>(iso, obj);
+      d->persistent = persistent;
       persistent->SetWeak(d.release(), headers_finalizer, WeakCallbackType::kParameter);
       return obj;
     }
@@ -228,6 +235,7 @@ namespace fxe::js {
       self->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_HEADERS));
       auto* persistent = new Global<Object>(iso, self);
+      d->persistent = persistent;
       persistent->SetWeak(d.release(), headers_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }
@@ -336,10 +344,16 @@ namespace fxe::js {
       bool aborted = false;
       std::string reason;
       std::vector<Global<Function>> listeners; // 'abort' event listeners
+      Global<Object>* persistent = nullptr;
     };
 
     void abort_signal_finalizer(const WeakCallbackInfo<abort_signal_data>& info) {
-      delete info.GetParameter();
+      auto* d = info.GetParameter();
+      if (d && d->persistent) {
+        d->persistent->Reset();
+        delete d->persistent;
+      }
+      delete d;
     }
 
     abort_signal_data* unwrap_abort_signal(Local<Object> o) {
@@ -354,6 +368,7 @@ namespace fxe::js {
       obj->SetInternalField(0, External::New(iso, d, v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_ABORT));
       auto* persistent = new Global<Object>(iso, obj);
+      d->persistent = persistent;
       persistent->SetWeak(d, abort_signal_finalizer, WeakCallbackType::kParameter);
       return obj;
     }
@@ -420,9 +435,15 @@ namespace fxe::js {
     struct abort_controller_data {
       Global<Object> signal_obj;
       abort_signal_data* signal = nullptr;
+      Global<Object>* persistent = nullptr;
     };
     void abort_ctrl_finalizer(const WeakCallbackInfo<abort_controller_data>& info) {
-      delete info.GetParameter();
+      auto* d = info.GetParameter();
+      if (d && d->persistent) {
+        d->persistent->Reset();
+        delete d->persistent;
+      }
+      delete d;
     }
 
     void abort_ctrl_ctor(const FunctionCallbackInfo<Value>& info) {
@@ -441,6 +462,7 @@ namespace fxe::js {
       // Expose `signal` directly on the instance.
       self->Set(ctx, "signal"_v8(iso), sig_obj).Check();
       auto* persistent = new Global<Object>(iso, self);
+      d->persistent = persistent;
       persistent->SetWeak(d, abort_ctrl_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }
@@ -500,12 +522,18 @@ namespace fxe::js {
       long status = 200;
       std::string status_text;
       std::string url;
+      Global<Object>* persistent = nullptr;
       std::string body; // raw bytes
       Global<Object> headers_obj;
       bool body_used = false;
     };
     void response_finalizer(const WeakCallbackInfo<response_data>& info) {
-      delete info.GetParameter();
+      auto* d = info.GetParameter();
+      if (d && d->persistent) {
+        d->persistent->Reset();
+        delete d->persistent;
+      }
+      delete d;
     }
     response_data* unwrap_response(Local<Object> o) {
       return static_cast<response_data*>(unwrap(o, TAG_RESPONSE));
@@ -518,6 +546,7 @@ namespace fxe::js {
       obj->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RESPONSE));
       auto* persistent = new Global<Object>(iso, obj);
+      d->persistent = persistent;
       persistent->SetWeak(d.release(), response_finalizer, WeakCallbackType::kParameter);
       return obj;
     }
@@ -692,6 +721,7 @@ namespace fxe::js {
       self->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RESPONSE));
       auto* persistent = new Global<Object>(iso, self);
+      d->persistent = persistent;
       persistent->SetWeak(d.release(), response_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }
@@ -707,9 +737,15 @@ namespace fxe::js {
       std::string proxy;
       std::string range;
       int timeout_ms = 0; // internal/test-only; intentionally not in RequestInit d.ts
+      Global<Object>* persistent = nullptr;
     };
     void request_finalizer(const WeakCallbackInfo<request_data>& info) {
-      delete info.GetParameter();
+      auto* d = info.GetParameter();
+      if (d && d->persistent) {
+        d->persistent->Reset();
+        delete d->persistent;
+      }
+      delete d;
     }
     request_data* unwrap_request(Local<Object> o) {
       return static_cast<request_data*>(unwrap(o, TAG_REQUEST));
@@ -806,6 +842,7 @@ namespace fxe::js {
       self->SetInternalField(0, External::New(iso, d, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_REQUEST));
       auto* persistent = new Global<Object>(iso, self);
+      d->persistent = persistent;
       persistent->SetWeak(d, request_finalizer, WeakCallbackType::kParameter);
       // Expose simple props as own properties so JS readers see them.
       self->Set(ctx, "url"_v8(iso), s8(iso, d->url)).Check();

@@ -24,6 +24,7 @@ namespace fxe::js {
     constexpr int kSlotHandle = 0;
     struct holder {
       fxe::os::tray_handle h;
+      Global<Object>* persistent = nullptr;
     };
 
     struct listener_binding {
@@ -58,6 +59,10 @@ namespace fxe::js {
       auto* hp = d.GetParameter();
       cleanup_tray_listeners(d.GetIsolate(), hp->h);
       fxe::os::tray_destroy(hp->h);
+      if (hp->persistent) {
+        hp->persistent->Reset();
+        delete hp->persistent;
+      }
       delete hp;
     }
 
@@ -80,6 +85,7 @@ namespace fxe::js {
       self->SetInternalField(kSlotHandle,
                              External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       auto* gp = new Global<Object>(iso, self);
+      h->persistent = gp;
       gp->SetWeak(h, finalizer_cb, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
     }

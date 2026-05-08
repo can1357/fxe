@@ -45,7 +45,12 @@ namespace fxe::js {
     static sheet_resetter_register s_sheet_resetter_register;
 
     void sheet_finalizer(const WeakCallbackInfo<spritesheet_holder>& info) {
-      delete info.GetParameter();
+      auto* h = info.GetParameter();
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
+      delete h;
     }
 
     void throw_type(Isolate* iso, const char* msg) {
@@ -66,6 +71,7 @@ namespace fxe::js {
       self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SPRITESHEET));
       auto* persistent = new Global<Object>(iso, self);
+      h->persistent = persistent;
       persistent->SetWeak(h, sheet_finalizer, WeakCallbackType::kParameter);
     }
 

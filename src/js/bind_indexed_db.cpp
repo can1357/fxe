@@ -608,10 +608,16 @@ namespace fxe::js {
       bool has_upper = false;
       bool upper_open = false;
       std::vector<uint8_t> upper;
+      Global<Object>* persistent = nullptr;
     };
 
     void key_range_finalizer(const WeakCallbackInfo<key_range>& info) {
-      delete info.GetParameter();
+      auto* st = info.GetParameter();
+      if (st && st->persistent) {
+        st->persistent->Reset();
+        delete st->persistent;
+      }
+      delete st;
     }
 
     Local<Object> wrap_key_range(Isolate* iso, Local<Context> ctx, key_range range) {
@@ -619,6 +625,7 @@ namespace fxe::js {
       auto* state = new key_range(std::move(range));
       inst->SetAlignedPointerInInternalField(0, state, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
+      state->persistent = p;
       p->SetWeak(state, key_range_finalizer, WeakCallbackType::kParameter);
       // Mirror key fields as JS-visible properties.
       if (state->has_lower) {
@@ -1038,10 +1045,16 @@ namespace fxe::js {
       // index mode (when accessed via store.index(...))
       std::string index_name;
       bool is_index = false;
+      Global<Object>* persistent = nullptr;
     };
 
     void store_finalizer(const WeakCallbackInfo<store_handle>& info) {
-      delete info.GetParameter();
+      auto* h = info.GetParameter();
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
+      delete h;
     }
 
     store_handle* unwrap_store(Local<Object> obj) {
@@ -1061,6 +1074,7 @@ namespace fxe::js {
       h->name = name;
       inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
+      h->persistent = p;
       p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
       auto& meta = h->db->stores.at(name);
       (void)inst->Set(ctx, s(iso, "name"), s(iso, name));
@@ -1088,6 +1102,7 @@ namespace fxe::js {
       h->is_index = true;
       inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
+      h->persistent = p;
       p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
       auto& smeta = h->db->stores.at(store);
       auto& imeta = smeta.indexes.at(index);
@@ -1896,12 +1911,17 @@ namespace fxe::js {
       std::string index_name;
       std::vector<uint8_t> last_pk; // for update/delete
       std::vector<uint8_t> last_ik; // for index cursors
+      Global<Object>* persistent = nullptr;
     };
 
     void cursor_finalizer(const WeakCallbackInfo<cursor_state>& info) {
       auto* st = info.GetParameter();
-      if (st->stmt)
+      if (st && st->stmt)
         sqlite3_finalize(st->stmt);
+      if (st && st->persistent) {
+        st->persistent->Reset();
+        delete st->persistent;
+      }
       delete st;
     }
 
@@ -2183,6 +2203,7 @@ namespace fxe::js {
       st->tx.Reset(iso, h->tx.Get(iso));
       cursor->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, cursor);
+      st->persistent = p;
       p->SetWeak(st, cursor_finalizer, WeakCallbackType::kParameter);
       (void)cursor->Set(ctx, s(iso, "source"), info.This());
       (void)cursor->Set(ctx, s(iso, "direction"), s(iso, descending ? "prev" : "next"));
@@ -2257,16 +2278,21 @@ namespace fxe::js {
 
     struct database_handle {
       std::shared_ptr<database_state> db;
+      Global<Object>* persistent = nullptr;
     };
 
     void database_finalizer(const WeakCallbackInfo<database_handle>& info) {
       auto* h = info.GetParameter();
-      if (h->db) {
+      if (h && h->db) {
         h->db->open_connections -= 1;
         if (h->db->open_connections <= 0 && h->db->closed && h->db->db) {
           sqlite3_close(h->db->db);
           h->db->db = nullptr;
         }
+      }
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
       }
       delete h;
     }
@@ -2286,6 +2312,7 @@ namespace fxe::js {
       h->db->open_connections += 1;
       inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
       auto p = new Global<Object>(iso, inst);
+      h->persistent = p;
       p->SetWeak(h, database_finalizer, WeakCallbackType::kParameter);
       (void)inst->Set(ctx, s(iso, "name"), s(iso, db->name));
       (void)inst->Set(ctx, s(iso, "version"), Number::New(iso, static_cast<double>(db->version)));

@@ -16,6 +16,7 @@ namespace fxe::js {
   // reference; remaining shared_ptr holders keep the pixels alive.
   struct image_holder {
     std::shared_ptr<fxe::texture_data> tex;
+    v8::Global<v8::Object>* persistent = nullptr;
   };
 
   // Install the `Image` global namespace + ImageHandle constructor template

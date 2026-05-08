@@ -53,10 +53,16 @@ namespace fxe::js {
     struct pipeline_holder {
       std::unique_ptr<pipeline> owned;
       uint32_t vertex_stride = 0;
+      Global<Object>* persistent = nullptr;
     };
 
     void pipeline_finalizer(const WeakCallbackInfo<pipeline_holder>& info) {
-      delete info.GetParameter();
+      auto* h = info.GetParameter();
+      if (h && h->persistent) {
+        h->persistent->Reset();
+        delete h->persistent;
+      }
+      delete h;
     }
 
     [[nodiscard]] std::string utf8(Isolate* iso, Local<Value> value) {
@@ -221,6 +227,7 @@ namespace fxe::js {
         self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
         self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_PIPELINE));
         auto* persistent = new Global<Object>(iso, self);
+        h->persistent = persistent;
         persistent->SetWeak(h, pipeline_finalizer, WeakCallbackType::kParameter);
       } catch (const std::exception& e) {
         throw_error(iso, e.what());

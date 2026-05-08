@@ -16,6 +16,7 @@ namespace fxe::js {
   struct spritesheet_holder {
     fxe::spritesheet sheet;
     std::vector<std::shared_ptr<fxe::texture_data>> retained;
+    v8::Global<v8::Object>* persistent = nullptr;
   };
 
   void install_spritesheet_global(v8::Isolate*, v8::Local<v8::ObjectTemplate> global);
