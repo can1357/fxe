@@ -30,8 +30,8 @@
 namespace fxe {
 
   struct text_document_edit {
-    u32 start = 0;       // pre-edit offset where the change began (UTF-16 code units)
-    u32 removed = 0;     // # code units removed
+    u32 start = 0;          // pre-edit offset where the change began (UTF-16 code units)
+    u32 removed = 0;        // # code units removed
     std::u16string deleted; // captured for undo / event payload
     std::u16string inserted;
   };
@@ -50,8 +50,12 @@ namespace fxe {
     // ----- Reads -----
     [[nodiscard]] u32 length() const noexcept;
     [[nodiscard]] u32 line_count() const noexcept;
-    [[nodiscard]] u32 revision() const noexcept { return revision_; }
-    [[nodiscard]] u32 piece_count() const noexcept { return static_cast<u32>(pieces_.size()); }
+    [[nodiscard]] u32 revision() const noexcept {
+      return revision_;
+    }
+    [[nodiscard]] u32 piece_count() const noexcept {
+      return static_cast<u32>(pieces_.size());
+    }
 
     [[nodiscard]] std::u16string slice(u32 start, u32 end) const;
     /** UTF-8 export of [start, end). */
@@ -87,14 +91,17 @@ namespace fxe {
     /** Literal substring scan. Stops at `limit` matches. Set
      *  `case_insensitive` for ASCII-folded search. Pass `from = 0` to scan
      *  the whole document. */
-    struct match { u32 start; u32 end; };
-    [[nodiscard]] std::vector<match>
-    search_literal(std::u16string_view needle, u32 from = 0,
-                   u32 limit = 0xFFFFFFFFu, bool case_insensitive = false) const;
+    struct match {
+      u32 start;
+      u32 end;
+    };
+    [[nodiscard]] std::vector<match> search_literal(std::u16string_view needle, u32 from = 0,
+                                                    u32 limit = 0xFFFFFFFFu,
+                                                    bool case_insensitive = false) const;
 
-    [[nodiscard]] std::vector<match>
-    search_literal_utf8(std::string_view needle, u32 from = 0, u32 limit = 0xFFFFFFFFu,
-                        bool case_insensitive = false) const;
+    [[nodiscard]] std::vector<match> search_literal_utf8(std::string_view needle, u32 from = 0,
+                                                         u32 limit = 0xFFFFFFFFu,
+                                                         bool case_insensitive = false) const;
 
   private:
     enum class buf : u8 { original = 0, add = 1 };
@@ -118,7 +125,10 @@ namespace fxe {
     [[nodiscard]] const std::u16string& buf_for(buf b) const noexcept;
     [[nodiscard]] piece make_piece(buf source, u32 start, u32 length) const;
     /** Find piece containing the absolute offset (clamped to [0, length()]). */
-    struct locate { u32 piece_index; u32 inner; };
+    struct locate {
+      u32 piece_index;
+      u32 inner;
+    };
     [[nodiscard]] locate piece_at(u32 offset) const noexcept;
     void split_at(u32 offset);
     [[nodiscard]] u32 piece_starting_at(u32 offset) const noexcept;

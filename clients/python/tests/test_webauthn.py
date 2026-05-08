@@ -155,7 +155,10 @@ class WebAuthnPageTests(unittest.IsolatedAsyncioTestCase):
                 }
             },
         )
-        self.assertEqual(calls[3], ("WebAuthn.addCredential", {"authenticatorId": "auth-7", "credential": credential}))
+        self.assertEqual(
+            calls[3],
+            ("WebAuthn.addCredential", {"authenticatorId": "auth-7", "credential": credential}),
+        )
         self.assertEqual(calls[4], ("WebAuthn.getCredentials", {"authenticatorId": "auth-7"}))
         self.assertEqual(calls[5], ("WebAuthn.clearCredentials", {"authenticatorId": "auth-7"}))
         self.assertEqual(

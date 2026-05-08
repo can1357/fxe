@@ -19,23 +19,12 @@
 import type { ComposeEvent, KeyEvent } from 'fxe';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
-import {
-  Component,
-  type Node,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from '../reconciler/fiber.ts';
+import { Component, type Node, useEffect, useId, useRef, useState } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { isPrimaryModifier, MOD_SHIFT } from '../text/edit_model.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
-import {
-  type LineDecorationFn,
-  type LineDecorations,
-  LineViewport,
-} from './LineViewport.ts';
+import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
 
 const KEY_ENTER = 257;
 const KEY_TAB = 258;
@@ -270,8 +259,7 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
   });
 
   // Wrap the user's getLineDecorations to add primary-cursor selection rects.
-  const fontSize =
-    typeof resolved.text.fontSize === 'number' ? resolved.text.fontSize : 14;
+  const fontSize = typeof resolved.text.fontSize === 'number' ? resolved.text.fontSize : 14;
   const charW = fontSize * 0.6;
   const range = ordered();
   const lineHeight = props.lineHeight;

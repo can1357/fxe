@@ -38,7 +38,9 @@ namespace fxe::js {
       }
     }
     struct td_resetter_register {
-      td_resetter_register() { register_template_resetter(&td_reset_for_isolate); }
+      td_resetter_register() {
+        register_template_resetter(&td_reset_for_isolate);
+      }
     };
     static td_resetter_register s_td_resetter_register;
 
@@ -58,9 +60,11 @@ namespace fxe::js {
 
     void td_finalizer(const WeakCallbackInfo<td_holder>& info) {
       auto* h = info.GetParameter();
-      if (!h) return;
+      if (!h)
+        return;
       // Drop V8 listener handles before destroying doc.
-      for (auto& l : h->listeners) l->fn.Reset();
+      for (auto& l : h->listeners)
+        l->fn.Reset();
       h->listeners.clear();
       if (h->self) {
         h->self->Reset();
@@ -71,14 +75,17 @@ namespace fxe::js {
     }
 
     text_document* unwrap_doc(Local<Value> v) {
-      if (!v->IsObject()) return nullptr;
+      if (!v->IsObject())
+        return nullptr;
       auto o = v.As<Object>();
-      if (auto* h = static_cast<td_holder*>(unwrap(o, TAG_TEXT_DOCUMENT))) return h->doc;
+      if (auto* h = static_cast<td_holder*>(unwrap(o, TAG_TEXT_DOCUMENT)))
+        return h->doc;
       return nullptr;
     }
 
     td_holder* unwrap_holder(Local<Value> v) {
-      if (!v->IsObject()) return nullptr;
+      if (!v->IsObject())
+        return nullptr;
       return static_cast<td_holder*>(unwrap(v.As<Object>(), TAG_TEXT_DOCUMENT));
     }
 
@@ -91,26 +98,29 @@ namespace fxe::js {
       // V8 String::NewFromTwoByte accepts uint16_t*; char16_t is layout-
       // compatible.
       return String::NewFromTwoByte(iso, reinterpret_cast<const uint16_t*>(s.data()),
-                                    NewStringType::kNormal,
-                                    static_cast<int>(s.size()))
+                                    NewStringType::kNormal, static_cast<int>(s.size()))
           .ToLocalChecked();
     }
 
     std::u16string v8_to_u16(Isolate* iso, Local<Value> v) {
       // Round-trip via UTF-8 (V8's String::Write was removed; UTF-8 path
       // also handles non-string coercions safely via Utf8Value).
-      if (v.IsEmpty()) return {};
+      if (v.IsEmpty())
+        return {};
       String::Utf8Value u(iso, v);
       std::u16string out;
       const char* p = *u;
-      if (!p) return out;
+      if (!p)
+        return out;
       const char* end = p + u.length();
       out.reserve(static_cast<usize>(u.length()));
       while (p < end) {
         char32_t cp;
         unsigned char c = static_cast<unsigned char>(*p);
-        if (c < 0x80) { cp = c; ++p; }
-        else if ((c & 0xE0) == 0xC0 && end - p >= 2) {
+        if (c < 0x80) {
+          cp = c;
+          ++p;
+        } else if ((c & 0xE0) == 0xC0 && end - p >= 2) {
           cp = static_cast<char32_t>(((c & 0x1Fu) << 6) |
                                      (static_cast<unsigned char>(p[1]) & 0x3Fu));
           p += 2;
@@ -125,7 +135,10 @@ namespace fxe::js {
                                      ((static_cast<unsigned char>(p[2]) & 0x3Fu) << 6) |
                                      (static_cast<unsigned char>(p[3]) & 0x3Fu));
           p += 4;
-        } else { cp = 0xFFFDu; ++p; }
+        } else {
+          cp = 0xFFFDu;
+          ++p;
+        }
         if (cp <= 0xFFFFu) {
           out.push_back(static_cast<char16_t>(cp));
         } else {
@@ -141,8 +154,7 @@ namespace fxe::js {
       return v->Uint32Value(ctx).FromMaybe(def);
     }
 
-    Local<Object> make_edit_object(Isolate* iso, Local<Context> ctx,
-                                   const text_document_edit& e) {
+    Local<Object> make_edit_object(Isolate* iso, Local<Context> ctx, const text_document_edit& e) {
       auto o = Object::New(iso);
       (void)o->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, e.start));
       (void)o->Set(ctx, "removed"_v8(iso), Integer::NewFromUnsigned(iso, e.removed));
@@ -180,25 +192,31 @@ namespace fxe::js {
     void td_length(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_doc(info.This());
-      if (!d) { (void)throw_type_error(iso, "invalid TextDocument"); return; }
+      if (!d) {
+        (void)throw_type_error(iso, "invalid TextDocument");
+        return;
+      }
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->length()));
     }
     void td_line_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->line_count()));
     }
     void td_revision(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->revision()));
     }
     void td_piece_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->piece_count()));
     }
 
@@ -206,7 +224,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       auto s = d->slice(0, d->length());
       info.GetReturnValue().Set(u16_to_v8(iso, s));
     }
@@ -215,16 +234,19 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 a = to_u32(ctx, info.Length() >= 1 ? info[0] : Undefined(iso).As<Value>(), 0);
-      const u32 b = to_u32(ctx, info.Length() >= 2 ? info[1] : Undefined(iso).As<Value>(), d->length());
+      const u32 b =
+          to_u32(ctx, info.Length() >= 2 ? info[1] : Undefined(iso).As<Value>(), d->length());
       info.GetReturnValue().Set(u16_to_v8(iso, d->slice(a, b)));
     }
     void td_char_code_at(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 off = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->code_unit_at(off)));
     }
@@ -233,7 +255,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 line = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->line_to_offset(line)));
     }
@@ -241,7 +264,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 off = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->offset_to_line(off)));
     }
@@ -250,7 +274,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 line = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       auto r = d->line_range(line);
       auto o = Object::New(iso);
@@ -263,7 +288,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 line = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       info.GetReturnValue().Set(u16_to_v8(iso, d->line_text(line)));
     }
@@ -272,7 +298,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 off = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       const u32 line = d->offset_to_line(off);
       const u32 lstart = d->line_to_offset(line);
@@ -285,7 +312,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       const u32 line = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       const u32 col = info.Length() >= 2 ? to_u32(ctx, info[1]) : 0;
       const u32 lstart = d->line_to_offset(line);
@@ -300,7 +328,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       if (info.Length() < 3 || !info[2]->IsString()) {
         (void)throw_type_error(iso, "replace: expected (start, end, text)");
         return;
@@ -319,7 +348,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       if (info.Length() < 1 || !info[0]->IsArray()) {
         (void)throw_type_error(iso, "applyBatch: expected (edits[])");
         return;
@@ -333,12 +363,15 @@ namespace fxe::js {
       auto k_inserted = "inserted"_v8(iso);
       for (u32 i = 0; i < n; ++i) {
         Local<Value> ev;
-        if (!arr->Get(ctx, i).ToLocal(&ev) || !ev->IsObject()) continue;
+        if (!arr->Get(ctx, i).ToLocal(&ev) || !ev->IsObject())
+          continue;
         auto o = ev.As<Object>();
         text_document_edit e;
         Local<Value> f;
-        if (o->Get(ctx, k_start).ToLocal(&f)) e.start = to_u32(ctx, f);
-        if (o->Get(ctx, k_removed).ToLocal(&f)) e.removed = to_u32(ctx, f);
+        if (o->Get(ctx, k_start).ToLocal(&f))
+          e.start = to_u32(ctx, f);
+        if (o->Get(ctx, k_removed).ToLocal(&f))
+          e.removed = to_u32(ctx, f);
         if (o->Get(ctx, k_inserted).ToLocal(&f) && f->IsString())
           e.inserted = v8_to_u16(iso, f);
         in.push_back(std::move(e));
@@ -358,7 +391,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto* h = unwrap_holder(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       if (info.Length() < 1 || !info[0]->IsFunction()) {
         (void)throw_type_error(iso, "subscribe: expected (fn)");
         return;
@@ -389,8 +423,10 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_holder(info.This());
-      if (!h) return;
-      if (info.Length() < 1) return;
+      if (!h)
+        return;
+      if (info.Length() < 1)
+        return;
       u64 id = 0;
       if (info[0]->IsBigInt()) {
         id = info[0]->ToBigInt(ctx).ToLocalChecked()->Uint64Value();
@@ -398,16 +434,15 @@ namespace fxe::js {
         id = static_cast<u64>(info[0]->NumberValue(ctx).FromMaybe(0));
       }
       h->doc->unsubscribe(id);
-      h->listeners.erase(
-          std::remove_if(h->listeners.begin(), h->listeners.end(),
-                         [id](const auto& up) {
-                           if (up->id == id) {
-                             up->fn.Reset();
-                             return true;
-                           }
-                           return false;
-                         }),
-          h->listeners.end());
+      h->listeners.erase(std::remove_if(h->listeners.begin(), h->listeners.end(),
+                                        [id](const auto& up) {
+                                          if (up->id == id) {
+                                            up->fn.Reset();
+                                            return true;
+                                          }
+                                          return false;
+                                        }),
+                         h->listeners.end());
     }
 
     // searchLiteral(needle, opts?: { from, limit, caseInsensitive }) → Array<{start,end}>
@@ -416,7 +451,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_doc(info.This());
-      if (!d) return;
+      if (!d)
+        return;
       if (info.Length() < 1 || !info[0]->IsString()) {
         (void)throw_type_error(iso, "searchLiteral: expected (needle, opts?)");
         return;
@@ -428,8 +464,10 @@ namespace fxe::js {
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
         Local<Value> f;
-        if (o->Get(ctx, "from"_v8(iso)).ToLocal(&f)) from = to_u32(ctx, f);
-        if (o->Get(ctx, "limit"_v8(iso)).ToLocal(&f)) limit = to_u32(ctx, f, 0xFFFFFFFFu);
+        if (o->Get(ctx, "from"_v8(iso)).ToLocal(&f))
+          from = to_u32(ctx, f);
+        if (o->Get(ctx, "limit"_v8(iso)).ToLocal(&f))
+          limit = to_u32(ctx, f, 0xFFFFFFFFu);
         if (o->Get(ctx, "caseInsensitive"_v8(iso)).ToLocal(&f))
           ci = f->BooleanValue(iso);
       }
@@ -444,8 +482,7 @@ namespace fxe::js {
       info.GetReturnValue().Set(out);
     }
 
-#define TD_GETTER(name, fn) \
-  proto->Set(iso, name, FunctionTemplate::New(iso, fn))
+#define TD_GETTER(name, fn) proto->Set(iso, name, FunctionTemplate::New(iso, fn))
 
   } // namespace
 

@@ -8,6 +8,7 @@
 // of one character.
 
 import type { TextDocumentEdit } from 'fxe';
+
 // `TextDocument` is exported as both a value (constructor) and a type;
 // re-export under an alias so we can refer to the instance type without
 // importing the constructor at runtime.
@@ -86,12 +87,7 @@ export class History {
     };
     this.redo_.length = 0;
     const top = this.undo_[this.undo_.length - 1];
-    if (
-      !opts.break &&
-      top &&
-      top.origin === origin &&
-      now - top.timestamp < this.mergeWindowMs
-    ) {
+    if (!opts.break && top && top.origin === origin && now - top.timestamp < this.mergeWindowMs) {
       // Merge: keep the *earliest* inverse so undo reverts the whole group.
       this.undo_[this.undo_.length - 1] = {
         forward: entry.forward,

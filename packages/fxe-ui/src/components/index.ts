@@ -1,7 +1,19 @@
 export type { ButtonProps } from './Button.ts';
 export { Button } from './Button.ts';
+export type { EditableAreaProps } from './EditableArea.ts';
+export { EditableArea } from './EditableArea.ts';
+export type { GutterMark, GutterMarkFn, GutterProps } from './Gutter.ts';
+export { Gutter } from './Gutter.ts';
 export type { ImageProps } from './Image.ts';
 export { Image } from './Image.ts';
+export type {
+  DiagnosticUnderline,
+  LineDecorationFn,
+  LineDecorations,
+  LineSpan,
+  LineViewportProps,
+} from './LineViewport.ts';
+export { LineViewport } from './LineViewport.ts';
 export type { PressableProps, PressableState } from './Pressable.ts';
 export { Pressable, useFocus, useHover, usePressableState } from './Pressable.ts';
 export type { ScrollViewProps } from './ScrollView.ts';
@@ -16,15 +28,3 @@ export type { ViewProps } from './View.ts';
 export { View } from './View.ts';
 export type { VirtualItemHeight, VirtualListProps } from './VirtualList.ts';
 export { VirtualList } from './VirtualList.ts';
-export type { EditableAreaProps } from './EditableArea.ts';
-export { EditableArea } from './EditableArea.ts';
-export type { GutterMark, GutterMarkFn, GutterProps } from './Gutter.ts';
-export { Gutter } from './Gutter.ts';
-export type {
-  DiagnosticUnderline,
-  LineDecorationFn,
-  LineDecorations,
-  LineSpan,
-  LineViewportProps,
-} from './LineViewport.ts';
-export { LineViewport } from './LineViewport.ts';

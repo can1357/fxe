@@ -1,4 +1,3 @@
-
 import { Primitives } from 'fxe';
 import { glyphIndexAt, wrapText, xAtGlyphIndex } from 'fxe-ui';
 

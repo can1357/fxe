@@ -31,7 +31,8 @@ namespace fxe {
           p += 3;
         } else if ((c & 0xF8) == 0xF0 && end - p >= 4 && (p[1] & 0xC0) == 0x80 &&
                    (p[2] & 0xC0) == 0x80 && (p[3] & 0xC0) == 0x80) {
-          cp = static_cast<char32_t>(((c & 0x07u) << 18) | ((p[1] & 0x3Fu) << 12) | ((p[2] & 0x3Fu) << 6) | (p[3] & 0x3Fu));
+          cp = static_cast<char32_t>(((c & 0x07u) << 18) | ((p[1] & 0x3Fu) << 12) |
+                                     ((p[2] & 0x3Fu) << 6) | (p[3] & 0x3Fu));
           p += 4;
         } else {
           cp = 0xFFFDu;
@@ -74,7 +75,8 @@ namespace fxe {
         if (c >= 0xD800 && c <= 0xDBFF && i + 1 < in.size()) {
           char16_t lo = in[i + 1];
           if (lo >= 0xDC00 && lo <= 0xDFFF) {
-            char32_t cp = static_cast<char32_t>(0x10000u + ((static_cast<u32>(c - 0xD800) << 10) | static_cast<u32>(lo - 0xDC00)));
+            char32_t cp = static_cast<char32_t>(
+                0x10000u + ((static_cast<u32>(c - 0xD800) << 10) | static_cast<u32>(lo - 0xDC00)));
             emit_utf8(cp, out);
             i += 1;
             continue;
@@ -115,9 +117,12 @@ namespace fxe {
 
   std::u16string text_document::slice(u32 start, u32 end) const {
     const u32 len = length();
-    if (start > len) start = len;
-    if (end > len) end = len;
-    if (start >= end) return {};
+    if (start > len)
+      start = len;
+    if (end > len)
+      end = len;
+    if (start >= end)
+      return {};
     std::u16string out;
     out.reserve(end - start);
     auto loc = piece_at(start);
@@ -145,24 +150,31 @@ namespace fxe {
   }
 
   char16_t text_document::code_unit_at(u32 offset) const noexcept {
-    if (offset >= length()) return 0;
+    if (offset >= length())
+      return 0;
     auto loc = piece_at(offset);
     const auto& p = pieces_[loc.piece_index];
     return buf_for(p.source)[p.start + loc.inner];
   }
 
   u32 text_document::line_to_offset(u32 line) const noexcept {
-    if (line == 0) return 0;
+    if (line == 0)
+      return 0;
     const u32 total_lines = line_count();
-    if (line >= total_lines) return length();
+    if (line >= total_lines)
+      return length();
     // Find smallest piece-index i such that cum_lines_[i+1] >= line.
     u32 lo = 0, hi = static_cast<u32>(pieces_.size());
     while (lo < hi) {
       u32 mid = (lo + hi) >> 1;
-      if (cum_lines_[mid + 1] >= line) hi = mid; else lo = mid + 1;
+      if (cum_lines_[mid + 1] >= line)
+        hi = mid;
+      else
+        lo = mid + 1;
     }
     const u32 piece_idx = lo;
-    if (piece_idx >= pieces_.size()) return length();
+    if (piece_idx >= pieces_.size())
+      return length();
     const auto& p = pieces_[piece_idx];
     const u32 lines_before = cum_lines_[piece_idx];
     const u32 wanted_within = line - lines_before - 1;
@@ -175,9 +187,11 @@ namespace fxe {
   }
 
   u32 text_document::offset_to_line(u32 offset) const noexcept {
-    if (offset == 0) return 0;
+    if (offset == 0)
+      return 0;
     const u32 len = length();
-    if (offset >= len) return line_count() - 1;
+    if (offset >= len)
+      return line_count() - 1;
     auto loc = piece_at(offset);
     const auto& p = pieces_[loc.piece_index];
     const u32 lines_before = cum_lines_[loc.piece_index];
@@ -189,13 +203,15 @@ namespace fxe {
 
   text_line_range text_document::line_range(u32 line) const noexcept {
     const u32 total = line_count();
-    if (line >= total) return {length(), length()};
+    if (line >= total)
+      return {length(), length()};
     const u32 start = line_to_offset(line);
     const u32 next = (line + 1 >= total) ? length() : line_to_offset(line + 1);
     u32 end = next;
     if (end > start) {
       // Trim the trailing '\n' that terminates this line.
-      if (code_unit_at(end - 1) == u'\n') end -= 1;
+      if (code_unit_at(end - 1) == u'\n')
+        end -= 1;
     }
     return {start, end};
   }
@@ -214,7 +230,8 @@ namespace fxe {
     if (!listeners_.empty()) {
       const text_document_edit edits[1] = {edit};
       const auto listeners_copy = listeners_;
-      for (const auto& [id, fn] : listeners_copy) (void)id, fn(edits);
+      for (const auto& [id, fn] : listeners_copy)
+        (void)id, fn(edits);
     }
     return edit;
   }
@@ -225,7 +242,8 @@ namespace fxe {
 
   std::vector<text_document_edit>
   text_document::apply_batch(std::span<const text_document_edit> edits) {
-    if (edits.empty()) return {};
+    if (edits.empty())
+      return {};
     // Validate ordering & non-overlap.
     for (usize i = 1; i < edits.size(); ++i) {
       const auto& a = edits[i - 1];
@@ -243,7 +261,8 @@ namespace fxe {
     revision_ += 1;
     if (!listeners_.empty()) {
       const auto listeners_copy = listeners_;
-      for (const auto& [id, fn] : listeners_copy) (void)id, fn(applied);
+      for (const auto& [id, fn] : listeners_copy)
+        (void)id, fn(applied);
     }
     return applied;
   }
@@ -263,20 +282,23 @@ namespace fxe {
   // ---------------------------------------------------------------------
   // Search
   // ---------------------------------------------------------------------
-  std::vector<text_document::match>
-  text_document::search_literal(std::u16string_view needle, u32 from, u32 limit,
-                                bool case_insensitive) const {
+  std::vector<text_document::match> text_document::search_literal(std::u16string_view needle,
+                                                                  u32 from, u32 limit,
+                                                                  bool case_insensitive) const {
     std::vector<match> out;
-    if (needle.empty()) return out;
+    if (needle.empty())
+      return out;
     const u32 len = length();
-    if (from >= len) return out;
+    if (from >= len)
+      return out;
     // Materialise the slice once — for huge documents this is wasteful, but
     // for typical single-file editors (<10 MB) it's a single allocation
     // instead of N piece-stitching loops. v2 can scan piece-by-piece.
     std::u16string hay = slice(from, len);
     const usize n = needle.size();
     const usize m = hay.size();
-    if (n > m) return out;
+    if (n > m)
+      return out;
     auto eq = [case_insensitive](char16_t a, char16_t b) {
       return case_insensitive ? fold_ascii(a) == fold_ascii(b) : a == b;
     };
@@ -284,7 +306,10 @@ namespace fxe {
     while (i + n <= m && out.size() < limit) {
       bool match = true;
       for (usize k = 0; k < n; ++k) {
-        if (!eq(hay[i + k], needle[k])) { match = false; break; }
+        if (!eq(hay[i + k], needle[k])) {
+          match = false;
+          break;
+        }
       }
       if (match) {
         out.push_back({static_cast<u32>(from + i), static_cast<u32>(from + i + n)});
@@ -317,29 +342,37 @@ namespace fxe {
     const auto& src = buf_for(source);
     const u32 end = start + length;
     for (u32 i = start; i < end; ++i) {
-      if (src[i] == u'\n') p.line_starts.push_back(i - start);
+      if (src[i] == u'\n')
+        p.line_starts.push_back(i - start);
     }
     return p;
   }
 
   text_document::locate text_document::piece_at(u32 offset) const noexcept {
-    if (pieces_.empty()) return {0u, 0u};
+    if (pieces_.empty())
+      return {0u, 0u};
     // Largest i with cum_len_[i] <= offset.
     u32 lo = 0;
     u32 hi = static_cast<u32>(pieces_.size());
     while (lo < hi) {
       u32 mid = (lo + hi) >> 1;
-      if (cum_len_[mid + 1] <= offset) lo = mid + 1; else hi = mid;
+      if (cum_len_[mid + 1] <= offset)
+        lo = mid + 1;
+      else
+        hi = mid;
     }
     const u32 idx = std::min<u32>(lo, static_cast<u32>(pieces_.size()) - 1);
     return {idx, offset - cum_len_[idx]};
   }
 
   void text_document::split_at(u32 offset) {
-    if (pieces_.empty()) return;
-    if (offset == 0 || offset >= length()) return;
+    if (pieces_.empty())
+      return;
+    if (offset == 0 || offset >= length())
+      return;
     auto loc = piece_at(offset);
-    if (loc.inner == 0) return;
+    if (loc.inner == 0)
+      return;
     const piece p = pieces_[loc.piece_index];
     piece left = make_piece(p.source, p.start, loc.inner);
     piece right = make_piece(p.source, p.start + loc.inner, p.length - loc.inner);
@@ -349,29 +382,37 @@ namespace fxe {
   }
 
   u32 text_document::piece_starting_at(u32 offset) const noexcept {
-    if (offset >= length()) return static_cast<u32>(pieces_.size());
+    if (offset >= length())
+      return static_cast<u32>(pieces_.size());
     u32 lo = 0;
     u32 hi = static_cast<u32>(pieces_.size());
     while (lo < hi) {
       u32 mid = (lo + hi) >> 1;
-      if (cum_len_[mid] < offset) lo = mid + 1; else hi = mid;
+      if (cum_len_[mid] < offset)
+        lo = mid + 1;
+      else
+        hi = mid;
     }
     return lo;
   }
 
-  text_document_edit text_document::replace_internal(u32 start, u32 end,
-                                                     std::u16string_view text) {
+  text_document_edit text_document::replace_internal(u32 start, u32 end, std::u16string_view text) {
     const u32 len = length();
-    if (start > len) start = len;
-    if (end > len) end = len;
-    if (start > end) std::swap(start, end);
+    if (start > len)
+      start = len;
+    if (end > len)
+      end = len;
+    if (start > end)
+      std::swap(start, end);
 
     text_document_edit edit;
     edit.start = start;
     edit.removed = end - start;
     edit.inserted.assign(text);
-    if (edit.removed > 0) edit.deleted = slice(start, end);
-    if (edit.removed == 0 && text.empty()) return edit;
+    if (edit.removed > 0)
+      edit.deleted = slice(start, end);
+    if (edit.removed == 0 && text.empty())
+      return edit;
 
     split_at(end);
     split_at(start);
@@ -395,8 +436,7 @@ namespace fxe {
     cum_lines_.assign(n + 1, 0u);
     for (usize i = 0; i < n; ++i) {
       cum_len_[i + 1] = cum_len_[i] + pieces_[i].length;
-      cum_lines_[i + 1] =
-          cum_lines_[i] + static_cast<u32>(pieces_[i].line_starts.size());
+      cum_lines_[i + 1] = cum_lines_[i] + static_cast<u32>(pieces_[i].line_starts.size());
     }
   }
 

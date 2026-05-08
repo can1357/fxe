@@ -185,7 +185,9 @@ class _WebAuthn:
         )
 
     async def clear_credentials(self, authenticator_id: str) -> None:
-        await self._page._client.call("WebAuthn.clearCredentials", {"authenticatorId": authenticator_id})
+        await self._page._client.call(
+            "WebAuthn.clearCredentials", {"authenticatorId": authenticator_id}
+        )
 
     async def set_user_verified(self, authenticator_id: str, *, is_user_verified: bool) -> None:
         await self._page._client.call(
@@ -193,11 +195,14 @@ class _WebAuthn:
             {"authenticatorId": authenticator_id, "isUserVerified": is_user_verified},
         )
 
-    async def set_automatic_presence_simulation(self, authenticator_id: str, *, enabled: bool) -> None:
+    async def set_automatic_presence_simulation(
+        self, authenticator_id: str, *, enabled: bool
+    ) -> None:
         await self._page._client.call(
             "WebAuthn.setAutomaticPresenceSimulation",
             {"authenticatorId": authenticator_id, "enabled": enabled},
         )
+
 
 class Page:
     def __init__(self, client: Client, handshake: Handshake | None = None) -> None:

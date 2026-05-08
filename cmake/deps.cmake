@@ -140,7 +140,12 @@ if(NOT TARGET md4c::md4c AND NOT TARGET md4c)
         )
         FetchContent_MakeAvailable(md4c)
         if(DEFINED BUILD_SHARED_LIBS_SAVED)
-            set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED} CACHE BOOL "" FORCE)
+            set(BUILD_SHARED_LIBS
+                ${BUILD_SHARED_LIBS_SAVED}
+                CACHE BOOL
+                ""
+                FORCE
+            )
         endif()
     else()
         message(

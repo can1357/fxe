@@ -1,4 +1,3 @@
-
 import dgramDefault, { createSocket } from 'node:dgram';
 import dnsDefault, { lookup } from 'node:dns';
 import dnsPromises from 'node:dns/promises';

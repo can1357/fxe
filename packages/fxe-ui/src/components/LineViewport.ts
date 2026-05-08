@@ -15,13 +15,7 @@
 import { type Color, type CommandBuffer, Primitives } from 'fxe';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
-import {
-  Component,
-  type Node,
-  useEffect,
-  useId,
-  useState,
-} from '../reconciler/fiber.ts';
+import { Component, type Node, useEffect, useId, useState } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { useTextStyle } from '../theme/text_context.ts';
