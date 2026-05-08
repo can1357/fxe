@@ -1,4 +1,5 @@
 #include "fxe_native.hpp"
+#include "os/os.hpp"
 #include "runtime/capabilities.hpp"
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_fd.hpp"
@@ -2550,6 +2551,108 @@ namespace fxe::runtime {
       info.GetReturnValue().Set(Number::New(info.GetIsolate(), free_mem()));
     }
 
+    struct system_change_listener {
+      Isolate* isolate = nullptr;
+      Global<Context> context;
+      Global<Function> callback;
+    };
+
+    std::mutex g_system_change_listener_mu;
+    std::unordered_map<u32, system_change_listener> g_system_change_listeners;
+    std::atomic<u32> g_next_system_change_listener_id{1};
+
+    void dispatch_system_change_listener(u32 id, std::string_view kind) {
+      Isolate* iso = nullptr;
+      {
+        std::lock_guard<std::mutex> lock(g_system_change_listener_mu);
+        auto it = g_system_change_listeners.find(id);
+        if (it == g_system_change_listeners.end() || it->second.callback.IsEmpty() ||
+            it->second.context.IsEmpty()) {
+          return;
+        }
+        iso = it->second.isolate;
+      }
+      if (!iso)
+        return;
+      Isolate::Scope isolate_scope(iso);
+      HandleScope handle_scope(iso);
+      Local<Context> ctx;
+      Local<Function> cb;
+      {
+        std::lock_guard<std::mutex> lock(g_system_change_listener_mu);
+        auto it = g_system_change_listeners.find(id);
+        if (it == g_system_change_listeners.end() || it->second.callback.IsEmpty() ||
+            it->second.context.IsEmpty()) {
+          return;
+        }
+        ctx = it->second.context.Get(iso);
+        cb = it->second.callback.Get(iso);
+      }
+      if (ctx.IsEmpty() || cb.IsEmpty())
+        return;
+      Context::Scope context_scope(ctx);
+      Local<Value> argv[1] = {str(iso, kind)};
+      TryCatch try_catch(iso);
+      Local<Value> ignored;
+      (void)cb->Call(ctx, ctx->Global(), 1, argv).ToLocal(&ignored);
+    }
+
+    void dispose_system_change_observer(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      const u32 id = info.Data().IsEmpty()
+                         ? 0
+                         : info.Data()->Uint32Value(iso->GetCurrentContext()).FromMaybe(0);
+      if (id == 0)
+        return;
+      std::lock_guard<std::mutex> lock(g_system_change_listener_mu);
+      auto it = g_system_change_listeners.find(id);
+      if (it == g_system_change_listeners.end())
+        return;
+      it->second.callback.Reset();
+      it->second.context.Reset();
+      g_system_change_listeners.erase(it);
+    }
+
+    void os_install_system_change_observer(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      if (info.Length() < 1 || !info[0]->IsFunction()) {
+        throw_error(iso, "__fxe_native.os.installSystemChangeObserver requires a callback");
+        return;
+      }
+      const u32 id = g_next_system_change_listener_id.fetch_add(1);
+      system_change_listener entry;
+      entry.isolate = iso;
+      entry.context.Reset(iso, ctx);
+      entry.callback.Reset(iso, info[0].As<Function>());
+      {
+        std::lock_guard<std::mutex> lock(g_system_change_listener_mu);
+        g_system_change_listeners.emplace(id, std::move(entry));
+      }
+      const bool installed = fxe::os::install_system_change_observer([id](const char* kind) {
+        if (!kind || *kind == '\0')
+          return;
+        fxe::os::post_main_thread_dispatch([id, kind_name = std::string(kind)] {
+          dispatch_system_change_listener(id, kind_name);
+        });
+      });
+      if (!installed) {
+        std::lock_guard<std::mutex> lock(g_system_change_listener_mu);
+        auto it = g_system_change_listeners.find(id);
+        if (it != g_system_change_listeners.end()) {
+          it->second.callback.Reset();
+          it->second.context.Reset();
+          g_system_change_listeners.erase(it);
+        }
+        info.GetReturnValue().Set(False(iso));
+        return;
+      }
+      auto disposer =
+          Function::New(ctx, dispose_system_change_observer, Integer::NewFromUnsigned(iso, id))
+              .ToLocalChecked();
+      info.GetReturnValue().Set(disposer);
+    }
+
     void os_cpus(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
@@ -4816,6 +4919,7 @@ namespace fxe::runtime {
       add_function(iso, ctx, ns, "cpus", os_cpus);
       add_function(iso, ctx, ns, "networkInterfaces", os_network_interfaces);
       add_function(iso, ctx, ns, "userInfo", os_user_info);
+      add_function(iso, ctx, ns, "installSystemChangeObserver", os_install_system_change_observer);
       return ns;
     }
 

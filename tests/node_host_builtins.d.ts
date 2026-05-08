@@ -33,7 +33,10 @@ declare module 'node:http2' {
     HTTP_STATUS_OK: number;
   };
   export function connect(url: string): {
-    request(headers: Record<string, string>): StreamLike;
+    request(
+      headers: Record<string, string>,
+      options?: { signal?: AbortSignal; timeout?: number; timeoutMs?: number },
+    ): StreamLike;
     close(): void;
   };
   export function createSecureServer(options?: unknown): unknown;

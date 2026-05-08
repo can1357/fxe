@@ -1,15 +1,15 @@
 // Node builtin compatibility status:
-// - Host-adapted: assert/strict, buffer, child_process, console, crypto, dgram, dns,
-//   dns/promises, events, fs, fs/promises, http2, https, net, os, path, path/posix,
-//   path/win32, process, querystring, stream, stream/promises, timers,
-//   timers/promises, tls, tty, url, util, util/types, worker_threads.
+// - Host-adapted: assert/strict, async_hooks (limited), buffer, child_process, console,
+//   crypto, dgram, dns, dns/promises, events, fs, fs/promises, http2, https, inspector,
+//   inspector/promises, net, os, path, path/posix, path/win32, process, querystring,
+//   readline, readline/promises, repl, stream, stream/promises, timers,
+//   timers/promises, tls, tty, url, util, util/types, v8, vm, wasi, worker_threads, zlib.
 // - unenv fallback: assert, cluster, constants, diagnostics_channel, domain, http,
 //   module, perf_hooks, punycode, stream/consumers, stream/web, string_decoder, sys,
 //   test, test/reporters, trace_events, _http_agent, _http_client, _http_common,
 //   _http_incoming, _http_outgoing, _http_server, _stream_duplex, _stream_passthrough,
 //   _stream_readable, _stream_transform, _stream_wrap, _stream_writable.
-// - Deferred on unenv until native parity work lands: async_hooks, inspector,
-//   inspector/promises, readline, readline/promises, repl, v8, vm, wasi, zlib.
+// - Deferred on unenv until native parity work lands: none.
 
 #include "node_compat.hpp"
 #if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
@@ -23,6 +23,7 @@
 #endif
 #include <algorithm>
 #include <array>
+#include <fxe/generated/node_compat/async_hooks_adapter.hpp>
 #include <fxe/generated/node_compat/buffer_adapter.hpp>
 #include <fxe/generated/node_compat/child_process_adapter.hpp>
 #include <fxe/generated/node_compat/console_adapter.hpp>
@@ -39,6 +40,8 @@
 #include <fxe/generated/node_compat/https_native_adapter.hpp>
 #endif
 #include <fxe/generated/node_compat/https_adapter.hpp>
+#include <fxe/generated/node_compat/inspector_adapter.hpp>
+#include <fxe/generated/node_compat/inspector_promises_adapter.hpp>
 #include <fxe/generated/node_compat/net_adapter.hpp>
 #include <fxe/generated/node_compat/os_adapter.hpp>
 #include <fxe/generated/node_compat/path_adapter.hpp>
@@ -47,6 +50,9 @@
 #include <fxe/generated/node_compat/prelude.hpp>
 #include <fxe/generated/node_compat/process_adapter.hpp>
 #include <fxe/generated/node_compat/querystring_adapter.hpp>
+#include <fxe/generated/node_compat/readline_adapter.hpp>
+#include <fxe/generated/node_compat/readline_promises_adapter.hpp>
+#include <fxe/generated/node_compat/repl_adapter.hpp>
 #include <fxe/generated/node_compat/stream_adapter.hpp>
 #include <fxe/generated/node_compat/stream_promises_adapter.hpp>
 #include <fxe/generated/node_compat/timers_adapter.hpp>
@@ -59,7 +65,11 @@
 #include <fxe/generated/node_compat/url_adapter.hpp>
 #include <fxe/generated/node_compat/util_adapter.hpp>
 #include <fxe/generated/node_compat/util_types_adapter.hpp>
+#include <fxe/generated/node_compat/v8_adapter.hpp>
+#include <fxe/generated/node_compat/vm_adapter.hpp>
+#include <fxe/generated/node_compat/wasi_adapter.hpp>
 #include <fxe/generated/node_compat/worker_threads_adapter.hpp>
+#include <fxe/generated/node_compat/zlib_adapter.hpp>
 #include <fxe/v8_strings.hpp>
 #include <optional>
 #include <string>
@@ -225,6 +235,10 @@ export default strict;
         return node_compat_asset{std::move(canonical_specifier),
                                  "src/runtime/node/assert/strict.fxe.ts",
                                  k_assert_strict_adapter_source};
+      if (bare == "async_hooks")
+        return node_compat_asset{std::move(canonical_specifier),
+                                 "src/runtime/node/async_hooks.fxe.ts",
+                                 node_js::k_async_hooks_adapter_source};
       if (bare == "events")
         return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/events.fxe.ts",
                                  node_js::k_events_adapter_source};
@@ -276,6 +290,16 @@ export default strict;
         return node_compat_asset{std::move(canonical_specifier),
                                  "src/runtime/node/stream/promises.fxe.ts",
                                  node_js::k_stream_promises_adapter_source};
+      if (bare == "readline")
+        return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/readline.fxe.ts",
+                                 node_js::k_readline_adapter_source};
+      if (bare == "readline/promises")
+        return node_compat_asset{std::move(canonical_specifier),
+                                 "src/runtime/node/readline/promises.fxe.ts",
+                                 node_js::k_readline_promises_adapter_source};
+      if (bare == "repl")
+        return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/repl.fxe.ts",
+                                 node_js::k_repl_adapter_source};
       if (bare == "os")
         return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/os.fxe.ts",
                                  node_js::k_os_adapter_source};
@@ -318,6 +342,26 @@ export default strict;
         return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/tls.fxe.ts",
                                  node_js::k_tls_native_adapter_source};
 #endif
+      if (bare == "vm")
+        return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/vm.fxe.ts",
+                                 node_js::k_vm_adapter_source};
+      if (bare == "v8")
+        return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/v8.fxe.ts",
+                                 node_js::k_v8_adapter_source};
+      if (bare == "wasi")
+        return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/wasi.fxe.ts",
+                                 node_js::k_wasi_adapter_source};
+      if (bare == "inspector")
+        return node_compat_asset{std::move(canonical_specifier),
+                                 "src/runtime/node/inspector.fxe.ts",
+                                 node_js::k_inspector_adapter_source};
+      if (bare == "inspector/promises")
+        return node_compat_asset{std::move(canonical_specifier),
+                                 "src/runtime/node/inspector/promises.fxe.ts",
+                                 node_js::k_inspector_promises_adapter_source};
+      if (bare == "zlib")
+        return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/zlib.fxe.ts",
+                                 node_js::k_zlib_adapter_source};
       if (bare == "tls")
         return node_compat_asset{std::move(canonical_specifier), "src/runtime/node/tls.fxe.ts",
                                  node_js::k_tls_adapter_source};
@@ -362,6 +406,20 @@ export default strict;
     install_native_http2(iso, ctx);
     install_native_https(iso, ctx);
 #endif
+    auto global = ctx->Global();
+    auto status_fn =
+        Function::New(ctx, [](const FunctionCallbackInfo<Value>& info) {
+          auto* iso = info.GetIsolate();
+          if (info.Length() < 1 || !info[0]->IsString())
+            return;
+          String::Utf8Value spec(iso, info[0]);
+          std::string_view sv = *spec ? std::string_view(*spec, spec.length()) : std::string_view{};
+          auto json = node_compat_module_status_json(sv);
+          info.GetReturnValue().Set(String::NewFromUtf8(iso, json.c_str(), NewStringType::kNormal,
+                                                        static_cast<int>(json.size()))
+                                        .ToLocalChecked());
+        }).ToLocalChecked();
+    (void)global->Set(ctx, "__fxe_node_compat_status"_v8(iso), status_fn);
     v8::TryCatch tc(iso);
     v8::ScriptOrigin origin("<fxe-node-compat-prelude>"_v8(iso));
     Local<Script> script;
@@ -407,6 +465,55 @@ export default strict;
     msg.append(specifier);
     msg.append("'");
     iso->ThrowException(Exception::Error(str(iso, msg)));
+  }
+
+  std::string node_compat_module_status_json(std::string_view specifier) {
+    auto bare = without_node_prefix(specifier);
+    auto canonical = canonical_node_specifier(bare);
+    std::string source;
+    std::string asset_path;
+    if (!is_node_builtin_specifier(specifier)) {
+      source = "unsupported";
+    } else if (auto adapter = make_host_adapter_asset(canonical, bare)) {
+      source = "native";
+      asset_path = adapter->asset_path;
+    } else {
+      auto lookup_path = node_asset_path_for(bare);
+      auto unenv = make_unenv_asset(std::move(canonical), lookup_path);
+      if (unenv) {
+        source = "unenv";
+        asset_path = unenv->asset_path;
+      } else {
+        source = "unsupported";
+      }
+    }
+    auto json_escape = [](std::string_view s) {
+      std::string out;
+      out.reserve(s.size() + 2);
+      for (char c : s) {
+        if (c == '"' || c == '\\') {
+          out.push_back('\\');
+          out.push_back(c);
+        } else if (c == '\n') {
+          out += "\\n";
+        } else {
+          out.push_back(c);
+        }
+      }
+      return out;
+    };
+    std::string out = "{\"specifier\":\"";
+    out += json_escape(specifier);
+    out += "\",\"source\":\"";
+    out += source;
+    out += "\"";
+    if (!asset_path.empty()) {
+      out += ",\"assetPath\":\"";
+      out += json_escape(asset_path);
+      out += "\"";
+    }
+    out += "}";
+    return out;
   }
 
 } // namespace fxe::runtime

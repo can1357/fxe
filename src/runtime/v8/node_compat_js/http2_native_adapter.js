@@ -1,6 +1,7 @@
 const native = globalThis.__fxe_native?.http2;
 const defer = (fn) => typeof queueMicrotask === 'function' ? queueMicrotask(fn) : setTimeout(fn, 0);
 const textEncoder = new TextEncoder();
+const schedulePoll = (fn) => typeof setImmediate === 'function' ? setImmediate(fn) : setTimeout(fn, 0);
 
 const requireNative = () => {
   if (!native || native.notImplemented || typeof native.connect !== 'function') {
@@ -81,14 +82,29 @@ const responseHeaders = (result) => ({
   ...(result.headers ?? {}),
 });
 
+const abortError = (signal) => {
+  const reason = signal?.reason;
+  if (reason && typeof reason === 'object' && (reason.name === 'AbortError' || reason.code === 'ABORT_ERR')) return reason;
+  const error = new Error(typeof reason === 'string' ? reason : 'The operation was aborted');
+  error.name = 'AbortError';
+  error.code = 'ABORT_ERR';
+  return error;
+};
+
 export class ClientHttp2Stream extends Emitter {
-  constructor(session, headers = {}) {
+  constructor(session, headers = {}, options = {}) {
     super();
     this.session = session;
     this.closed = false;
     this.destroyed = false;
     this._headers = { ...headers };
+    this._options = { ...options };
     this._chunks = [];
+    this._streamId = 0;
+    this._readHandle = 0;
+    this._aborted = false;
+    this._abortCleanup = undefined;
+    this._closeEmitted = false;
   }
   write(chunk, encoding, callback) {
     if (this.closed) throw new Error('write after end');
@@ -105,18 +121,37 @@ export class ClientHttp2Stream extends Emitter {
     return this;
   }
   close() { return this.destroy(); }
+
+  _emitCloseOnce() {
+    if (this._closeEmitted) return;
+    this._closeEmitted = true;
+    defer(() => this.emit('close'));
+  }
   destroy(error) {
     if (this.destroyed) return this;
+    this._abortCleanup?.();
+    this._abortCleanup = undefined;
     this.closed = true;
     this.destroyed = true;
     if (error) this.emit('error', error);
-    defer(() => this.emit('close'));
+    this._emitCloseOnce();
     return this;
   }
   respond() { throw new Error('ClientHttp2Stream.respond is only available on server streams'); }
   _finishWith(result) {
     if (this.destroyed) return;
+    this._abortCleanup?.();
+    this._abortCleanup = undefined;
+    if (this._aborted) {
+      this.destroyed = true;
+      this._emitCloseOnce();
+      return;
+    }
     if (!result?.ok) {
+      if (result?.code === 'ABORT_ERR') {
+        this.destroy(abortError(this._options.signal));
+        return;
+      }
       this.destroy(new Error(result?.error ?? 'HTTP/2 native read failed'));
       return;
     }
@@ -126,21 +161,44 @@ export class ClientHttp2Stream extends Emitter {
     this.closed = true;
     this.destroyed = true;
     this.emit('end');
-    this.emit('close');
+    this._emitCloseOnce();
   }
   _dispatch() {
     if (this.destroyed) return;
+    if (this._options.signal?.aborted) {
+      this.destroy(abortError(this._options.signal));
+      return;
+    }
     this.emit('finish');
     try {
       const n = requireNative();
       const body = concatBody(this._chunks);
-      const streamId = n.submit(this.session._handle, { ...this._headers, __body: body });
-      const readHandle = n.read(this.session._handle, streamId, () => {});
+      const timeout = Number(this._options.timeout ?? this._options.timeoutMs ?? 0);
+      this._streamId = n.submit(this.session._handle, {
+        ...this._headers,
+        __body: body,
+        __timeoutMs: Number.isFinite(timeout) && timeout > 0 ? Math.trunc(timeout) : 0,
+      });
+      const onAbort = () => {
+        if (this.destroyed || this._aborted) return;
+        this._aborted = true;
+        this.closed = true;
+        this.emit('error', abortError(this._options.signal));
+        this._emitCloseOnce();
+        // TODO(F5 verify): readResult polling can outlive an aborted stream and leave the native
+        // read thread join pending until session teardown finishes.
+        defer(() => { try { n.cancel(this.session._handle, this._streamId); } catch {} });
+      };
+      if (this._options.signal?.addEventListener) {
+        this._abortCleanup = () => this._options.signal.removeEventListener('abort', onAbort);
+        this._options.signal.addEventListener('abort', onAbort, { once: true });
+      }
+      this._readHandle = n.read(this.session._handle, this._streamId, () => {});
       const poll = () => {
         if (this.destroyed) return;
-        const result = n.readResult(readHandle);
+        const result = n.readResult(this._readHandle);
         if (result === null) {
-          setTimeout(poll, 1);
+          schedulePoll(poll);
           return;
         }
         this._finishWith(result);
@@ -164,9 +222,9 @@ export class ClientHttp2Session extends Emitter {
     if (typeof listener === 'function') this.once('connect', listener);
     defer(() => { if (!this.destroyed) this.emit('connect', this, undefined); });
   }
-  request(headers = {}) {
+  request(headers = {}, options = {}) {
     if (this.closed || this.destroyed) throw new Error('node:http2 session is closed');
-    return new ClientHttp2Stream(this, headers);
+    return new ClientHttp2Stream(this, headers, options);
   }
   close(callback) {
     if (typeof callback === 'function') this.once('close', callback);

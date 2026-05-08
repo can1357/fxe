@@ -215,8 +215,17 @@ namespace fxe::runtime {
       std::mutex mutex;
       bool done = false;
       std::string err;
+      std::string code;
       fxe::net::http2_response response;
       std::thread worker;
+      ~read_entry() {
+        // If the JS side never called readResult (e.g. session torn down on
+        // exit while a stream was still pending), detach the worker so its
+        // destructor doesn't terminate(). Joining is unsafe here because the
+        // worker may still be blocked in nghttp2 IO.
+        if (worker.joinable())
+          worker.detach();
+      }
     };
 
     std::mutex registry_mutex;
@@ -300,11 +309,12 @@ namespace fxe::runtime {
       request.method = string_prop(iso, ctx, headers, ":method", "GET");
       request.path = string_prop(iso, ctx, headers, ":path", "/");
       request.body = bytes_value(iso, ctx, get_prop(iso, ctx, headers, "__body"));
+      request.timeout_ms = int_prop(iso, ctx, headers, "__timeoutMs", 0);
       auto names = headers->GetOwnPropertyNames(ctx).ToLocalChecked();
       for (u32 i = 0; i < names->Length(); ++i) {
         auto key_value = names->Get(ctx, i).ToLocalChecked();
         auto key = string_arg(iso, key_value);
-        if (key == ":method" || key == ":path" || key == "__body")
+        if (key == ":method" || key == ":path" || key == "__body" || key == "__timeoutMs")
           continue;
         auto value = headers->Get(ctx, key_value).ToLocalChecked();
         request.headers.emplace_back(std::move(key), string_arg(iso, value));
@@ -320,6 +330,29 @@ namespace fxe::runtime {
         return;
       }
       info.GetReturnValue().Set(Integer::New(iso, stream_id));
+    }
+
+    void http2_cancel(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      if (info.Length() < 2 || !info[0]->IsNumber() || !info[1]->IsNumber()) {
+        throw_error(iso, "__fxe_native.http2.cancel requires handle and stream id");
+        return;
+      }
+      auto client = find_client(info[0]->Int32Value(ctx).FromMaybe(0));
+      if (!client) {
+        throw_error(iso, "unknown HTTP/2 client handle");
+        return;
+      }
+      const i32 stream_id = info[1]->Int32Value(ctx).FromMaybe(0);
+      const u32 error_code = info.Length() > 2 && info[2]->IsUint32()
+                                 ? info[2]->Uint32Value(ctx).FromMaybe(NGHTTP2_CANCEL)
+                                 : NGHTTP2_CANCEL;
+      {
+        std::lock_guard<std::mutex> lock(client->mutex);
+        client->client->cancel(stream_id, error_code);
+      }
+      info.GetReturnValue().Set(True(iso));
     }
 
     void http2_read(const FunctionCallbackInfo<Value>& info) {
@@ -345,16 +378,15 @@ namespace fxe::runtime {
       read->worker = std::thread([client, read, stream_id] {
         std::string err;
         fxe::net::http2_response response;
-        {
-          std::lock_guard<std::mutex> lock(client->mutex);
-          response = client->client->wait(stream_id, err);
-          if (err.empty())
-            err = client->client->last_error();
-        }
+        response = client->client->wait(stream_id, err);
+        if (err.empty())
+          err = client->client->last_error();
         {
           std::lock_guard<std::mutex> lock(read->mutex);
           read->response = std::move(response);
           read->err = std::move(err);
+          if (read->err == "ABORT_ERR" || read->err == "ERR_HTTP2_STREAM_TIMEOUT")
+            read->code = read->err;
           read->done = true;
         }
       });
@@ -396,6 +428,8 @@ namespace fxe::runtime {
         auto out = Object::New(iso);
         set_bool(ctx, out, "ok", false);
         set_string(ctx, out, "error", read->err);
+        if (!read->code.empty())
+          set_string(ctx, out, "code", read->code);
         info.GetReturnValue().Set(out);
         return;
       }
@@ -605,6 +639,7 @@ namespace fxe::runtime {
       auto ns = Object::New(iso);
       add_function(iso, ctx, ns, "connect", http2_connect);
       add_function(iso, ctx, ns, "submit", http2_submit);
+      add_function(iso, ctx, ns, "cancel", http2_cancel);
       add_function(iso, ctx, ns, "read", http2_read);
       add_function(iso, ctx, ns, "readResult", http2_read_result);
       add_function(iso, ctx, ns, "write", http2_write);

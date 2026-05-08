@@ -17,6 +17,7 @@ namespace fxe::runtime {
   std::optional<node_compat_asset> resolve_node_compat_asset(std::string_view specifier);
   std::optional<node_compat_asset> resolve_node_compat_asset_path(std::string_view asset_path);
   std::optional<node_compat_asset> resolve_unenv_pathe_asset();
+  std::string node_compat_module_status_json(std::string_view specifier);
   void throw_node_compat_disabled(v8::Isolate* iso, std::string_view specifier);
 
 } // namespace fxe::runtime
