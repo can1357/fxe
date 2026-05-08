@@ -15,8 +15,9 @@
     "paths": {
       "fxe": ["./types/fxe.d.ts"],
       "fxe-ui": ["./types/fxe-ui.d.ts"],
-      "fxe-ui/jsx-runtime": ["./types/fxe-ui.d.ts"]
+      "fxe-ui/jsx-runtime": ["./types/fxe-ui.d.ts"],
+      "fxe-doc": ["./packages/fxe-doc/src/index.ts"]
     }
   },
-  "include": ["examples/js/**/*.ts", "examples/js/**/*.tsx", "packages/fxe-devtools/src/**/*.ts", "packages/fxe-devtools/src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "tests/**/*.d.ts", "types/**/*.d.ts"]
+  "include": ["examples/js/**/*.ts", "examples/js/**/*.tsx", "packages/fxe-doc/src/**/*.ts", "packages/fxe-devtools/src/**/*.ts", "packages/fxe-devtools/src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "tests/**/*.d.ts", "types/**/*.d.ts"]
 }

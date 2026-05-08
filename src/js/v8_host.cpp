@@ -980,13 +980,14 @@ namespace fxe::js {
       return {
           {"fxe-ui", root / "packages" / "fxe-ui" / "src" / "index.ts"},
           {"fxe-ui/jsx-runtime", root / "packages" / "fxe-ui" / "src" / "jsx-runtime.ts"},
+          {"fxe-doc", root / "packages" / "fxe-doc" / "src" / "index.ts"},
       };
     }
 
     bool resolve_synthetic_package_module(std::string_view spec, std::string& out,
                                           std::string& error) {
       fs::path root{FXE_SOURCE_DIR};
-      const bool known_spec = spec == "fxe-ui" || spec == "fxe-ui/jsx-runtime";
+      const bool known_spec = spec == "fxe-ui" || spec == "fxe-ui/jsx-runtime" || spec == "fxe-doc";
       if (!known_spec)
         return false;
       if (root.empty()) {
