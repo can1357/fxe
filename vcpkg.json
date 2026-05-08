@@ -13,7 +13,6 @@
     },
     "stb",
     "nlohmann-json",
-    "aklomp-base64",
     "libuv",
     "libsodium",
     "mbedtls",

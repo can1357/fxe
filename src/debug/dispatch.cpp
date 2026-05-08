@@ -25,7 +25,7 @@
 
 #include "screenshot.hpp"
 #include "server_internal.hpp"
-#include <libbase64.h>
+#include <sodium.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -629,11 +629,12 @@ namespace fxe::debug {
       out["sourceHeight"] = static_cast<double>(cap.height);
       out["byteSize"] = static_cast<double>(encoded.size());
       if (!omit_data || save_path.empty()) {
-        std::string b64;
-        b64.resize(((encoded.size() + 2) / 3) * 4);
-        usize b64_len = 0;
-        ::base64_encode(encoded.data(), encoded.size(), b64.data(), &b64_len, 0);
-        b64.resize(b64_len);
+        const usize b64_len =
+            sodium_base64_ENCODED_LEN(encoded.size(), sodium_base64_VARIANT_ORIGINAL) - 1u;
+        std::string b64(b64_len, '\0');
+        sodium_bin2base64(b64.data(), b64_len + 1u,
+                          reinterpret_cast<const unsigned char*>(encoded.data()), encoded.size(),
+                          sodium_base64_VARIANT_ORIGINAL);
         out["dataBase64"] = std::move(b64);
       }
       if (!save_path.empty()) {

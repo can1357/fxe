@@ -1,6 +1,6 @@
 #include "cdp_ws.hpp"
 
-#include <libbase64.h>
+#include <sodium.h>
 
 #include <algorithm>
 #include <array>
@@ -97,19 +97,23 @@ namespace fxe::debug::cdp_ws {
       return std::nullopt;
     std::array<u8, 16> nonce{};
     usize nonce_len = 0;
-    if (::base64_decode(sec_websocket_key.data(), sec_websocket_key.size(),
-                        reinterpret_cast<char*>(nonce.data()), &nonce_len, 0) != 1 ||
+    const char* b64_end = nullptr;
+    if (sodium_base642bin(nonce.data(), nonce.size(), sec_websocket_key.data(),
+                          sec_websocket_key.size(), nullptr, &nonce_len, &b64_end,
+                          sodium_base64_VARIANT_ORIGINAL) != 0 ||
         nonce_len != nonce.size())
       return std::nullopt;
     std::string seed(sec_websocket_key);
     seed += kMagic;
     auto digest = sha1(seed);
     // Sec-WebSocket-Accept: base64 of a 20-byte SHA-1 digest = 28 chars padded.
-    std::array<char, 32> accept_buf{};
-    usize accept_len = 0;
-    ::base64_encode(reinterpret_cast<const char*>(digest.data()), digest.size(), accept_buf.data(),
-                    &accept_len, 0);
-    return std::string(accept_buf.data(), accept_len);
+    constexpr usize kAcceptLen =
+        sodium_base64_ENCODED_LEN(20u, sodium_base64_VARIANT_ORIGINAL) - 1u;
+    std::array<char, kAcceptLen + 1u> accept_buf{};
+    sodium_bin2base64(accept_buf.data(), accept_buf.size(),
+                      reinterpret_cast<const unsigned char*>(digest.data()), digest.size(),
+                      sodium_base64_VARIANT_ORIGINAL);
+    return std::string(accept_buf.data(), kAcceptLen);
   }
 
   std::string http_request::header(std::string_view name) const {
