@@ -4,13 +4,13 @@
 // Type tag 'REND'.
 
 #include "bind_pipeline.hpp"
-#include <fxe/v8_helpers.hpp>
 #include "weak_holder.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <fxe/window.hpp>
 

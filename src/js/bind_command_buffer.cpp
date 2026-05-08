@@ -8,11 +8,11 @@
 // SetWeak callback. Wrapping engine-owned buffers (renderer, etc.) skips the
 // finaliser by setting field 0 with EXT_FLAG_BORROWED encoded into the tag.
 
-#include <fxe/v8_helpers.hpp>
 #include <fxe/command_buffer.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <fxe/vertex.hpp>
 

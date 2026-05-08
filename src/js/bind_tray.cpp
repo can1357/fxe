@@ -1,6 +1,7 @@
 #include "bind_tray.hpp"
 #include "../os/os.hpp"
 #include "bind_menu.hpp"
+#include "weak_holder.hpp"
 
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
@@ -23,10 +24,16 @@ namespace fxe::js {
       return *u ? std::string(*u, u.length()) : std::string{};
     }
 
+    void cleanup_tray_listeners(Isolate* iso, fxe::os::tray_handle h);
+
     constexpr int kSlotHandle = 0;
-    struct holder {
+    struct holder : weak_holder<holder> {
       fxe::os::tray_handle h;
-      Global<Object>* persistent = nullptr;
+
+      void on_finalize(Isolate* iso) {
+        cleanup_tray_listeners(iso, this->h);
+        fxe::os::tray_destroy(this->h);
+      }
     };
 
     struct listener_binding {
@@ -57,17 +64,6 @@ namespace fxe::js {
       }
     }
 
-    void finalizer_cb(const WeakCallbackInfo<holder>& d) {
-      auto* hp = d.GetParameter();
-      cleanup_tray_listeners(d.GetIsolate(), hp->h);
-      fxe::os::tray_destroy(hp->h);
-      if (hp->persistent) {
-        hp->persistent->Reset();
-        delete hp->persistent;
-      }
-      delete hp;
-    }
-
     holder* unwrap(Local<Object> self) {
       auto v = self->GetInternalField(kSlotHandle);
       return external_ptr<holder>(v);
@@ -85,9 +81,7 @@ namespace fxe::js {
       h->h = fxe::os::tray_create(icon, tip);
       auto self = info.This();
       self->SetInternalField(kSlotHandle, make_external(iso, h));
-      auto* gp = new Global<Object>(iso, self);
-      h->persistent = gp;
-      gp->SetWeak(h, finalizer_cb, WeakCallbackType::kParameter);
+      h->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
 

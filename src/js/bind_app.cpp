@@ -8,8 +8,8 @@
 #include "../os/os.hpp"
 #include "../runtime/updater.hpp"
 #include "fxe/single_instance.hpp"
-#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 
 // FXE_APP_NAME and FXE_APP_VERSION may be injected by the build as quoted

@@ -38,6 +38,7 @@
 #include "bind_timers.hpp"
 #include "bind_websocket.hpp"
 #include "runtime/uv_loop.hpp"
+#include "weak_holder.hpp"
 #include <fxe/v8_helpers.hpp>
 
 namespace fxe::js {
@@ -72,7 +73,7 @@ namespace fxe::js {
       Global<Function> fn;
     };
 
-    struct win_holder {
+    struct win_holder : weak_holder<win_holder> {
       std::unique_ptr<window> owned;
       std::string title; // backing storage for window_desc::title (string_view).
       std::unordered_map<std::string, std::vector<listener_entry>> listeners;
@@ -81,7 +82,8 @@ namespace fxe::js {
       Global<Object> self_strong; // strong ref held by app_run_loop while running
       int capability_id = 0;
       bool capabilities_registered = false;
-      Global<Object>* persistent = nullptr;
+
+      void on_finalize(Isolate* iso);
     };
 
     // Map raw window pointer -> holder. Lets free-function helpers (App.run,
@@ -100,29 +102,21 @@ namespace fxe::js {
       return it == m.end() ? nullptr : it->second;
     }
 
-    void win_finalizer(const WeakCallbackInfo<win_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h) {
-        auto& m = holder_map();
-        if (h->owned) {
-          unregister_window_for_isolate(info.GetIsolate(), h->owned.get());
-          m.erase(h->owned.get());
-        }
-        if (h->capabilities_registered)
-          fxe::runtime::unregister_window_capabilities(h->capability_id);
-        for (auto& [_, v] : h->listeners) {
-          for (auto& entry : v)
-            entry.fn.Reset();
-        }
-        h->listeners.clear();
-        h->on_frame.Reset();
-        h->self_strong.Reset();
-        if (h->persistent) {
-          h->persistent->Reset();
-          delete h->persistent;
-        }
+    void win_holder::on_finalize(Isolate* iso) {
+      auto& m = holder_map();
+      if (owned) {
+        unregister_window_for_isolate(iso, owned.get());
+        m.erase(owned.get());
       }
-      delete h;
+      if (capabilities_registered)
+        fxe::runtime::unregister_window_capabilities(capability_id);
+      for (auto& [_, v] : listeners) {
+        for (auto& entry : v)
+          entry.fn.Reset();
+      }
+      listeners.clear();
+      on_frame.Reset();
+      self_strong.Reset();
     }
 
     window* unwrap_win(Local<Object> self) {
@@ -684,9 +678,7 @@ namespace fxe::js {
         delete h;
         return;
       }
-      auto* persistent = new Global<Object>(iso, self);
-      h->persistent = persistent;
-      persistent->SetWeak(h, win_finalizer, WeakCallbackType::kParameter);
+      h->bind(iso, self);
     }
 
     // ---- pre-existing methods ----------------------------------------------

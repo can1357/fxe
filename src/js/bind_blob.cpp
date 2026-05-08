@@ -1,8 +1,8 @@
 #include "bind_blob.hpp"
 
-#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 
 #include <algorithm>

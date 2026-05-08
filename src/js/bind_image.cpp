@@ -5,10 +5,10 @@
 
 #include "bind_image.hpp"
 
-#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 
 #include <cstdint>

@@ -2,9 +2,9 @@
 #include "../../include/fxe/power.hpp"
 #include "../os/os.hpp"
 
-#include <fxe/v8_helpers.hpp>
 #include <algorithm>
 #include <atomic>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <iterator>
 #include <mutex>

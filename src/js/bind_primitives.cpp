@@ -6,11 +6,11 @@
 // RGBA8 number (0xRRGGBBAA) or a 4-tuple of floats in [0,1].
 
 #include "bind_font.hpp"
-#include <fxe/v8_helpers.hpp>
 #include <fxe/command_buffer.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/primitives.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 
 #include <algorithm>
@@ -55,11 +55,6 @@ namespace fxe::js {
       if (!v->IsObject())
         return nullptr;
       return static_cast<path_holder*>(unwrap(v.As<Object>(), TAG_PATH));
-    }
-
-    Local<String> js_string(Isolate* iso, const std::string& s) {
-      return String::NewFromUtf8(iso, s.c_str(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
     }
 
     enum drain_opcode : u32 {

@@ -26,6 +26,7 @@
 #include <fxe/v8_strings.hpp>
 
 #include "../os/os.hpp"
+#include "weak_holder.hpp"
 #include <fxe/v8_helpers.hpp>
 
 #include <algorithm>
@@ -51,6 +52,12 @@ namespace fxe::js {
   using namespace v8;
   namespace {
 
+    constexpr u32 TAG_IDB_KEY_RANGE = 0x494B524Eu;   // 'IKRN'
+    constexpr u32 TAG_IDB_REQUEST = 0x49524551u;     // 'IREQ'
+    constexpr u32 TAG_IDB_TRANSACTION = 0x4954584Eu; // 'ITXN'
+    constexpr u32 TAG_IDB_STORE = 0x4953544Fu;       // 'ISTO'
+    constexpr u32 TAG_IDB_CURSOR = 0x49435253u;      // 'ICRS'
+    constexpr u32 TAG_IDB_DATABASE = 0x49444241u;    // 'IDBA'
     // ============================== V8 helpers ==============================
 
     Local<String> s(Isolate* iso, std::string_view sv) {
@@ -79,10 +86,6 @@ namespace fxe::js {
     void set_int(Local<Context> ctx, Local<Object> obj, const char* key, int64_t v) {
       set_prop(ctx, obj, key, Number::New(Isolate::GetCurrent(), static_cast<double>(v)));
     }
-    void set_bool(Local<Context> ctx, Local<Object> obj, const char* key, bool v) {
-      set_prop(ctx, obj, key, Boolean::New(Isolate::GetCurrent(), v));
-    }
-
     void throw_msg(Isolate* iso, std::string_view msg, const char* name = "Error") {
       auto err = Exception::Error(s(iso, msg)).As<Object>();
       auto ctx = iso->GetCurrentContext();
@@ -96,16 +99,6 @@ namespace fxe::js {
       (void)err->Set(ctx, "name"_v8(iso), s(iso, name));
       return err;
     }
-
-    template <typename T> T* unwrap_external(Local<Data> v) {
-      if (v.IsEmpty() || !v->IsValue())
-        return nullptr;
-      auto val = v.As<Value>();
-      if (!val->IsExternal())
-        return nullptr;
-      return static_cast<T*>(val.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
-    }
-
     // ============================== Key encoding ==============================
     // Tag bytes (lower = sorts first per IDB key order):
     //   0x10 number, 0x20 Date, 0x30 string, 0x40 binary.
@@ -418,14 +411,6 @@ namespace fxe::js {
       }
     };
 
-    bool prepare(database_state* st, const char* sql, sqlite3_stmt** out, std::string& err) {
-      if (sqlite3_prepare_v2(st->db, sql, -1, out, nullptr) != SQLITE_OK) {
-        err = sqlite3_errmsg(st->db);
-        return false;
-      }
-      return true;
-    }
-
     void bind_blob(sqlite3_stmt* stmt, int i, const std::vector<uint8_t>& blob) {
       if (blob.empty())
         sqlite3_bind_zeroblob(stmt, i, 0);
@@ -599,32 +584,20 @@ namespace fxe::js {
 
     // ============================== IDBKeyRange ==============================
 
-    struct key_range {
+    struct key_range : weak_holder<key_range> {
       bool has_lower = false;
       bool lower_open = false;
       std::vector<uint8_t> lower;
       bool has_upper = false;
       bool upper_open = false;
       std::vector<uint8_t> upper;
-      Global<Object>* persistent = nullptr;
     };
-
-    void key_range_finalizer(const WeakCallbackInfo<key_range>& info) {
-      auto* st = info.GetParameter();
-      if (st && st->persistent) {
-        st->persistent->Reset();
-        delete st->persistent;
-      }
-      delete st;
-    }
 
     Local<Object> wrap_key_range(Isolate* iso, Local<Context> ctx, key_range range) {
       auto inst = new_instance_from(iso, ctx, tpl_for(iso).key_range_tpl);
       auto* state = new key_range(std::move(range));
-      inst->SetAlignedPointerInInternalField(0, state, v8::kEmbedderDataTypeTagDefault);
-      auto p = new Global<Object>(iso, inst);
-      state->persistent = p;
-      p->SetWeak(state, key_range_finalizer, WeakCallbackType::kParameter);
+      set_native(iso, inst, state, TAG_IDB_KEY_RANGE);
+      state->bind(iso, inst);
       // Mirror key fields as JS-visible properties.
       if (state->has_lower) {
         (void)inst->Set(ctx, "lower"_v8(iso),
@@ -646,8 +619,7 @@ namespace fxe::js {
     key_range* unwrap_key_range(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<key_range*>(
-          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<key_range*>(unwrap(obj, TAG_IDB_KEY_RANGE));
     }
 
     void key_range_only(const FunctionCallbackInfo<Value>& info) {
@@ -835,7 +807,7 @@ namespace fxe::js {
         st->source.Reset(iso, source);
       if (!transaction.IsEmpty())
         st->transaction.Reset(iso, transaction);
-      inst->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
+      set_native(iso, inst, st, TAG_IDB_REQUEST);
       (void)inst->Set(ctx, "result"_v8(iso), Undefined(iso));
       (void)inst->Set(ctx, "error"_v8(iso), Null(iso));
       (void)inst->Set(ctx, "readyState"_v8(iso), "pending"_v8(iso));
@@ -850,13 +822,6 @@ namespace fxe::js {
         (void)inst->Set(ctx, "onblocked"_v8(iso), Null(iso));
       }
       return inst;
-    }
-
-    request_state* unwrap_request(Local<Object> req) {
-      if (req.IsEmpty() || req->InternalFieldCount() < 1)
-        return nullptr;
-      return static_cast<request_state*>(
-          req->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
     }
 
     void resolve_request(Isolate* iso, Local<Context> ctx, Local<Object> req, Local<Value> result) {
@@ -953,8 +918,7 @@ namespace fxe::js {
     transaction_state* unwrap_tx(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<transaction_state*>(
-          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<transaction_state*>(unwrap(obj, TAG_IDB_TRANSACTION));
     }
 
     bool tx_begin(transaction_state* tx, std::string& err) {
@@ -1018,7 +982,7 @@ namespace fxe::js {
       st->mode = mode;
       st->self.Reset(iso, inst);
       st->self.SetWeak(st, tx_finalizer, WeakCallbackType::kParameter);
-      inst->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
+      set_native(iso, inst, st, TAG_IDB_TRANSACTION);
       auto names = Array::New(iso, static_cast<int>(store_names.size()));
       for (size_t i = 0; i < store_names.size(); ++i)
         (void)names->Set(ctx, static_cast<uint32_t>(i), s(iso, store_names[i]));
@@ -1043,30 +1007,19 @@ namespace fxe::js {
 
     // ============================== Object store / Index ==============================
 
-    struct store_handle {
+    struct store_handle : weak_holder<store_handle> {
       std::shared_ptr<database_state> db;
       Global<Object> tx; // owning transaction
       std::string name;
       // index mode (when accessed via store.index(...))
       std::string index_name;
       bool is_index = false;
-      Global<Object>* persistent = nullptr;
     };
-
-    void store_finalizer(const WeakCallbackInfo<store_handle>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
 
     store_handle* unwrap_store(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<store_handle*>(
-          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<store_handle*>(unwrap(obj, TAG_IDB_STORE));
     }
 
     Local<Object> create_object_store_handle(Isolate* iso, Local<Context> ctx,
@@ -1077,10 +1030,8 @@ namespace fxe::js {
       h->db = std::move(db);
       h->tx.Reset(iso, tx_obj);
       h->name = name;
-      inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
-      auto p = new Global<Object>(iso, inst);
-      h->persistent = p;
-      p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
+      set_native(iso, inst, h, TAG_IDB_STORE);
+      h->bind(iso, inst);
       auto& meta = h->db->stores.at(name);
       (void)inst->Set(ctx, "name"_v8(iso), s(iso, name));
       (void)inst->Set(ctx, "keyPath"_v8(iso),
@@ -1105,10 +1056,8 @@ namespace fxe::js {
       h->name = store;
       h->index_name = index;
       h->is_index = true;
-      inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
-      auto p = new Global<Object>(iso, inst);
-      h->persistent = p;
-      p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
+      set_native(iso, inst, h, TAG_IDB_STORE);
+      h->bind(iso, inst);
       auto& smeta = h->db->stores.at(store);
       auto& imeta = smeta.indexes.at(index);
       (void)inst->Set(ctx, "name"_v8(iso), s(iso, index));
@@ -1903,7 +1852,7 @@ namespace fxe::js {
 
     // ============================== Cursors ==============================
 
-    struct cursor_state {
+    struct cursor_state : weak_holder<cursor_state> {
       std::shared_ptr<database_state> db;
       Global<Object> source; // store or index
       Global<Object> tx;
@@ -1916,25 +1865,17 @@ namespace fxe::js {
       std::string index_name;
       std::vector<uint8_t> last_pk; // for update/delete
       std::vector<uint8_t> last_ik; // for index cursors
-      Global<Object>* persistent = nullptr;
-    };
 
-    void cursor_finalizer(const WeakCallbackInfo<cursor_state>& info) {
-      auto* st = info.GetParameter();
-      if (st && st->stmt)
-        sqlite3_finalize(st->stmt);
-      if (st && st->persistent) {
-        st->persistent->Reset();
-        delete st->persistent;
+      void on_finalize(Isolate*) {
+        if (stmt)
+          sqlite3_finalize(stmt);
       }
-      delete st;
-    }
+    };
 
     cursor_state* unwrap_cursor(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<cursor_state*>(
-          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<cursor_state*>(unwrap(obj, TAG_IDB_CURSOR));
     }
 
     // Step the cursor; on row, sets the JS-visible key/primaryKey/value props
@@ -2206,10 +2147,8 @@ namespace fxe::js {
       st->index_name = h->index_name;
       st->source.Reset(iso, info.This());
       st->tx.Reset(iso, h->tx.Get(iso));
-      cursor->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
-      auto p = new Global<Object>(iso, cursor);
-      st->persistent = p;
-      p->SetWeak(st, cursor_finalizer, WeakCallbackType::kParameter);
+      set_native(iso, cursor, st, TAG_IDB_CURSOR);
+      st->bind(iso, cursor);
       (void)cursor->Set(ctx, "source"_v8(iso), info.This());
       (void)cursor->Set(ctx, "direction"_v8(iso), s(iso, descending ? "prev" : "next"));
       (void)cursor->Set(ctx, "key"_v8(iso), Null(iso));
@@ -2281,32 +2220,24 @@ namespace fxe::js {
 
     // ============================== IDBDatabase methods ==============================
 
-    struct database_handle {
+    struct database_handle : weak_holder<database_handle> {
       std::shared_ptr<database_state> db;
-      Global<Object>* persistent = nullptr;
-    };
 
-    void database_finalizer(const WeakCallbackInfo<database_handle>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->db) {
-        h->db->open_connections -= 1;
-        if (h->db->open_connections <= 0 && h->db->closed && h->db->db) {
-          sqlite3_close(h->db->db);
-          h->db->db = nullptr;
+      void on_finalize(Isolate*) {
+        if (!db)
+          return;
+        db->open_connections -= 1;
+        if (db->open_connections <= 0 && db->closed && db->db) {
+          sqlite3_close(db->db);
+          db->db = nullptr;
         }
       }
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
+    };
 
     database_handle* unwrap_database(Local<Object> obj) {
       if (obj.IsEmpty() || obj->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<database_handle*>(
-          obj->GetAlignedPointerFromInternalField(0, v8::kEmbedderDataTypeTagDefault));
+      return static_cast<database_handle*>(unwrap(obj, TAG_IDB_DATABASE));
     }
 
     Local<Object> create_database_handle(Isolate* iso, Local<Context> ctx,
@@ -2315,10 +2246,8 @@ namespace fxe::js {
       auto* h = new database_handle();
       h->db = db;
       h->db->open_connections += 1;
-      inst->SetAlignedPointerInInternalField(0, h, v8::kEmbedderDataTypeTagDefault);
-      auto p = new Global<Object>(iso, inst);
-      h->persistent = p;
-      p->SetWeak(h, database_finalizer, WeakCallbackType::kParameter);
+      set_native(iso, inst, h, TAG_IDB_DATABASE);
+      h->bind(iso, inst);
       (void)inst->Set(ctx, "name"_v8(iso), s(iso, db->name));
       (void)inst->Set(ctx, "version"_v8(iso), Number::New(iso, static_cast<double>(db->version)));
       auto names = Array::New(iso);

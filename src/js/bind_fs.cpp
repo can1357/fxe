@@ -15,8 +15,8 @@
 #include "runtime/capabilities.hpp"
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_watcher.hpp"
-#include <fxe/v8_helpers.hpp>
 #include "weak_holder.hpp"
+#include <fxe/v8_helpers.hpp>
 
 #include <algorithm>
 #include <atomic>
