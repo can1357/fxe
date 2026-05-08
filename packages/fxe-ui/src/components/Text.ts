@@ -1,3 +1,4 @@
+import type { AccessibilityProps } from '../a11y/types.ts';
 import { paintText } from '../paint/text_painter.ts';
 import {
   type BoundaryChild,
@@ -7,7 +8,8 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
-import { registerHitTarget } from '../mount/hit_test.ts';
+import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
+import { extractA11yProps } from '../a11y/extract.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { glyphIndexAt, wrapText } from '../text/wrap.ts';
@@ -15,7 +17,7 @@ import { useTextStyle } from '../theme/text_context.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 
 export type TextChild = string | number | readonly TextChild[] | BoundaryChild;
-export interface TextProps extends InternalLayoutProps {
+export interface TextProps extends InternalLayoutProps, AccessibilityProps {
   key?: string;
   style?: StyleValue;
   children?: TextChild;
@@ -38,6 +40,13 @@ function clampIndex(value: number, text: string): number {
   return Math.max(0, Math.min(Math.trunc(value), text.length));
 }
 
+function textA11yProps(props: TextProps, text: string): AccessibilityProps {
+  const a11y = extractA11yProps(props);
+  if (a11y.accessibilityLabel === undefined && text) {
+    a11y.accessibilityLabel = text;
+  }
+  return a11y;
+}
 export const Text = Component((props: TextProps): Node => {
   const id = useId();
   const inherited = useTextStyle();
@@ -73,35 +82,42 @@ export const Text = Component((props: TextProps): Node => {
     const lineStart = wrapped.lineStartIndices[lineIndex] ?? 0;
     return clampIndex(lineStart + glyphIndexAt(line, textStyle, x - rect.x), text);
   };
-  if (props.selectable === true) {
-    registerHitTarget({
-      id,
-      rect,
-      cursor: 'ibeam',
-      onPressIn: (ev) => {
-        if ((ev.nativeEvent as { button?: number }).button !== 0) return;
-        const idx = indexFromPoint(ev.x, ev.y);
-        dragAnchor.current = idx;
-        setSelection(idx, idx);
-      },
-      onDrag: (ev) => setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y)),
-      onPressOut: (ev) => {
-        if ((ev.nativeEvent as { button?: number }).button !== 0) return;
-        setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y));
-      },
-      onKeyDown: (ev) => {
-        const keyEvent = ev as {
-          key?: number;
-          modifiers?: number;
-          setClipboardText?: (text: string) => void;
-        };
-        const accel = ((keyEvent.modifiers ?? 0) & (2 | 8)) !== 0;
-        if (!accel || keyEvent.key !== 67) return;
-        const [start, end] = orderedRange(selectionStart, selectionEnd);
-        if (end > start) keyEvent.setClipboardText?.(text.slice(start, end));
-      },
-    });
-  }
+  const a11y = textA11yProps(props, text);
+  registerHitTarget({
+    id,
+    rect,
+    cursor: props.selectable === true ? 'ibeam' : undefined,
+    a11y,
+    componentType: 'Text',
+    tabIndex: a11y.tabIndex,
+    ...(props.selectable === true
+      ? {
+          onPressIn: (ev: SyntheticEvent) => {
+            if ((ev.nativeEvent as { button?: number }).button !== 0) return;
+            const idx = indexFromPoint(ev.x, ev.y);
+            dragAnchor.current = idx;
+            setSelection(idx, idx);
+          },
+          onDrag: (ev: SyntheticEvent) =>
+            setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y)),
+          onPressOut: (ev: SyntheticEvent) => {
+            if ((ev.nativeEvent as { button?: number }).button !== 0) return;
+            setSelection(dragAnchor.current, indexFromPoint(ev.x, ev.y));
+          },
+          onKeyDown: (ev: unknown) => {
+            const keyEvent = ev as {
+              key?: number;
+              modifiers?: number;
+              setClipboardText?: (text: string) => void;
+            };
+            const accel = ((keyEvent.modifiers ?? 0) & (2 | 8)) !== 0;
+            if (!accel || keyEvent.key !== 67) return;
+            const [start, end] = orderedRange(selectionStart, selectionEnd);
+            if (end > start) keyEvent.setClipboardText?.(text.slice(start, end));
+          },
+        }
+      : {}),
+  });
   const hasSelection = props.selectable === true && selectionStart !== selectionEnd;
   return {
     type: 'draw',

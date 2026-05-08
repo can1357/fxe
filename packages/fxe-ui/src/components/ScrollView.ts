@@ -1,11 +1,13 @@
+import type { AccessibilityProps } from '../a11y/types.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
+import { extractA11yProps } from '../a11y/extract.ts';
 import { type BoundaryChild, Component, type Node, useState } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 import { View } from './View.ts';
 
-export interface ScrollViewProps extends InternalLayoutProps {
+export interface ScrollViewProps extends InternalLayoutProps, AccessibilityProps {
   key?: string;
   style?: StyleValue;
   contentStyle?: StyleValue;
@@ -19,6 +21,12 @@ export const ScrollView = Component((props: ScrollViewProps): Node => {
   registerHitTarget({
     id: `scroll:${rect.x}:${rect.y}`,
     rect,
+    a11y: {
+      ...extractA11yProps(props),
+      accessibilityRole: props.accessibilityRole ?? 'scrollview',
+    },
+    componentType: 'ScrollView',
+    tabIndex: props.tabIndex,
     onWheel: (ev) => {
       const next = { x: Math.max(0, offset.x + ev.dx), y: Math.max(0, offset.y + ev.dy) };
       setOffset(next);

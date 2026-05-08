@@ -1,3 +1,4 @@
+import type { Database, SQLBindings } from 'fxe:sqlite';
 import type {
   CommandBuffer,
   CursorKind,
@@ -9,7 +10,6 @@ import type {
   WindowEventMap,
   WindowEventName,
 } from 'fxe';
-import type { Database, SQLBindings } from 'fxe:sqlite';
 
 type FxeUiLength = number | `${number}%` | 'auto';
 type FxeUiColor = number | readonly [number, number, number, number] | `#${string}`;
@@ -18,6 +18,111 @@ declare module 'fxe-ui' {
   export type Length = FxeUiLength;
   export type Color = FxeUiColor;
   export type RuntimeColor = FxeRuntimeColor;
+
+  export type AccessibilityRole =
+    | 'none'
+    | 'group'
+    | 'text'
+    | 'button'
+    | 'link'
+    | 'image'
+    | 'textbox'
+    | 'searchbox'
+    | 'checkbox'
+    | 'switch'
+    | 'radio'
+    | 'slider'
+    | 'progressbar'
+    | 'heading'
+    | 'list'
+    | 'listitem'
+    | 'scrollview'
+    | 'dialog'
+    | 'alert'
+    | 'status'
+    | 'tab'
+    | 'tablist'
+    | 'menu'
+    | 'menuitem';
+  export type AccessibilityLiveRegion = 'off' | 'polite' | 'assertive';
+  export type AccessibilityCheckedState = boolean | 'mixed';
+  export interface AccessibilityState {
+    disabled?: boolean;
+    selected?: boolean;
+    checked?: AccessibilityCheckedState;
+    expanded?: boolean;
+    busy?: boolean;
+    required?: boolean;
+    invalid?: boolean | 'grammar' | 'spelling';
+    readOnly?: boolean;
+    pressed?: boolean;
+  }
+  export interface AccessibilityValue {
+    text?: string;
+    now?: number;
+    min?: number;
+    max?: number;
+  }
+  export interface AccessibilityProps {
+    accessible?: boolean;
+    accessibilityRole?: AccessibilityRole;
+    accessibilityLabel?: string;
+    accessibilityHint?: string;
+    accessibilityState?: AccessibilityState;
+    accessibilityValue?: string | number | AccessibilityValue;
+    accessibilityLiveRegion?: AccessibilityLiveRegion;
+    accessibilityLanguage?: string;
+    accessibilityHeadingLevel?: 1 | 2 | 3 | 4 | 5 | 6;
+    accessibilityId?: string;
+    tabIndex?: number;
+    focusable?: boolean;
+    dir?: 'ltr' | 'rtl' | 'auto';
+  }
+  export interface AccessibilityRect {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }
+  export interface AccessibilityNodeSnapshot {
+    id: string;
+    parentId: string | null;
+    role: AccessibilityRole;
+    label: string;
+    hint?: string;
+    value?: AccessibilityValue;
+    state: AccessibilityState;
+    rect: AccessibilityRect;
+    focusable: boolean;
+    tabIndex?: number;
+    liveRegion: AccessibilityLiveRegion;
+    language?: string;
+    headingLevel?: number;
+    children: AccessibilityNodeSnapshot[];
+  }
+  export interface AccessibilityTreeSnapshot {
+    rootId: string;
+    generation: number;
+    focusedId: string | null;
+    nodesById: Record<string, AccessibilityNodeSnapshot>;
+    childrenById: Record<string, string[]>;
+  }
+  export interface AccessibilityFiberLike {
+    id: string;
+    componentType: string;
+    a11y: AccessibilityProps;
+    rect: { x: number; y: number; width: number; height: number };
+    children: AccessibilityFiberLike[];
+    fallbackLabel?: string;
+  }
+  export interface BuildTreeOptions {
+    generation: number;
+    focusedId?: string | null;
+  }
+  export function buildAccessibilityTree(
+    root: AccessibilityFiberLike,
+    options: BuildTreeOptions,
+  ): AccessibilityTreeSnapshot;
 
   export interface Constraint {
     width?: number;
@@ -207,6 +312,23 @@ declare module 'fxe-ui' {
     value: Color | undefined,
     fallback?: RuntimeColor,
   ): RuntimeColor | undefined;
+
+  export interface SvgShape {
+    path: import('fxe').Path;
+    fill?: number;
+    stroke?: number;
+    strokeWidth?: number;
+    fillRule?: 'nonzero' | 'evenodd';
+  }
+
+  export interface SvgDocument {
+    viewBox: [number, number, number, number];
+    width: number;
+    height: number;
+    shapes: SvgShape[];
+  }
+
+  export function parseSvg(source: string): SvgDocument;
   export function flattenStyle(value: StyleValue): Style;
   export function splitStyle(value: StyleValue): {
     layout: LayoutStyle;
@@ -471,18 +593,18 @@ declare module 'fxe-ui' {
   }): Node;
   export function useTheme(): Theme;
 
-  export interface ViewProps {
+  export interface ViewProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
     children?: BoundaryChild;
   }
-  export interface TextProps {
+  export interface TextProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
     children?: TextChild;
     selectable?: boolean;
   }
-  export interface ImageProps {
+  export interface ImageProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
     source?: unknown;
@@ -504,7 +626,7 @@ declare module 'fxe-ui' {
     preventDefault(): void;
     stopPropagation(): void;
   }
-  export interface PressableProps {
+  export interface PressableProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue | ((state: PressableState) => StyleValue);
     children?: BoundaryChild | ((state: PressableState) => BoundaryChild);
@@ -515,15 +637,17 @@ declare module 'fxe-ui' {
     onHoverIn?: (ev: SyntheticEvent) => void;
     onHoverOut?: (ev: SyntheticEvent) => void;
     onFocus?: () => void;
+    /** Right-click / contextmenu handler. */
+    onContextMenu?: (ev: SyntheticEvent) => void;
     onBlur?: () => void;
     onLongPress?: (ev: SyntheticEvent) => void;
   }
-  export interface ButtonProps extends Omit<PressableProps, 'children'> {
+  export interface ButtonProps extends Omit<PressableProps, 'children'>, AccessibilityProps {
     title?: string;
     children?: string;
     textStyle?: StyleValue;
   }
-  export interface ScrollViewProps {
+  export interface ScrollViewProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
     contentStyle?: StyleValue;
@@ -531,7 +655,7 @@ declare module 'fxe-ui' {
     onScroll?: (offset: { x: number; y: number }) => void;
   }
   export type VirtualItemHeight = number | ((index: number) => number);
-  export interface VirtualListProps<T> {
+  export interface VirtualListProps<T> extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
     contentStyle?: StyleValue;
@@ -543,7 +667,7 @@ declare module 'fxe-ui' {
     keyExtractor?: (item: T, index: number) => string;
     onScroll?: (offset: { x: number; y: number }) => void;
   }
-  export interface TextInputProps {
+  export interface TextInputProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
     value?: string;
@@ -552,6 +676,45 @@ declare module 'fxe-ui' {
     onSubmit?: (value: string) => void;
     onCompose?: (preedit: string, cursor: number) => void;
     onCommit?: (committed: string) => void;
+    /** Cursor caret blink interval in ms; 0 disables blink. Default 530. */
+    caretBlinkMs?: number;
+    /** Mask the value with bullet characters; preserves real value internally. */
+    secureTextEntry?: boolean;
+    /** Maximum length in code units. Inserts past this limit are clipped. */
+    maxLength?: number;
+    /** Select all text on focus. */
+    selectAllOnFocus?: boolean;
+    /** Hook fired before paste; return null to reject, return a string to override. */
+    onPaste?: (text: string) => string | null;
+    /** Fired when caret/selection changes. */
+    onSelectionChange?: (selection: { start: number; end: number }) => void;
+    /** Read-only: focus + selection + copy allowed; edits blocked. */
+    readOnly?: boolean;
+    /** Disabled: prevents focus and edits; cursor shows not_allowed. */
+    disabled?: boolean;
+    /** What pressing Tab does: 'focus' (default) advances focus; 'insert' inserts \t. */
+    tabBehavior?: 'focus' | 'insert';
+    /** Selection highlight color (RRGGBBAA). Default 0x3b82f654. */
+    selectionColor?: number;
+    /** Show a focus outline when focused. Default true. */
+    focusRing?: boolean;
+    /** Mobile keyboard hint (ignored on desktop today, declared for app forward-compat). */
+    inputMode?: 'text' | 'numeric' | 'decimal' | 'email' | 'tel' | 'url' | 'search' | 'none';
+    /** Spell-check hint (no-op today, declared for app forward-compat). */
+    spellCheck?: boolean;
+    /** Auto-capitalize hint (no-op today). */
+    autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+    /** Auto-correct hint (no-op today). */
+    autoCorrect?: boolean;
+  }
+
+  export interface TextAreaProps extends Omit<TextInputProps, 'tabBehavior'>, AccessibilityProps {
+    /** Suggested visible row count for sizing. Default 4. */
+    numberOfLines?: number;
+    /** Soft-wrap content at the box width. Default true. */
+    softWrap?: boolean;
+    /** Tab behavior. Default 'insert' for TextArea (browser convention for multi-line). */
+    tabBehavior?: 'focus' | 'insert';
   }
 
   export function View(props: ViewProps): Node;
@@ -562,6 +725,7 @@ declare module 'fxe-ui' {
   export function ScrollView(props: ScrollViewProps): Node;
   export function VirtualList<T>(props: VirtualListProps<T>): Node;
   export function TextInput(props: TextInputProps): Node;
+  export function TextArea(props: TextAreaProps): Node;
   export function usePressableState(): PressableState;
   export function useHover(): boolean;
   export function useFocus(): boolean;
@@ -585,11 +749,16 @@ declare module 'fxe-ui' {
     lazy?: boolean;
   }
   export function mount(root: Node, window: Window, opts?: MountOptions): () => void;
+  export function useFocusTrap(groupId: string | null, enabled?: boolean): void;
 
   export interface HitTarget {
     id: string;
     rect: LayoutResult;
     z: number;
+    tabIndex?: number;
+    focusGroup?: string;
+    componentType?: string;
+    a11y?: AccessibilityProps;
     onFocus?: () => void;
     onBlur?: () => void;
     onKeyDown?: (ev: unknown) => void;
@@ -614,6 +783,7 @@ declare module 'fxe-ui' {
   ): void;
   export function dispatchKeyPress(ev: WindowEventMap['keypress']): void;
   export function resetEventPipeline(): void;
+  export function setFocusTrapGroup(id: string | null): void;
   export function focusTarget(): HitTarget | null;
   export function focusTarget(id: string | 'next' | 'previous'): HitTarget | null;
   export function focusedTargetId(): string | null;

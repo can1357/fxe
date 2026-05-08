@@ -12,5 +12,7 @@ export type { TextProps } from './Text.ts';
 export { Text } from './Text.ts';
 export type { TextInputProps } from './TextInput.ts';
 export { TextInput } from './TextInput.ts';
+export type { TextAreaProps } from './TextArea.ts';
+export { TextArea } from './TextArea.ts';
 export type { ViewProps } from './View.ts';
 export { View } from './View.ts';

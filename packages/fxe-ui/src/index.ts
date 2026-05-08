@@ -1,6 +1,7 @@
 export * from './components/index.ts';
 export * from './layout/index.ts';
 export * from './mount/index.ts';
+export * from './mount/focus_trap.ts';
 export * from './reconciler/fiber.ts';
 export * from './reconciler/signals.ts';
 export * from './reconciler/scheduler.ts';
@@ -11,5 +12,7 @@ export * from './reconciler/store_helpers.ts';
 export * from './style/index.ts';
 export * from './theme/index.ts';
 export * from './debug/layout_trace.ts';
+export * from './svg/index.ts';
+export * from './a11y/index.ts';
 export { glyphIndexAt, wrapText, xAtGlyphIndex } from './text/wrap.ts';
 export type { WrappedText, WrapOptions } from './text/wrap.ts';

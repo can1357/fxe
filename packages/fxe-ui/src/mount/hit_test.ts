@@ -1,4 +1,5 @@
-import type { ComposeEvent, CursorKind } from 'fxe';
+import type { AccessibilityProps } from '../a11y/types.ts';
+import type { ComposeEvent, CursorKind, MouseButtonEvent } from 'fxe';
 import type { LayoutResult } from '../layout/types.ts';
 
 export interface SyntheticEvent<T = unknown> {

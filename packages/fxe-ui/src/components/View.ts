@@ -4,13 +4,15 @@ import type { LayoutNode, LayoutResult, LayoutStyle } from '../layout/types.ts';
 import { paintView } from '../paint/view_painter.ts';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { coarseClip } from '../paint/clip.ts';
-import { type BoundaryChild, Component, type Node, Portal } from '../reconciler/fiber.ts';
-import { type HitTarget, hitTargets } from '../mount/hit_test.ts';
+import { type BoundaryChild, Component, type Node, Portal, useId } from '../reconciler/fiber.ts';
+import { registerHitTarget, type HitTarget, hitTargets } from '../mount/hit_test.ts';
 import { currentRenderTargetSize } from '../mount/mount.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { TextStyleContext } from '../theme/text_context.ts';
 import { wrapText } from '../text/wrap.ts';
+import { extractA11yProps } from '../a11y/extract.ts';
+import type { AccessibilityProps } from '../a11y/types.ts';
 import {
   cloneWithInternal,
   type InternalLayoutProps,
@@ -18,11 +20,12 @@ import {
   rectFromStyle,
 } from './common.ts';
 
-export interface ViewProps extends InternalLayoutProps {
+export interface ViewProps extends InternalLayoutProps, AccessibilityProps {
   key?: string;
   style?: StyleValue;
   children?: BoundaryChild;
 }
+type ViewInternalProps = ViewProps & { __skipA11yHitTarget?: boolean };
 
 type ComponentProps = {
   style?: StyleValue;
@@ -233,6 +236,8 @@ function layoutNodeFor(node: Node, inheritedTextStyle: TextStyle): LayoutNode {
 }
 
 export const View = Component((props: ViewProps): Node => {
+  const internalProps = props as ViewInternalProps;
+  const id = useId();
   const resolved = splitStyle(props.style);
   const rect = props.__layout
     ? { ...props.__layout }
@@ -249,6 +254,16 @@ export const View = Component((props: ViewProps): Node => {
     styleHeight: resolved.layout.height,
     tag: (props as { __traceTag?: string }).__traceTag,
   });
+  if (!internalProps.__skipA11yHitTarget) {
+    registerHitTarget({
+      id,
+      rect,
+      a11y: extractA11yProps(props),
+      componentType: 'View',
+      tabIndex: props.tabIndex,
+      focusGroup: undefined,
+    });
+  }
   const rawChildren = normalizeChildren(props.children);
   const textStyle = { ...(props.__textStyle ?? {}), ...resolved.text };
   const visibleChildren = rawChildren.filter((child) => !isDisplayNone(child));

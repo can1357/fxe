@@ -7,7 +7,9 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
+import { extractA11yProps } from '../a11y/extract.ts';
 import { splitStyle } from '../style/resolve.ts';
+import type { AccessibilityProps } from '../a11y/types.ts';
 import type { StyleValue } from '../style/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 import { ScrollView } from './ScrollView.ts';
@@ -15,7 +17,7 @@ import { View } from './View.ts';
 
 export type VirtualItemHeight = number | ((index: number) => number);
 
-export interface VirtualListProps<T> extends InternalLayoutProps {
+export interface VirtualListProps<T> extends InternalLayoutProps, AccessibilityProps {
   key?: string;
   style?: StyleValue;
   contentStyle?: StyleValue;
@@ -269,6 +271,8 @@ export const VirtualList = Component(<T>(props: VirtualListProps<T>): Node => {
 
   return ScrollView({
     key: props.key,
+    ...extractA11yProps(props),
+    accessibilityRole: props.accessibilityRole ?? 'list',
     style: props.style,
     contentStyle: [
       props.contentStyle,
