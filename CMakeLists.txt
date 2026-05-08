@@ -880,6 +880,8 @@ if(FXE_ENABLE_WEBAUTHN)
     target_include_directories(fxe_webauthn PUBLIC include src)
     target_compile_features(fxe_webauthn PUBLIC cxx_std_20)
     target_link_libraries(fxe_webauthn PUBLIC fxe_runtime PRIVATE MbedTLS::mbedcrypto)
+    find_package(unofficial-sqlite3 CONFIG REQUIRED)
+    target_link_libraries(fxe_webauthn PRIVATE unofficial::sqlite3::sqlite3)
     target_compile_definitions(fxe_webauthn PUBLIC FXE_HAS_WEBAUTHN=1)
     if(APPLE)
         set(_fxe_webauthn_platform src/webauthn/platform_macos.mm)
@@ -957,6 +959,14 @@ if(FXE_BUILD_TESTS)
                     PROPERTIES ENVIRONMENT "FXE_RUN=$<TARGET_FILE:fxe_run>"
                 )
             endif()
+            add_executable(fxe_pack_webauthn_entitlement_tests tests/fxe_pack_webauthn_entitlement_test.cpp)
+            target_compile_features(fxe_pack_webauthn_entitlement_tests PRIVATE cxx_std_20)
+            add_dependencies(fxe_pack_webauthn_entitlement_tests fxe-pack)
+            add_test(NAME fxe_pack_webauthn_entitlement_tests COMMAND fxe_pack_webauthn_entitlement_tests)
+            set_tests_properties(
+                fxe_pack_webauthn_entitlement_tests
+                PROPERTIES ENVIRONMENT "FXE_PACK=$<TARGET_FILE:fxe-pack>;FXE_RUN=$<TARGET_FILE:fxe_run>"
+            )
         endif()
         if(NOT WIN32)
             add_test(
@@ -1058,6 +1068,7 @@ if(FXE_BUILD_TESTS)
             fxe_webauthn
             fxe_runtime
         )
+        fxe_add_cpp_test(fxe_webauthn_jar_tests tests/webauthn_jar_test.cpp fxe_webauthn fxe_runtime)
     endif()
     if(UNIX)
         fxe_add_cpp_test(fxe_net_http_advanced_tests tests/net_http_advanced_test.cpp fxe_net fxe_runtime)

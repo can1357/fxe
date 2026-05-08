@@ -202,4 +202,8 @@ namespace fxe::webauthn {
   protected:
     platform_authenticator() = default;
   };
+  // Process-wide singleton used by both the JS surface (navigator.credentials)
+  // and the WebAuthn.* debug domain so debug-installed credentials are visible
+  // to JS calls and vice versa. Lazy; constructed with the real RNG.
+  virtual_authenticator& default_virtual_authenticator();
 } // namespace fxe::webauthn

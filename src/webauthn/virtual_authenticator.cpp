@@ -1,5 +1,7 @@
 #include <fxe/webauthn.hpp>
 
+#include "webauthn/credential_jar.hpp"
+
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
@@ -12,6 +14,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <memory>
 #include <string>
@@ -148,13 +152,14 @@ namespace fxe::webauthn {
 
   struct virtual_authenticator::impl {
     std::map<std::vector<uint8_t>, virtual_credential> credentials;
+    std::unique_ptr<detail::credential_jar> jar;
     mbedtls_ctr_drbg_context ctr_drbg;
     mbedtls_entropy_context entropy;
     bool use_real_entropy = true;
     bool user_verified = true;
     uint64_t deterministic_state = 0xF1E0D1C0ULL;
 
-    explicit impl(uint64_t seed) {
+    impl(uint64_t seed, bool enable_jar) {
       mbedtls_ctr_drbg_init(&ctr_drbg);
       mbedtls_entropy_init(&entropy);
       static const unsigned char personalization[] = "fxe-virt";
@@ -167,6 +172,18 @@ namespace fxe::webauthn {
         use_real_entropy = true;
         (void)mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, personalization,
                                     sizeof(personalization) - 1u);
+      }
+
+      if (!enable_jar)
+        return;
+      const char* jar_path = std::getenv("FXE_WEBAUTHN_JAR_PATH");
+      if (jar_path == nullptr || *jar_path == '\0')
+        return;
+      jar = detail::credential_jar::open(jar_path);
+      if (!jar)
+        return;
+      for (auto& credential : jar->load_all()) {
+        credentials[credential.credential_id] = std::move(credential);
       }
     }
 
@@ -182,10 +199,10 @@ namespace fxe::webauthn {
     return k_aaguid;
   }
 
-  virtual_authenticator::virtual_authenticator() : impl_(std::make_unique<impl>(0)) {}
+  virtual_authenticator::virtual_authenticator() : impl_(std::make_unique<impl>(0, true)) {}
 
   virtual_authenticator::virtual_authenticator(uint64_t deterministic_seed)
-      : impl_(std::make_unique<impl>(deterministic_seed)) {}
+      : impl_(std::make_unique<impl>(deterministic_seed, false)) {}
 
   virtual_authenticator::~virtual_authenticator() = default;
 
@@ -269,7 +286,6 @@ namespace fxe::webauthn {
     credential.sign_count = 0;
     credential.user_verified = impl_->user_verified;
     credential.resident = true;
-    impl_->credentials[credential_id] = credential;
 
     out.credential_id = credential_id;
     out.client_data_json.assign(client.json.begin(), client.json.end());
@@ -277,6 +293,11 @@ namespace fxe::webauthn {
     if (out.public_key.empty())
       return "failed to encode public key";
     out.algorithm = cose_algorithm::es256;
+
+    impl_->credentials[credential_id] = credential;
+    if (impl_->jar && !impl_->jar->upsert(credential)) {
+      std::fprintf(stderr, "fxe_webauthn: failed to persist registered credential\n");
+    }
     return {};
   }
 
@@ -313,6 +334,10 @@ namespace fxe::webauthn {
     if (credential == nullptr)
       return "no credential available";
 
+    ecdsa_guard signer;
+    if (!load_private_key(signer.ctx, *credential))
+      return "failed to load credential key";
+
     credential->sign_count += 1;
 
     authenticator_data auth_data;
@@ -328,17 +353,20 @@ namespace fxe::webauthn {
     signed_message.insert(signed_message.end(), client.hash.begin(), client.hash.end());
     const auto digest = sha256(signed_message);
 
-    ecdsa_guard signer;
-    if (!load_private_key(signer.ctx, *credential))
-      return "failed to load credential key";
-
     std::array<unsigned char, 128> signature_buf{};
     size_t signature_len = 0;
     const int rc = mbedtls_ecdsa_write_signature(
         &signer.ctx, MBEDTLS_MD_SHA256, digest.data(), digest.size(), signature_buf.data(),
         signature_buf.size(), &signature_len, mbedtls_ctr_drbg_random, &impl_->ctr_drbg);
-    if (rc != 0)
+    if (rc != 0) {
+      credential->sign_count -= 1;
       return "signature failed: " + mbedtls_err_str(rc);
+    }
+
+    if (impl_->jar &&
+        !impl_->jar->bump_sign_count(credential->credential_id, credential->sign_count)) {
+      std::fprintf(stderr, "fxe_webauthn: failed to persist sign counter bump\n");
+    }
 
     out.credential_id = credential->credential_id;
     out.client_data_json.assign(client.json.begin(), client.json.end());
@@ -359,6 +387,8 @@ namespace fxe::webauthn {
 
   void virtual_authenticator::clear() {
     impl_->credentials.clear();
+    if (impl_->jar && !impl_->jar->clear())
+      std::fprintf(stderr, "fxe_webauthn: failed to clear credential jar\n");
   }
 
   bool virtual_authenticator::set_user_verified(bool verified) {

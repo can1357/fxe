@@ -5,6 +5,7 @@
 //   fxe-pack <entry.ts> [--out <path>] [--name <appname>] [--icon <path>]
 //            [--platform macos|win|linux] [--include <glob>...]
 //            [--identity <codesign-id>] [--notarize-profile <profile>]
+//            [--webauthn-rp-id <rp_id>...] [--webauthn-mode production|developer]
 //            [--cert <path-or-subject>] [--appimage] [--dmg] [--msi] [--msix]
 //            [--update-url <url>] [--public-key <key>] [--channel stable|beta|alpha]
 //            [--version <semver> REQUIRED for --appimage/--dmg/--msi/--msix]
@@ -46,6 +47,8 @@ namespace {
     std::string platform;
     std::string identity;
     std::string notarize_profile;
+    std::vector<std::string> webauthn_rp_ids;
+    std::string webauthn_mode;
     std::string cert;
     bool appimage = false;
     bool dmg = false;
@@ -59,7 +62,6 @@ namespace {
     Compression compress = Compression::None;
     std::vector<std::string> includes;
   };
-
   bool produces_installer(const Args& a) {
     return a.appimage || a.dmg || a.msi || a.msix;
   }
@@ -76,6 +78,25 @@ namespace {
 #else
     return "linux";
 #endif
+  }
+
+  bool is_valid_webauthn_rp_id(std::string_view value) {
+    if (value.empty() || value.front() == '.' || value.back() == '.')
+      return false;
+    bool last_was_dot = false;
+    for (char c : value) {
+      if (c == '.') {
+        if (last_was_dot)
+          return false;
+        last_was_dot = true;
+        continue;
+      }
+      last_was_dot = false;
+      if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')
+        continue;
+      return false;
+    }
+    return true;
   }
 
   bool has_suffix(std::string_view value, std::string_view suffix) {
@@ -301,7 +322,18 @@ namespace {
         a.identity = need("--identity");
       else if (s == "--notarize-profile")
         a.notarize_profile = need("--notarize-profile");
-      else if (s == "--cert")
+      else if (s == "--webauthn-rp-id") {
+        std::string rp_id = need("--webauthn-rp-id");
+        if (!is_valid_webauthn_rp_id(rp_id))
+          die("invalid --webauthn-rp-id: " + rp_id);
+        a.webauthn_rp_ids.push_back(std::move(rp_id));
+      } else if (s == "--webauthn-mode") {
+        a.webauthn_mode = need("--webauthn-mode");
+        if (a.webauthn_mode != "production" && a.webauthn_mode != "developer") {
+          die("unknown --webauthn-mode value: " + a.webauthn_mode +
+              " (expected production or developer)");
+        }
+      } else if (s == "--cert")
         a.cert = need("--cert");
       else if (s == "--version")
         a.version = need("--version");
@@ -328,6 +360,8 @@ namespace {
             << "Usage: fxe-pack <entry.ts> [--out PATH] [--name NAME] [--icon PATH]\n"
             << "                [--platform macos|win|linux] [--include GLOB ...]\n"
             << "                [--identity CODESIGN_ID] [--notarize-profile PROFILE]\n"
+            << "                [--webauthn-rp-id RP_ID ...] [--webauthn-mode "
+               "production|developer]\n"
             << "                [--cert PATH_OR_SUBJECT] [--appimage] [--dmg] [--msi] [--msix]\n"
             << "                [--update-url URL] [--public-key KEY] [--channel "
                "stable|beta|alpha]\n"
@@ -362,6 +396,15 @@ namespace {
       die("missing <entry.ts>");
     if (a.platform != "macos" && a.platform != "win" && a.platform != "linux")
       die("unknown --platform: " + a.platform);
+    if (!a.webauthn_rp_ids.empty() && a.platform != "macos")
+      die("--webauthn-rp-id requires --platform macos");
+    if (!a.webauthn_mode.empty() && a.platform != "macos")
+      die("--webauthn-mode requires --platform macos");
+    if (a.webauthn_mode.empty() && !a.webauthn_rp_ids.empty()) {
+      // Unsigned developer builds keep the associated domain in developer mode;
+      // signed builds default to production entitlements.
+      a.webauthn_mode = a.identity.empty() ? "developer" : "production";
+    }
     if (a.dmg && a.platform != "macos")
       die("--dmg requires --platform macos");
     if (a.msi && a.platform != "win")
@@ -547,8 +590,8 @@ namespace {
              self_dir / "share" / "fxe" / "fxe-pack" / "templates",
              self_dir / ".." / "share" / "fxe" / "fxe-pack" / "templates",
              self_dir / "templates",
-             // CMake source-tree layout when running from build dir.
-             self_dir / ".." / ".." / "tools" / "fxe-pack" / "templates",
+             // CMake source-tree layout when running from build/<preset>/tools/fxe-pack.
+             self_dir / ".." / ".." / ".." / ".." / "tools" / "fxe-pack" / "templates",
          }) {
       if (fs::exists(cand))
         return fs::weakly_canonical(cand);
@@ -662,6 +705,21 @@ namespace {
     plist = subst(plist, "FXE_APP_VERSION", a.version);
     spit(app / "Contents" / "Info.plist", plist);
 
+    if (!a.webauthn_rp_ids.empty()) {
+      std::string domains;
+      for (const auto& rp_id : a.webauthn_rp_ids) {
+        domains += "    <string>webcredentials:" + xml_escape(rp_id);
+        if (a.webauthn_mode == "developer")
+          domains += "?mode=developer";
+        domains += "</string>\n";
+      }
+      if (!domains.empty())
+        domains.pop_back();
+      std::string ent = subst(load_template_or(tmpl_dir, "entitlements.plist.in", ""),
+                              "FXE_WEBAUTHN_ASSOCIATED_DOMAINS", domains);
+      spit(app / "Contents" / "entitlements.plist", ent);
+    }
+
     if (!a.icon.empty())
       copy_one(a.icon, res / "AppIcon.icns");
     copy_runtime_sidecars(fxe_run_dir, macos);
@@ -760,7 +818,11 @@ namespace {
       return;
     std::ostringstream cmd;
     cmd << "codesign --force --deep --timestamp --options runtime --sign "
-        << shell_quote(fs::path(a.identity)) << " " << shell_quote(app);
+        << shell_quote(fs::path(a.identity));
+    fs::path entitlements = app / "Contents" / "entitlements.plist";
+    if (!a.webauthn_rp_ids.empty() && fs::exists(entitlements))
+      cmd << " --entitlements " << shell_quote(entitlements);
+    cmd << " " << shell_quote(app);
     run_command_or_die(cmd.str(), "codesign");
   }
 

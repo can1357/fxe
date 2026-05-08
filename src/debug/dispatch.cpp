@@ -20,6 +20,9 @@
 #include <fxe/renderer.hpp>
 #include <fxe/v8_host.hpp>
 #include <fxe/window.hpp>
+#if defined(FXE_DEBUG_HAS_WEBAUTHN)
+#include "../webauthn/debug_handlers.hpp"
+#endif
 
 #include <atomic>
 #include <unordered_map>
@@ -274,6 +277,10 @@ namespace fxe::debug {
       caps.emplace_back(std::string("Fetch.unsubscribe"));
       caps.emplace_back(std::string("Fs.subscribe"));
       caps.emplace_back(std::string("Fs.unsubscribe"));
+#if defined(FXE_DEBUG_HAS_WEBAUTHN)
+      for (const auto capability : webauthn::debug::schema_capabilities())
+        caps.emplace_back(std::string(capability));
+#endif
 
       const auto& prof = profiler_storage();
       if (prof.enable)
@@ -396,6 +403,9 @@ namespace fxe::debug {
       domains.push_back({{"name", "Debugger"}, {"version", "1.3"}});
       domains.push_back({{"name", "Reconciler"}, {"version", "1.3"}});
       domains.push_back({{"name", "Network"}, {"version", "1.3"}});
+#if defined(FXE_DEBUG_HAS_WEBAUTHN)
+      domains.push_back({{"name", "WebAuthn"}, {"version", "1.3"}});
+#endif
       if (profiler_available())
         domains.push_back({{"name", "Profiler"}, {"version", "1.3"}});
       if (heap_profiler_available())
@@ -947,51 +957,59 @@ namespace fxe::debug {
     }
 
     const std::unordered_map<std::string_view, handler_fn>& table() {
-      static const std::unordered_map<std::string_view, handler_fn> t = {
-          {"System.handshake", &h_handshake},
-          {"System.shutdown", &h_shutdown},
-          {"Runtime.evaluate", &h_runtime_evaluate},
-          {"Runtime.getGlobals", &h_runtime_get_globals},
-          {"Runtime.fireHmr", &h_runtime_fire_hmr},
-          {"Runtime.invalidateModule", &h_runtime_invalidate_module},
-          {"Runtime.reimportModule", &h_runtime_reimport_module},
-          {"Schema.getDomains", &h_schema_get_domains},
-          {"Runtime.enable", &h_runtime_enable},
-          {"Network.enable", &h_network_enable},
-          {"Network.disable", &h_network_disable},
-          {"Console.enable", &h_console_enable},
-          {"Console.disable", &h_console_disable},
-          {"Page.framebufferSize", &h_page_fb_size},
-          {"Page.requestRedraw", &h_page_request_redraw},
-          {"Page.screenshot", &h_page_screenshot},
-          {"Page.windows", &h_page_windows},
-          {"Input.dispatchMouseEvent", &h_input_mouse},
-          {"Input.dispatchKeyEvent", &h_input_key},
-          {"Window.close", &h_window_close},
-          {"Window.pollInput", &h_window_poll_input},
-          {"Debugger.pause", &h_debugger_pause},
-          {"Debugger.resume", &h_debugger_resume},
-          {"Debugger.step", &h_debugger_step},
-          {"Debugger.enable", &h_debugger_enable},
-          {"Reconciler.snapshot", &h_reconciler_snapshot},
-          {"Profiler.enable", &h_profiler_enable},
-          {"Profiler.disable", &h_profiler_disable},
-          {"Profiler.start", &h_profiler_start},
-          {"Profiler.stop", &h_profiler_stop},
-          {"Profiler.startPreciseCoverage", &h_profiler_start_precise_coverage},
-          {"Profiler.takePreciseCoverage", &h_profiler_take_precise_coverage},
-          {"HeapProfiler.enable", &h_heap_profiler_enable},
-          {"HeapProfiler.disable", &h_heap_profiler_disable},
-          {"HeapProfiler.takeHeapSnapshot", &h_heap_profiler_take_heap_snapshot},
-          {"HeapProfiler.collectGarbage", &h_heap_profiler_collect_garbage},
-          {"Performance.timeline", &h_performance_timeline},
-          {"Window.subscribe", &h_window_subscribe},
-          {"Window.unsubscribe", &h_window_unsubscribe},
-          {"Fetch.subscribe", &h_fetch_subscribe},
-          {"Fetch.unsubscribe", &h_fetch_unsubscribe},
-          {"Fs.subscribe", &h_fs_subscribe},
-          {"Fs.unsubscribe", &h_fs_unsubscribe},
-      };
+      static const std::unordered_map<std::string_view, handler_fn> t = [] {
+        std::unordered_map<std::string_view, handler_fn> handlers = {
+            {"System.handshake", &h_handshake},
+            {"System.shutdown", &h_shutdown},
+            {"Runtime.evaluate", &h_runtime_evaluate},
+            {"Runtime.getGlobals", &h_runtime_get_globals},
+            {"Runtime.fireHmr", &h_runtime_fire_hmr},
+            {"Runtime.invalidateModule", &h_runtime_invalidate_module},
+            {"Runtime.reimportModule", &h_runtime_reimport_module},
+            {"Schema.getDomains", &h_schema_get_domains},
+            {"Runtime.enable", &h_runtime_enable},
+            {"Network.enable", &h_network_enable},
+            {"Network.disable", &h_network_disable},
+            {"Console.enable", &h_console_enable},
+            {"Console.disable", &h_console_disable},
+            {"Page.framebufferSize", &h_page_fb_size},
+            {"Page.requestRedraw", &h_page_request_redraw},
+            {"Page.screenshot", &h_page_screenshot},
+            {"Page.windows", &h_page_windows},
+            {"Input.dispatchMouseEvent", &h_input_mouse},
+            {"Input.dispatchKeyEvent", &h_input_key},
+            {"Window.close", &h_window_close},
+            {"Window.pollInput", &h_window_poll_input},
+            {"Debugger.pause", &h_debugger_pause},
+            {"Debugger.resume", &h_debugger_resume},
+            {"Debugger.step", &h_debugger_step},
+            {"Debugger.enable", &h_debugger_enable},
+            {"Reconciler.snapshot", &h_reconciler_snapshot},
+            {"Profiler.enable", &h_profiler_enable},
+            {"Profiler.disable", &h_profiler_disable},
+            {"Profiler.start", &h_profiler_start},
+            {"Profiler.stop", &h_profiler_stop},
+            {"Profiler.startPreciseCoverage", &h_profiler_start_precise_coverage},
+            {"Profiler.takePreciseCoverage", &h_profiler_take_precise_coverage},
+            {"HeapProfiler.enable", &h_heap_profiler_enable},
+            {"HeapProfiler.disable", &h_heap_profiler_disable},
+            {"HeapProfiler.takeHeapSnapshot", &h_heap_profiler_take_heap_snapshot},
+            {"HeapProfiler.collectGarbage", &h_heap_profiler_collect_garbage},
+            {"Performance.timeline", &h_performance_timeline},
+            {"Window.subscribe", &h_window_subscribe},
+            {"Window.unsubscribe", &h_window_unsubscribe},
+            {"Fetch.subscribe", &h_fetch_subscribe},
+            {"Fetch.unsubscribe", &h_fetch_unsubscribe},
+            {"Fs.subscribe", &h_fs_subscribe},
+            {"Fs.unsubscribe", &h_fs_unsubscribe},
+        };
+#if defined(FXE_DEBUG_HAS_WEBAUTHN)
+        webauthn::debug::register_webauthn_dispatch_handlers();
+        for (const auto& method : webauthn::debug::handler_table())
+          handlers.emplace(method.name, method.fn);
+#endif
+        return handlers;
+      }();
       return t;
     }
   } // namespace

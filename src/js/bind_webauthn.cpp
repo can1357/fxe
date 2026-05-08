@@ -64,8 +64,7 @@ namespace fxe::js {
     }
 
     webauthn::virtual_authenticator& authenticator() {
-      static webauthn::virtual_authenticator instance;
-      return instance;
+      return webauthn::default_virtual_authenticator();
     }
 
     struct selected_webauthn_backend {

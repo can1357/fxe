@@ -16,6 +16,7 @@ if(APPLE)
 endif()
 
 install(TARGETS fxe-pack RUNTIME DESTINATION bin)
+# Installs all packaging templates (.plist/.wxs/AppRun), including macOS entitlements.
 install(DIRECTORY templates/
         DESTINATION share/fxe/fxe-pack/templates
         FILES_MATCHING PATTERN "*.in")
