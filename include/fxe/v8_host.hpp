@@ -48,12 +48,16 @@ namespace fxe::js {
 
   class host {
   public:
-    enum class bootstrap_mode { main_thread, worker_thread };
+    enum class bootstrap_mode { main_thread, worker_thread, window_thread };
 
     // Main-thread host bootstrap installs the full renderer/window binding set.
     // Worker bootstrap owns an isolate/context on the calling worker thread and
     // deliberately skips Window/Renderer/App/GLFW-facing bindings.
+    // Window-thread bootstrap is the B1 per-window runtime: it owns a dedicated
+    // isolate on the calling thread, but still installs the same bindings as
+    // main_thread until GLFW/render marshaling moves off the shared path.
     explicit host(bootstrap_mode mode = bootstrap_mode::main_thread);
+    host(bootstrap_mode mode, uint64_t runtime_id);
     ~host();
     host(const host&) = delete;
     host& operator=(const host&) = delete;

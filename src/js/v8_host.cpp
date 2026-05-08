@@ -15,7 +15,14 @@
 #include "../runtime/bundle_loader.hpp"
 #include "../runtime/uv_loop.hpp"
 #include "../runtime/v8/fxe_native.hpp"
+#include "../runtime/v8/native/async_hooks.hpp"
+#include "../runtime/v8/native/inspector.hpp"
+#include "../runtime/v8/native/v8_module.hpp"
+#include "../runtime/v8/native/vm.hpp"
 #include "../runtime/v8/node_compat.hpp"
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+#include "../runtime/v8/native/zlib.hpp"
+#endif
 #include "bind_app.hpp"
 #include "bind_audio.hpp"
 #include "bind_blob.hpp"
@@ -71,6 +78,9 @@
 #include <v8-profiler.h>
 #include <v8.h>
 
+namespace fxe::runtime {
+  void uninstall_native_async_hooks(v8::Isolate* iso);
+}
 namespace fxe::js {
   void dispatch_console_sink(v8::Isolate* iso, const char* level, std::string_view text);
   void install_hmr_native_bindings(v8::Isolate* iso, v8::Local<v8::Context> ctx);
@@ -123,6 +133,7 @@ namespace fxe::js {
     std::string g_icudtl;
 
     constexpr u32 kIsolateSlotHostImpl = 0;
+    constexpr u32 kIsolateSlotRuntimeId = 3;
 
     std::string to_std_string(v8::Isolate* iso, v8::Local<v8::Value> v) {
       if (v.IsEmpty())
@@ -308,6 +319,7 @@ namespace fxe::js {
     std::unordered_map<std::string, std::unordered_set<std::string>> importers_by_dependency;
     std::unordered_map<std::string, std::unordered_set<std::string>> dependencies_by_importer;
     std::string entry_path;
+    uint64_t runtime_id = 0;
     host::console_sink console_sink_fn = nullptr;
     void* console_sink_user = nullptr;
     host::debug_pump pump_fn = nullptr;
@@ -324,7 +336,7 @@ namespace fxe::js {
     };
     std::shared_ptr<uv_microtask_checkpoint_state> uv_microtask_checkpoint;
     usize uv_microtask_checkpoint_id = 0;
-    explicit impl(host::bootstrap_mode mode);
+    explicit impl(host::bootstrap_mode mode, uint64_t runtime_id);
     void record_import(std::string_view importer, std::string_view dependency);
     void clear_import_edges(std::string_view importer);
     std::vector<std::string> invalidate_module(v8::Isolate* iso, std::string_view path);
@@ -345,9 +357,13 @@ namespace fxe::js {
     if (p && p->console_sink_fn)
       p->console_sink_fn(p->console_sink_user, level, text);
   }
-  host::host(bootstrap_mode mode) : p_(std::make_unique<impl>(mode)) {
+  host::host(bootstrap_mode mode) : host(mode, 0) {}
+
+  host::host(bootstrap_mode mode, uint64_t runtime_id)
+      : p_(std::make_unique<impl>(mode, runtime_id)) {
     p_->owner = this;
   }
+
   host::~host() = default;
 
   void host::set_console_sink(console_sink sink, void* user) noexcept {
@@ -1789,7 +1805,7 @@ Error.prepareStackTrace = function(err, frames) {
   // host::impl ctor + dtor live here so the body can see the second anonymous
   // namespace's helpers (source maps, module path table, import.meta callback,
   // remap_frame callback, prepare-stack-trace JS).
-  host::impl::impl(host::bootstrap_mode mode) {
+  host::impl::impl(host::bootstrap_mode mode, uint64_t runtime_id) : runtime_id(runtime_id) {
     if (!g_initialized)
       initialize();
 
@@ -1799,7 +1815,8 @@ Error.prepareStackTrace = function(err, frames) {
     isolate = v8::Isolate::New(params);
 
     isolate->SetData(kIsolateSlotHostImpl, this);
-
+    isolate->SetData(kIsolateSlotRuntimeId,
+                     reinterpret_cast<void*>(static_cast<uintptr_t>(runtime_id)));
     v8::Isolate::Scope iscope(isolate);
     v8::HandleScope hscope(isolate);
 
@@ -1811,6 +1828,8 @@ Error.prepareStackTrace = function(err, frames) {
     const bool worker_mode = mode == host::bootstrap_mode::worker_thread;
 
     // Bindings register their constructors / namespaces on the global template.
+    // B1's window_thread mode is scaffold-only for now: it still installs the
+    // full main-thread binding set until per-window thread pinning lands.
     if (!worker_mode) {
       install_command_buffer_template(isolate, global);
       install_renderer_template(isolate, global);
@@ -1856,6 +1875,13 @@ Error.prepareStackTrace = function(err, frames) {
     {
       v8::Context::Scope cs(ctx);
       fxe::runtime::install_fxe_native(isolate, ctx);
+      fxe::runtime::install_native_async_hooks(isolate, ctx);
+      fxe::runtime::install_native_inspector(isolate, ctx);
+      fxe::runtime::install_native_v8_module(isolate, ctx);
+      fxe::runtime::install_native_vm(isolate, ctx);
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+      fxe::runtime::install_native_zlib(isolate, ctx);
+#endif
       install_hmr_native_bindings(isolate, ctx);
       fxe::runtime::install_node_compat(isolate, ctx);
       auto fn = v8::Function::New(ctx, console_log_callback).ToLocalChecked();
@@ -2021,6 +2047,7 @@ Error.prepareStackTrace = function(err, frames) {
         v8::Isolate::Scope is(isolate);
         v8::HandleScope hs(isolate);
         run_template_resetters(isolate);
+        fxe::runtime::uninstall_native_async_hooks(isolate);
         // Drop the `_v8` literal cache while the isolate + a HandleScope are
         // still alive; Eternal handles cannot outlive the isolate.
         fxe::js::uninstall_string_cache(isolate);

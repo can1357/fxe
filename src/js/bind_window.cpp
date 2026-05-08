@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -37,6 +38,7 @@
 #include "bind_fetch.hpp"
 #include "bind_timers.hpp"
 #include "bind_websocket.hpp"
+#include "isolate_coordinator.hpp"
 #include "runtime/uv_loop.hpp"
 #include "weak_holder.hpp"
 #include <fxe/v8_helpers.hpp>
@@ -80,6 +82,7 @@ namespace fxe::js {
       u64 next_token = 1;
       Global<Function> on_frame;
       Global<Object> self_strong; // strong ref held by app_run_loop while running
+      uint64_t isolate_runtime_id = 0;
       int capability_id = 0;
       bool capabilities_registered = false;
 
@@ -110,6 +113,8 @@ namespace fxe::js {
       }
       if (capabilities_registered)
         fxe::runtime::unregister_window_capabilities(capability_id);
+      if (isolate_runtime_id != 0)
+        (void)isolate_coordinator::get().stop_runtime(isolate_runtime_id);
       for (auto& [_, v] : listeners) {
         for (auto& entry : v)
           entry.fn.Reset();
@@ -121,6 +126,17 @@ namespace fxe::js {
 
     window* unwrap_win(Local<Object> self) {
       return static_cast<window*>(unwrap(self, TAG_WINDOW));
+    }
+
+    uint64_t window_runtime_id(Isolate* iso, Local<Object> self) {
+      if (self.IsEmpty() || self->InternalFieldCount() < 3)
+        return 0;
+      auto ctx = iso->GetCurrentContext();
+      auto v = self->GetInternalField(2).As<Value>();
+      if (v.IsEmpty() || !v->IsNumber())
+        return 0;
+      auto id = v->IntegerValue(ctx).FromMaybe(0);
+      return id > 0 ? static_cast<uint64_t>(id) : 0;
     }
 
     Local<String> str(Isolate* iso, std::string_view s) {
@@ -601,6 +617,9 @@ namespace fxe::js {
       auto* h = new win_holder{};
       fxe::runtime::capability_set policy{};
       std::string preload;
+      // B1 v1: `isolate: 'own'` spins a dedicated V8 runtime thread, but GLFW
+      // window creation and renderer binding still stay on the shared/main path.
+      std::string isolate_mode = "shared";
       if (info.Length() >= 1 && info[0]->IsObject()) {
         auto o = info[0].As<Object>();
         Local<Value> v;
@@ -651,6 +670,21 @@ namespace fxe::js {
           }
           preload = utf8(iso, v);
         }
+        Local<Value> iso_v;
+        if (get("isolate") && !v->IsNullOrUndefined()) {
+          iso_v = v;
+          if (!iso_v->IsString()) {
+            delete h;
+            (void)throw_type_error(iso, "WindowOptions.isolate must be 'shared' or 'own'");
+            return;
+          }
+          isolate_mode = utf8(iso, iso_v);
+          if (isolate_mode != "shared" && isolate_mode != "own") {
+            delete h;
+            (void)throw_type_error(iso, "WindowOptions.isolate must be 'shared' or 'own'");
+            return;
+          }
+        }
         if (get("permissions") && !parse_window_permissions(iso, ctx, v, policy)) {
           delete h;
           return;
@@ -663,14 +697,46 @@ namespace fxe::js {
         return;
       }
       h->owned = std::move(w);
+      if (isolate_mode == "own") {
+        auto rid = isolate_coordinator::get().spawn_window_runtime();
+        if (rid == 0) {
+          std::fprintf(stderr, "fxe: WindowOptions.isolate='own' failed to start a dedicated "
+                               "runtime; falling back to 'shared'.\n");
+          isolate_mode = "shared";
+        } else {
+          h->isolate_runtime_id = rid;
+          // v1 keeps the actual window on the main thread; this queued task is a
+          // smoke signal that the child isolate is alive and can accept work.
+          if (!isolate_coordinator::get().post_task(rid, [rid, preload] {
+                if (preload.empty()) {
+                  std::fprintf(stderr,
+                               "fxe: window isolate %llu ready; main-thread window marshaling is "
+                               "still pending.\n",
+                               static_cast<unsigned long long>(rid));
+                } else {
+                  std::fprintf(stderr,
+                               "fxe: window isolate %llu ready; deferred preload '%s' until "
+                               "cross-thread window marshaling lands.\n",
+                               static_cast<unsigned long long>(rid), preload.c_str());
+                }
+              })) {
+            (void)isolate_coordinator::get().stop_runtime(rid);
+            h->isolate_runtime_id = 0;
+            isolate_mode = "shared";
+            std::fprintf(stderr, "fxe: WindowOptions.isolate='own' could not queue startup work; "
+                                 "falling back to 'shared'.\n");
+          }
+        }
+      }
       auto self = info.This();
       set_native(iso, self, h->owned.get(), TAG_WINDOW);
+      self->SetInternalField(2, Number::New(iso, static_cast<double>(h->isolate_runtime_id)));
       holder_map()[h->owned.get()] = h;
       h->capability_id = next_window_capability_id();
       fxe::runtime::register_window_capabilities(h->capability_id, policy);
       h->capabilities_registered = true;
       register_window_for_isolate(iso, h->owned.get());
-      if (!run_window_preload(iso, preload)) {
+      if (h->isolate_runtime_id == 0 && !run_window_preload(iso, preload)) {
         unregister_window_for_isolate(iso, h->owned.get());
         fxe::runtime::unregister_window_capabilities(h->capability_id);
         h->capabilities_registered = false;
@@ -679,6 +745,18 @@ namespace fxe::js {
         return;
       }
       h->bind(iso, self);
+    }
+
+    void win_get_isolate_mode(Local<Name>, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto id = window_runtime_id(iso, info.HolderV2());
+      info.GetReturnValue().Set(id > 0 ? "own"_v8(iso) : "shared"_v8(iso));
+    }
+
+    void win_get_isolate_id(Local<Name>, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto id = window_runtime_id(iso, info.HolderV2());
+      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(id)));
     }
 
     // ---- pre-existing methods ----------------------------------------------
@@ -2019,7 +2097,11 @@ namespace fxe::js {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, win_constructor);
     tpl->SetClassName("Window"_v8(iso));
-    tpl->InstanceTemplate()->SetInternalFieldCount(2);
+    tpl->InstanceTemplate()->SetInternalFieldCount(3);
+    tpl->InstanceTemplate()->SetNativeDataProperty("isolateMode"_v8(iso), win_get_isolate_mode,
+                                                   nullptr);
+    tpl->InstanceTemplate()->SetNativeDataProperty("isolateId"_v8(iso), win_get_isolate_id,
+                                                   nullptr);
 
     auto proto = tpl->PrototypeTemplate();
     proto->Set(iso, "poll", FunctionTemplate::New(iso, win_poll));
