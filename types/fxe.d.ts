@@ -2591,7 +2591,17 @@ declare module 'node:net' {
     destroy(error?: Error): this;
     connect(path: string, callback?: () => void): this;
     connect(options: { host?: string; port: number; path?: string }, callback?: () => void): this;
+    on(event: 'data', listener: (chunk: Uint8Array) => void): this;
+    on(event: 'end', listener: () => void): this;
+    on(event: 'close', listener: () => void): this;
+    on(event: 'connect', listener: () => void): this;
+    on(event: 'error', listener: (error: Error) => void): this;
     on(event: string, listener: (...args: unknown[]) => void): this;
+    once(event: 'data', listener: (chunk: Uint8Array) => void): this;
+    once(event: 'end', listener: () => void): this;
+    once(event: 'close', listener: () => void): this;
+    once(event: 'connect', listener: () => void): this;
+    once(event: 'error', listener: (error: Error) => void): this;
     once(event: string, listener: (...args: unknown[]) => void): this;
     off(event: string, listener: (...args: unknown[]) => void): this;
   }
@@ -2605,8 +2615,16 @@ declare module 'node:net' {
   }
   export function connect(path: string, callback?: () => void): Socket;
   export function connect(port: number, host?: string, callback?: () => void): Socket;
+  export function connect(
+    options: { port: number; host?: string; path?: string },
+    callback?: () => void,
+  ): Socket;
   export function createConnection(path: string, callback?: () => void): Socket;
   export function createConnection(port: number, host?: string, callback?: () => void): Socket;
+  export function createConnection(
+    options: { port: number; host?: string; path?: string },
+    callback?: () => void,
+  ): Socket;
   export function createServer(connectionListener?: (socket: Socket) => void): Server;
   export function isIP(input: string): 0 | 4 | 6;
   export function isIPv4(input: string): boolean;
@@ -2719,11 +2737,13 @@ declare module 'node:crypto' {
   export interface Hash {
     update(data: string | FxeBufferSource, inputEncoding?: string): this;
     digest(): Uint8Array;
+    digest(encoding: 'hex' | 'base64' | 'base64url'): string;
     digest(encoding: string): string | Uint8Array;
   }
   export interface Hmac {
     update(data: string | FxeBufferSource, inputEncoding?: string): this;
     digest(): Uint8Array;
+    digest(encoding: 'hex' | 'base64' | 'base64url'): string;
     digest(encoding: string): string | Uint8Array;
   }
   export interface Cipher {

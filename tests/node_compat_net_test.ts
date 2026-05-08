@@ -143,8 +143,10 @@ test('node:net supports localhost TCP echo', async () => {
   const { promise: listenPromise, resolve: resolveListen } = Promise.withResolvers<void>();
   server.listen(0, '127.0.0.1', resolveListen);
   await withTimeout(listenPromise, 500, 'tcp listen');
-  const address = server.address();
-  assert(address && address.address === '127.0.0.1', 'server.address should report localhost');
+  const rawAddress = server.address();
+  assert(rawAddress && typeof rawAddress === 'object', 'server.address must return an object');
+  const address = rawAddress;
+  assert(address.address === '127.0.0.1', 'server.address should report localhost');
   assert(
     typeof address.port === 'number' && address.port > 0,
     'server.address should report ephemeral port',

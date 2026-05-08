@@ -125,8 +125,12 @@ async function startBinaryEchoWebSocketServer(): Promise<EchoServer> {
   server.on('error', listening.reject);
   server.listen(0, '127.0.0.1', listening.resolve);
   await listening.promise;
-  const address = server.address();
-  assert(address && typeof address.port === 'number', 'echo server must bind a TCP port');
+  const rawAddress = server.address();
+  assert(
+    rawAddress && typeof rawAddress === 'object' && typeof rawAddress.port === 'number',
+    'echo server must bind a TCP port',
+  );
+  const address = rawAddress;
   return {
     port: address.port,
     close: () => {

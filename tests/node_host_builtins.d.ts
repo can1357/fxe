@@ -1,53 +1,3 @@
-declare module 'node:crypto' {
-  type Binary = string | ArrayBuffer | ArrayBufferView;
-  interface HashLike {
-    update(data: Binary, inputEncoding?: string): HashLike;
-    digest(): Uint8Array;
-    digest(encoding: 'hex'): string;
-  }
-  interface CipherLike {
-    update(data: Binary, inputEncoding?: string, outputEncoding?: string): Uint8Array | string;
-    final(outputEncoding?: string): Uint8Array | string;
-    getAuthTag(): Uint8Array;
-    setAuthTag(tag: Uint8Array): void;
-  }
-  export function createHash(algorithm: string): HashLike;
-  export function createHmac(algorithm: string, key: Binary): HashLike;
-  export function createCipheriv(algorithm: string, key: Binary, iv: Binary): CipherLike;
-  export function createDecipheriv(algorithm: string, key: Binary, iv: Binary): CipherLike;
-  export function randomBytes(size: number): Uint8Array;
-  export function randomFillSync<T extends ArrayBufferView>(buffer: T): T;
-  export function getRandomValues<T extends ArrayBufferView>(array: T): T;
-  export function pbkdf2Sync(
-    password: Binary,
-    salt: Binary,
-    iterations: number,
-    keylen: number,
-    digest: string,
-  ): Uint8Array;
-  export function pbkdf2(
-    password: Binary,
-    salt: Binary,
-    iterations: number,
-    keylen: number,
-    digest: string,
-    callback: (error: unknown, derivedKey: Uint8Array) => void,
-  ): void;
-  export function scryptSync(
-    password: Binary,
-    salt: Binary,
-    keylen: number,
-    options?: unknown,
-  ): Uint8Array;
-  export function scrypt(
-    password: Binary,
-    salt: Binary,
-    keylen: number,
-    options: unknown,
-    callback: (error: unknown, derivedKey: Uint8Array) => void,
-  ): void;
-}
-
 declare module 'node:https' {
   import type { EventEmitter } from 'events';
 
@@ -109,41 +59,6 @@ declare module 'node:tls' {
     connect: typeof connect;
   };
   export default tlsDefault;
-}
-
-declare module 'node:net' {
-  export interface Socket {
-    on(event: 'data', listener: (chunk: Uint8Array) => void): Socket;
-    on(event: 'end', listener: () => void): Socket;
-    on(event: 'error', listener: (error: Error) => void): Socket;
-    on(event: string, listener: (...args: unknown[]) => void): Socket;
-    once(event: string, listener: (...args: unknown[]) => void): Socket;
-    write(data: Uint8Array | string): void;
-    end(data?: Uint8Array | string): void;
-    destroy(): void;
-  }
-  export class Server {
-    listen(port?: number, host?: string, callback?: () => void): Server;
-    close(callback?: () => void): void;
-    address(): { address: string; family: string; port: number } | null;
-    on(event: string, listener: (...args: unknown[]) => void): Server;
-  }
-  export function connect(port: number, host?: string): Socket;
-  export function connect(options: { port: number; host?: string }, callback?: () => void): Socket;
-  export function createConnection(port: number, host?: string): Socket;
-  export function createConnection(
-    options: { port: number; host?: string },
-    callback?: () => void,
-  ): Socket;
-  export function createServer(listener?: (socket: Socket) => void): Server;
-  export function isIP(input: string): number;
-  const netDefault: {
-    connect: typeof connect;
-    createConnection: typeof createConnection;
-    createServer: typeof createServer;
-    isIP: typeof isIP;
-  };
-  export default netDefault;
 }
 
 declare module 'node:dgram' {

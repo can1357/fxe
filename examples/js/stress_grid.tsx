@@ -20,7 +20,7 @@ const s = StyleSheet.create({
   sub: { fontSize: 9, color: 0x94a3b8ff },
 });
 
-function Cell({ i, tick }: { i: number; tick: number }): Node {
+function Cell({ i, tick }: { i: number; tick: number; key?: string | number }): Node {
   return (
     <View style={s.cell}>
       <Text style={s.title}>Item {i}</Text>

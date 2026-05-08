@@ -1,4 +1,3 @@
-// @ts-expect-error FXE host-backed builtin
 import net from 'node:net';
 import {
   assert,
