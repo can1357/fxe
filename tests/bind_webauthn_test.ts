@@ -42,6 +42,7 @@ test('register + assert via virtual authenticator', async () => {
     })) as PublicKeyCredential;
     assert(cred !== null);
     assertEqual(cred.type, 'public-key');
+    assertEqual(cred.authenticatorAttachment, 'cross-platform');
     const att = cred.response as AuthenticatorAttestationResponse;
     assert(att.attestationObject.byteLength > 0);
     assert(att.clientDataJSON.byteLength > 0);
@@ -120,7 +121,36 @@ test('already-aborted signal rejects with AbortError', async () => {
   }
 });
 
-test('isUserVerifyingPlatformAuthenticatorAvailable resolves', async () => {
+test('PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable returns boolean', async () => {
   const result = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
   assertEqual(typeof result, 'boolean');
+});
+test('mid-flight abort rejects create with AbortError', async () => {
+  const win = new Window({
+    width: 64,
+    height: 64,
+    visible: false,
+    permissions: { webauthn: { rpIds: ['example.com'] } },
+  });
+  try {
+    const platformAvailable =
+      await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+    if (!platformAvailable) {
+      return;
+    }
+    const ac = new AbortController();
+    const promise = navigator.credentials.create({
+      publicKey: {
+        rp: { id: 'example.com', name: 'Example' },
+        user: { id: new Uint8Array([9, 8, 7]), name: 'platform', displayName: 'Platform User' },
+        challenge: new Uint8Array(16),
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      },
+      signal: ac.signal,
+    });
+    queueMicrotask(() => ac.abort());
+    await assertRejects(() => promise, /AbortError|NotAllowedError/);
+  } finally {
+    win.close();
+  }
 });
