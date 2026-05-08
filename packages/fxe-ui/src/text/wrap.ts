@@ -124,6 +124,46 @@ export function glyphIndexAt(text: string, style: TextStyle, x: number): number 
   return lo;
 }
 
+/**
+ * Maps wrapped-text local coordinates to a source UTF-16 code-unit index.
+ */
+export function pointToTextIndex(
+  wrapped: WrappedText,
+  style: TextStyle,
+  x: number,
+  y: number,
+): number {
+  if (wrapped.lines.length === 0) return 0;
+  const lineIdx = Math.max(
+    0,
+    Math.min(Math.floor(y / wrapped.lineHeight), wrapped.lines.length - 1),
+  );
+  const localIdx = glyphIndexAt(wrapped.lines[lineIdx], style, x);
+  // Soft-wrap EOL and next-line BOF can share the same source index; that's acceptable for caret placement.
+  // Hard newlines are already reflected in `lineStartIndices`.
+  return (wrapped.lineStartIndices[lineIdx] ?? 0) + localIdx;
+}
+
+/**
+ * Maps a source UTF-16 code-unit index to wrapped-text local coordinates.
+ */
+export function textIndexToPoint(
+  wrapped: WrappedText,
+  style: TextStyle,
+  idx: number,
+): { x: number; y: number } {
+  if (wrapped.lines.length === 0) return { x: 0, y: 0 };
+  let i = wrapped.lines.length - 1;
+  for (; i > 0; i--) {
+    if ((wrapped.lineStartIndices[i] ?? 0) <= idx) break;
+  }
+  const start = wrapped.lineStartIndices[i] ?? 0;
+  const localIdx = Math.max(0, Math.min(idx - start, wrapped.lines[i].length));
+  const x = xAtGlyphIndex(wrapped.lines[i], style, localIdx);
+  const y = i * wrapped.lineHeight;
+  return { x, y };
+}
+
 function breakLongWord(
   word: string,
   fontSize: number,

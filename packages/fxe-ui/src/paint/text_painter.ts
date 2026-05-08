@@ -9,17 +9,28 @@ export interface TextPreeditOptions {
   underlineColor?: Color;
 }
 
+/**
+ * Selection range in UTF-16 indices.
+ */
 export interface TextSelectionOptions {
   start: number;
   end: number;
+  /** Selection highlight color (defaults to `0x3b82f654`). */
   color?: Color;
 }
 
+/**
+ * Painter-only text rendering options.
+ *
+ * `caretOpacity` lets callers drive caret blink animation over time. The
+ * painter is stateless and applies opacity only to the caret draw.
+ */
 export interface PaintTextOptions {
   imePreedit?: TextPreeditOptions;
   selection?: TextSelectionOptions;
   caretIndex?: number;
   caretColor?: Color;
+  caretOpacity?: number;
 }
 
 function measuredWidth(text: string, style: TextStyle): number {
@@ -31,6 +42,11 @@ function alignedX(rect: LayoutResult, lineWidth: number, align: TextStyle['textA
     return rect.x + Math.max(0, (rect.width - lineWidth) / 2);
   if (align === 'right' && rect.width > 0) return rect.x + Math.max(0, rect.width - lineWidth);
   return rect.x;
+}
+
+function scaleAlpha(color: number, factor: number): number {
+  const a = (color & 0xff) * factor;
+  return ((color >>> 8) << 8) | Math.max(0, Math.min(255, Math.round(a)));
 }
 
 export function paintText(
@@ -61,7 +77,16 @@ export function paintText(
       : Math.max(0, Math.min(Math.trunc(options.caretIndex), text.length));
   const caretColor = options.caretColor ?? color;
   let caretDrawn = false;
+  const caretOpacity =
+    options.caretOpacity === undefined
+      ? 1
+      : Number.isFinite(options.caretOpacity)
+        ? Math.max(0, Math.min(1, options.caretOpacity))
+        : 1;
+  const visibleCaretColor = scaleAlpha(caretColor, caretOpacity);
   const wrapWidth = rect.width > 0 ? rect.width : undefined;
+  let caretAnchorX: number | undefined;
+  let caretAnchorY: number | undefined;
   const wrapped = wrapText(text, style, { maxWidth: wrapWidth });
   const baseY = rect.y;
   let caretBaseX = alignedX(rect, 0, align);
@@ -102,7 +127,11 @@ export function paintText(
       const caretInLine = Math.max(0, Math.min(caretIndex - lineStart, line.length));
       if (caretIndex >= lineStart && caretIndex <= lineStart + line.length) {
         const caretX = x + xAtGlyphIndex(line, style, caretInLine);
-        Primitives.fillRect(cb, caretX, caretY, 1, wrapped.lineHeight, 0, caretColor);
+        caretAnchorX = caretX;
+        caretAnchorY = caretY;
+        if (caretOpacity > 0) {
+          Primitives.fillRect(cb, caretX, caretY, 1, wrapped.lineHeight, 0, visibleCaretColor);
+        }
         caretDrawn = true;
       }
     }
@@ -122,15 +151,19 @@ export function paintText(
   const preeditWidth = measuredWidth(preedit.text, style);
   const cursor = Math.max(0, Math.min(preedit.cursor, preedit.text.length));
   const preeditCursorWidth = measuredWidth(preedit.text.slice(0, cursor), style);
-  Primitives.drawText(cb, caretBaseX, caretY, 0, preedit.text, fontSize, color);
+  const preeditX = caretAnchorX ?? caretBaseX;
+  const preeditY = caretAnchorY ?? caretY;
+  // v1 behavior: when preedit starts inside existing text, draw it over any
+  // trailing glyphs instead of reflowing / shifting the buffer tail.
+  Primitives.drawText(cb, preeditX, preeditY, 0, preedit.text, fontSize, color);
   Primitives.fillRect(
     cb,
-    caretBaseX,
-    caretY + fontSize + 1,
+    preeditX,
+    preeditY + fontSize + 1,
     Math.max(1, preeditWidth),
     1,
     0,
     preedit.underlineColor ?? color,
   );
-  Primitives.fillRect(cb, caretBaseX + preeditCursorWidth, caretY, 1, fontSize, 0, color);
+  Primitives.fillRect(cb, preeditX + preeditCursorWidth, preeditY, 1, fontSize, 0, color);
 }

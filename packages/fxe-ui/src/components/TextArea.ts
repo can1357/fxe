@@ -1,3 +1,11 @@
+// Multi-line text input. Reuses the shared edit model + wrap helpers from
+// TextInput; differs in:
+//   - Enter inserts a newline (Cmd/Ctrl+Enter calls onSubmit instead).
+//   - Tab defaults to inserting a `\t` rather than advancing focus.
+//   - Up/Down arrow keys move the caret across visual (wrapped) lines while
+//     trying to preserve the current x position.
+//   - Home/End snap to source-line edges via `moveToLineEdge`.
+//   - Default minHeight scales with `numberOfLines` (default 4).
 import type { CommandBuffer } from 'fxe';
 import { registerHitTarget } from '../mount/hit_test.ts';
 import { paintText, type TextPreeditOptions } from '../paint/text_painter.ts';
@@ -32,7 +40,7 @@ import {
   undo as undoHistory,
   wordRangeAt,
 } from '../text/edit_model.ts';
-import { pointToTextIndex, wrapText } from '../text/wrap.ts';
+import { pointToTextIndex, textIndexToPoint, wrapText } from '../text/wrap.ts';
 import { useTheme } from '../theme/provider.ts';
 import { useTextStyle } from '../theme/text_context.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
@@ -40,7 +48,7 @@ import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 import { extractA11yProps } from '../a11y/extract.ts';
 import { View } from './View.ts';
 
-export interface TextInputProps extends InternalLayoutProps, AccessibilityProps {
+export interface TextAreaProps extends InternalLayoutProps, AccessibilityProps {
   key?: string;
   style?: StyleValue;
   value?: string;
@@ -49,36 +57,29 @@ export interface TextInputProps extends InternalLayoutProps, AccessibilityProps 
   onSubmit?: (value: string) => void;
   onCompose?: (preedit: string, cursor: number) => void;
   onCommit?: (committed: string) => void;
-  /** Cursor caret blink interval in ms; 0 disables blink. Default 530. */
   caretBlinkMs?: number;
-  /** Mask the value with bullet characters; preserves real value internally. */
   secureTextEntry?: boolean;
-  /** Maximum length in code units. Inserts past this limit are clipped. */
   maxLength?: number;
-  /** Select all text on the first focus. */
   selectAllOnFocus?: boolean;
-  /** Hook fired before paste; return null to reject, return a string to override. */
   onPaste?: (text: string) => string | null;
-  /** Fired when caret/selection changes. */
   onSelectionChange?: (selection: { start: number; end: number }) => void;
-  /** Read-only: focus + selection + copy allowed; edits blocked. */
   readOnly?: boolean;
-  /** Disabled: prevents focus and edits; cursor shows not_allowed. */
   disabled?: boolean;
-  /** Tab key behavior: 'focus' advances focus; 'insert' inserts \t. Default 'focus'. */
+  /** Tab key behavior: 'insert' (default for TextArea) inserts \t; 'focus' advances focus. */
   tabBehavior?: 'focus' | 'insert';
-  /** Selection highlight color (RRGGBBAA). Default 0x3b82f654. */
   selectionColor?: number;
-  /** Show a focus outline when focused. Default true. */
   focusRing?: boolean;
-  /** Mobile keyboard hint (no-op on desktop today). */
   inputMode?: 'text' | 'numeric' | 'decimal' | 'email' | 'tel' | 'url' | 'search' | 'none';
   spellCheck?: boolean;
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   autoCorrect?: boolean;
+  /** Suggested visible row count for sizing. Default 4. */
+  numberOfLines?: number;
+  /** Soft-wrap content at the box width. Default true. */
+  softWrap?: boolean;
 }
 
-interface TextInputTextProps extends InternalLayoutProps {
+interface TextAreaInnerProps extends InternalLayoutProps {
   key?: string;
   style?: StyleValue;
   children: string;
@@ -88,6 +89,7 @@ interface TextInputTextProps extends InternalLayoutProps {
   caretIndex?: number;
   caretOpacity?: number;
   selectionColor?: number;
+  softWrap?: boolean;
 }
 
 type ClipboardKeyEvent = {
@@ -103,12 +105,14 @@ const KEY_BACKSPACE = 259;
 const KEY_DELETE = 261;
 const KEY_RIGHT = 262;
 const KEY_LEFT = 263;
+const KEY_DOWN = 264;
+const KEY_UP = 265;
 const KEY_HOME = 268;
 const KEY_END = 269;
 const DOUBLE_CLICK_MS = 500;
 const CLICK_SLOP = 4;
 
-const TextInputText = Component((props: TextInputTextProps): Node => {
+const TextAreaInner = Component((props: TextAreaInnerProps): Node => {
   const inherited = useTextStyle();
   const resolved = splitStyle(props.style);
   const textStyle: TextStyle = { ...inherited, ...(props.__textStyle ?? {}), ...resolved.text };
@@ -116,8 +120,9 @@ const TextInputText = Component((props: TextInputTextProps): Node => {
   const rect = props.__layout
     ? { ...props.__layout }
     : rectFromStyle(resolved.layout, props.__layout);
+  const wrapMax = props.softWrap === false ? undefined : rect.width > 0 ? rect.width : undefined;
   if (rect.width === 0 || rect.height === 0) {
-    const intrinsic = wrapText(text, textStyle, { maxWidth: undefined });
+    const intrinsic = wrapText(text, textStyle, { maxWidth: wrapMax });
     if (rect.width === 0) rect.width = intrinsic.width;
     if (rect.height === 0) rect.height = intrinsic.height;
   }
@@ -143,6 +148,7 @@ const TextInputText = Component((props: TextInputTextProps): Node => {
         props.caretIndex,
         props.caretOpacity,
         props.selectionColor,
+        props.softWrap,
       ],
       fn: (cb: CommandBuffer) =>
         paintText(cb, rect, text, textStyle, {
@@ -161,7 +167,7 @@ const TextInputText = Component((props: TextInputTextProps): Node => {
   } as Node;
 }, 'Text');
 
-export const TextInput = Component((props: TextInputProps): Node => {
+export const TextArea = Component((props: TextAreaProps): Node => {
   const id = useId();
   const theme = useTheme();
   const inherited = useTextStyle();
@@ -191,7 +197,9 @@ export const TextInput = Component((props: TextInputProps): Node => {
   const secure = props.secureTextEntry === true;
   const maxLen = props.maxLength;
   const blinkMs = props.caretBlinkMs ?? 530;
-  // Touch the no-op forward-compat props so unused-prop lint stays quiet.
+  const tabBehavior = props.tabBehavior ?? 'insert';
+  const softWrap = props.softWrap !== false;
+  const numberOfLines = Math.max(1, Math.trunc(props.numberOfLines ?? 4));
   void props.inputMode;
   void props.spellCheck;
   void props.autoCapitalize;
@@ -250,11 +258,24 @@ export const TextInput = Component((props: TextInputProps): Node => {
     return value.slice(s, e);
   };
 
+  const wrapMaxForHit = (): number | undefined => {
+    if (!softWrap) return undefined;
+    return rect.width > 0 ? rect.width : undefined;
+  };
+
   const indexFromPoint = (x: number, y: number): number => {
     const padX = rect.paddingLeft ?? 0;
     const padY = rect.paddingTop ?? 0;
-    const wrapped = wrapText(value, textStyle, { maxWidth: rect.width });
+    const wrapped = wrapText(value, textStyle, { maxWidth: wrapMaxForHit() });
     return pointToTextIndex(wrapped, textStyle, x - rect.x - padX, y - rect.y - padY);
+  };
+
+  const moveCaretVertical = (idx: number, dir: 1 | -1): number => {
+    const wrapped = wrapText(value, textStyle, { maxWidth: wrapMaxForHit() });
+    if (wrapped.lines.length === 0) return idx;
+    const cur = textIndexToPoint(wrapped, textStyle, idx);
+    const targetY = cur.y + dir * wrapped.lineHeight;
+    return pointToTextIndex(wrapped, textStyle, cur.x, targetY);
   };
 
   const doUndo = (): void => {
@@ -291,13 +312,6 @@ export const TextInput = Component((props: TextInputProps): Node => {
     });
   };
 
-  // Lazy clipboard sink for right-click menu actions, since contextmenu events
-  // do not carry a KeyEvent's clipboardText/setClipboardText. The mount layer
-  // exposes `__fxe_clipboard` if available; otherwise cut/copy/paste from the
-  // edit menu are no-ops.
-  // TODO(arch): give event_pipeline a way to attach a ClipboardSink to
-  // synthetic mouse events so right-click clipboard actions don't depend on
-  // a side-channel global.
   const clipboardSink = (): { read?: () => string; write?: (t: string) => void } | null => {
     return (
       (
@@ -308,7 +322,6 @@ export const TextInput = Component((props: TextInputProps): Node => {
     );
   };
 
-  // Caret blink — only ticks when focused, no selection range, no IME preedit.
   useFrame((dt) => {
     if (!focused || disabled || blinkMs <= 0) return;
     if (selectionStart !== selectionEnd) return;
@@ -329,7 +342,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
       accessibilityState: a11yState,
       accessibilityValue: a11yValue,
     },
-    componentType: 'TextInput',
+    componentType: 'TextArea',
     tabIndex: props.tabIndex,
     cursor: disabled ? 'not_allowed' : 'ibeam',
     onFocus: () => {
@@ -426,12 +439,12 @@ export const TextInput = Component((props: TextInputProps): Node => {
         }
         if (action === 'paste') {
           if (readOnly) return;
-          let t = sink?.read?.() ?? '';
-          t = t.replace(/\n/g, '');
+          const t = sink?.read?.() ?? '';
           if (props.onPaste) {
             const r = props.onPaste(t);
             if (r === null) return;
-            t = r;
+            if (r.length > 0) replaceSelection(r, 'paste');
+            return;
           }
           if (t.length > 0) replaceSelection(t, 'paste');
           return;
@@ -470,12 +483,10 @@ export const TextInput = Component((props: TextInputProps): Node => {
       const wordJump = isWordJumpModifier(mods, platform);
       const lineJump = isLineJumpModifier(mods, platform);
 
-      // Primary+A select all.
       if (primary && (key === 65 || key === 97)) {
         setSelection(0, value.length);
         return;
       }
-      // Primary+C copy.
       if (primary && (key === 67 || key === 99)) {
         if (!secure) {
           const t = selectedText();
@@ -483,7 +494,6 @@ export const TextInput = Component((props: TextInputProps): Node => {
         }
         return;
       }
-      // Primary+X cut.
       if (primary && (key === 88 || key === 120)) {
         if (readOnly || secure) return;
         const t = selectedText();
@@ -493,11 +503,9 @@ export const TextInput = Component((props: TextInputProps): Node => {
         }
         return;
       }
-      // Primary+V paste.
       if (primary && (key === 86 || key === 118)) {
         if (readOnly) return;
         let t = keyEvent.clipboardText?.() ?? '';
-        t = t.replace(/\n/g, '');
         if (props.onPaste) {
           const r = props.onPaste(t);
           if (r === null) return;
@@ -506,13 +514,11 @@ export const TextInput = Component((props: TextInputProps): Node => {
         if (t.length > 0) replaceSelection(t, 'paste');
         return;
       }
-      // Primary+Z undo (Shift = redo).
       if (primary && (key === 90 || key === 122)) {
         if (shift) doRedo();
         else doUndo();
         return;
       }
-      // Primary+Y redo (Windows convention; harmless on macOS).
       if (primary && (key === 89 || key === 121)) {
         doRedo();
         return;
@@ -536,8 +542,19 @@ export const TextInput = Component((props: TextInputProps): Node => {
         return;
       }
 
+      if (key === KEY_UP || key === KEY_DOWN) {
+        const dir: 1 | -1 = key === KEY_UP ? -1 : 1;
+        const next = moveCaretVertical(selectionEnd, dir);
+        if (shift) setSelection(selectionStart, next);
+        else setSelection(next, next);
+        return;
+      }
+
       if (key === KEY_HOME || key === KEY_END) {
-        const next = key === KEY_HOME ? 0 : value.length;
+        const next =
+          key === KEY_HOME
+            ? moveToLineEdge(value, selectionEnd, 'start')
+            : moveToLineEdge(value, selectionEnd, 'end');
         if (shift) setSelection(selectionStart, next);
         else setSelection(next, next);
         return;
@@ -570,16 +587,16 @@ export const TextInput = Component((props: TextInputProps): Node => {
       }
 
       if (key === KEY_ENTER) {
-        if (!readOnly) props.onSubmit?.(value);
+        // Cmd/Ctrl+Enter submits; plain Enter inserts newline.
+        if (primary) {
+          if (!readOnly) props.onSubmit?.(value);
+          return;
+        }
+        if (!readOnly) replaceSelection('\n', 'type');
         return;
       }
 
-      if (key === KEY_TAB && props.tabBehavior === 'insert' && !readOnly) {
-        // NOTE: event_pipeline.dispatchKeyDown advances focus before this
-        // handler runs, so the focused TextInput already lost focus by the
-        // time we receive Tab. Inserting here is correct only for inputs that
-        // re-focus afterwards; full support requires a phase hook in
-        // event_pipeline. TODO(P3): add focus-advance phase preempt.
+      if (key === KEY_TAB && tabBehavior === 'insert' && !readOnly) {
         replaceSelection('\t', 'type');
         return;
       }
@@ -591,18 +608,18 @@ export const TextInput = Component((props: TextInputProps): Node => {
   const shown = showPlaceholder ? (props.placeholder ?? '') : masked;
   const hasSelectionRange = !showPlaceholder && selectionStart !== selectionEnd;
   const showCaret = focused && !disabled && !showPlaceholder && imePreedit.preedit.length === 0;
-  const caretOpacity =
-    showCaret && !hasSelectionRange ? (caretPhase ? 1 : 0) : showCaret && hasSelectionRange ? 0 : 0;
+  const caretOpacity = showCaret && !hasSelectionRange ? (caretPhase ? 1 : 0) : 0;
   const focusRingOn = focused && !disabled && props.focusRing !== false;
+  const lineHeight = (textStyle.fontSize ?? 16) * 1.4;
+  const minHeight = Math.max(34, Math.round(numberOfLines * lineHeight + theme.spacing.xs * 2));
 
   return View({
     ...props,
     style: [
       {
-        minHeight: 34,
+        minHeight,
         paddingX: theme.spacing.sm,
         paddingY: theme.spacing.xs,
-        justifyContent: 'center',
         borderWidth: focusRingOn ? 2 : 1,
         borderColor: focused ? theme.colors.primary : theme.colors.border,
         backgroundColor: theme.colors.surface,
@@ -610,7 +627,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
       },
       props.style,
     ],
-    children: TextInputText({
+    children: TextAreaInner({
       style: { color: showPlaceholder ? theme.colors.mutedText : theme.colors.text },
       children: shown,
       selectionStart: showPlaceholder ? undefined : selectionStart,
@@ -618,6 +635,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
       caretIndex: showCaret ? selectionEnd : undefined,
       caretOpacity,
       selectionColor: props.selectionColor,
+      softWrap,
       imePreedit:
         imePreedit.preedit.length > 0
           ? {
@@ -628,4 +646,4 @@ export const TextInput = Component((props: TextInputProps): Node => {
           : undefined,
     }),
   });
-}, 'TextInput');
+}, 'TextArea');
