@@ -43,7 +43,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            xvfb pkg-config autoconf automake libtool \
+            xvfb pkg-config autoconf autoconf-archive automake libtool \
             libxinerama-dev libxcursor-dev libxrandr-dev libxi-dev \
             libgl1-mesa-dev
 
