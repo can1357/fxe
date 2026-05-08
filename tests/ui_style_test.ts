@@ -1,4 +1,3 @@
-// @ts-ignore FXE synthetic package
 import { parseColor, StyleSheet, splitStyle } from 'fxe-ui';
 
 import { assert, assertDeepEqual, assertEqual, assertThrows, run, test } from './ts_harness.ts';

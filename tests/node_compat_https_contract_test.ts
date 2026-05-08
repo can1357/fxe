@@ -1,11 +1,8 @@
 // Native TLS/HTTPS/HTTP2 adapters are host-backed without live network I/O here;
 // fetch is stubbed so callback/EventEmitter flow stays deterministic.
-// @ts-ignore FXE host-backed builtin
 
-// @ts-ignore FXE host-backed builtin
 import http2Default, { connect, constants, createSecureServer } from 'node:http2';
 import httpsDefault, { Agent, createServer, get, request } from 'node:https';
-// @ts-ignore FXE host-backed builtin
 import tlsDefault, { createSecureContext, rootCertificates, connect as tlsConnect } from 'node:tls';
 
 import { assert, assertEqual, assertThrows, delay, run, test } from './ts_harness.ts';

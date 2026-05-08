@@ -1,5 +1,4 @@
 // Native node:fs fd compatibility tests intentionally import FXE host-backed builtins.
-// @ts-ignore FXE host-backed builtin
 import { open } from 'node:fs';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

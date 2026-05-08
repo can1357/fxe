@@ -1,8 +1,6 @@
-import { assertEqual, assertRejects, run, test } from './ts_harness.ts';
-// @ts-ignore FXE host-backed builtin
 import { createHash } from 'node:crypto';
-// @ts-ignore FXE host-backed builtin
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { assertEqual, assertRejects, run, test } from './ts_harness.ts';
 
 type FetchStub = (url: string, opts?: unknown) => Promise<unknown> | unknown;
 

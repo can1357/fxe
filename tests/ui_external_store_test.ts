@@ -1,8 +1,7 @@
 // FXE resolves these package names through the host loader rather than node_modules.
-// @ts-ignore FXE synthetic package
-import { CommandBuffer } from 'fxe';
+
 import { Database } from 'fxe:sqlite';
-// @ts-ignore FXE synthetic package
+import { CommandBuffer } from 'fxe';
 import {
   Component,
   Draw,

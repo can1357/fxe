@@ -1,6 +1,6 @@
 /** @jsxImportSource fxe-ui */
-import { Pressable, Text, View, useEffect, useState } from 'fxe-ui';
-import { connectCdp, type CdpClient } from './cdp_client.ts';
+import { Pressable, Text, useEffect, useState, View } from 'fxe-ui';
+import { type CdpClient, connectCdp } from './cdp_client.ts';
 import { ConsolePanel } from './panels/Console.tsx';
 import { HeapPanel } from './panels/Heap.tsx';
 import { LayoutPanel } from './panels/Layout.tsx';

@@ -1,4 +1,3 @@
-// @ts-ignore FXE host-backed builtin
 import http2Default, { connect, constants, createSecureServer } from 'node:http2';
 
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';

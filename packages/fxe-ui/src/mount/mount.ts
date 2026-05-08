@@ -1,8 +1,8 @@
 import { Renderer, type Window, type WindowDisposer } from 'fxe';
 import {
   Component,
-  Layer,
   type FrameLoopDisposer,
+  Layer,
   type Node,
   render,
   setRenderTarget,

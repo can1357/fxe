@@ -1,6 +1,4 @@
-// @ts-ignore FXE synthetic package
 import { CommandBuffer } from 'fxe';
-// @ts-ignore FXE synthetic package
 import { Button, Image, render, Text, View } from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

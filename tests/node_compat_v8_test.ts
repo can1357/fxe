@@ -1,5 +1,7 @@
 // Native node:v8 compatibility tests intentionally import FXE host-backed builtins.
-// @ts-ignore FXE host-backed builtin
+
+import { readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import v8Default, {
   cachedDataVersionTag,
   deserialize,
@@ -9,10 +11,6 @@ import v8Default, {
   serialize,
   writeHeapSnapshot,
 } from 'node:v8';
-// @ts-ignore FXE host-backed builtin
-import { readFileSync, rmSync } from 'node:fs';
-// @ts-ignore FXE host-backed builtin
-import { tmpdir } from 'node:os';
 
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 

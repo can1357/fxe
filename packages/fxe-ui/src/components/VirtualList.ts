@@ -1,3 +1,5 @@
+import { extractA11yProps } from '../a11y/extract.ts';
+import type { AccessibilityProps } from '../a11y/types.ts';
 import {
   type BoundaryChild,
   Component,
@@ -7,9 +9,7 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
-import { extractA11yProps } from '../a11y/extract.ts';
 import { splitStyle } from '../style/resolve.ts';
-import type { AccessibilityProps } from '../a11y/types.ts';
 import type { StyleValue } from '../style/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 import { ScrollView } from './ScrollView.ts';

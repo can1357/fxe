@@ -1,9 +1,9 @@
 import {
-  getCurrentSchedulerLane,
   flushSync,
+  getCurrentSchedulerLane,
+  type SchedulerLane,
   scheduleCallback,
   scheduleWork,
-  type SchedulerLane,
 } from './scheduler.ts';
 
 type SignalSetter<T> = (next: T | ((prev: T) => T)) => void;

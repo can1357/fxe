@@ -1,7 +1,4 @@
 // Native node:fs/crypto imports are provided by FXE at runtime.
-// @ts-ignore FXE host-backed builtin
-
-// @ts-ignore FXE host-backed builtin
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 

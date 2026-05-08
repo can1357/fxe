@@ -1,6 +1,4 @@
-// @ts-ignore FXE synthetic package
 import { OffscreenRenderer, type Window, type WindowEventName } from 'fxe';
-// @ts-ignore FXE synthetic package
 import { mount, View } from 'fxe-ui';
 
 import { assert, run, test } from './ts_harness.ts';

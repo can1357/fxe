@@ -4,9 +4,9 @@ import { EventEmitter, once } from 'node:events';
 import path, { posix, win32 } from 'node:path';
 import processModule, { cwd, hrtime, kill, nextTick, release, umask } from 'node:process';
 import querystring from 'node:querystring';
-import { Readable, Transform, Writable, finished, pipeline } from 'node:stream';
+import { finished, pipeline, Readable, Transform, Writable } from 'node:stream';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { format as formatUrl, fileURLToPath, pathToFileURL, URL, URLSearchParams } from 'node:url';
+import { fileURLToPath, format as formatUrl, pathToFileURL, URL, URLSearchParams } from 'node:url';
 import { format, promisify, types } from 'node:util';
 
 import { assert, assertDeepEqual, assertEqual, assertThrows, run, test } from './ts_harness.ts';

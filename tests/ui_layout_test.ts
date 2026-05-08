@@ -1,4 +1,3 @@
-// @ts-ignore FXE synthetic package
 import { type LayoutNode, type LayoutResult, layout } from 'fxe-ui';
 
 import { assertEqual, run, test } from './ts_harness.ts';

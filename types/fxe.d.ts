@@ -2951,6 +2951,240 @@ declare module 'node:net' {
   export default _default;
 }
 // === node:net compatibility end ===
+// === node:child_process compatibility begin ===
+declare module 'node:child_process' {
+  export interface ReadableChildStream {
+    setEncoding(encoding: string): this;
+    on(event: 'data', listener: (chunk: string | Uint8Array) => void): this;
+    on(event: 'end', listener: () => void): this;
+    on(event: string, listener: (...args: unknown[]) => void): this;
+  }
+  export interface ChildProcessWithoutNullStreams {
+    stdin: {
+      write(chunk: string, encoding?: string, cb?: (err?: Error) => void): boolean;
+      end(chunk?: string, cb?: () => void): boolean;
+    };
+    stdout: ReadableChildStream;
+    stderr: ReadableChildStream;
+    readonly pid?: number;
+    readonly killed?: boolean;
+    on(event: 'close', listener: (code: number | null, signal?: unknown) => void): this;
+    on(event: 'exit', listener: (code: number | null, signal?: unknown) => void): this;
+    on(event: 'error', listener: (err: Error) => void): this;
+    on(event: string, listener: (...args: unknown[]) => void): this;
+    kill(signal?: string): boolean;
+  }
+  export function spawn(
+    command: string,
+    args?: readonly string[],
+    options?: Record<string, unknown>,
+  ): ChildProcessWithoutNullStreams;
+  export function spawnSync(
+    command: string,
+    args?: readonly string[],
+    options?: Record<string, unknown>,
+  ): unknown;
+  export function execFileSync(
+    file: string,
+    args?: readonly string[],
+    options?: Record<string, unknown>,
+  ): string | Uint8Array;
+}
+// === node:child_process compatibility end ===
+// === node:worker_threads compatibility begin ===
+declare module 'node:worker_threads' {
+  export interface WorkerOptions {
+    workerData?: unknown;
+    eval?: boolean;
+    stdout?: boolean;
+    stderr?: boolean;
+    [key: string]: unknown;
+  }
+  export class Worker {
+    constructor(filename: string | URL, options?: WorkerOptions);
+    on(event: 'message', listener: (data: unknown) => void): this;
+    on(event: 'error', listener: (error: Error) => void): this;
+    on(event: 'exit', listener: (code: number) => void): this;
+    on(event: string, listener: (...args: unknown[]) => void): this;
+    postMessage(value: unknown): void;
+    terminate(): Promise<number>;
+  }
+  export class MessagePort {
+    onmessage: ((event: { data: unknown }) => void) | null;
+    postMessage(value: unknown): void;
+    start?(): void;
+    close?(): void;
+  }
+  export class MessageChannel {
+    port1: MessagePort;
+    port2: MessagePort;
+  }
+  export class BroadcastChannelImpl {
+    constructor(name: string);
+    readonly name: string;
+    onmessage: ((event: { data: unknown }) => void) | null;
+    postMessage(value: unknown): void;
+    close(): void;
+  }
+  export const BroadcastChannel:
+    | (new (name: string) => BroadcastChannelImpl)
+    | undefined;
+  export const isMainThread: boolean;
+  export const threadId: number;
+  export const parentPort: MessagePort | null;
+  export const workerData: unknown;
+  export const capabilities: {
+    worker: boolean;
+    sameIsolateMessageChannel: boolean;
+    sameIsolateBroadcastChannel: boolean;
+    native: unknown;
+  };
+}
+// === node:worker_threads compatibility end ===
+// === node:dns compatibility begin ===
+declare module 'node:dns' {
+  export type LookupAddress = { address: string; family: number };
+  export type LookupCallback = (err: Error | null, address?: string, family?: number) => void;
+  export type LookupAllCallback = (err: Error | null, addresses?: LookupAddress[]) => void;
+  export function lookup(
+    hostname: string,
+    options: { family?: number; all: true },
+    callback: LookupAllCallback,
+  ): void;
+  export function lookup(hostname: string, callback: LookupCallback): void;
+  export function lookup(
+    hostname: string,
+    options: { family?: number; all?: false },
+    callback: LookupCallback,
+  ): void;
+  export function resolve4(
+    hostname: string,
+    callback: (err: Error | null, addresses?: string[]) => void,
+  ): void;
+  export function resolve(
+    hostname: string,
+    rrtype: string,
+    callback: (err: Error | null, addresses?: string[]) => void,
+  ): void;
+  export function resolveAny(
+    hostname: string,
+    callback: (
+      err: Error | null,
+      records?: Array<{ address: string; family: number; type: string }>,
+    ) => void,
+  ): void;
+  export function resolve6(
+    hostname: string,
+    callback: (err: Error | null, addresses?: string[]) => void,
+  ): void;
+  export function resolveTxt(
+    hostname: string,
+    callback: (err: Error | null, records?: string[][]) => void,
+  ): void;
+  export function resolveMx(
+    hostname: string,
+    callback: (err: Error | null, records?: Record<string, unknown>[]) => void,
+  ): void;
+  export function resolveSrv(
+    hostname: string,
+    callback: (err: Error | null, records?: Record<string, unknown>[]) => void,
+  ): void;
+  export function resolveCname(
+    hostname: string,
+    callback: (err: Error | null, records?: string[]) => void,
+  ): void;
+  export function resolveNs(
+    hostname: string,
+    callback: (err: Error | null, records?: string[]) => void,
+  ): void;
+  export function reverse(
+    ip: string,
+    callback: (err: Error | null, hostnames?: string[]) => void,
+  ): void;
+  export function lookupService(
+    address: string,
+    port: number,
+    callback: (err: Error | null, hostname?: string, service?: string) => void,
+  ): void;
+  const _default: {
+    lookup: typeof lookup;
+    resolve: typeof resolve;
+    resolveAny: typeof resolveAny;
+    resolve4: typeof resolve4;
+    resolve6: typeof resolve6;
+    resolveTxt: typeof resolveTxt;
+    resolveMx: typeof resolveMx;
+    resolveSrv: typeof resolveSrv;
+    resolveCname: typeof resolveCname;
+    resolveNs: typeof resolveNs;
+    reverse: typeof reverse;
+    lookupService: typeof lookupService;
+  };
+  export default _default;
+}
+declare module 'node:dns/promises' {
+  export function lookup(
+    hostname: string,
+    options?: { family?: number },
+  ): Promise<{ address: string; family: number }>;
+  export function resolve4(hostname: string): Promise<string[]>;
+  const _default: {
+    lookup: typeof lookup;
+    resolve4: typeof resolve4;
+  };
+  export default _default;
+}
+// === node:dns compatibility end ===
+// === node:os / node:tty compatibility begin ===
+declare module 'node:os' {
+  export function arch(): string;
+  export function cpus(): unknown[];
+  export function endianness(): 'LE' | 'BE';
+  export function freemem(): number;
+  export function homedir(): string;
+  export function networkInterfaces(): Record<string, unknown> | null;
+  export function platform(): string;
+  export function release(): string;
+  export function tmpdir(): string;
+  export function totalmem(): number;
+  export function type(): string;
+  export function userInfo(): Record<string, unknown>;
+  const _default: {
+    arch: typeof arch;
+    cpus: typeof cpus;
+    endianness: typeof endianness;
+    freemem: typeof freemem;
+    homedir: typeof homedir;
+    networkInterfaces: typeof networkInterfaces;
+    platform: typeof platform;
+    release: typeof release;
+    tmpdir: typeof tmpdir;
+    totalmem: typeof totalmem;
+    type: typeof type;
+    userInfo: typeof userInfo;
+    hostname(): string;
+    uptime(): number;
+  };
+  export default _default;
+}
+declare module 'node:tty' {
+  export function isatty(fd: number): boolean;
+  export function getWindowSize(fd: number): [number, number];
+  const _default: {
+    isatty: typeof isatty;
+    getWindowSize: typeof getWindowSize;
+  };
+  export default _default;
+}
+declare module 'os' {
+  export * from 'node:os';
+  export { default } from 'node:os';
+}
+declare module 'tty' {
+  export * from 'node:tty';
+  export { default } from 'node:tty';
+}
+// === node:os / node:tty compatibility end ===
 // === node:vm compatibility begin ===
 interface FxeVmOptions {
   filename?: string;

@@ -1,4 +1,3 @@
-// @ts-ignore FXE synthetic package
 import {
   CommandBuffer,
   type Renderer,
@@ -6,17 +5,16 @@ import {
   type WindowEventMap,
   type WindowEventName,
 } from 'fxe';
-// @ts-ignore FXE synthetic package
 import {
   clearFocus,
   clearHitTargets,
   dispatchKeyDown,
   dispatchKeyPress,
-  focusTarget,
-  mount,
   dispatchMouseDown,
   dispatchMouseMove,
   dispatchMouseUp,
+  focusTarget,
+  mount,
   registerHitTarget,
   Text,
   TextInput,

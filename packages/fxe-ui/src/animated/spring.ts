@@ -1,8 +1,8 @@
 import {
+  type ActiveAnimation,
   type AnimatedValue,
   type AnimationEndCallback,
   type CompositeAnimation,
-  type ActiveAnimation,
   clearActiveAnimation,
   registerAnimatedFrameStep,
   replaceActiveAnimation,

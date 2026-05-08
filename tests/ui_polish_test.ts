@@ -1,7 +1,5 @@
 // FXE resolves these package names through the host loader rather than node_modules.
-// @ts-ignore FXE synthetic package
 import { CommandBuffer } from 'fxe';
-// @ts-ignore FXE synthetic package
 import {
   Component,
   createContext,

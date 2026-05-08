@@ -1,4 +1,6 @@
+import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
+import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
 import { paintText } from '../paint/text_painter.ts';
 import {
   type BoundaryChild,
@@ -8,8 +10,6 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
-import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
-import { extractA11yProps } from '../a11y/extract.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { glyphIndexAt, wrapText } from '../text/wrap.ts';

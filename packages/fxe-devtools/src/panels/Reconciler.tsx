@@ -1,5 +1,5 @@
 /** @jsxImportSource fxe-ui */
-import { Button, ScrollView, Text, TextInput, View, useEffect, useMemo, useState } from 'fxe-ui';
+import { Button, ScrollView, Text, TextInput, useEffect, useMemo, useState, View } from 'fxe-ui';
 import type { CdpClient } from '../cdp_client.ts';
 
 interface ReconcilerSnapshot {

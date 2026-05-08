@@ -18,5 +18,5 @@
       "fxe-ui/jsx-runtime": ["./types/fxe-ui.d.ts"]
     }
   },
-  "include": ["examples/js/**/*.ts", "examples/js/**/*.tsx", "packages/fxe-devtools/src/**/*.ts", "packages/fxe-devtools/src/**/*.tsx", "tests/**/*.ts", "tests/**/*.d.ts", "types/**/*.d.ts"]
+  "include": ["examples/js/**/*.ts", "examples/js/**/*.tsx", "packages/fxe-devtools/src/**/*.ts", "packages/fxe-devtools/src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx", "tests/**/*.d.ts", "types/**/*.d.ts"]
 }

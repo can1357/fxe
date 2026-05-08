@@ -1,6 +1,4 @@
-// @ts-ignore FXE host-backed builtin
 import { createHash } from 'node:crypto';
-// @ts-ignore FXE host-backed builtin
 import { createServer } from 'node:net';
 
 import { assert, assertDeepEqual, assertEqual, assertThrows, test } from './ts_harness.ts';

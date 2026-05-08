@@ -1,5 +1,5 @@
 /** @jsxImportSource fxe-ui */
-import { Button, ScrollView, Text, View, useState } from 'fxe-ui';
+import { Button, ScrollView, Text, useState, View } from 'fxe-ui';
 import type { CdpClient } from '../cdp_client.ts';
 
 interface RuntimeEvaluationResult {

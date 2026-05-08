@@ -10,8 +10,8 @@
 // The shape is deliberately small and JSON-serialisable so the wire
 // payload stays cheap.
 
-import type { Style } from '../style/types.ts';
 import type { LayoutResult } from '../layout/types.ts';
+import type { Style } from '../style/types.ts';
 
 export interface LayoutTraceEntry {
   /** Component or primitive name — `'View'`, `'Text'`, etc. */

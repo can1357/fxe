@@ -1,4 +1,3 @@
-// @ts-ignore FXE synthetic package
 import { clearHitTargets, dispatchWheel, registerHitTarget } from 'fxe-ui';
 
 import { assertDeepEqual, run, test } from './ts_harness.ts';

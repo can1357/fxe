@@ -7,6 +7,8 @@
 //   - Home/End snap to source-line edges via `moveToLineEdge`.
 //   - Default minHeight scales with `numberOfLines` (default 4).
 import type { CommandBuffer } from 'fxe';
+import { extractA11yProps } from '../a11y/extract.ts';
+import type { AccessibilityProps } from '../a11y/types.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
 import { paintText, type TextPreeditOptions } from '../paint/text_painter.ts';
 import {
@@ -43,9 +45,7 @@ import {
 import { pointToTextIndex, textIndexToPoint, wrapText } from '../text/wrap.ts';
 import { useTheme } from '../theme/provider.ts';
 import { useTextStyle } from '../theme/text_context.ts';
-import type { AccessibilityProps } from '../a11y/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
-import { extractA11yProps } from '../a11y/extract.ts';
 import { View } from './View.ts';
 
 export interface TextAreaProps extends InternalLayoutProps, AccessibilityProps {

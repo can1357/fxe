@@ -1,8 +1,6 @@
 // Native TCP/UDP host adapters are wired for basic socket IO. This offline
 // contract keeps factory exports and address helpers observable without network connections.
-// @ts-ignore FXE host-backed builtin
 
-// @ts-ignore FXE host-backed builtin
 import dgramDefault, { createSocket } from 'node:dgram';
 import netDefault, { connect, createConnection, createServer, isIP, Server } from 'node:net';
 

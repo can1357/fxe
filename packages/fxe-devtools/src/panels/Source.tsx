@@ -1,5 +1,5 @@
 /** @jsxImportSource fxe-ui */
-import { Pressable, ScrollView, Text, View, useEffect, useState } from 'fxe-ui';
+import { Pressable, ScrollView, Text, useEffect, useState, View } from 'fxe-ui';
 import type { CdpClient } from '../cdp_client.ts';
 
 interface ScriptEntry {

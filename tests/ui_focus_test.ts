@@ -1,4 +1,3 @@
-// @ts-ignore FXE synthetic package
 import {
   clearFocus,
   clearHitTargets,

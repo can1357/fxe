@@ -1,5 +1,5 @@
 /** @jsxImportSource fxe-ui */
-import { Button, ScrollView, Text, View, useEffect, useState } from 'fxe-ui';
+import { Button, ScrollView, Text, useEffect, useState, View } from 'fxe-ui';
 import type { CdpClient } from '../cdp_client.ts';
 
 interface HeapSnapshotRoot {

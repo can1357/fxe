@@ -1,12 +1,9 @@
 /// <reference path="./node_compat_pure_types.d.ts" />
 
 import { Buffer } from 'node:buffer';
-// @ts-ignore FXE host-backed builtin
 import { createHash, randomBytes } from 'node:crypto';
-// @ts-ignore FXE host-backed builtin
 import * as fsPromises from 'node:fs/promises';
 import pathDefault, { basename, join } from 'node:path';
-// @ts-ignore FXE host-backed builtin
 import * as workerThreads from 'node:worker_threads';
 import { EventEmitter } from 'events';
 

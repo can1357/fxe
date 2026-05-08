@@ -1,6 +1,4 @@
-// @ts-ignore FXE synthetic package
 import { CommandBuffer, type Renderer, type Window, type WindowEventName } from 'fxe';
-// @ts-ignore FXE synthetic package
 import { mount, Text, View } from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

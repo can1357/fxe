@@ -1,8 +1,5 @@
-// @ts-ignore FXE host-backed builtin
 import { spawn } from 'node:child_process';
-// @ts-ignore FXE host-backed builtin
 import { mkdirSync, rmSync, watch, writeFileSync } from 'node:fs';
-// @ts-ignore FXE host-backed builtin
 import { join } from 'node:path';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

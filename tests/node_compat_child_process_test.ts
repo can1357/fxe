@@ -1,7 +1,5 @@
 // Native node:child_process compatibility tests intentionally import FXE host-backed builtins.
-// @ts-ignore FXE host-backed builtin
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-// @ts-ignore FXE host-backed builtin
 import { lookup, resolve4 } from 'node:dns';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
@@ -116,11 +114,11 @@ test('node:dns lookup all and resolve4 use host DNS results', async () => {
       lookup(
         'localhost',
         { family: 4, all: true },
-        (error: unknown, addresses: Array<{ address: string; family: number }>) => {
+        (error: unknown, addresses?: Array<{ address: string; family: number }>) => {
           if (error) {
             reject(error);
           } else {
-            resolve(addresses);
+            resolve(addresses ?? []);
           }
         },
       );
@@ -133,11 +131,11 @@ test('node:dns lookup all and resolve4 use host DNS results', async () => {
   );
 
   const resolved = await new Promise<string[]>((resolve, reject) => {
-    resolve4('localhost', (error: unknown, addresses: string[]) => {
+    resolve4('localhost', (error: unknown, addresses?: string[]) => {
       if (error) {
         reject(error);
       } else {
-        resolve(addresses);
+        resolve(addresses ?? []);
       }
     });
   });

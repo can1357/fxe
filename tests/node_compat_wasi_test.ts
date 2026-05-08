@@ -1,6 +1,6 @@
 import { WASI } from 'node:wasi';
 
-import { assert, assertEqual, assertThrows, test, run } from './ts_harness.ts';
+import { assert, assertEqual, assertThrows, run, test } from './ts_harness.ts';
 
 const decoder = new TextDecoder();
 

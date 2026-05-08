@@ -1,4 +1,3 @@
-// @ts-ignore FXE host-backed builtin
 import * as workerThreads from 'node:worker_threads';
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 

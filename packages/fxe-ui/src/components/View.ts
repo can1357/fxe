@@ -1,18 +1,18 @@
 import { CommandBuffer } from 'fxe';
-import { layout } from '../layout/index.ts';
-import type { LayoutNode, LayoutResult, LayoutStyle } from '../layout/types.ts';
-import { paintView } from '../paint/view_painter.ts';
-import { recordLayout } from '../debug/layout_trace.ts';
-import { coarseClip } from '../paint/clip.ts';
-import { type BoundaryChild, Component, type Node, Portal, useId } from '../reconciler/fiber.ts';
-import { registerHitTarget, type HitTarget, hitTargets } from '../mount/hit_test.ts';
-import { currentRenderTargetSize } from '../mount/mount.ts';
-import { splitStyle } from '../style/resolve.ts';
-import type { StyleValue, TextStyle } from '../style/types.ts';
-import { TextStyleContext } from '../theme/text_context.ts';
-import { wrapText } from '../text/wrap.ts';
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
+import { recordLayout } from '../debug/layout_trace.ts';
+import { layout } from '../layout/index.ts';
+import type { LayoutNode, LayoutResult, LayoutStyle } from '../layout/types.ts';
+import { type HitTarget, hitTargets, registerHitTarget } from '../mount/hit_test.ts';
+import { currentRenderTargetSize } from '../mount/mount.ts';
+import { coarseClip } from '../paint/clip.ts';
+import { paintView } from '../paint/view_painter.ts';
+import { type BoundaryChild, Component, type Node, Portal, useId } from '../reconciler/fiber.ts';
+import { splitStyle } from '../style/resolve.ts';
+import type { StyleValue, TextStyle } from '../style/types.ts';
+import { wrapText } from '../text/wrap.ts';
+import { TextStyleContext } from '../theme/text_context.ts';
 import {
   cloneWithInternal,
   type InternalLayoutProps,

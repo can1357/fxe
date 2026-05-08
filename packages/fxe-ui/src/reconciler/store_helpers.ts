@@ -1,6 +1,6 @@
 import type { Database, SQLBindings } from 'fxe:sqlite';
-import { useMemo } from './fiber.ts';
 import { useSyncExternalStore } from './external_store.ts';
+import { useMemo } from './fiber.ts';
 
 export interface FetchResult<T> {
   data: T | undefined;

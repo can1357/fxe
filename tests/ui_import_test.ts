@@ -1,7 +1,5 @@
 // FXE resolves these package names through the host loader rather than node_modules.
-// @ts-ignore FXE synthetic package
 import { Component, Draw, ErrorBoundary, Layer, Suspense, Text, View } from 'fxe-ui';
-// @ts-ignore FXE synthetic package
 import { Fragment, jsx, jsxs } from 'fxe-ui/jsx-runtime';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

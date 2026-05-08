@@ -1,6 +1,6 @@
+import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
-import { extractA11yProps } from '../a11y/extract.ts';
 import { type BoundaryChild, Component, type Node, useState } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';

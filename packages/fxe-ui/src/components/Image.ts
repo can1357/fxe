@@ -1,10 +1,10 @@
 import { extractA11yProps } from '../a11y/extract.ts';
-import { paintImage } from '../paint/image_painter.ts';
+import type { AccessibilityProps } from '../a11y/types.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
+import { paintImage } from '../paint/image_painter.ts';
 import { Component, type Node, useId } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
-import type { AccessibilityProps } from '../a11y/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 
 export interface ImageProps extends InternalLayoutProps, AccessibilityProps {

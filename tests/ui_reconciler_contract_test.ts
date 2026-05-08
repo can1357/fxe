@@ -1,14 +1,12 @@
 // FXE resolves this package name through the host loader rather than node_modules.
-// @ts-ignore FXE synthetic package
 import { App, CommandBuffer, Primitives } from 'fxe';
-// @ts-ignore FXE synthetic package
 import {
+  Component,
   createEffect,
   createSignal,
-  flushSync,
-  Component,
   Draw,
   ErrorBoundary,
+  flushSync,
   Layer,
   render,
   Suspense,
@@ -18,10 +16,9 @@ import {
   startFrameLoop,
   tickFrame,
   useFrame,
-  useTransition,
   useState,
+  useTransition,
 } from 'fxe-ui';
-// @ts-ignore FXE synthetic package
 import { jsx } from 'fxe-ui/jsx-runtime';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

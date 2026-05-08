@@ -27,9 +27,9 @@ import {
   replayHitTargets,
 } from '../mount/hit_test.ts';
 import {
+  type DevtoolsFiberNode,
   installFiberTreeSnapshotProvider,
   isPaintFlashEnabled,
-  type DevtoolsFiberNode,
 } from './devtools.ts';
 import {
   getCurrentSchedulerLane,

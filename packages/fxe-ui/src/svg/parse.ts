@@ -637,8 +637,8 @@ function arcToCubics(
   const sinPhi = Math.sin(phi);
   const dx = (x1 - x2) / 2;
   const dy = (y1 - y2) / 2;
-  let x1p = cosPhi * dx + sinPhi * dy;
-  let y1p = -sinPhi * dx + cosPhi * dy;
+  const x1p = cosPhi * dx + sinPhi * dy;
+  const y1p = -sinPhi * dx + cosPhi * dy;
 
   let rrX = Math.abs(rx);
   let rrY = Math.abs(ry);

@@ -1,4 +1,3 @@
-// @ts-ignore FXE host-backed builtin
 import dns, { lookup, resolve4, resolve6 } from 'node:dns';
 
 import { assert, run, test } from './ts_harness.ts';

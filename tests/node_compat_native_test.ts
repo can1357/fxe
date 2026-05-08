@@ -1,12 +1,8 @@
 // Native Node compatibility smoke tests intentionally import host-backed builtins
 // that are provided by FXE at runtime rather than by @types/node.
-// @ts-ignore FXE host-backed builtin
 import osDefault, * as osNamed from 'node:os';
-// @ts-ignore FXE host-backed builtin
 import ttyDefault, * as ttyNamed from 'node:tty';
-// @ts-ignore FXE host-backed builtin
 import { platform as barePlatform } from 'os';
-// @ts-ignore FXE host-backed builtin
 import { isatty as bareIsatty } from 'tty';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

@@ -1,5 +1,5 @@
-import type { AccessibilityProps } from '../a11y/types.ts';
 import { extractA11yProps } from '../a11y/extract.ts';
+import type { AccessibilityProps } from '../a11y/types.ts';
 import { Component, type Node } from '../reconciler/fiber.ts';
 import type { StyleValue } from '../style/types.ts';
 import { useTheme } from '../theme/provider.ts';

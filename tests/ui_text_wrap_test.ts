@@ -1,7 +1,6 @@
-// @ts-ignore FXE synthetic package
-import { glyphIndexAt, wrapText, xAtGlyphIndex } from 'fxe-ui';
-// @ts-ignore FXE synthetic package
+
 import { Primitives } from 'fxe';
+import { glyphIndexAt, wrapText, xAtGlyphIndex } from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 

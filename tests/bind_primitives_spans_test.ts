@@ -111,9 +111,7 @@ test('drawTextSpans equivalent vertex count to single drawText for one span', ()
 test('drawTextSpans underline emits line topology', () => {
   const cb = new CommandBuffer();
   const before = counts(cb);
-  Pr.drawTextSpans(cb, 0, 0, 0, [
-    { text: 'underlined', size: 16, underline: true, color: BLUE },
-  ]);
+  Pr.drawTextSpans(cb, 0, 0, 0, [{ text: 'underlined', size: 16, underline: true, color: BLUE }]);
   const after = counts(cb);
   assert(after.line > before.line, 'underline should emit at least one line index');
 });
@@ -122,14 +120,7 @@ test('drawTextSpans tabSize advances pen to tab stops', () => {
   const cb = new CommandBuffer();
   const noTabRet = Pr.drawTextSpans(cb, 0, 0, 0, [{ text: 'a', size: 16 }]);
   const cb2 = new CommandBuffer();
-  const tabRet = Pr.drawTextSpans(
-    cb2,
-    0,
-    0,
-    0,
-    [{ text: 'a\tb', size: 16 }],
-    { tabSize: 64 },
-  );
+  const tabRet = Pr.drawTextSpans(cb2, 0, 0, 0, [{ text: 'a\tb', size: 16 }], { tabSize: 64 });
   // Pen with tab should land at >= tabSize after first 'a' (64) + 'b' width.
   assert(tabRet[0] >= 64, `tab span width ${tabRet[0]} should be >= 64`);
   assert(tabRet[0] > noTabRet[0], 'tab span wider than no-tab span');

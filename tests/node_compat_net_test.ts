@@ -1,10 +1,6 @@
-// @ts-ignore FXE host-backed builtin
 
-// @ts-ignore FXE host-backed builtin
 import dgramDefault, { createSocket } from 'node:dgram';
-// @ts-ignore FXE host-backed builtin
 import dnsDefault, { lookup } from 'node:dns';
-// @ts-ignore FXE host-backed builtin
 import dnsPromises from 'node:dns/promises';
 import netDefault, { createConnection } from 'node:net';
 

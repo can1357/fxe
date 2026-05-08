@@ -1,11 +1,10 @@
-// @ts-ignore FXE host-backed builtin
 import vm, {
-  Script,
   compileFunction,
   createContext,
   isContext,
   runInContext,
   runInNewContext,
+  Script,
 } from 'node:vm';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

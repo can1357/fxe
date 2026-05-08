@@ -1,10 +1,9 @@
 import { useEffect, useRef } from '../reconciler/fiber.ts';
-import { spring, type SpringAnimationConfig } from './spring.ts';
+import { type SpringAnimationConfig, spring } from './spring.ts';
 import {
-  AnimatedValue,
-  timing,
   type AnimatedListener,
   type AnimatedOutput,
+  AnimatedValue,
   type AnimationEndCallback,
   type AnimationEndResult,
   type CompositeAnimation,
@@ -14,14 +13,13 @@ import {
   type ExtrapolateMode,
   type InterpolationConfig,
   type TimingAnimationConfig,
+  timing,
 } from './timing.ts';
 
 export {
-  AnimatedValue,
-  spring,
-  timing,
   type AnimatedListener,
   type AnimatedOutput,
+  AnimatedValue,
   type AnimationEndCallback,
   type AnimationEndResult,
   type CompositeAnimation,
@@ -31,7 +29,9 @@ export {
   type ExtrapolateMode,
   type InterpolationConfig,
   type SpringAnimationConfig,
+  spring,
   type TimingAnimationConfig,
+  timing,
 };
 
 interface AnimatedNamespace {
