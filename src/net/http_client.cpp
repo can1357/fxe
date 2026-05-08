@@ -10,6 +10,7 @@
 #include <deque>
 #include <fxe/types.hpp>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <unordered_map>
 
@@ -182,6 +183,8 @@ namespace fxe::net {
       http_response resp;
       std::string body_buf;
       std::string upload_buf;
+      std::function<std::pair<std::size_t, bool>(unsigned char* ptr, std::size_t max_bytes)>
+          body_source;
       std::string request_url;
       std::string origin;
       std::vector<std::string> set_cookie_headers;
@@ -248,8 +251,14 @@ namespace fxe::net {
 
     static usize read_cb(char* ptr, usize size, usize nmemb, void* user) {
       auto* fl = static_cast<in_flight*>(user);
-      const usize avail = fl->upload_buf.size() - fl->upload_off;
       const usize want = size * nmemb;
+      if (fl->body_source) {
+        auto [n, done] = fl->body_source(reinterpret_cast<unsigned char*>(ptr), want);
+        if (n == 0)
+          return done ? 0 : CURL_READFUNC_PAUSE;
+        return n;
+      }
+      const usize avail = fl->upload_buf.size() - fl->upload_off;
       const usize n = avail < want ? avail : want;
       if (n)
         std::memcpy(ptr, fl->upload_buf.data() + fl->upload_off, n);
@@ -463,6 +472,7 @@ namespace fxe::net {
     bool ok = false;
     bool supports_https = false;
     std::atomic<http_request_id> next_id{1};
+    std::mutex in_flight_mu;
     std::unordered_map<http_request_id, in_flight*> by_id;
     std::unordered_map<CURL*, in_flight*> by_easy;
     std::unordered_map<std::string, usize> active_by_origin;
@@ -558,6 +568,7 @@ namespace fxe::net {
       fl->request_url = req.url;
       fl->origin = std::move(origin);
       fl->upload_buf = std::move(req.body);
+      fl->body_source = std::move(req.body_source);
       fl->easy = curl_easy_init();
       if (!fl->easy) {
         auto fail_cb = std::move(fl->cb);
@@ -618,18 +629,34 @@ namespace fxe::net {
       } else if (m == "HEAD") {
         curl_easy_setopt(fl->easy, CURLOPT_NOBODY, 1L);
       } else if (m == "POST") {
-        curl_easy_setopt(fl->easy, CURLOPT_POST, 1L);
-        curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDSIZE_LARGE,
-                         static_cast<curl_off_t>(fl->upload_buf.size()));
-        curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDS, fl->upload_buf.data());
-      } else {
-        curl_easy_setopt(fl->easy, CURLOPT_CUSTOMREQUEST, m.c_str());
-        if (!fl->upload_buf.empty()) {
+        if (fl->body_source) {
+          curl_easy_setopt(fl->easy, CURLOPT_CUSTOMREQUEST, m.c_str());
           curl_easy_setopt(fl->easy, CURLOPT_UPLOAD, 1L);
           curl_easy_setopt(fl->easy, CURLOPT_READFUNCTION, read_cb);
           curl_easy_setopt(fl->easy, CURLOPT_READDATA, fl);
-          curl_easy_setopt(fl->easy, CURLOPT_INFILESIZE_LARGE,
+          if (req.body_size_hint.has_value()) {
+            curl_easy_setopt(fl->easy, CURLOPT_INFILESIZE_LARGE,
+                             static_cast<curl_off_t>(*req.body_size_hint));
+          }
+        } else {
+          curl_easy_setopt(fl->easy, CURLOPT_POST, 1L);
+          curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDSIZE_LARGE,
                            static_cast<curl_off_t>(fl->upload_buf.size()));
+          curl_easy_setopt(fl->easy, CURLOPT_POSTFIELDS, fl->upload_buf.data());
+        }
+      } else {
+        curl_easy_setopt(fl->easy, CURLOPT_CUSTOMREQUEST, m.c_str());
+        if (fl->body_source || !fl->upload_buf.empty()) {
+          curl_easy_setopt(fl->easy, CURLOPT_UPLOAD, 1L);
+          curl_easy_setopt(fl->easy, CURLOPT_READFUNCTION, read_cb);
+          curl_easy_setopt(fl->easy, CURLOPT_READDATA, fl);
+          if (req.body_size_hint.has_value()) {
+            curl_easy_setopt(fl->easy, CURLOPT_INFILESIZE_LARGE,
+                             static_cast<curl_off_t>(*req.body_size_hint));
+          } else if (!fl->body_source) {
+            curl_easy_setopt(fl->easy, CURLOPT_INFILESIZE_LARGE,
+                             static_cast<curl_off_t>(fl->upload_buf.size()));
+          }
         }
       }
 
@@ -651,8 +678,11 @@ namespace fxe::net {
         return false;
       }
 
-      by_id[id] = fl;
-      by_easy[fl->easy] = fl;
+      {
+        std::lock_guard<std::mutex> lock(in_flight_mu);
+        by_id[id] = fl;
+        by_easy[fl->easy] = fl;
+      }
       note_active(fl->origin);
       return true;
     }
@@ -710,8 +740,11 @@ namespace fxe::net {
       auto resp = std::move(fl->resp);
       const http_request_id id = fl->id;
       const std::string origin = fl->origin;
-      by_easy.erase(fl->easy);
-      by_id.erase(id);
+      {
+        std::lock_guard<std::mutex> lock(in_flight_mu);
+        by_easy.erase(fl->easy);
+        by_id.erase(id);
+      }
       release_active(origin);
       cleanup_in_flight(fl);
       if (cb)
@@ -737,6 +770,20 @@ namespace fxe::net {
         }
         finish_active(it->second, m->data.result);
       }
+    }
+
+    void resume_upload(http_request_id id) {
+      if (!ok)
+        return;
+      CURL* easy = nullptr;
+      {
+        std::lock_guard<std::mutex> lock(in_flight_mu);
+        auto it = by_id.find(id);
+        if (it == by_id.end() || !it->second || !it->second->easy)
+          return;
+        easy = it->second->easy;
+      }
+      (void)curl_easy_pause(easy, CURLPAUSE_CONT);
     }
   };
 
@@ -831,14 +878,16 @@ namespace fxe::net {
       return;
     }
 
-    auto it = p_->by_id.find(id);
-    if (it == p_->by_id.end())
-      return;
-    in_flight* fl = it->second;
-    fl->aborted = true;
-    curl_multi_remove_handle(p_->multi, fl->easy);
-    p_->by_easy.erase(fl->easy);
-    p_->by_id.erase(it);
+    in_flight* fl = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(p_->in_flight_mu);
+      auto it = p_->by_id.find(id);
+      if (it == p_->by_id.end())
+        return;
+      fl = it->second;
+      p_->by_easy.erase(fl->easy);
+      p_->by_id.erase(it);
+    }
     p_->release_active(fl->origin);
     set_http_error(fl->resp, http_error::abort, "aborted");
     auto cb = std::move(fl->cb);
@@ -847,6 +896,10 @@ namespace fxe::net {
     if (cb)
       cb(std::move(resp));
     p_->admit_pending();
+  }
+
+  void http_client::resume_upload(http_request_id id) {
+    p_->resume_upload(id);
   }
 
   void http_client::poll() {
@@ -904,6 +957,7 @@ namespace fxe::net {
     return 0;
   }
   void http_client::abort(http_request_id) {}
+  void http_client::resume_upload(http_request_id) {}
   void http_client::poll() {}
 
 #endif

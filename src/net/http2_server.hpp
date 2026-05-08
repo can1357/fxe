@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <fxe/types.hpp>
 #include <memory>
+#include <nghttp2/nghttp2.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -36,6 +37,7 @@ namespace fxe::net {
     virtual u16 local_port() const = 0;
     virtual std::optional<http2_incoming_request> poll(std::string& err) = 0;
     virtual bool respond(u64 request_id, const http2_response& response, std::string& err) = 0;
+    virtual bool cancel(i32 stream_id, u32 error_code = NGHTTP2_CANCEL) = 0;
     virtual void close() = 0;
     virtual std::string last_error() const = 0;
   };

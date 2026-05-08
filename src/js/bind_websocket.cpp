@@ -1,6 +1,6 @@
 // JS WebSocket binding.
 //
-// Each `new WebSocket(url, protocols?)` spawns a worker thread inside
+// Each `new WebSocket(url, protocols?, options?)` spawns a worker thread inside
 // fxe::net::websocket_client. Inbound events queue on the worker side and are
 // drained on the V8 thread by `bind_websocket::pump(iso)`, which is invoked
 // once per app_run_loop iteration. Sends are buffered through the same client
@@ -133,6 +133,37 @@ namespace fxe::js {
         return;
       }
       std::string url = to_str(iso, info[0]);
+      net::ws_client_options client_options{};
+      // FXE extension: browsers standardize only (url, protocols).
+      if (info.Length() >= 3 && info[2]->IsObject()) {
+        auto opts = info[2].As<Object>();
+        auto read_positive_int = [&](const char* key, i64& out) -> bool {
+          Local<Value> v;
+          if (!opts->Get(ctx, s8(iso, key)).ToLocal(&v) || v->IsUndefined() || v->IsNull() ||
+              !v->IsNumber()) {
+            return false;
+          }
+          const i64 n = static_cast<i64>(v->IntegerValue(ctx).FromMaybe(0));
+          if (n <= 0)
+            return false;
+          out = n;
+          return true;
+        };
+        Local<Value> compress_v;
+        if (opts->Get(ctx, "perMessageDeflate"_v8(iso)).ToLocal(&compress_v) &&
+            !compress_v->IsUndefined() && !compress_v->IsNull() && compress_v->IsBoolean()) {
+          client_options.compress = compress_v->BooleanValue(iso);
+        }
+        i64 n = 0;
+        if (read_positive_int("maxMessageBytes", n))
+          client_options.max_message_bytes = static_cast<usize>(n);
+        if (read_positive_int("maxFragmentBytes", n))
+          client_options.max_fragment_bytes = static_cast<usize>(n);
+        if (read_positive_int("idleTimeoutMs", n))
+          client_options.idle_timeout_ms = static_cast<u32>(n);
+        if (read_positive_int("pongTimeoutMs", n))
+          client_options.pong_timeout_ms = static_cast<u32>(n);
+      }
       std::vector<std::string> protocols;
       if (info.Length() >= 2 && !info[1]->IsUndefined() && !info[1]->IsNull()) {
         if (info[1]->IsArray()) {
@@ -147,7 +178,7 @@ namespace fxe::js {
         }
       }
       auto* h = new ws_holder();
-      h->client = std::make_unique<net::websocket_client>();
+      h->client = std::make_unique<net::websocket_client>(client_options);
       h->client->connect(url, protocols);
 
       auto self = info.This();
@@ -183,8 +214,10 @@ namespace fxe::js {
     }
     void ws_get_extensions(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      (void)iso;
-      info.GetReturnValue().Set(""_v8(info.GetIsolate()));
+      auto* h = unwrap_ws(info.HolderV2());
+      if (!h)
+        return;
+      info.GetReturnValue().Set(s8(iso, h->client->negotiated_extensions()));
     }
 
     void ws_get_binary_type(Local<Name>, const PropertyCallbackInfo<Value>& info) {

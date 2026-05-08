@@ -269,6 +269,36 @@ namespace fxe::net {
           last_error_ = tls_error("mbedtls_ssl_read", ret);
         return static_cast<ssize_t>(ret);
       }
+      ssize_t read_with_timeout(void* buf, usize cap, int timeout_ms) override {
+        last_error_.clear();
+        if (!buf || cap == 0)
+          return 0;
+        if (timeout_ms <= 0)
+          return read(buf, cap);
+        const int poll =
+            mbedtls_net_poll(&net_, MBEDTLS_NET_POLL_READ, static_cast<uint32_t>(timeout_ms));
+        if (poll == 0)
+          return read_timed_out;
+        if (poll < 0) {
+          last_error_ = tls_error("mbedtls_net_poll", poll);
+          return -1;
+        }
+        if (mbedtls_net_set_nonblock(&net_) != 0) {
+          last_error_ = "mbedtls_net_set_nonblock failed";
+          return -1;
+        }
+        const int ret = mbedtls_ssl_read(&ssl_, static_cast<unsigned char*>(buf), cap);
+        (void)mbedtls_net_set_block(&net_);
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+          return read_timed_out;
+        if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+          return 0;
+        if (ret < 0) {
+          last_error_ = tls_error("mbedtls_ssl_read", ret);
+          return -1;
+        }
+        return static_cast<ssize_t>(ret);
+      }
 
       ssize_t write(const void* buf, usize len) override {
         last_error_.clear();

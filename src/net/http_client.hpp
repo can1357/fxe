@@ -6,14 +6,14 @@
 // the native mbedTLS transport exists. Without libcurl, requests fail
 // synchronously with a clear "fetch unavailable" error so callers stay
 // observable.
-// TODO(net): Phase 9/future work: streaming bodies and native transport parity.
-#pragma once
+// TODO(net): Phase 9/future work: native transport parity.
 #include "cookie_jar.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <fxe/types.hpp>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -64,6 +64,9 @@ namespace fxe::net {
     std::string url;
     header_list headers;
     std::string body; // raw bytes
+    std::function<std::pair<std::size_t, bool>(unsigned char* ptr, std::size_t max_bytes)>
+        body_source;
+    std::optional<std::int64_t> body_size_hint;
     bool follow_redirects = true;
     int timeout_ms = 0; // 0 = library default
     std::string proxy;  // explicit proxy URL; empty = auto-detect environment
@@ -96,6 +99,9 @@ namespace fxe::net {
     // Cancel an in-flight request. The callback still fires (with an error
     // populated) so callers can drop their bookkeeping.
     void abort(http_request_id id);
+
+    // Resume a paused upload after body_source has produced more bytes.
+    void resume_upload(http_request_id id);
 
     // Drive completion. Cheap to call every frame.
     void poll();

@@ -15,10 +15,13 @@
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -111,6 +114,20 @@ namespace fxe::js {
     }
     void throw_type(Isolate* iso, const char* m) {
       (void)throw_type_error(iso, m);
+    }
+
+    bool is_readable_stream_like(Isolate* iso, Local<Context> ctx, Local<Object> obj) {
+      Local<Value> get_reader;
+      return obj->Get(ctx, "getReader"_v8(iso)).ToLocal(&get_reader) && get_reader->IsFunction();
+    }
+
+    Local<Value> make_stream_body_not_supported_error(Isolate* iso, Local<Context> ctx) {
+      auto err = Exception::TypeError(
+                     "fetch: ReadableStream body is not yet supported in this build (use Blob or "
+                     "ArrayBuffer; ERR_FXE_FETCH_STREAM_BODY)"_v8(iso))
+                     .As<Object>();
+      (void)err->Set(ctx, "code"_v8(iso), "ERR_FXE_FETCH_STREAM_BODY"_v8(iso));
+      return err;
     }
 
     Local<Value> make_permission_denied(Isolate* iso, std::string_view what) {
@@ -474,6 +491,22 @@ namespace fxe::js {
       bool aborted = false;
       bool settled = false;
       std::string abort_reason;
+      std::shared_ptr<struct stream_state> upload_stream;
+      Global<Object> upload_reader;
+      Global<Function> upload_on_read;
+      Global<Function> upload_on_error;
+      struct stream_reader_context* upload_ctx = nullptr;
+    };
+
+    struct stream_state {
+      std::deque<std::uint8_t> buf;
+      std::mutex m;
+      bool reader_done = false;
+      bool aborted = false;
+    };
+
+    struct stream_reader_context {
+      std::shared_ptr<in_flight_state> st;
     };
 
     // No global registry — each in-flight state lives inside the libcurl
@@ -687,8 +720,12 @@ namespace fxe::js {
     }
 
     bool extract_init(Isolate* iso, Local<Context> ctx, Local<Value> init_v, request_data& req,
-                      std::string* body_text_or_null, bool* throw_stream) {
-      *throw_stream = false;
+                      std::string* body_text_or_null, bool* throw_stream,
+                      Local<Object>* stream_body_or_null = nullptr, bool allow_stream = false) {
+      if (throw_stream)
+        *throw_stream = false;
+      if (stream_body_or_null)
+        *stream_body_or_null = Local<Object>();
       if (init_v.IsEmpty() || init_v->IsUndefined() || init_v->IsNull())
         return true;
       if (!init_v->IsObject())
@@ -716,16 +753,19 @@ namespace fxe::js {
           auto* p = reinterpret_cast<const char*>(bs->Data()) + view->ByteOffset();
           req.body.assign(p, view->ByteLength());
         } else if (v->IsObject()) {
-          // Detect ReadableStream-shape: an object with `getReader` is a
-          // streaming body, which v0 explicitly does not support.
-          auto o = v.As<Object>();
-          Local<Value> getter;
-          if (o->Get(ctx, "getReader"_v8(iso)).ToLocal(&getter) && getter->IsFunction()) {
-            *throw_stream = true;
-            return false;
+          if (is_readable_stream_like(iso, ctx, v.As<Object>())) {
+            if (!allow_stream) {
+              if (throw_stream)
+                *throw_stream = true;
+              return false;
+            }
+            if (stream_body_or_null)
+              *stream_body_or_null = v.As<Object>();
+            req.body.clear();
+          } else {
+            // Best-effort: stringify objects that look like form data.
+            req.body = to_str(iso, v);
           }
-          // Best-effort: stringify objects that look like form data.
-          req.body = to_str(iso, v);
         } else {
           req.body = to_str(iso, v);
         }
@@ -761,7 +801,7 @@ namespace fxe::js {
         std::string ignored;
         if (!extract_init(iso, ctx, info[1], *d, &ignored, &throw_stream)) {
           if (throw_stream)
-            throw_type(iso, "Request: ReadableStream body is not supported in v0");
+            iso->ThrowException(make_stream_body_not_supported_error(iso, ctx));
           delete d;
           return;
         }
@@ -776,6 +816,27 @@ namespace fxe::js {
     }
 
     // ---------------- fetch -------------------------------------------------
+
+    bool append_buffer_source(Local<Value> v, std::deque<std::uint8_t>& out) {
+      const std::uint8_t* data = nullptr;
+      std::size_t len = 0;
+      std::shared_ptr<BackingStore> store;
+      if (v->IsArrayBuffer()) {
+        auto ab = v.As<ArrayBuffer>();
+        store = ab->GetBackingStore();
+        data = static_cast<const std::uint8_t*>(store->Data());
+        len = store->ByteLength();
+      } else if (v->IsArrayBufferView()) {
+        auto view = v.As<ArrayBufferView>();
+        store = view->Buffer()->GetBackingStore();
+        data = static_cast<const std::uint8_t*>(store->Data()) + view->ByteOffset();
+        len = view->ByteLength();
+      } else {
+        return false;
+      }
+      out.insert(out.end(), data, data + len);
+      return true;
+    }
 
     void cleanup_abort_listener(Isolate* iso, in_flight_state& st) {
       if (!st.abort_listener.IsEmpty() && !st.signal_obj.IsEmpty()) {
@@ -798,6 +859,69 @@ namespace fxe::js {
       st.signal_obj.Reset();
     }
 
+    void cleanup_stream_reader(Isolate* iso, in_flight_state& st) {
+      st.upload_reader.Reset();
+      st.upload_on_read.Reset();
+      st.upload_on_error.Reset();
+      if (st.upload_ctx)
+        st.upload_ctx->st.reset();
+      st.upload_ctx = nullptr;
+      (void)iso;
+    }
+
+    void cleanup_in_flight_state(Isolate* iso, in_flight_state& st) {
+      cleanup_stream_reader(iso, st);
+      cleanup_abort_listener(iso, st);
+      st.upload_stream.reset();
+    }
+
+    void reject_in_flight(Isolate* iso, in_flight_state& st, Local<Value> err) {
+      if (st.settled)
+        return;
+      st.settled = true;
+      auto ctx = st.ctx.Get(iso);
+      Context::Scope cs(ctx);
+      HandleScope hs(iso);
+      auto resolver = st.resolver.Get(iso);
+      cleanup_in_flight_state(iso, st);
+      resolver->Reject(ctx, err).Check();
+      st.resolver.Reset();
+      st.ctx.Reset();
+    }
+
+    bool schedule_stream_read(Isolate* iso, in_flight_state& st) {
+      if (st.settled || st.aborted || st.upload_stream == nullptr || st.upload_reader.IsEmpty())
+        return false;
+      auto ctx = st.ctx.Get(iso);
+      Context::Scope cs(ctx);
+      TryCatch try_catch(iso);
+      auto reader = st.upload_reader.Get(iso);
+      Local<Value> read_v;
+      if (!reader->Get(ctx, "read"_v8(iso)).ToLocal(&read_v) || !read_v->IsFunction()) {
+        Local<Value> reason =
+            try_catch.HasCaught()
+                ? try_catch.Exception()
+                : Exception::TypeError("fetch: ReadableStream reader is missing read()"_v8(iso));
+        try_catch.Reset();
+        reject_in_flight(iso, st, reason);
+        return false;
+      }
+      Local<Value> pending_v;
+      if (!read_v.As<Function>()->Call(ctx, reader, 0, nullptr).ToLocal(&pending_v)) {
+        Local<Value> reason = try_catch.HasCaught()
+                                  ? try_catch.Exception()
+                                  : Exception::Error("fetch: ReadableStream read() threw"_v8(iso));
+        try_catch.Reset();
+        reject_in_flight(iso, st, reason);
+        return false;
+      }
+      auto wrap = Promise::Resolver::New(ctx).ToLocalChecked();
+      wrap->Resolve(ctx, pending_v).Check();
+      auto promise = wrap->GetPromise();
+      (void)promise->Then(ctx, st.upload_on_read.Get(iso), st.upload_on_error.Get(iso));
+      return true;
+    }
+
     std::string abort_reason_from_state(Isolate* iso, in_flight_state& st) {
       if (!st.abort_reason.empty())
         return st.abort_reason;
@@ -806,6 +930,137 @@ namespace fxe::js {
           return sig->reason;
       }
       return "aborted";
+    }
+
+    void on_stream_read_rejected(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* data = external_ptr<stream_reader_context>(info.Data());
+      if (!data || !data->st) {
+        delete data;
+        return;
+      }
+      if (data->st->settled) {
+        return;
+      }
+      auto& st = *data->st;
+      if (st.aborted) {
+        cleanup_stream_reader(iso, st);
+        delete data;
+        return;
+      }
+      if (st.upload_stream) {
+        std::lock_guard<std::mutex> lock(st.upload_stream->m);
+        st.upload_stream->aborted = true;
+        st.upload_stream->reader_done = true;
+      }
+      Local<Value> reason = info.Length() >= 1
+                                ? info[0]
+                                : Exception::Error("fetch: ReadableStream read failed"_v8(iso));
+      reject_in_flight(iso, st, reason);
+      delete data;
+      net::http_client::instance().abort(st.req_id);
+    }
+
+    void on_stream_read_resolved(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* data = external_ptr<stream_reader_context>(info.Data());
+      if (!data || !data->st) {
+        delete data;
+        return;
+      }
+      if (data->st->settled)
+        return;
+      auto& st = *data->st;
+      auto ctx = st.ctx.Get(iso);
+      Context::Scope cs(ctx);
+      if (st.aborted || st.upload_stream == nullptr) {
+        cleanup_stream_reader(iso, st);
+        delete data;
+        return;
+      }
+      TryCatch try_catch(iso);
+      if (info.Length() < 1 || !info[0]->IsObject()) {
+        if (st.upload_stream) {
+          std::lock_guard<std::mutex> lock(st.upload_stream->m);
+          st.upload_stream->aborted = true;
+          st.upload_stream->reader_done = true;
+        }
+        reject_in_flight(
+            iso, st,
+            Exception::TypeError("fetch: ReadableStream read() must resolve to an object"_v8(iso)));
+        delete data;
+        net::http_client::instance().abort(st.req_id);
+        return;
+      }
+      auto result = info[0].As<Object>();
+      Local<Value> done_v;
+      if (!result->Get(ctx, "done"_v8(iso)).ToLocal(&done_v)) {
+        Local<Value> reason =
+            try_catch.HasCaught()
+                ? try_catch.Exception()
+                : Exception::Error("fetch: ReadableStream result missing done"_v8(iso));
+        try_catch.Reset();
+        if (st.upload_stream) {
+          std::lock_guard<std::mutex> lock(st.upload_stream->m);
+          st.upload_stream->aborted = true;
+          st.upload_stream->reader_done = true;
+        }
+        reject_in_flight(iso, st, reason);
+        delete data;
+        net::http_client::instance().abort(st.req_id);
+        return;
+      }
+      if (done_v->BooleanValue(iso)) {
+        {
+          std::lock_guard<std::mutex> lock(st.upload_stream->m);
+          st.upload_stream->reader_done = true;
+        }
+        st.upload_reader.Reset();
+        st.upload_on_read.Reset();
+        st.upload_on_error.Reset();
+        st.upload_ctx = nullptr;
+        net::http_client::instance().resume_upload(st.req_id);
+        delete data;
+        return;
+      }
+      Local<Value> value_v;
+      if (!result->Get(ctx, "value"_v8(iso)).ToLocal(&value_v)) {
+        Local<Value> reason =
+            try_catch.HasCaught()
+                ? try_catch.Exception()
+                : Exception::Error("fetch: ReadableStream result missing value"_v8(iso));
+        try_catch.Reset();
+        if (st.upload_stream) {
+          std::lock_guard<std::mutex> lock(st.upload_stream->m);
+          st.upload_stream->aborted = true;
+          st.upload_stream->reader_done = true;
+        }
+        reject_in_flight(iso, st, reason);
+        delete data;
+        net::http_client::instance().abort(st.req_id);
+        return;
+      }
+      {
+        std::lock_guard<std::mutex> lock(st.upload_stream->m);
+        if (st.upload_stream->aborted) {
+          delete data;
+          return;
+        }
+        if (!append_buffer_source(value_v, st.upload_stream->buf)) {
+          st.upload_stream->aborted = true;
+          st.upload_stream->reader_done = true;
+          reject_in_flight(
+              iso, st,
+              Exception::TypeError("fetch: ReadableStream chunks must be BufferSource"_v8(iso)));
+          delete data;
+          net::http_client::instance().abort(st.req_id);
+          return;
+        }
+      }
+      net::http_client::instance().resume_upload(st.req_id);
+      (void)schedule_stream_read(iso, st);
     }
 
     void resolve_with_response(Isolate* iso, in_flight_state& st, net::http_response&& resp) {
@@ -818,14 +1073,14 @@ namespace fxe::js {
       auto resolver = st.resolver.Get(iso);
       if (st.aborted || resp.last_error == net::http_error::abort) {
         const std::string reason = abort_reason_from_state(iso, st);
-        cleanup_abort_listener(iso, st);
+        cleanup_in_flight_state(iso, st);
         resolver->Reject(ctx, make_abort_error(iso, reason)).Check();
         st.resolver.Reset();
         st.ctx.Reset();
         return;
       }
       if (resp.last_error == net::http_error::timeout) {
-        cleanup_abort_listener(iso, st);
+        cleanup_in_flight_state(iso, st);
         resolver->Reject(ctx, make_timeout_error(iso, "fetch timed out")).Check();
         st.resolver.Reset();
         st.ctx.Reset();
@@ -833,7 +1088,7 @@ namespace fxe::js {
       }
       if (!resp.error.empty()) {
         std::string msg = "fetch failed: " + resp.error;
-        cleanup_abort_listener(iso, st);
+        cleanup_in_flight_state(iso, st);
         resolver->Reject(ctx, Exception::Error(s8(iso, msg))).Check();
         st.resolver.Reset();
         st.ctx.Reset();
@@ -850,7 +1105,7 @@ namespace fxe::js {
       rd->body = std::move(resp.body);
       rd->headers_obj.Reset(iso, h_obj);
       auto resp_obj = wrap_response(iso, ctx, std::move(rd));
-      cleanup_abort_listener(iso, st);
+      cleanup_in_flight_state(iso, st);
       resolver->Resolve(ctx, resp_obj).Check();
       st.resolver.Reset();
       st.ctx.Reset();
@@ -918,6 +1173,8 @@ namespace fxe::js {
 
       net::http_request hreq;
       Local<Object> signal_obj_local;
+      Local<Object> stream_body_local;
+      stream_reader_context* upload_ctx_raw = nullptr;
       bool have_signal = false;
 
       if (info[0]->IsObject() && unwrap_request(info[0].As<Object>())) {
@@ -945,17 +1202,10 @@ namespace fxe::js {
 
       if (info.Length() >= 2 && info[1]->IsObject()) {
         request_data scratch;
-        bool throw_stream = false;
         std::string body_str;
-        if (!extract_init(iso, ctx, info[1], scratch, &body_str, &throw_stream)) {
-          if (throw_stream) {
-            resolver
-                ->Reject(ctx, Exception::TypeError(
-                                  "fetch: ReadableStream body is not supported in v0"_v8(iso)))
-                .Check();
-            return;
-          }
-        }
+        Local<Object> init_stream_body;
+        if (!extract_init(iso, ctx, info[1], scratch, &body_str, nullptr, &init_stream_body, true))
+          return;
         if (!scratch.method.empty() && scratch.method != "GET")
           hreq.method = scratch.method;
         if (!scratch.body.empty())
@@ -976,6 +1226,8 @@ namespace fxe::js {
           signal_obj_local = scratch.signal_obj.Get(iso);
           have_signal = true;
         }
+        if (!init_stream_body.IsEmpty())
+          stream_body_local = init_stream_body;
       }
 
       if (hreq.url.empty()) {
@@ -1009,6 +1261,67 @@ namespace fxe::js {
       if (have_signal)
         state->signal_obj.Reset(iso, signal_obj_local);
 
+      if (!stream_body_local.IsEmpty()) {
+        auto upload_stream = std::make_shared<stream_state>();
+        state->upload_stream = upload_stream;
+        hreq.body_source = [upload_stream](unsigned char* dest, std::size_t max_bytes) {
+          std::lock_guard<std::mutex> lock(upload_stream->m);
+          if (upload_stream->buf.empty())
+            return upload_stream->reader_done ? std::pair<std::size_t, bool>{0u, true}
+                                              : std::pair<std::size_t, bool>{0u, false};
+          const std::size_t n = std::min(max_bytes, upload_stream->buf.size());
+          std::copy_n(upload_stream->buf.begin(), n, dest);
+          upload_stream->buf.erase(upload_stream->buf.begin(),
+                                   upload_stream->buf.begin() + static_cast<std::ptrdiff_t>(n));
+          return std::pair<std::size_t, bool>{n, false};
+        };
+
+        TryCatch try_catch(iso);
+        Local<Value> get_reader_v;
+        if (!stream_body_local->Get(ctx, "getReader"_v8(iso)).ToLocal(&get_reader_v) ||
+            !get_reader_v->IsFunction()) {
+          Local<Value> reason =
+              try_catch.HasCaught()
+                  ? try_catch.Exception()
+                  : Exception::TypeError(
+                        "fetch: ReadableStream body is missing getReader()"_v8(iso));
+          try_catch.Reset();
+          reject_in_flight(iso, *state, reason);
+          return;
+        }
+        Local<Value> reader_v;
+        if (!get_reader_v.As<Function>()
+                 ->Call(ctx, stream_body_local, 0, nullptr)
+                 .ToLocal(&reader_v) ||
+            !reader_v->IsObject()) {
+          Local<Value> reason =
+              try_catch.HasCaught()
+                  ? try_catch.Exception()
+                  : Exception::TypeError(
+                        "fetch: ReadableStream getReader() must return an object"_v8(iso));
+          try_catch.Reset();
+          reject_in_flight(iso, *state, reason);
+          return;
+        }
+        state->upload_reader.Reset(iso, reader_v.As<Object>());
+        auto* upload_ctx = new stream_reader_context{state};
+        state->upload_ctx = upload_ctx;
+        upload_ctx_raw = upload_ctx;
+        auto data = make_external(iso, upload_ctx);
+        auto on_read_maybe = Function::New(ctx, on_stream_read_resolved, data);
+        auto on_error_maybe = Function::New(ctx, on_stream_read_rejected, data);
+        if (on_read_maybe.IsEmpty() || on_error_maybe.IsEmpty()) {
+          delete upload_ctx;
+          state->upload_ctx = nullptr;
+          reject_in_flight(
+              iso, *state,
+              Exception::Error("fetch: failed to install ReadableStream upload callbacks"_v8(iso)));
+          return;
+        }
+        state->upload_on_read.Reset(iso, on_read_maybe.ToLocalChecked());
+        state->upload_on_error.Reset(iso, on_error_maybe.ToLocalChecked());
+      }
+
       // Submit. Capture state by value so the lambda owns it. The completion
       // may run synchronously inside submit() when libcurl is unavailable,
       // so don't rely on any post-submit bookkeeping.
@@ -1041,6 +1354,25 @@ namespace fxe::js {
                   if (auto* sig = unwrap_abort_signal(a->st->signal_obj.Get(iso)); sig)
                     a->st->abort_reason = sig->reason;
                 }
+                if (a->st->upload_stream) {
+                  std::lock_guard<std::mutex> lock(a->st->upload_stream->m);
+                  a->st->upload_stream->aborted = true;
+                  a->st->upload_stream->reader_done = true;
+                }
+                if (!a->st->upload_reader.IsEmpty()) {
+                  auto ctx = a->st->ctx.Get(iso);
+                  Context::Scope cs(ctx);
+                  TryCatch try_catch(iso);
+                  auto reader = a->st->upload_reader.Get(iso);
+                  Local<Value> cancel_v;
+                  if (reader->Get(ctx, "cancel"_v8(iso)).ToLocal(&cancel_v) &&
+                      cancel_v->IsFunction()) {
+                    Local<Value> argv[1] = {s8(iso, a->st->abort_reason)};
+                    Local<Value> ignored;
+                    (void)cancel_v.As<Function>()->Call(ctx, reader, 1, argv).ToLocal(&ignored);
+                  }
+                  try_catch.Reset();
+                }
                 net::http_client::instance().abort(a->st->req_id);
               },
               data);
@@ -1053,6 +1385,12 @@ namespace fxe::js {
             state->abort_ctx = nullptr;
           }
         }
+      }
+
+      if (!stream_body_local.IsEmpty()) {
+        const bool stream_read_started = !state->settled && schedule_stream_read(iso, *state);
+        if (!stream_read_started && upload_ctx_raw)
+          delete upload_ctx_raw;
       }
     }
 

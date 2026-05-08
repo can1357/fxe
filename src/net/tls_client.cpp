@@ -10,6 +10,8 @@
 #include <mbedtls/x509_crt.h>
 
 #include <cstring>
+#include <fstream>
+#include <sstream>
 #include <string_view>
 
 #include <fxe/types.hpp>
@@ -29,6 +31,17 @@ namespace fxe::net {
       out += std::to_string(ret);
       out += ")";
       return out;
+    }
+
+    std::string read_file_to_string(const std::string& path, std::string& err) {
+      std::ifstream f(path, std::ios::binary);
+      if (!f) {
+        err = "failed to open " + path;
+        return {};
+      }
+      std::stringstream ss;
+      ss << f.rdbuf();
+      return ss.str();
     }
 
     bool seed_rng(mbedtls_entropy_context& entropy, mbedtls_ctr_drbg_context& ctr_drbg,
@@ -239,10 +252,16 @@ namespace fxe::net {
                                                                    : MBEDTLS_SSL_VERIFY_NONE);
         configure_ocsp_stapling(conf_, opts);
 
-        if (!opts.ca_pem.empty()) {
+        std::string effective_ca = opts.ca_pem;
+        if (!opts.ca_path.empty()) {
+          effective_ca = read_file_to_string(opts.ca_path, err);
+          if (!err.empty())
+            return false;
+        }
+        if (!effective_ca.empty()) {
           ret = mbedtls_x509_crt_parse(&ca_,
-                                       reinterpret_cast<const unsigned char*>(opts.ca_pem.data()),
-                                       opts.ca_pem.size() + 1);
+                                       reinterpret_cast<const unsigned char*>(effective_ca.data()),
+                                       effective_ca.size() + 1);
           if (ret != 0) {
             err = tls_error("mbedtls_x509_crt_parse", ret);
             return false;
@@ -253,29 +272,41 @@ namespace fxe::net {
         if (ca_.version != 0)
           mbedtls_ssl_conf_ca_chain(&conf_, &ca_, nullptr);
 
-        if (opts.client_cert_pem.empty() != opts.client_key_pem.empty()) {
-          err = "TLS client_cert_pem and client_key_pem must be provided together";
+        std::string effective_client_cert = opts.client_cert_pem;
+        if (!opts.client_cert_path.empty()) {
+          effective_client_cert = read_file_to_string(opts.client_cert_path, err);
+          if (!err.empty())
+            return false;
+        }
+        std::string effective_client_key = opts.client_key_pem;
+        if (!opts.client_key_path.empty()) {
+          effective_client_key = read_file_to_string(opts.client_key_path, err);
+          if (!err.empty())
+            return false;
+        }
+        if (effective_client_cert.empty() != effective_client_key.empty()) {
+          err = "TLS client_cert_pem/client_key_pem (or *_path) must be provided together";
           return false;
         }
-        if (!opts.client_cert_pem.empty()) {
+        if (!effective_client_cert.empty()) {
           ret = mbedtls_x509_crt_parse(
-              &client_cert_, reinterpret_cast<const unsigned char*>(opts.client_cert_pem.data()),
-              opts.client_cert_pem.size() + 1);
+              &client_cert_, reinterpret_cast<const unsigned char*>(effective_client_cert.data()),
+              effective_client_cert.size() + 1);
           if (ret != 0) {
-            err = tls_error("mbedtls_x509_crt_parse client_cert_pem", ret);
+            err = tls_error("mbedtls_x509_crt_parse client certificate", ret);
             return false;
           }
 #if MBEDTLS_VERSION_NUMBER >= 0x03000000
           ret = mbedtls_pk_parse_key(
-              &client_key_, reinterpret_cast<const unsigned char*>(opts.client_key_pem.data()),
-              opts.client_key_pem.size() + 1, nullptr, 0, mbedtls_ctr_drbg_random, &ctr_drbg_);
+              &client_key_, reinterpret_cast<const unsigned char*>(effective_client_key.data()),
+              effective_client_key.size() + 1, nullptr, 0, mbedtls_ctr_drbg_random, &ctr_drbg_);
 #else
           ret = mbedtls_pk_parse_key(
-              &client_key_, reinterpret_cast<const unsigned char*>(opts.client_key_pem.data()),
-              opts.client_key_pem.size() + 1, nullptr, 0);
+              &client_key_, reinterpret_cast<const unsigned char*>(effective_client_key.data()),
+              effective_client_key.size() + 1, nullptr, 0);
 #endif
           if (ret != 0) {
-            err = tls_error("mbedtls_pk_parse_key client_key_pem", ret);
+            err = tls_error("mbedtls_pk_parse_key client key", ret);
             return false;
           }
           ret = mbedtls_ssl_conf_own_cert(&conf_, &client_cert_, &client_key_);
@@ -341,6 +372,37 @@ namespace fxe::net {
           return 0;
         if (ret < 0)
           last_error_ = tls_error("mbedtls_ssl_read", ret);
+        return static_cast<ssize_t>(ret);
+      }
+
+      ssize_t read_with_timeout(void* buf, usize cap, int timeout_ms) override {
+        last_error_.clear();
+        if (!buf || cap == 0)
+          return 0;
+        if (timeout_ms <= 0)
+          return read(buf, cap);
+        const int poll =
+            mbedtls_net_poll(&net_, MBEDTLS_NET_POLL_READ, static_cast<uint32_t>(timeout_ms));
+        if (poll == 0)
+          return read_timed_out;
+        if (poll < 0) {
+          last_error_ = tls_error("mbedtls_net_poll", poll);
+          return -1;
+        }
+        if (mbedtls_net_set_nonblock(&net_) != 0) {
+          last_error_ = "mbedtls_net_set_nonblock failed";
+          return -1;
+        }
+        const int ret = mbedtls_ssl_read(&ssl_, static_cast<unsigned char*>(buf), cap);
+        (void)mbedtls_net_set_block(&net_);
+        if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE)
+          return read_timed_out;
+        if (ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+          return 0;
+        if (ret < 0) {
+          last_error_ = tls_error("mbedtls_ssl_read", ret);
+          return -1;
+        }
         return static_cast<ssize_t>(ret);
       }
 

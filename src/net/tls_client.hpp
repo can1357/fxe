@@ -21,10 +21,13 @@ namespace fxe::net {
     std::string host;
     u16 port = 443;
     std::string ca_pem;
+    std::string ca_path; // file path; takes precedence if non-empty
     bool reject_unauthorized = true;
     std::vector<std::string> alpn;
     std::string client_cert_pem;
+    std::string client_cert_path; // file path; takes precedence if non-empty
     std::string client_key_pem;
+    std::string client_key_path; // file path; takes precedence if non-empty
     bool request_ocsp_stapling = true;
     bool enable_session_resumption = true;
   };
@@ -35,6 +38,11 @@ namespace fxe::net {
     virtual ~tls_client();
 
     virtual ssize_t read(void* buf, usize cap) = 0;
+    static constexpr ssize_t read_timed_out = -2;
+    virtual ssize_t read_with_timeout(void* buf, usize cap, int timeout_ms) {
+      (void)timeout_ms;
+      return read(buf, cap);
+    }
     virtual ssize_t write(const void* buf, usize len) = 0;
     virtual std::string negotiated_alpn() const = 0;
     virtual std::optional<std::string> peer_cert_subject() const = 0;

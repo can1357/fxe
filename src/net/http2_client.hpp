@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <fxe/types.hpp>
 #include <memory>
+#include <nghttp2/nghttp2.h>
 #include <optional>
 #include <string>
 #include <utility>
@@ -23,6 +24,7 @@ namespace fxe::net {
     std::string path;
     std::vector<std::pair<std::string, std::string>> headers;
     std::string body;
+    int timeout_ms = 0; // 0 = no timeout
   };
 
   struct http2_response {
@@ -47,6 +49,7 @@ namespace fxe::net {
     virtual ~http2_client();
     virtual i32 submit(const http2_request& request) = 0;
     virtual http2_response wait(i32 stream_id, std::string& err) = 0;
+    virtual void cancel(i32 stream_id, u32 error_code = NGHTTP2_CANCEL) = 0;
     virtual void close() = 0;
     virtual std::string last_error() const = 0;
   };
