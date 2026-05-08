@@ -7,6 +7,7 @@
 // Buffer, so this differs from Node.
 
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "bind_fs.hpp"
 #include "bind_timers.hpp"
@@ -96,12 +97,12 @@ namespace fxe::js {
         msg += "'";
       }
       auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, str(iso, "code"), str(iso, node_error_code(ec)));
-      (void)err->Set(ctx, str(iso, "errno"), Integer::New(iso, ec.value()));
+      (void)err->Set(ctx, "code"_v8(iso), str(iso, node_error_code(ec)));
+      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, ec.value()));
       if (syscall)
-        (void)err->Set(ctx, str(iso, "syscall"), str(iso, syscall));
+        (void)err->Set(ctx, "syscall"_v8(iso), str(iso, syscall));
       if (!path.empty())
-        (void)err->Set(ctx, str(iso, "path"), str(iso, path));
+        (void)err->Set(ctx, "path"_v8(iso), str(iso, path));
       return err;
     }
 
@@ -112,12 +113,12 @@ namespace fxe::js {
       auto err = Exception::Error(str(iso, message.empty() ? "native operation failed" : message))
                      .As<Object>();
       if (!code.empty())
-        (void)err->Set(ctx, str(iso, "code"), str(iso, code));
-      (void)err->Set(ctx, str(iso, "errno"), Integer::New(iso, errno_value));
+        (void)err->Set(ctx, "code"_v8(iso), str(iso, code));
+      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, errno_value));
       if (!syscall.empty())
-        (void)err->Set(ctx, str(iso, "syscall"), str(iso, syscall));
+        (void)err->Set(ctx, "syscall"_v8(iso), str(iso, syscall));
       if (!path.empty())
-        (void)err->Set(ctx, str(iso, "path"), str(iso, path));
+        (void)err->Set(ctx, "path"_v8(iso), str(iso, path));
       return err;
     }
 
@@ -146,7 +147,7 @@ namespace fxe::js {
       std::string msg = "Permission denied: ";
       msg.append(what);
       auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, str(iso, "name"), str(iso, "PermissionDenied"));
+      (void)err->Set(ctx, "name"_v8(iso), "PermissionDenied"_v8(iso));
       return err;
     }
 
@@ -200,7 +201,7 @@ namespace fxe::js {
         auto ctx = iso->GetCurrentContext();
         auto o = opts.As<Object>();
         Local<Value> v;
-        if (o->Get(ctx, str(iso, "encoding")).ToLocal(&v) && v->IsString()) {
+        if (o->Get(ctx, "encoding"_v8(iso)).ToLocal(&v) && v->IsString()) {
           auto s = utf8(iso, v);
           if (s == "utf8" || s == "utf-8")
             return read_encoding::utf8;
@@ -298,13 +299,13 @@ namespace fxe::js {
       } else {
         ec.clear();
       }
-      (void)out->Set(ctx, str(iso, "size"), Number::New(iso, static_cast<double>(size)));
-      (void)out->Set(ctx, str(iso, "isFile"), Boolean::New(iso, is_file));
-      (void)out->Set(ctx, str(iso, "isDirectory"), Boolean::New(iso, is_dir));
-      (void)out->Set(ctx, str(iso, "isSymbolicLink"), Boolean::New(iso, is_symlink));
-      (void)out->Set(ctx, str(iso, "mtimeMs"), Number::New(iso, mtime_ms));
-      (void)out->Set(ctx, str(iso, "atimeMs"), Number::New(iso, mtime_ms));
-      (void)out->Set(ctx, str(iso, "ctimeMs"), Number::New(iso, mtime_ms));
+      (void)out->Set(ctx, "size"_v8(iso), Number::New(iso, static_cast<double>(size)));
+      (void)out->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, is_file));
+      (void)out->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, is_dir));
+      (void)out->Set(ctx, "isSymbolicLink"_v8(iso), Boolean::New(iso, is_symlink));
+      (void)out->Set(ctx, "mtimeMs"_v8(iso), Number::New(iso, mtime_ms));
+      (void)out->Set(ctx, "atimeMs"_v8(iso), Number::New(iso, mtime_ms));
+      (void)out->Set(ctx, "ctimeMs"_v8(iso), Number::New(iso, mtime_ms));
       return out;
     }
 
@@ -323,10 +324,10 @@ namespace fxe::js {
         auto name = e.path().filename().generic_string();
         if (with_types) {
           auto o = Object::New(iso);
-          (void)o->Set(ctx, str(iso, "name"), str(iso, name));
-          (void)o->Set(ctx, str(iso, "isFile"), Boolean::New(iso, e.is_regular_file(ec)));
-          (void)o->Set(ctx, str(iso, "isDirectory"), Boolean::New(iso, e.is_directory(ec)));
-          (void)o->Set(ctx, str(iso, "isSymbolicLink"), Boolean::New(iso, e.is_symlink(ec)));
+          (void)o->Set(ctx, "name"_v8(iso), str(iso, name));
+          (void)o->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, e.is_regular_file(ec)));
+          (void)o->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, e.is_directory(ec)));
+          (void)o->Set(ctx, "isSymbolicLink"_v8(iso), Boolean::New(iso, e.is_symlink(ec)));
           ec.clear();
           (void)arr->Set(ctx, i++, o);
         } else {
@@ -676,10 +677,10 @@ namespace fxe::js {
       auto result = Object::New(iso);
       auto* state = glob_iter_from(info.This());
       if (!state || state->index >= state->entries.size()) {
-        (void)result->Set(ctx, str(iso, "done"), Boolean::New(iso, true));
+        (void)result->Set(ctx, "done"_v8(iso), Boolean::New(iso, true));
       } else {
-        (void)result->Set(ctx, str(iso, "done"), Boolean::New(iso, false));
-        (void)result->Set(ctx, str(iso, "value"), str(iso, state->entries[state->index++]));
+        (void)result->Set(ctx, "done"_v8(iso), Boolean::New(iso, false));
+        (void)result->Set(ctx, "value"_v8(iso), str(iso, state->entries[state->index++]));
       }
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       (void)resolver->Resolve(ctx, result);
@@ -709,7 +710,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "readFileSync(path, opts?)")));
+        iso->ThrowException(Exception::TypeError("readFileSync(path, opts?)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -736,7 +737,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "writeFileSync(path, data)")));
+        iso->ThrowException(Exception::TypeError("writeFileSync(path, data)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -744,7 +745,7 @@ namespace fxe::js {
         return;
       std::vector<uint8_t> data;
       if (!extract_data(iso, info[1], data)) {
-        iso->ThrowException(Exception::TypeError(str(iso, "data must be string or TypedArray")));
+        iso->ThrowException(Exception::TypeError("data must be string or TypedArray"_v8(iso)));
         return;
       }
       std::error_code ec;
@@ -774,7 +775,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "statSync(path)")));
+        iso->ThrowException(Exception::TypeError("statSync(path)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -793,7 +794,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "readdirSync(path, opts?)")));
+        iso->ThrowException(Exception::TypeError("readdirSync(path, opts?)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -814,7 +815,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "mkdirSync(path, {recursive?})")));
+        iso->ThrowException(Exception::TypeError("mkdirSync(path, {recursive?})"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -833,7 +834,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "rmSync(path, {recursive?, force?})")));
+        iso->ThrowException(Exception::TypeError("rmSync(path, {recursive?, force?})"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -854,7 +855,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "renameSync(from, to)")));
+        iso->ThrowException(Exception::TypeError("renameSync(from, to)"_v8(iso)));
         return;
       }
       auto from = utf8(iso, info[0]);
@@ -871,7 +872,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "realpathSync(path)")));
+        iso->ThrowException(Exception::TypeError("realpathSync(path)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -890,7 +891,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "copyFileSync(src, dest)")));
+        iso->ThrowException(Exception::TypeError("copyFileSync(src, dest)"_v8(iso)));
         return;
       }
       auto src = utf8(iso, info[0]);
@@ -907,7 +908,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "cpSync(src, dest, opts?)")));
+        iso->ThrowException(Exception::TypeError("cpSync(src, dest, opts?)"_v8(iso)));
         return;
       }
       auto src = utf8(iso, info[0]);
@@ -925,7 +926,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "symlinkSync(target, path, type?)")));
+        iso->ThrowException(Exception::TypeError("symlinkSync(target, path, type?)"_v8(iso)));
         return;
       }
       auto target = utf8(iso, info[0]);
@@ -947,7 +948,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "readlinkSync(path)")));
+        iso->ThrowException(Exception::TypeError("readlinkSync(path)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -966,7 +967,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "linkSync(existing, path)")));
+        iso->ThrowException(Exception::TypeError("linkSync(existing, path)"_v8(iso)));
         return;
       }
       auto existing = utf8(iso, info[0]);
@@ -983,7 +984,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "lstatSync(path)")));
+        iso->ThrowException(Exception::TypeError("lstatSync(path)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1003,7 +1004,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "accessSync(path, mode?)")));
+        iso->ThrowException(Exception::TypeError("accessSync(path, mode?)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1020,7 +1021,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "chmodSync(path, mode)")));
+        iso->ThrowException(Exception::TypeError("chmodSync(path, mode)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1036,7 +1037,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "lchmodSync(path, mode)")));
+        iso->ThrowException(Exception::TypeError("lchmodSync(path, mode)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1052,7 +1053,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "chownSync(path, uid, gid)")));
+        iso->ThrowException(Exception::TypeError("chownSync(path, uid, gid)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1093,7 +1094,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "writeFileAtomicSync(path, data)")));
+        iso->ThrowException(Exception::TypeError("writeFileAtomicSync(path, data)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1101,7 +1102,7 @@ namespace fxe::js {
         return;
       std::vector<uint8_t> data;
       if (!extract_data(iso, info[1], data)) {
-        iso->ThrowException(Exception::TypeError(str(iso, "data must be string or TypedArray")));
+        iso->ThrowException(Exception::TypeError("data must be string or TypedArray"_v8(iso)));
         return;
       }
       auto tmp = random_temp_path(fs::path(p));
@@ -1124,7 +1125,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "globSync(pattern, opts?)")));
+        iso->ThrowException(Exception::TypeError("globSync(pattern, opts?)"_v8(iso)));
         return;
       }
       std::vector<std::string> entries;
@@ -1146,7 +1147,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "glob(pattern, opts?)")));
+        iso->ThrowException(Exception::TypeError("glob(pattern, opts?)"_v8(iso)));
         return;
       }
       std::vector<std::string> entries;
@@ -1169,7 +1170,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsInt32()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "lockSync(fd, opts?)")));
+        iso->ThrowException(Exception::TypeError("lockSync(fd, opts?)"_v8(iso)));
         return;
       }
       int fd = info[0]->Int32Value(ctx).FromMaybe(-1);
@@ -1197,7 +1198,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsInt32()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "unlockSync(fd)")));
+        iso->ThrowException(Exception::TypeError("unlockSync(fd)"_v8(iso)));
         return;
       }
       int fd = info[0]->Int32Value(ctx).FromMaybe(-1);
@@ -1270,12 +1271,12 @@ namespace fxe::js {
     Local<Object> stat_record_to_object(Isolate* iso, const fs_stat_record& st) {
       auto ctx = iso->GetCurrentContext();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, str(iso, "size"), Number::New(iso, static_cast<double>(st.size)));
-      (void)out->Set(ctx, str(iso, "isFile"), Boolean::New(iso, st.is_file));
-      (void)out->Set(ctx, str(iso, "isDirectory"), Boolean::New(iso, st.is_dir));
-      (void)out->Set(ctx, str(iso, "mtimeMs"), Number::New(iso, st.mtime_ms));
-      (void)out->Set(ctx, str(iso, "atimeMs"), Number::New(iso, st.mtime_ms));
-      (void)out->Set(ctx, str(iso, "ctimeMs"), Number::New(iso, st.mtime_ms));
+      (void)out->Set(ctx, "size"_v8(iso), Number::New(iso, static_cast<double>(st.size)));
+      (void)out->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, st.is_file));
+      (void)out->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, st.is_dir));
+      (void)out->Set(ctx, "mtimeMs"_v8(iso), Number::New(iso, st.mtime_ms));
+      (void)out->Set(ctx, "atimeMs"_v8(iso), Number::New(iso, st.mtime_ms));
+      (void)out->Set(ctx, "ctimeMs"_v8(iso), Number::New(iso, st.mtime_ms));
       return out;
     }
 
@@ -1307,9 +1308,9 @@ namespace fxe::js {
       for (const auto& entry : entries) {
         if (with_types) {
           auto o = Object::New(iso);
-          (void)o->Set(ctx, str(iso, "name"), str(iso, entry.name));
-          (void)o->Set(ctx, str(iso, "isFile"), Boolean::New(iso, entry.is_file));
-          (void)o->Set(ctx, str(iso, "isDirectory"), Boolean::New(iso, entry.is_dir));
+          (void)o->Set(ctx, "name"_v8(iso), str(iso, entry.name));
+          (void)o->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, entry.is_file));
+          (void)o->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, entry.is_dir));
           (void)arr->Set(ctx, i++, o);
         } else {
           (void)arr->Set(ctx, i++, str(iso, entry.name));
@@ -1408,7 +1409,7 @@ namespace fxe::js {
                                   const char* syscall) {
       auto ctx = iso->GetCurrentContext();
       auto err = make_error(iso, ec, path, syscall).As<Object>();
-      (void)err->Set(ctx, str(iso, "errno"), Integer::New(iso, ec.value()));
+      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, ec.value()));
       return err;
     }
 
@@ -1426,12 +1427,12 @@ namespace fxe::js {
         msg += "'";
       }
       auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, str(iso, "code"), str(iso, code ? code : "EIO"));
-      (void)err->Set(ctx, str(iso, "errno"), Integer::New(iso, status));
+      (void)err->Set(ctx, "code"_v8(iso), str(iso, code ? code : "EIO"));
+      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, status));
       if (syscall)
-        (void)err->Set(ctx, str(iso, "syscall"), str(iso, syscall));
+        (void)err->Set(ctx, "syscall"_v8(iso), str(iso, syscall));
       if (!path.empty())
-        (void)err->Set(ctx, str(iso, "path"), str(iso, path));
+        (void)err->Set(ctx, "path"_v8(iso), str(iso, path));
       return err;
     }
 #endif
@@ -1444,8 +1445,8 @@ namespace fxe::js {
         msg.append(reason);
       }
       auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, str(iso, "name"), str(iso, "AbortError"));
-      (void)err->Set(ctx, str(iso, "code"), str(iso, "ABORT_ERR"));
+      (void)err->Set(ctx, "name"_v8(iso), "AbortError"_v8(iso));
+      (void)err->Set(ctx, "code"_v8(iso), "ABORT_ERR"_v8(iso));
       return err;
     }
 
@@ -1454,7 +1455,7 @@ namespace fxe::js {
       if (info.Length() <= index || !info[index]->IsObject())
         return Local<Object>();
       Local<Value> signal_value;
-      if (!info[index].As<Object>()->Get(ctx, str(iso, "signal")).ToLocal(&signal_value))
+      if (!info[index].As<Object>()->Get(ctx, "signal"_v8(iso)).ToLocal(&signal_value))
         return Local<Object>();
       if (!signal_value->IsObject())
         return Local<Object>();
@@ -1465,7 +1466,7 @@ namespace fxe::js {
       if (signal.IsEmpty())
         return false;
       Local<Value> aborted;
-      if (!signal->Get(ctx, str(iso, "aborted")).ToLocal(&aborted))
+      if (!signal->Get(ctx, "aborted"_v8(iso)).ToLocal(&aborted))
         return false;
       return aborted->BooleanValue(iso);
     }
@@ -1474,7 +1475,7 @@ namespace fxe::js {
       if (signal.IsEmpty())
         return {};
       Local<Value> reason;
-      if (!signal->Get(ctx, str(iso, "reason")).ToLocal(&reason) || reason->IsUndefined() ||
+      if (!signal->Get(ctx, "reason"_v8(iso)).ToLocal(&reason) || reason->IsUndefined() ||
           reason->IsNull())
         return {};
       return utf8(iso, reason);
@@ -1485,7 +1486,7 @@ namespace fxe::js {
       if (signal.IsEmpty())
         return;
       Local<Value> add_value;
-      if (!signal->Get(ctx, str(iso, "addEventListener")).ToLocal(&add_value) ||
+      if (!signal->Get(ctx, "addEventListener"_v8(iso)).ToLocal(&add_value) ||
           !add_value->IsFunction())
         return;
       auto* listener_ctx = new fs_abort_listener_ctx{work.cancel, nullptr};
@@ -1508,7 +1509,7 @@ namespace fxe::js {
         return;
       }
       auto listener = listener_maybe.ToLocalChecked();
-      Local<Value> argv[] = {str(iso, "abort"), listener};
+      Local<Value> argv[] = {"abort"_v8(iso), listener};
       TryCatch try_catch(iso);
       Local<Value> ignored;
       (void)add_value.As<Function>()->Call(ctx, signal, 2, argv).ToLocal(&ignored);
@@ -1529,14 +1530,14 @@ namespace fxe::js {
         return;
       auto signal = work.signal.Get(iso);
       Local<Value> remove_value;
-      if (!signal->Get(ctx, str(iso, "removeEventListener")).ToLocal(&remove_value) ||
+      if (!signal->Get(ctx, "removeEventListener"_v8(iso)).ToLocal(&remove_value) ||
           !remove_value->IsFunction()) {
         work.abort_listener.Reset();
         work.signal.Reset();
         return;
       }
       auto listener = work.abort_listener.Get(iso);
-      Local<Value> argv[] = {str(iso, "abort"), listener};
+      Local<Value> argv[] = {"abort"_v8(iso), listener};
       TryCatch try_catch(iso);
       Local<Value> ignored;
       (void)remove_value.As<Function>()->Call(ctx, signal, 2, argv).ToLocal(&ignored);
@@ -1865,7 +1866,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "readFile(path, opts?)"))));
+            rejected(iso, ctx, Exception::TypeError("readFile(path, opts?)"_v8(iso))));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1882,7 +1883,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "writeFile(path, data)"))));
+            rejected(iso, ctx, Exception::TypeError("writeFile(path, data)"_v8(iso))));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1891,8 +1892,8 @@ namespace fxe::js {
       auto work = make_work(append ? fs_async_kind::append_file : fs_async_kind::write_file, p,
                             append ? "appendFile" : "writeFile");
       if (!extract_data(iso, info[1], work->data)) {
-        info.GetReturnValue().Set(rejected(
-            iso, ctx, Exception::TypeError(str(iso, "data must be string or TypedArray"))));
+        info.GetReturnValue().Set(
+            rejected(iso, ctx, Exception::TypeError("data must be string or TypedArray"_v8(iso))));
         return;
       }
       queue_fs_async(info, std::move(work), signal_from_options(iso, ctx, info, 2));
@@ -1909,7 +1910,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError(str(iso, "stat(path)"))));
+        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("stat(path)"_v8(iso))));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1925,7 +1926,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "readdir(path)"))));
+            rejected(iso, ctx, Exception::TypeError("readdir(path)"_v8(iso))));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1942,8 +1943,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "mkdir(path)"))));
+        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("mkdir(path)"_v8(iso))));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1959,7 +1959,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError(str(iso, "rm(path)"))));
+        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("rm(path)"_v8(iso))));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1977,7 +1977,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "rename(from, to)"))));
+            rejected(iso, ctx, Exception::TypeError("rename(from, to)"_v8(iso))));
         return;
       }
       auto from = utf8(iso, info[0]);
@@ -1995,7 +1995,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "realpath(path)"))));
+            rejected(iso, ctx, Exception::TypeError("realpath(path)"_v8(iso))));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -2022,7 +2022,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "copyFile(src, dest)"))));
+            rejected(iso, ctx, Exception::TypeError("copyFile(src, dest)"_v8(iso))));
         return;
       }
       auto src = utf8(iso, info[0]);
@@ -2040,7 +2040,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "cp(src, dest, opts?)"))));
+            rejected(iso, ctx, Exception::TypeError("cp(src, dest, opts?)"_v8(iso))));
         return;
       }
       auto src = utf8(iso, info[0]);
@@ -2060,7 +2060,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "symlink(target, path, type?)"))));
+            rejected(iso, ctx, Exception::TypeError("symlink(target, path, type?)"_v8(iso))));
         return;
       }
       auto target = utf8(iso, info[0]);
@@ -2084,7 +2084,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "link(existing, path)"))));
+            rejected(iso, ctx, Exception::TypeError("link(existing, path)"_v8(iso))));
         return;
       }
       auto existing = utf8(iso, info[0]);
@@ -2102,7 +2102,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "access(path, mode?)"))));
+            rejected(iso, ctx, Exception::TypeError("access(path, mode?)"_v8(iso))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2123,7 +2123,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "chmod(path, mode)"))));
+            rejected(iso, ctx, Exception::TypeError("chmod(path, mode)"_v8(iso))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2140,7 +2140,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "lchmod(path, mode)"))));
+            rejected(iso, ctx, Exception::TypeError("lchmod(path, mode)"_v8(iso))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2157,7 +2157,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "chown(path, uid, gid)"))));
+            rejected(iso, ctx, Exception::TypeError("chown(path, uid, gid)"_v8(iso))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2204,7 +2204,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "writeFileAtomic(path, data)"))));
+            rejected(iso, ctx, Exception::TypeError("writeFileAtomic(path, data)"_v8(iso))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2212,8 +2212,8 @@ namespace fxe::js {
         return;
       auto work = make_work(fs_async_kind::write_file_atomic, path, "writeFileAtomic");
       if (!extract_data(iso, info[1], work->data)) {
-        info.GetReturnValue().Set(rejected(
-            iso, ctx, Exception::TypeError(str(iso, "data must be string or TypedArray"))));
+        info.GetReturnValue().Set(
+            rejected(iso, ctx, Exception::TypeError("data must be string or TypedArray"_v8(iso))));
         return;
       }
       queue_fs_async(info, std::move(work), signal_from_options(iso, ctx, info, 2));
@@ -2225,7 +2225,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsInt32()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "lock(fd, opts?)"))));
+            rejected(iso, ctx, Exception::TypeError("lock(fd, opts?)"_v8(iso))));
         return;
       }
       auto work = make_work(fs_async_kind::lock, "", "flock");
@@ -2241,7 +2241,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsInt32()) {
-        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError(str(iso, "unlock(fd)"))));
+        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("unlock(fd)"_v8(iso))));
         return;
       }
       auto work = make_work(fs_async_kind::unlock, "", "flock");
@@ -2255,7 +2255,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "readlink(path)"))));
+            rejected(iso, ctx, Exception::TypeError("readlink(path)"_v8(iso))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2270,8 +2270,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(
-            rejected(iso, ctx, Exception::TypeError(str(iso, "lstat(path)"))));
+        info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("lstat(path)"_v8(iso))));
         return;
       }
       auto path = utf8(iso, info[0]);
@@ -2338,7 +2337,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "watch(path[, options], listener)")));
+        iso->ThrowException(Exception::TypeError("watch(path[, options], listener)"_v8(iso)));
         return;
       }
 
@@ -2353,7 +2352,7 @@ namespace fxe::js {
           callback = info[2];
       }
       if (callback.IsEmpty() || !callback->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "watch listener must be a function")));
+        iso->ThrowException(Exception::TypeError("watch listener must be a function"_v8(iso)));
         return;
       }
 
@@ -2363,7 +2362,7 @@ namespace fxe::js {
       bool recursive = false;
       if (!options->IsUndefined() && options->IsObject()) {
         Local<Value> recursive_value;
-        if (options.As<Object>()->Get(ctx, str(iso, "recursive")).ToLocal(&recursive_value))
+        if (options.As<Object>()->Get(ctx, "recursive"_v8(iso)).ToLocal(&recursive_value))
           recursive = recursive_value->BooleanValue(iso);
       }
 

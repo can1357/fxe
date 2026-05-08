@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <fxe/v8_strings.hpp>
 #include <iterator>
 #include <mutex>
 #include <string>
@@ -176,14 +177,14 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "powerMonitor.on requires an event string and callback")));
+            Exception::TypeError("powerMonitor.on requires an event string and callback"_v8(iso)));
         return;
       }
 
       std::string event = to_str(iso, info[0]);
       if (!valid_event(event)) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "powerMonitor.on received an unknown event")));
+            Exception::TypeError("powerMonitor.on received an unknown event"_v8(iso)));
         return;
       }
 
@@ -224,27 +225,27 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsObject()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.power.inhibitSleep requires an options object")));
+            Exception::TypeError("App.power.inhibitSleep requires an options object"_v8(iso)));
         return;
       }
       auto options = info[0].As<Object>();
       Local<Value> reason_value;
       Local<Value> what_value;
-      if (!options->Get(ctx, s(iso, "reason")).ToLocal(&reason_value) ||
+      if (!options->Get(ctx, "reason"_v8(iso)).ToLocal(&reason_value) ||
           !reason_value->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.power.inhibitSleep requires options.reason")));
+            Exception::TypeError("App.power.inhibitSleep requires options.reason"_v8(iso)));
         return;
       }
       std::string reason = to_str(iso, reason_value);
       if (reason.empty()) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.power.inhibitSleep requires a non-empty options.reason")));
+            "App.power.inhibitSleep requires a non-empty options.reason"_v8(iso)));
         return;
       }
-      if (!options->Get(ctx, s(iso, "what")).ToLocal(&what_value) || !what_value->IsString()) {
+      if (!options->Get(ctx, "what"_v8(iso)).ToLocal(&what_value) || !what_value->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.power.inhibitSleep requires options.what")));
+            Exception::TypeError("App.power.inhibitSleep requires options.what"_v8(iso)));
         return;
       }
       std::string what = to_str(iso, what_value);
@@ -255,13 +256,13 @@ namespace fxe::js {
         kind = fxe::os::sleep_inhibit_kind::sleep;
       } else {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.power.inhibitSleep options.what must be 'idle' or 'sleep'")));
+            "App.power.inhibitSleep options.what must be 'idle' or 'sleep'"_v8(iso)));
         return;
       }
 
       auto handle = fxe::os::inhibit_sleep(reason, kind);
       if (!handle) {
-        iso->ThrowException(Exception::Error(s(iso, "App.power.inhibitSleep failed")));
+        iso->ThrowException(Exception::Error("App.power.inhibitSleep failed"_v8(iso)));
         return;
       }
       uint32_t id = g_next_inhibit.fetch_add(1);
@@ -286,18 +287,18 @@ namespace fxe::js {
     set_fn("isOnBattery", is_on_battery);
     set_fn("isOnline", is_online);
     set_fn("systemIdleSeconds", system_idle_seconds);
-    (void)appObj->Set(ctx, s(iso, "powerMonitor"), power);
-    (void)ctx->Global()->Set(ctx, s(iso, "powerMonitor"), power);
+    (void)appObj->Set(ctx, "powerMonitor"_v8(iso), power);
+    (void)ctx->Global()->Set(ctx, "powerMonitor"_v8(iso), power);
 
     Local<Object> power_api;
     Local<Value> existing_power;
-    if (appObj->Get(ctx, s(iso, "power")).ToLocal(&existing_power) && existing_power->IsObject()) {
+    if (appObj->Get(ctx, "power"_v8(iso)).ToLocal(&existing_power) && existing_power->IsObject()) {
       power_api = existing_power.As<Object>();
     } else {
       power_api = Object::New(iso);
-      (void)appObj->Set(ctx, s(iso, "power"), power_api);
+      (void)appObj->Set(ctx, "power"_v8(iso), power_api);
     }
-    (void)power_api->Set(ctx, s(iso, "inhibitSleep"),
+    (void)power_api->Set(ctx, "inhibitSleep"_v8(iso),
                          Function::New(ctx, power_inhibit_sleep).ToLocalChecked());
   }
 } // namespace fxe::js

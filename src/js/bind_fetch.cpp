@@ -115,14 +115,14 @@ namespace fxe::js {
       std::string msg = "Permission denied: ";
       msg.append(what);
       auto err = Exception::Error(s8(iso, msg)).As<Object>();
-      (void)err->Set(iso->GetCurrentContext(), s8(iso, "name"), s8(iso, "PermissionDenied"));
+      (void)err->Set(iso->GetCurrentContext(), "name"_v8(iso), "PermissionDenied"_v8(iso));
       return err;
     }
 
     Local<Value> make_named_error(Isolate* iso, std::string_view name, std::string_view message) {
       std::string msg(message);
       auto err = Exception::Error(s8(iso, msg)).As<Object>();
-      (void)err->Set(iso->GetCurrentContext(), s8(iso, "name"), s8(iso, std::string(name)));
+      (void)err->Set(iso->GetCurrentContext(), "name"_v8(iso), s8(iso, std::string(name)));
       return err;
     }
 
@@ -670,10 +670,7 @@ namespace fxe::js {
                      .ToLocalChecked();
       Local<Value> parsed;
       if (!JSON::Parse(ctx, src).ToLocal(&parsed)) {
-        resolver
-            ->Reject(ctx,
-                     Exception::SyntaxError("JSON parse failed"_v8(iso)))
-            .Check();
+        resolver->Reject(ctx, Exception::SyntaxError("JSON parse failed"_v8(iso))).Check();
       } else {
         resolver->Resolve(ctx, parsed).Check();
       }
@@ -699,20 +696,18 @@ namespace fxe::js {
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto init = info[1].As<Object>();
         Local<Value> v;
-        if (init->Get(ctx, "status"_v8(iso)).ToLocal(&v) &&
-            !v->IsUndefined()) {
+        if (init->Get(ctx, "status"_v8(iso)).ToLocal(&v) && !v->IsUndefined()) {
           auto status = v->Int32Value(ctx).FromMaybe(200);
           if (status < 200 || status > 599) {
-            iso->ThrowException(Exception::RangeError("Response: status must be in the range 200 to 599"_v8(iso)));
+            iso->ThrowException(
+                Exception::RangeError("Response: status must be in the range 200 to 599"_v8(iso)));
             return;
           }
           d->status = status;
         }
-        if (init->Get(ctx, "statusText"_v8(iso)).ToLocal(&v) &&
-            !v->IsUndefined())
+        if (init->Get(ctx, "statusText"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
           d->status_text = to_str(iso, v);
-        if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) &&
-            !v->IsUndefined())
+        if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
           headers_populate_from_value(iso, ctx, v, *h_data);
       }
       d->headers_obj.Reset(iso, wrap_headers(iso, ctx, std::move(h_data)));
@@ -760,17 +755,14 @@ namespace fxe::js {
         return true;
       auto init = init_v.As<Object>();
       Local<Value> v;
-      if (init->Get(ctx, "method"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined())
+      if (init->Get(ctx, "method"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
         req.method = to_str(iso, v);
-      if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined()) {
+      if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) && !v->IsUndefined()) {
         auto h_data = std::make_unique<headers_data>();
         headers_populate_from_value(iso, ctx, v, *h_data);
         req.headers_obj.Reset(iso, wrap_headers(iso, ctx, std::move(h_data)));
       }
-      if (init->Get(ctx, "body"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined() && !v->IsNull()) {
+      if (init->Get(ctx, "body"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull()) {
         if (v->IsString()) {
           req.body = to_str(iso, v);
         } else if (v->IsArrayBuffer()) {
@@ -788,8 +780,7 @@ namespace fxe::js {
           // streaming body, which v0 explicitly does not support.
           auto o = v.As<Object>();
           Local<Value> getter;
-          if (o->Get(ctx, "getReader"_v8(iso)).ToLocal(&getter) &&
-              getter->IsFunction()) {
+          if (o->Get(ctx, "getReader"_v8(iso)).ToLocal(&getter) && getter->IsFunction()) {
             *throw_stream = true;
             return false;
           }
@@ -803,14 +794,11 @@ namespace fxe::js {
       }
       if (init->Get(ctx, "signal"_v8(iso)).ToLocal(&v) && v->IsObject())
         req.signal_obj.Reset(iso, v.As<Object>());
-      if (init->Get(ctx, "proxy"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined() && !v->IsNull())
+      if (init->Get(ctx, "proxy"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull())
         req.proxy = to_str(iso, v);
-      if (init->Get(ctx, "range"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined() && !v->IsNull())
+      if (init->Get(ctx, "range"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull())
         req.range = to_str(iso, v);
-      if (init->Get(ctx, "timeout_ms"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined() && !v->IsNull())
+      if (init->Get(ctx, "timeout_ms"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull())
         req.timeout_ms = v->Int32Value(ctx).FromMaybe(0);
       return true;
     }
@@ -974,15 +962,9 @@ namespace fxe::js {
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull())
         net::http_client::instance().set_cookie_file_path(to_str(iso, info[0]));
       auto obj = Object::New(iso);
-      obj->Set(ctx, "set"_v8(iso),
-               Function::New(ctx, cookie_jar_set).ToLocalChecked())
-          .Check();
-      obj->Set(ctx, "get"_v8(iso),
-               Function::New(ctx, cookie_jar_get).ToLocalChecked())
-          .Check();
-      obj->Set(ctx, "clear"_v8(iso),
-               Function::New(ctx, cookie_jar_clear).ToLocalChecked())
-          .Check();
+      obj->Set(ctx, "set"_v8(iso), Function::New(ctx, cookie_jar_set).ToLocalChecked()).Check();
+      obj->Set(ctx, "get"_v8(iso), Function::New(ctx, cookie_jar_get).ToLocalChecked()).Check();
+      obj->Set(ctx, "clear"_v8(iso), Function::New(ctx, cookie_jar_clear).ToLocalChecked()).Check();
       info.GetReturnValue().Set(obj);
     }
 
@@ -993,10 +975,7 @@ namespace fxe::js {
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       info.GetReturnValue().Set(resolver->GetPromise());
       if (info.Length() < 1) {
-        resolver
-            ->Reject(ctx,
-                     Exception::TypeError("fetch: missing url"_v8(iso)))
-            .Check();
+        resolver->Reject(ctx, Exception::TypeError("fetch: missing url"_v8(iso))).Check();
         return;
       }
 
@@ -1034,7 +1013,8 @@ namespace fxe::js {
         if (!extract_init(iso, ctx, info[1], scratch, &body_str, &throw_stream)) {
           if (throw_stream) {
             resolver
-                ->Reject(ctx, Exception::TypeError("fetch: ReadableStream body is not supported in v0"_v8(iso)))
+                ->Reject(ctx, Exception::TypeError(
+                                  "fetch: ReadableStream body is not supported in v0"_v8(iso)))
                 .Check();
             return;
           }
@@ -1062,9 +1042,7 @@ namespace fxe::js {
       }
 
       if (hreq.url.empty()) {
-        resolver
-            ->Reject(ctx, Exception::TypeError("fetch: empty url"_v8(iso)))
-            .Check();
+        resolver->Reject(ctx, Exception::TypeError("fetch: empty url"_v8(iso))).Check();
         return;
       }
 
@@ -1174,8 +1152,7 @@ namespace fxe::js {
     rsptpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto rspinst = rsptpl->InstanceTemplate();
     rspinst->SetNativeDataProperty("status"_v8(iso), resp_get_status);
-    rspinst->SetNativeDataProperty("statusText"_v8(iso),
-                                   resp_get_status_text);
+    rspinst->SetNativeDataProperty("statusText"_v8(iso), resp_get_status_text);
     rspinst->SetNativeDataProperty("ok"_v8(iso), resp_get_ok);
     rspinst->SetNativeDataProperty("url"_v8(iso), resp_get_url);
     rspinst->SetNativeDataProperty("headers"_v8(iso), resp_get_headers);
@@ -1195,10 +1172,8 @@ namespace fxe::js {
     sigtpl->SetClassName("AbortSignal"_v8(iso));
     sigtpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto siginst = sigtpl->InstanceTemplate();
-    siginst->SetNativeDataProperty("aborted"_v8(iso),
-                                   abort_signal_get_aborted);
-    siginst->SetNativeDataProperty("reason"_v8(iso),
-                                   abort_signal_get_reason);
+    siginst->SetNativeDataProperty("aborted"_v8(iso), abort_signal_get_aborted);
+    siginst->SetNativeDataProperty("reason"_v8(iso), abort_signal_get_reason);
     auto sigproto = sigtpl->PrototypeTemplate();
     sigtpl->Set(iso, "abort", FunctionTemplate::New(iso, abort_signal_abort_static));
     sigproto->Set(iso, "addEventListener", FunctionTemplate::New(iso, abort_signal_add_listener));

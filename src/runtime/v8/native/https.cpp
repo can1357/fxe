@@ -10,6 +10,7 @@
 #include <charconv>
 #include <cstdint>
 #include <deque>
+#include <fxe/v8_strings.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -817,15 +818,15 @@ namespace fxe::runtime {
   void install_native_https(Isolate* iso, Local<Context> ctx) {
     Local<Value> native_value;
     Local<Object> native;
-    if (ctx->Global()->Get(ctx, str(iso, "__fxe_native")).ToLocal(&native_value) &&
+    if (ctx->Global()->Get(ctx, "__fxe_native"_v8(iso)).ToLocal(&native_value) &&
         native_value->IsObject()) {
       native = native_value.As<Object>();
     } else {
       native = Object::New(iso);
-      (void)ctx->Global()->DefineOwnProperty(ctx, str(iso, "__fxe_native"), native,
+      (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
                                              static_cast<PropertyAttribute>(DontEnum));
     }
-    (void)native->Set(ctx, str(iso, "https"), make_https_namespace(iso, ctx));
+    (void)native->Set(ctx, "https"_v8(iso), make_https_namespace(iso, ctx));
   }
 
 } // namespace fxe::runtime

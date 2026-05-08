@@ -1,6 +1,7 @@
 #include "bind_menu.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/v8_strings.hpp>
 #include <memory>
 #include <string>
 #include <v8.h>
@@ -31,19 +32,19 @@ namespace fxe::js {
       auto obj = el.As<Object>();
       fxe::os::menu_item it;
       Local<Value> v;
-      if (obj->Get(ctx, s(iso, "id")).ToLocal(&v))
+      if (obj->Get(ctx, "id"_v8(iso)).ToLocal(&v))
         it.id = to_str(iso, v);
-      if (obj->Get(ctx, s(iso, "label")).ToLocal(&v))
+      if (obj->Get(ctx, "label"_v8(iso)).ToLocal(&v))
         it.label = to_str(iso, v);
-      if (obj->Get(ctx, s(iso, "accelerator")).ToLocal(&v))
+      if (obj->Get(ctx, "accelerator"_v8(iso)).ToLocal(&v))
         it.accelerator = to_str(iso, v);
-      if (obj->Get(ctx, s(iso, "type")).ToLocal(&v) && v->IsString())
+      if (obj->Get(ctx, "type"_v8(iso)).ToLocal(&v) && v->IsString())
         it.type = to_str(iso, v);
-      if (obj->Get(ctx, s(iso, "enabled")).ToLocal(&v) && !v->IsUndefined())
+      if (obj->Get(ctx, "enabled"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
         it.enabled = v->BooleanValue(iso);
-      if (obj->Get(ctx, s(iso, "checked")).ToLocal(&v))
+      if (obj->Get(ctx, "checked"_v8(iso)).ToLocal(&v))
         it.checked = v->BooleanValue(iso);
-      if (obj->Get(ctx, s(iso, "submenu")).ToLocal(&v))
+      if (obj->Get(ctx, "submenu"_v8(iso)).ToLocal(&v))
         parse_menu_items(iso, ctx, v, it.submenu);
       out.push_back(std::move(it));
     }
@@ -52,15 +53,15 @@ namespace fxe::js {
   bool parse_menu_item_patch(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                              fxe::os::menu_item_patch& out) {
     Local<Value> v;
-    if (obj->Get(ctx, s(iso, "label")).ToLocal(&v) && !v->IsUndefined())
+    if (obj->Get(ctx, "label"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
       out.label = to_str(iso, v);
-    if (obj->Get(ctx, s(iso, "enabled")).ToLocal(&v) && !v->IsUndefined())
+    if (obj->Get(ctx, "enabled"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
       out.enabled = v->BooleanValue(iso);
-    if (obj->Get(ctx, s(iso, "checked")).ToLocal(&v) && !v->IsUndefined())
+    if (obj->Get(ctx, "checked"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
       out.checked = v->BooleanValue(iso);
-    if (obj->Get(ctx, s(iso, "visible")).ToLocal(&v) && !v->IsUndefined())
+    if (obj->Get(ctx, "visible"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
       out.visible = v->BooleanValue(iso);
-    if (obj->Get(ctx, s(iso, "accelerator")).ToLocal(&v) && !v->IsUndefined())
+    if (obj->Get(ctx, "accelerator"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
       out.accelerator = to_str(iso, v);
     return true;
   }
@@ -123,7 +124,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       Local<Value> id_v;
-      if (!info.This()->Get(ctx, s(iso, "id")).ToLocal(&id_v))
+      if (!info.This()->Get(ctx, "id"_v8(iso)).ToLocal(&id_v))
         return {};
       return to_str(iso, id_v);
     }
@@ -168,18 +169,18 @@ namespace fxe::js {
       }
       auto obj = Object::New(iso);
       (void)obj->Set(
-          ctx, s(iso, "id"),
+          ctx, "id"_v8(iso),
           String::NewFromUtf8(iso, id.data(), NewStringType::kNormal, static_cast<int>(id.size()))
               .ToLocalChecked());
-      (void)obj->Set(ctx, s(iso, "setLabel"),
+      (void)obj->Set(ctx, "setLabel"_v8(iso),
                      Function::New(ctx, menu_item_set_label).ToLocalChecked());
-      (void)obj->Set(ctx, s(iso, "setEnabled"),
+      (void)obj->Set(ctx, "setEnabled"_v8(iso),
                      Function::New(ctx, menu_item_set_enabled).ToLocalChecked());
-      (void)obj->Set(ctx, s(iso, "setChecked"),
+      (void)obj->Set(ctx, "setChecked"_v8(iso),
                      Function::New(ctx, menu_item_set_checked).ToLocalChecked());
-      (void)obj->Set(ctx, s(iso, "setVisible"),
+      (void)obj->Set(ctx, "setVisible"_v8(iso),
                      Function::New(ctx, menu_item_set_visible).ToLocalChecked());
-      (void)obj->Set(ctx, s(iso, "setAccelerator"),
+      (void)obj->Set(ctx, "setAccelerator"_v8(iso),
                      Function::New(ctx, menu_item_set_accelerator).ToLocalChecked());
       info.GetReturnValue().Set(obj);
     }

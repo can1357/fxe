@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <fxe/v8_strings.hpp>
 #include <string>
 #include <v8.h>
 #include <vector>
@@ -46,7 +47,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsObject()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.crashReporter.start requires an options object")));
+            Exception::TypeError("App.crashReporter.start requires an options object"_v8(iso)));
         return;
       }
 
@@ -55,7 +56,7 @@ namespace fxe::js {
       opts.product_name = get_optional_string(iso, ctx, opts_obj, "productName");
       if (opts.product_name.empty()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.crashReporter.start requires options.productName")));
+            Exception::TypeError("App.crashReporter.start requires options.productName"_v8(iso)));
         return;
       }
       opts.product_version = get_optional_string(iso, ctx, opts_obj, "productVersion");
@@ -101,15 +102,15 @@ namespace fxe::js {
   void install_crash_reporter_to(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
     HandleScope hs(iso);
     auto reporter = Object::New(iso);
-    (void)reporter->Set(ctx, s(iso, "start"), Function::New(ctx, crash_start_cb).ToLocalChecked());
-    (void)reporter->Set(ctx, s(iso, "listDumps"),
+    (void)reporter->Set(ctx, "start"_v8(iso), Function::New(ctx, crash_start_cb).ToLocalChecked());
+    (void)reporter->Set(ctx, "listDumps"_v8(iso),
                         Function::New(ctx, crash_list_dumps_cb).ToLocalChecked());
-    (void)reporter->Set(ctx, s(iso, "getLastDumpPath"),
+    (void)reporter->Set(ctx, "getLastDumpPath"_v8(iso),
                         Function::New(ctx, crash_get_last_dump_path_cb).ToLocalChecked());
-    (void)reporter->Set(ctx, s(iso, "selfTest"),
+    (void)reporter->Set(ctx, "selfTest"_v8(iso),
                         Function::New(ctx, crash_self_test_cb).ToLocalChecked());
-    (void)appObj->Set(ctx, s(iso, "crashReporter"), reporter);
-    (void)appObj->Set(ctx, s(iso, "crashReport"), reporter);
+    (void)appObj->Set(ctx, "crashReporter"_v8(iso), reporter);
+    (void)appObj->Set(ctx, "crashReport"_v8(iso), reporter);
 #ifndef NDEBUG
     if (const char* enabled = std::getenv("FXE_CRASH_SELF_TEST");
         enabled && std::string(enabled) == "1") {

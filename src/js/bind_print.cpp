@@ -37,17 +37,14 @@ namespace fxe::js {
       return nullptr;
     }
 
-    bool get_u32_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* primary,
-                      const char* fallback, u32& out) {
+    bool get_u32_prop(Local<Context> ctx, Local<Object> obj, Local<String> primary,
+                      Local<String> fallback, u32& out) {
       Local<Value> v;
-      if (obj->Get(ctx, String::NewFromUtf8(iso, primary).ToLocalChecked()).ToLocal(&v) &&
-          !v->IsUndefined()) {
+      if (obj->Get(ctx, primary).ToLocal(&v) && !v->IsUndefined()) {
         out = v->Uint32Value(ctx).FromMaybe(0);
         return out > 0;
       }
-      if (fallback &&
-          obj->Get(ctx, String::NewFromUtf8(iso, fallback).ToLocalChecked()).ToLocal(&v) &&
-          !v->IsUndefined()) {
+      if (obj->Get(ctx, fallback).ToLocal(&v) && !v->IsUndefined()) {
         out = v->Uint32Value(ctx).FromMaybe(0);
         return out > 0;
       }
@@ -74,8 +71,8 @@ namespace fxe::js {
         }
         auto page_obj = page_value.As<Object>();
         pdf_page page;
-        if (!get_u32_prop(iso, ctx, page_obj, "widthPt", "width", page.width_pt) ||
-            !get_u32_prop(iso, ctx, page_obj, "heightPt", "height", page.height_pt)) {
+        if (!get_u32_prop(ctx, page_obj, "widthPt"_v8(iso), "width"_v8(iso), page.width_pt) ||
+            !get_u32_prop(ctx, page_obj, "heightPt"_v8(iso), "height"_v8(iso), page.height_pt)) {
           throw_type(iso, "Print.toPdf: page requires widthPt/heightPt");
           return;
         }

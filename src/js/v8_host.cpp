@@ -140,8 +140,7 @@ namespace fxe::js {
 
       v8::Local<v8::Object> error = value.As<v8::Object>();
       v8::Local<v8::Value> stack;
-      if (error->Get(ctx, "stack"_v8(iso)).ToLocal(&stack) &&
-          stack->IsString()) {
+      if (error->Get(ctx, "stack"_v8(iso)).ToLocal(&stack) && stack->IsString()) {
         auto rendered = to_std_string(iso, stack);
         if (!rendered.empty())
           return rendered;
@@ -568,14 +567,12 @@ namespace fxe::js {
     v8::TryCatch tc(iso);
     auto global = ctx->Global();
     v8::Local<v8::Value> hmr_value;
-    if (!global->Get(ctx, "__fxe_hmr"_v8(iso)).ToLocal(&hmr_value) ||
-        !hmr_value->IsObject()) {
+    if (!global->Get(ctx, "__fxe_hmr"_v8(iso)).ToLocal(&hmr_value) || !hmr_value->IsObject()) {
       return {false, "__fxe_hmr is not an object"};
     }
     auto hmr = hmr_value.As<v8::Object>();
     v8::Local<v8::Value> fire_value;
-    if (!hmr->Get(ctx, "fire"_v8(iso)).ToLocal(&fire_value) ||
-        !fire_value->IsFunction()) {
+    if (!hmr->Get(ctx, "fire"_v8(iso)).ToLocal(&fire_value) || !fire_value->IsFunction()) {
       return {false, "__fxe_hmr.fire is not a function"};
     }
     auto fire = fire_value.As<v8::Function>();
@@ -702,7 +699,7 @@ namespace fxe::js {
     v8::Isolate::Scope is(iso);
     v8::HandleScope hs(iso);
     if (p_->cpu_profile_active) {
-      if (auto* profile = p_->cpu_profiler->StopProfiling(str(iso, "fxe")))
+      if (auto* profile = p_->cpu_profiler->StopProfiling("fxe"_v8(iso)))
         profile->Delete();
       p_->cpu_profile_active = false;
     }
@@ -722,7 +719,7 @@ namespace fxe::js {
     }
     if (p_->cpu_profile_active)
       return {true, {}, {}};
-    auto status = p_->cpu_profiler->StartProfiling(str(iso, "fxe"), v8::kLeafNodeLineNumbers,
+    auto status = p_->cpu_profiler->StartProfiling("fxe"_v8(iso), v8::kLeafNodeLineNumbers,
                                                    /*record_samples*/ true);
     if (status == v8::CpuProfilingStatus::kErrorTooManyProfilers)
       return {false, {}, "V8 refused to start CPU profiling: too many active profilers"};
@@ -738,7 +735,7 @@ namespace fxe::js {
     v8::HandleScope hs(iso);
     if (!p_->cpu_profiler)
       return {false, {}, "CPU profiler is not enabled"};
-    auto* profile = p_->cpu_profiler->StopProfiling(str(iso, "fxe"));
+    auto* profile = p_->cpu_profiler->StopProfiling("fxe"_v8(iso));
     p_->cpu_profile_active = false;
     if (!profile)
       return {false, {}, "CPU profile was not active"};
@@ -1114,14 +1111,10 @@ namespace fxe::js {
       std::string dirname = normalize_slashes(fp.parent_path().string());
       std::string filename = normalize_slashes(fp.string());
       bool is_main = p && !p->entry_path.empty() && p->entry_path == path;
-      (void)meta->CreateDataProperty(ctx, "url"_v8(iso),
-                                     str(iso, url));
-      (void)meta->CreateDataProperty(ctx, "dirname"_v8(iso),
-                                     str(iso, dirname));
-      (void)meta->CreateDataProperty(ctx, "filename"_v8(iso),
-                                     str(iso, filename));
-      (void)meta->CreateDataProperty(ctx, "main"_v8(iso),
-                                     v8::Boolean::New(iso, is_main));
+      (void)meta->CreateDataProperty(ctx, "url"_v8(iso), str(iso, url));
+      (void)meta->CreateDataProperty(ctx, "dirname"_v8(iso), str(iso, dirname));
+      (void)meta->CreateDataProperty(ctx, "filename"_v8(iso), str(iso, filename));
+      (void)meta->CreateDataProperty(ctx, "main"_v8(iso), v8::Boolean::New(iso, is_main));
     }
 
     constexpr const char k_prepare_stack_trace_js[] = R"JS(
@@ -1617,7 +1610,7 @@ Error.prepareStackTrace = function(err, frames) {
       auto ctx = iso->GetCurrentContext();
       auto* p = static_cast<host::impl*>(iso->GetData(kIsolateSlotHostImpl));
       if (args.Length() < 1) {
-        iso->ThrowError(str(iso, "__fxe_hmr_reload expects a module path"));
+        iso->ThrowError("__fxe_hmr_reload expects a module path"_v8(iso));
         return;
       }
       std::string error;
@@ -1874,23 +1867,18 @@ Error.prepareStackTrace = function(err, frames) {
       (void)console_obj->Set(ctx, "error"_v8(isolate), fn_err);
       (void)console_obj->Set(ctx, "info"_v8(isolate), fn);
       (void)console_obj->Set(ctx, "debug"_v8(isolate), fn);
-      (void)ctx->Global()->Set(ctx, "console"_v8(isolate),
-                               console_obj);
+      (void)ctx->Global()->Set(ctx, "console"_v8(isolate), console_obj);
 
       // performance.now() — monotonic ms since the host's first init.
       auto perf_now = v8::Function::New(ctx, performance_now_callback).ToLocalChecked();
       auto performance_obj = v8::Object::New(isolate);
       (void)performance_obj->Set(ctx, "now"_v8(isolate), perf_now);
-      (void)ctx->Global()->Set(ctx, "performance"_v8(isolate),
-                               performance_obj);
+      (void)ctx->Global()->Set(ctx, "performance"_v8(isolate), performance_obj);
 
       if (!worker_mode) {
         // App extras (OS shims layered onto the existing App global).
         v8::Local<v8::Value> appv;
-        if (ctx->Global()
-                ->Get(ctx, "App"_v8(isolate))
-                .ToLocal(&appv) &&
-            appv->IsObject()) {
+        if (ctx->Global()->Get(ctx, "App"_v8(isolate)).ToLocal(&appv) && appv->IsObject()) {
           install_app_extras_to(isolate, ctx, appv.As<v8::Object>());
           install_power_monitor_to(isolate, ctx, appv.As<v8::Object>());
           install_crash_reporter_to(isolate, ctx, appv.As<v8::Object>());
@@ -1900,34 +1888,24 @@ Error.prepareStackTrace = function(err, frames) {
       }
 
       auto hmr_reload = v8::Function::New(ctx, hmr_reload_callback).ToLocalChecked();
-      (void)ctx->Global()->Set(ctx, "__fxe_hmr_reload"_v8(isolate),
-                               hmr_reload);
+      (void)ctx->Global()->Set(ctx, "__fxe_hmr_reload"_v8(isolate), hmr_reload);
       // HMR registry plus polling watch bridge. When a fired path is present in
       // the module cache, __fxe_hmr reloads that module before user handlers run.
       (void)install_fxe_hmr_runtime(isolate, ctx);
 
       auto vertex_topology = v8::Object::New(isolate);
-      (void)vertex_topology->Set(ctx, "Triangle"_v8(isolate),
-                                 v8::Integer::New(isolate, 0));
-      (void)vertex_topology->Set(ctx, "Line"_v8(isolate),
-                                 v8::Integer::New(isolate, 1));
-      (void)ctx->Global()->Set(ctx, "VertexTopology"_v8(isolate),
-                               vertex_topology);
+      (void)vertex_topology->Set(ctx, "Triangle"_v8(isolate), v8::Integer::New(isolate, 0));
+      (void)vertex_topology->Set(ctx, "Line"_v8(isolate), v8::Integer::New(isolate, 1));
+      (void)ctx->Global()->Set(ctx, "VertexTopology"_v8(isolate), vertex_topology);
 
       if (!worker_mode) {
         // Build the synthetic `fxe` module exporting the engine globals. Each
         // entry is looked up on the global object at evaluation time so we never
         // duplicate constructor templates.
         std::array<v8::Local<v8::String>, 9> exports{
-            "Window"_v8(isolate),
-            "Renderer"_v8(isolate),
-            "OffscreenRenderer"_v8(isolate),
-            "Primitives"_v8(isolate),
-            "CommandBuffer"_v8(isolate),
-            "Monitors"_v8(isolate),
-            "App"_v8(isolate),
-            "Print"_v8(isolate),
-            "VertexTopology"_v8(isolate),
+            "Window"_v8(isolate),     "Renderer"_v8(isolate),      "OffscreenRenderer"_v8(isolate),
+            "Primitives"_v8(isolate), "CommandBuffer"_v8(isolate), "Monitors"_v8(isolate),
+            "App"_v8(isolate),        "Print"_v8(isolate),         "VertexTopology"_v8(isolate),
         };
         v8::MemorySpan<const v8::Local<v8::String>> exports_span(exports.data(), exports.size());
         auto module_name = "fxe"_v8(isolate);
@@ -1937,12 +1915,11 @@ Error.prepareStackTrace = function(err, frames) {
                 v8::Local<v8::Module> mod) -> v8::MaybeLocal<v8::Value> {
               auto* iso = v8::Isolate::GetCurrent();
               auto global = ctx->Global();
-              static constexpr const char* names[] = {
-                  "Window",     "Renderer",      "OffscreenRenderer",
-                  "Primitives", "CommandBuffer", "Monitors",
-                  "App",        "Print",         "VertexTopology"};
-              for (auto* n : names) {
-                auto key = v8::String::NewFromUtf8(iso, n).ToLocalChecked();
+              std::array<v8::Local<v8::String>, 9> names = {
+                  "Window"_v8(iso),     "Renderer"_v8(iso),      "OffscreenRenderer"_v8(iso),
+                  "Primitives"_v8(iso), "CommandBuffer"_v8(iso), "Monitors"_v8(iso),
+                  "App"_v8(iso),        "Print"_v8(iso),         "VertexTopology"_v8(iso)};
+              for (auto key : names) {
                 v8::Local<v8::Value> val;
                 if (!global->Get(ctx, key).ToLocal(&val)) {
                   return v8::MaybeLocal<v8::Value>();
@@ -1974,11 +1951,9 @@ Error.prepareStackTrace = function(err, frames) {
 
       // Install __fxe_remap_frame native + Error.prepareStackTrace JS.
       auto remap_fn = v8::Function::New(ctx, remap_frame_callback).ToLocalChecked();
-      (void)ctx->Global()->Set(ctx, "__fxe_remap_frame"_v8(isolate),
-                               remap_fn);
+      (void)ctx->Global()->Set(ctx, "__fxe_remap_frame"_v8(isolate), remap_fn);
       v8::TryCatch tc(isolate);
-      v8::ScriptOrigin pst_origin(
-          "<fxe-prepare-stack-trace>"_v8(isolate));
+      v8::ScriptOrigin pst_origin("<fxe-prepare-stack-trace>"_v8(isolate));
       v8::Local<v8::Script> pst_script;
       if (v8::Script::Compile(ctx, str(isolate, k_prepare_stack_trace_js), &pst_origin)
               .ToLocal(&pst_script)) {
@@ -2030,7 +2005,7 @@ Error.prepareStackTrace = function(err, frames) {
       if (cpu_profile_active && isolate) {
         v8::Isolate::Scope is(isolate);
         v8::HandleScope hs(isolate);
-        if (auto* profile = cpu_profiler->StopProfiling(str(isolate, "fxe")))
+        if (auto* profile = cpu_profiler->StopProfiling("fxe"_v8(isolate)))
           profile->Delete();
         cpu_profile_active = false;
       }

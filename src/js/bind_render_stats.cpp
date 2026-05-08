@@ -4,6 +4,7 @@
 
 #include <fxe/command_buffer.hpp>
 #include <fxe/render_stats.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "bind_render_stats.hpp"
 
@@ -20,20 +21,19 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       const auto& s = current_render_stats();
       auto out = Object::New(iso);
-      auto put = [&](const char* k, std::uint64_t v) {
-        (void)out->Set(ctx, String::NewFromUtf8(iso, k).ToLocalChecked(),
-                       Number::New(iso, static_cast<double>(v)));
+      auto put = [&](Local<String> k, std::uint64_t v) {
+        (void)out->Set(ctx, k, Number::New(iso, static_cast<double>(v)));
       };
-      put("verticesSubmitted", s.vertices_submitted);
-      put("indicesSubmitted", s.indices_submitted);
-      put("queueCalls", s.queue_calls);
-      put("cacheHits", s.cache_hits);
-      put("cacheMisses", s.cache_misses);
-      put("rebuilds", s.rebuilds);
-      put("frames", s.frames);
-      put("queueFastIdentity", fxe::command_buffer::g_q_fast.load());
-      put("queueXform", fxe::command_buffer::g_q_xform.load());
-      put("queueTinted", fxe::command_buffer::g_q_tinted.load());
+      put("verticesSubmitted"_v8(iso), s.vertices_submitted);
+      put("indicesSubmitted"_v8(iso), s.indices_submitted);
+      put("queueCalls"_v8(iso), s.queue_calls);
+      put("cacheHits"_v8(iso), s.cache_hits);
+      put("cacheMisses"_v8(iso), s.cache_misses);
+      put("rebuilds"_v8(iso), s.rebuilds);
+      put("frames"_v8(iso), s.frames);
+      put("queueFastIdentity"_v8(iso), fxe::command_buffer::g_q_fast.load());
+      put("queueXform"_v8(iso), fxe::command_buffer::g_q_xform.load());
+      put("queueTinted"_v8(iso), fxe::command_buffer::g_q_tinted.load());
       info.GetReturnValue().Set(out);
     }
 

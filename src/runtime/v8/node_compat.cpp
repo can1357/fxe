@@ -60,6 +60,7 @@
 #include <fxe/generated/node_compat/util_adapter.hpp>
 #include <fxe/generated/node_compat/util_types_adapter.hpp>
 #include <fxe/generated/node_compat/worker_threads_adapter.hpp>
+#include <fxe/v8_strings.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -362,7 +363,7 @@ export default strict;
     install_native_https(iso, ctx);
 #endif
     v8::TryCatch tc(iso);
-    v8::ScriptOrigin origin(str(iso, "<fxe-node-compat-prelude>"));
+    v8::ScriptOrigin origin("<fxe-node-compat-prelude>"_v8(iso));
     Local<Script> script;
     if (!Script::Compile(ctx, str(iso, node_js::k_prelude_source), &origin).ToLocal(&script))
       return;

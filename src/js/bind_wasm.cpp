@@ -29,6 +29,7 @@
 #include <string>
 #include <utility>
 
+#include <fxe/v8_strings.hpp>
 #include <v8.h>
 
 namespace fxe::js {
@@ -112,7 +113,7 @@ namespace fxe::js {
 
       // response.ok
       Local<Value> okv;
-      if (!resp->Get(ctx, s8(iso, "ok")).ToLocal(&okv) || !okv->BooleanValue(iso)) {
+      if (!resp->Get(ctx, "ok"_v8(iso)).ToLocal(&okv) || !okv->BooleanValue(iso)) {
         st->streaming->Abort(type_error(iso, "WebAssembly.compileStreaming: response is not ok"));
         terminate(st);
         return;
@@ -120,7 +121,7 @@ namespace fxe::js {
 
       // response.headers.get("Content-Type") -> mime essence == application/wasm
       Local<Value> hv;
-      if (!resp->Get(ctx, s8(iso, "headers")).ToLocal(&hv) || !hv->IsObject()) {
+      if (!resp->Get(ctx, "headers"_v8(iso)).ToLocal(&hv) || !hv->IsObject()) {
         st->streaming->Abort(
             type_error(iso, "WebAssembly.compileStreaming: response missing headers"));
         terminate(st);
@@ -128,13 +129,13 @@ namespace fxe::js {
       }
       auto headers = hv.As<Object>();
       Local<Value> get_fn;
-      if (!headers->Get(ctx, s8(iso, "get")).ToLocal(&get_fn) || !get_fn->IsFunction()) {
+      if (!headers->Get(ctx, "get"_v8(iso)).ToLocal(&get_fn) || !get_fn->IsFunction()) {
         st->streaming->Abort(
             type_error(iso, "WebAssembly.compileStreaming: response.headers.get not callable"));
         terminate(st);
         return;
       }
-      Local<Value> ct_arg = s8(iso, "Content-Type");
+      Local<Value> ct_arg = "Content-Type"_v8(iso);
       Local<Value> ct_v;
       {
         TryCatch tc(iso);
@@ -157,14 +158,14 @@ namespace fxe::js {
 
       // Optional source URL for stack traces.
       Local<Value> urlv;
-      if (resp->Get(ctx, s8(iso, "url")).ToLocal(&urlv) && urlv->IsString()) {
+      if (resp->Get(ctx, "url"_v8(iso)).ToLocal(&urlv) && urlv->IsString()) {
         std::string url = to_str(iso, urlv);
         st->streaming->SetUrl(url.c_str(), url.size());
       }
 
       // Chain into response.arrayBuffer().
       Local<Value> ab_fn;
-      if (!resp->Get(ctx, s8(iso, "arrayBuffer")).ToLocal(&ab_fn) || !ab_fn->IsFunction()) {
+      if (!resp->Get(ctx, "arrayBuffer"_v8(iso)).ToLocal(&ab_fn) || !ab_fn->IsFunction()) {
         st->streaming->Abort(
             type_error(iso, "WebAssembly.compileStreaming: response.arrayBuffer not callable"));
         terminate(st);

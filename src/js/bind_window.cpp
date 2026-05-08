@@ -8,8 +8,8 @@
 #include "../runtime/v8/fxe_native.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
 #include <fxe/v8_host.hpp>
+#include <fxe/v8_strings.hpp>
 #include <fxe/window.hpp>
 
 #include <algorithm>
@@ -225,8 +225,7 @@ namespace fxe::js {
       if (value.IsEmpty() || value->IsUndefined() || value->IsNull())
         return true;
       if (!value->IsObject()) {
-        iso->ThrowException(
-            Exception::TypeError("permissions must be an object"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("permissions must be an object"_v8(iso)));
         return false;
       }
       auto perms = value.As<Object>();
@@ -289,8 +288,7 @@ namespace fxe::js {
       }
       auto* h = host_for_isolate(iso);
       if (!h) {
-        iso->ThrowException(
-            Exception::Error("Window preload has no V8 host"_v8(iso)));
+        iso->ThrowException(Exception::Error("Window preload has no V8 host"_v8(iso)));
         return false;
       }
       auto result = h->run_preload_file(path, preload_is_module(path));
@@ -534,7 +532,8 @@ namespace fxe::js {
         for (usize i = 0; i < ev.message_args_serialised.size(); ++i) {
           Local<Value> value;
           if (!deserialize_window_value(iso, ctx, ev.message_args_serialised[i]).ToLocal(&value)) {
-            iso->ThrowException(Exception::Error("Window message payload could not be deserialized"_v8(iso)));
+            iso->ThrowException(
+                Exception::Error("Window message payload could not be deserialized"_v8(iso)));
             return o;
           }
           (void)arr->Set(ctx, static_cast<u32>(i), value);
@@ -602,8 +601,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(
-            "Window must be invoked with new"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("Window must be invoked with new"_v8(iso)));
         return;
       }
       window_desc desc;
@@ -655,8 +653,8 @@ namespace fxe::js {
         if (get("preload") && !v->IsNull()) {
           if (!v->IsString()) {
             delete h;
-            iso->ThrowException(Exception::TypeError(
-                "WindowOptions.preload must be a string"_v8(iso)));
+            iso->ThrowException(
+                Exception::TypeError("WindowOptions.preload must be a string"_v8(iso)));
             return;
           }
           preload = utf8(iso, v);
@@ -669,8 +667,7 @@ namespace fxe::js {
       auto w = create_window(desc);
       if (!w) {
         delete h;
-        iso->ThrowException(
-            Exception::Error("create_window failed"_v8(iso)));
+        iso->ThrowException(Exception::Error("create_window failed"_v8(iso)));
         return;
       }
       h->owned = std::move(w);
@@ -762,18 +759,17 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (fxe::runtime::current_worker_bootstrap() != nullptr) {
-        iso->ThrowException(Exception::Error("Window.send is not yet supported across worker isolates"_v8(iso)));
+        iso->ThrowException(
+            Exception::Error("Window.send is not yet supported across worker isolates"_v8(iso)));
         return;
       }
       auto* w = unwrap_win(info.This());
       if (!w) {
-        iso->ThrowException(
-            Exception::Error("send: no native window"_v8(iso)));
+        iso->ThrowException(Exception::Error("send: no native window"_v8(iso)));
         return;
       }
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(
-            Exception::TypeError("send(channel, ...args)"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("send(channel, ...args)"_v8(iso)));
         return;
       }
       std::vector<std::vector<std::uint8_t>> args;
@@ -862,10 +858,10 @@ namespace fxe::js {
         return;
       auto bounds = w->get_bounds();
       auto obj = Object::New(iso);
-      (void)obj->Set(ctx, str(iso, "x"), Integer::New(iso, bounds.x));
-      (void)obj->Set(ctx, str(iso, "y"), Integer::New(iso, bounds.y));
-      (void)obj->Set(ctx, str(iso, "width"), Integer::New(iso, bounds.z));
-      (void)obj->Set(ctx, str(iso, "height"), Integer::New(iso, bounds.w));
+      (void)obj->Set(ctx, "x"_v8(iso), Integer::New(iso, bounds.x));
+      (void)obj->Set(ctx, "y"_v8(iso), Integer::New(iso, bounds.y));
+      (void)obj->Set(ctx, "width"_v8(iso), Integer::New(iso, bounds.z));
+      (void)obj->Set(ctx, "height"_v8(iso), Integer::New(iso, bounds.w));
       info.GetReturnValue().Set(obj);
     }
     void win_set_min_size(const FunctionCallbackInfo<Value>& info) {
@@ -974,8 +970,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(
-            "setTitleBarStyle: expected style string"_v8(iso)));
+        iso->ThrowException(
+            Exception::TypeError("setTitleBarStyle: expected style string"_v8(iso)));
         return;
       }
       auto name = utf8(iso, info[0]);
@@ -1031,7 +1027,8 @@ namespace fxe::js {
         return;
       }
       if (!info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("setVibrancy: expected 'sidebar', 'titlebar', 'menu', or null"_v8(iso)));
+        iso->ThrowException(Exception::TypeError(
+            "setVibrancy: expected 'sidebar', 'titlebar', 'menu', or null"_v8(iso)));
         return;
       }
       auto name = utf8(iso, info[0]);
@@ -1072,18 +1069,17 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 3) {
-        iso->ThrowException(
-            Exception::TypeError("setIcon(rgba, w, h)"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("setIcon(rgba, w, h)"_v8(iso)));
         return;
       }
       if (!info[0]->IsTypedArray()) {
-        iso->ThrowException(Exception::TypeError(
-            "setIcon: rgba must be a typed array"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("setIcon: rgba must be a typed array"_v8(iso)));
         return;
       }
       auto ta = info[0].As<TypedArray>();
       if (!info[0]->IsUint8Array() && !info[0]->IsUint8ClampedArray()) {
-        iso->ThrowException(Exception::TypeError("setIcon: rgba must be Uint8Array or Uint8ClampedArray"_v8(iso)));
+        iso->ThrowException(
+            Exception::TypeError("setIcon: rgba must be Uint8Array or Uint8ClampedArray"_v8(iso)));
         return;
       }
       auto buf = ta->Buffer();
@@ -1093,8 +1089,8 @@ namespace fxe::js {
       int ht = info[2]->Int32Value(ctx).FromMaybe(0);
       if (wd <= 0 || ht <= 0 ||
           ta->ByteLength() < static_cast<usize>(wd) * static_cast<usize>(ht) * 4u) {
-        iso->ThrowException(Exception::RangeError(
-            "setIcon: rgba length too small for w*h*4"_v8(iso)));
+        iso->ThrowException(
+            Exception::RangeError("setIcon: rgba length too small for w*h*4"_v8(iso)));
         return;
       }
       try {
@@ -1163,8 +1159,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(
-            Exception::TypeError("setCursor: expected string"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("setCursor: expected string"_v8(iso)));
         return;
       }
       auto name = utf8(iso, info[0]);
@@ -1250,9 +1245,9 @@ namespace fxe::js {
         std::memcpy(store->Data(), image.data.data(), image.data.size());
       auto ab = ArrayBuffer::New(iso, std::move(store));
       auto out = Object::New(iso);
-      (void)out->Set(ctx, str(iso, "width"), Integer::NewFromUnsigned(iso, image.width));
-      (void)out->Set(ctx, str(iso, "height"), Integer::NewFromUnsigned(iso, image.height));
-      (void)out->Set(ctx, str(iso, "data"), Uint8Array::New(ab, 0, image.data.size()));
+      (void)out->Set(ctx, "width"_v8(iso), Integer::NewFromUnsigned(iso, image.width));
+      (void)out->Set(ctx, "height"_v8(iso), Integer::NewFromUnsigned(iso, image.height));
+      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(ab, 0, image.data.size()));
       info.GetReturnValue().Set(out);
     }
 
@@ -1265,8 +1260,8 @@ namespace fxe::js {
         return;
       }
       if (info.Length() < 1 || !info[0]->IsObject()) {
-        iso->ThrowException(Exception::TypeError(
-            "writeClipboardImage({ width, height, data })"_v8(iso)));
+        iso->ThrowException(
+            Exception::TypeError("writeClipboardImage({ width, height, data })"_v8(iso)));
         return;
       }
 
@@ -1274,11 +1269,12 @@ namespace fxe::js {
       Local<Value> width_value;
       Local<Value> height_value;
       Local<Value> data_value;
-      if (!object->Get(ctx, str(iso, "width")).ToLocal(&width_value) ||
-          !object->Get(ctx, str(iso, "height")).ToLocal(&height_value) ||
-          !object->Get(ctx, str(iso, "data")).ToLocal(&data_value) || !data_value->IsTypedArray() ||
+      if (!object->Get(ctx, "width"_v8(iso)).ToLocal(&width_value) ||
+          !object->Get(ctx, "height"_v8(iso)).ToLocal(&height_value) ||
+          !object->Get(ctx, "data"_v8(iso)).ToLocal(&data_value) || !data_value->IsTypedArray() ||
           (!data_value->IsUint8Array() && !data_value->IsUint8ClampedArray())) {
-        iso->ThrowException(Exception::TypeError("writeClipboardImage: data must be Uint8Array or Uint8ClampedArray"_v8(iso)));
+        iso->ThrowException(Exception::TypeError(
+            "writeClipboardImage: data must be Uint8Array or Uint8ClampedArray"_v8(iso)));
         return;
       }
 
@@ -1289,7 +1285,8 @@ namespace fxe::js {
           static_cast<usize>(width) >
               std::numeric_limits<usize>::max() / static_cast<usize>(height) / 4u ||
           data->ByteLength() < static_cast<usize>(width) * static_cast<usize>(height) * 4u) {
-        iso->ThrowException(Exception::RangeError("writeClipboardImage: data length too small for width*height*4"_v8(iso)));
+        iso->ThrowException(Exception::RangeError(
+            "writeClipboardImage: data length too small for width*height*4"_v8(iso)));
         return;
       }
 
@@ -1379,7 +1376,9 @@ namespace fxe::js {
       }
       if (!info[1]->IsTypedArray() ||
           (!info[1]->IsUint8Array() && !info[1]->IsUint8ClampedArray())) {
-        iso->ThrowException(Exception::TypeError("setClipboardMime(mime, bytes): bytes must be Uint8Array or Uint8ClampedArray"_v8(iso)));
+        iso->ThrowException(Exception::TypeError(
+            "setClipboardMime(mime, bytes): bytes must be Uint8Array or Uint8ClampedArray"_v8(
+                iso)));
         return;
       }
       auto data = info[1].As<TypedArray>();
@@ -1419,16 +1418,16 @@ namespace fxe::js {
             hh = get_i(3);
           } else if (el->IsObject()) {
             auto o = el.As<Object>();
-            auto get_i = [&](const char* k) -> int {
+            auto get_i = [&](Local<String> k) -> int {
               Local<Value> v;
-              if (!o->Get(ctx, String::NewFromUtf8(iso, k).ToLocalChecked()).ToLocal(&v))
+              if (!o->Get(ctx, k).ToLocal(&v))
                 return 0;
               return v->Int32Value(ctx).FromMaybe(0);
             };
-            x = get_i("x");
-            y = get_i("y");
-            ww = get_i("width");
-            hh = get_i("height");
+            x = get_i("x"_v8(iso));
+            y = get_i("y"_v8(iso));
+            ww = get_i("width"_v8(iso));
+            hh = get_i("height"_v8(iso));
           } else {
             continue;
           }
@@ -1447,8 +1446,8 @@ namespace fxe::js {
         return;
       }
       if (info.Length() < 1 || !info[0]->IsObject()) {
-        iso->ThrowException(Exception::TypeError(
-            "startDrag({ files, text?, html?, image?, icon? })"_v8(iso)));
+        iso->ThrowException(
+            Exception::TypeError("startDrag({ files, text?, html?, image?, icon? })"_v8(iso)));
         return;
       }
 
@@ -1456,7 +1455,7 @@ namespace fxe::js {
       drag_payload payload;
 
       Local<Value> files_value;
-      if (object->Get(ctx, str(iso, "files")).ToLocal(&files_value) && files_value->IsArray()) {
+      if (object->Get(ctx, "files"_v8(iso)).ToLocal(&files_value) && files_value->IsArray()) {
         auto files = files_value.As<Array>();
         const u32 count = files->Length();
         payload.files.reserve(count);
@@ -1468,7 +1467,7 @@ namespace fxe::js {
       }
 
       Local<Value> text_value;
-      if (object->Get(ctx, str(iso, "text")).ToLocal(&text_value) && text_value->IsString())
+      if (object->Get(ctx, "text"_v8(iso)).ToLocal(&text_value) && text_value->IsString())
         payload.text = utf8(iso, text_value);
 
       auto parse_drag_image = [&](Local<Value> value, image_data& out) -> bool {
@@ -1478,10 +1477,9 @@ namespace fxe::js {
         Local<Value> width_value;
         Local<Value> height_value;
         Local<Value> data_value;
-        if (!object->Get(ctx, str(iso, "width")).ToLocal(&width_value) ||
-            !object->Get(ctx, str(iso, "height")).ToLocal(&height_value) ||
-            !object->Get(ctx, str(iso, "data")).ToLocal(&data_value) ||
-            !data_value->IsTypedArray() ||
+        if (!object->Get(ctx, "width"_v8(iso)).ToLocal(&width_value) ||
+            !object->Get(ctx, "height"_v8(iso)).ToLocal(&height_value) ||
+            !object->Get(ctx, "data"_v8(iso)).ToLocal(&data_value) || !data_value->IsTypedArray() ||
             (!data_value->IsUint8Array() && !data_value->IsUint8ClampedArray()))
           return false;
         int width = width_value->Int32Value(ctx).FromMaybe(0);
@@ -1500,18 +1498,18 @@ namespace fxe::js {
       };
 
       Local<Value> html_value;
-      if (object->Get(ctx, str(iso, "html")).ToLocal(&html_value) && html_value->IsString())
+      if (object->Get(ctx, "html"_v8(iso)).ToLocal(&html_value) && html_value->IsString())
         payload.html = utf8(iso, html_value);
 
       Local<Value> icon_value;
       image_data icon;
-      if (object->Get(ctx, str(iso, "icon")).ToLocal(&icon_value) &&
+      if (object->Get(ctx, "icon"_v8(iso)).ToLocal(&icon_value) &&
           parse_drag_image(icon_value, icon))
         payload.icon = std::move(icon);
 
       Local<Value> image_value;
       image_data image;
-      if (object->Get(ctx, str(iso, "image")).ToLocal(&image_value) &&
+      if (object->Get(ctx, "image"_v8(iso)).ToLocal(&image_value) &&
           parse_drag_image(image_value, image))
         payload.image = std::move(image);
 
@@ -1570,13 +1568,11 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       auto* h = lookup_holder(w);
       if (!h) {
-        iso->ThrowException(
-            Exception::Error("on: no native window"_v8(iso)));
+        iso->ThrowException(Exception::Error("on: no native window"_v8(iso)));
         return;
       }
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
-        iso->ThrowException(
-            Exception::TypeError("on(event, handler)"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("on(event, handler)"_v8(iso)));
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -1593,8 +1589,7 @@ namespace fxe::js {
       (void)data->Set(ctx, "win"_v8(iso),
                       External::New(iso, w, v8::kExternalPointerTypeTagDefault));
       (void)data->Set(ctx, "event"_v8(iso), str(iso, event));
-      (void)data->Set(ctx, "token"_v8(iso),
-                      Number::New(iso, static_cast<double>(token)));
+      (void)data->Set(ctx, "token"_v8(iso), Number::New(iso, static_cast<double>(token)));
       auto disp = Function::New(ctx, listener_disposer, data).ToLocalChecked();
       info.GetReturnValue().Set(disp);
     }
@@ -1606,8 +1601,7 @@ namespace fxe::js {
       if (!h)
         return;
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(
-            Exception::TypeError("off(event[, handler])"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("off(event[, handler])"_v8(iso)));
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -1678,8 +1672,7 @@ namespace fxe::js {
       if (opts->Get(ctx, "fps"_v8(iso)).ToLocal(&x) && x->IsNumber()) {
         fps = x->NumberValue(ctx).FromMaybe(0.0);
       }
-      if (fps <= 0.0 && opts->Get(ctx, "animate"_v8(iso)).ToLocal(&x) &&
-          x->BooleanValue(iso)) {
+      if (fps <= 0.0 && opts->Get(ctx, "animate"_v8(iso)).ToLocal(&x) && x->BooleanValue(iso)) {
         fps = 60.0;
       }
       out.frame_period = fps > 0.0 ? 1.0 / fps : 0.0;
@@ -1923,8 +1916,7 @@ namespace fxe::js {
       if (!w || !hh)
         return;
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(
-            "run: expected callback function"_v8(iso)));
+        iso->ThrowException(Exception::TypeError("run: expected callback function"_v8(iso)));
         return;
       }
       run_opts opts;
@@ -1960,8 +1952,8 @@ namespace fxe::js {
         return;
       }
       if (!info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(
-            "setFrameCallback: expected function or null"_v8(iso)));
+        iso->ThrowException(
+            Exception::TypeError("setFrameCallback: expected function or null"_v8(iso)));
         return;
       }
       hh->on_frame.Reset(iso, info[0].As<Function>());

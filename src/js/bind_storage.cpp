@@ -68,8 +68,8 @@ namespace fxe::js {
       if (db && err->IsObject()) {
         auto ctx = iso->GetCurrentContext();
         auto obj = err.As<Object>();
-        (void)obj->Set(ctx, s(iso, "code"), Integer::New(iso, sqlite3_extended_errcode(db)));
-        (void)obj->Set(ctx, s(iso, "errno"), Integer::New(iso, sqlite3_errcode(db)));
+        (void)obj->Set(ctx, "code"_v8(iso), Integer::New(iso, sqlite3_extended_errcode(db)));
+        (void)obj->Set(ctx, "errno"_v8(iso), Integer::New(iso, sqlite3_errcode(db)));
       }
       iso->ThrowException(err);
       return false;
@@ -392,7 +392,7 @@ namespace fxe::js {
     void storage_set_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 2) {
-        iso->ThrowException(Exception::TypeError(s(iso, "Storage.setItem requires key and value")));
+        iso->ThrowException(Exception::TypeError("Storage.setItem requires key and value"_v8(iso)));
         return;
       }
       auto maybe_key = value_to_string(iso, info[0]);
@@ -407,7 +407,7 @@ namespace fxe::js {
     void storage_get_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1) {
-        iso->ThrowException(Exception::TypeError(s(iso, "Storage.getItem requires key")));
+        iso->ThrowException(Exception::TypeError("Storage.getItem requires key"_v8(iso)));
         return;
       }
       auto maybe_key = value_to_string(iso, info[0]);
@@ -427,7 +427,7 @@ namespace fxe::js {
     void storage_remove_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1) {
-        iso->ThrowException(Exception::TypeError(s(iso, "Storage.removeItem requires key")));
+        iso->ThrowException(Exception::TypeError("Storage.removeItem requires key"_v8(iso)));
         return;
       }
       auto maybe_key = value_to_string(iso, info[0]);
@@ -505,8 +505,7 @@ namespace fxe::js {
       t->Set(iso, "removeItem", FunctionTemplate::New(iso, storage_remove_item, data));
       t->Set(iso, "clear", FunctionTemplate::New(iso, storage_clear, data));
       t->Set(iso, "key", FunctionTemplate::New(iso, storage_key, data));
-      t->SetAccessorProperty("length"_v8(iso),
-                             FunctionTemplate::New(iso, storage_length, data));
+      t->SetAccessorProperty("length"_v8(iso), FunctionTemplate::New(iso, storage_length, data));
       return t;
     }
   } // namespace

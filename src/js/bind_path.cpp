@@ -1,4 +1,5 @@
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "bind_path.hpp"
 
@@ -11,13 +12,6 @@ namespace fxe::js {
     using namespace v8;
     namespace fs = std::filesystem;
 
-#if defined(_WIN32)
-    constexpr const char* kSep = "\\";
-    constexpr const char* kDelim = ";";
-#else
-    constexpr const char* kSep = "/";
-    constexpr const char* kDelim = ":";
-#endif
 
     std::string utf8(Isolate* iso, Local<Value> v) {
       String::Utf8Value u(iso, v);
@@ -140,8 +134,13 @@ namespace fxe::js {
     t->Set(iso, "relative", FunctionTemplate::New(iso, path_relative));
     t->Set(iso, "normalize", FunctionTemplate::New(iso, path_normalize));
     t->Set(iso, "isAbsolute", FunctionTemplate::New(iso, path_is_absolute));
-    t->Set(iso, "sep", String::NewFromUtf8(iso, kSep).ToLocalChecked());
-    t->Set(iso, "delimiter", String::NewFromUtf8(iso, kDelim).ToLocalChecked());
+#if defined(_WIN32)
+    t->Set(iso, "sep", "\\"_v8(iso));
+    t->Set(iso, "delimiter", ";"_v8(iso));
+#else
+    t->Set(iso, "sep", "/"_v8(iso));
+    t->Set(iso, "delimiter", ":"_v8(iso));
+#endif
     global->Set(iso, "path", t);
   }
 } // namespace fxe::js

@@ -100,44 +100,40 @@ namespace fxe::js {
       return static_cast<pipeline_holder*>(unwrap(self, TAG_PIPELINE));
     }
 
-    bool get_value(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
-                   Local<Value>& out) {
-      return obj->Get(ctx, String::NewFromUtf8(iso, key, NewStringType::kNormal).ToLocalChecked())
-          .ToLocal(&out);
+    bool get_value(Local<Context> ctx, Local<Object> obj, Local<String> key, Local<Value>& out) {
+      return obj->Get(ctx, key).ToLocal(&out);
     }
 
-    bool get_required_string(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
+    bool get_required_string(Isolate* iso, Local<Context> ctx, Local<Object> obj, Local<String> key,
                              std::string& out) {
       Local<Value> value;
-      if (!get_value(iso, ctx, obj, key, value) || !value->IsString())
+      if (!get_value(ctx, obj, key, value) || !value->IsString())
         return false;
       out = utf8(iso, value);
       return true;
     }
 
-    void get_optional_string(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
+    void get_optional_string(Isolate* iso, Local<Context> ctx, Local<Object> obj, Local<String> key,
                              std::string& out) {
       Local<Value> value;
-      if (get_value(iso, ctx, obj, key, value) && value->IsString())
+      if (get_value(ctx, obj, key, value) && value->IsString())
         out = utf8(iso, value);
     }
 
-    bool get_required_u32(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
-                          uint32_t& out) {
+    bool get_required_u32(Local<Context> ctx, Local<Object> obj, Local<String> key, uint32_t& out) {
       Local<Value> value;
-      if (!get_value(iso, ctx, obj, key, value) || !value->IsNumber())
+      if (!get_value(ctx, obj, key, value) || !value->IsNumber())
         return false;
       out = value->Uint32Value(ctx).FromMaybe(0);
       return true;
     }
 
-    void get_optional_bool(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
+    void get_optional_bool(Isolate* iso, Local<Context> ctx, Local<Object> obj, Local<String> key,
                            bool& out) {
       Local<Value> value;
-      if (get_value(iso, ctx, obj, key, value) && !value->IsUndefined())
+      if (get_value(ctx, obj, key, value) && !value->IsUndefined())
         out = value->BooleanValue(iso);
     }
-
     bool parse_vertex_format(const std::string& s, vertex_attribute::format& out) {
       if (s == "f32")
         out = vertex_attribute::format::f32;
@@ -160,17 +156,17 @@ namespace fxe::js {
       if (value.IsEmpty() || !value->IsObject())
         return false;
       auto obj = value.As<Object>();
-      if (!get_required_string(iso, ctx, obj, "wgsl", desc.wgsl))
+      if (!get_required_string(iso, ctx, obj, "wgsl"_v8(iso), desc.wgsl))
         return false;
-      get_optional_string(iso, ctx, obj, "vsEntry", desc.vs_entry);
-      get_optional_string(iso, ctx, obj, "fsEntry", desc.fs_entry);
-      if (!get_required_u32(iso, ctx, obj, "vertexStride", desc.vertex_stride))
+      get_optional_string(iso, ctx, obj, "vsEntry"_v8(iso), desc.vs_entry);
+      get_optional_string(iso, ctx, obj, "fsEntry"_v8(iso), desc.fs_entry);
+      if (!get_required_u32(ctx, obj, "vertexStride"_v8(iso), desc.vertex_stride))
         return false;
-      get_optional_bool(iso, ctx, obj, "depthTest", desc.depth_test);
-      get_optional_bool(iso, ctx, obj, "blend", desc.blend);
+      get_optional_bool(iso, ctx, obj, "depthTest"_v8(iso), desc.depth_test);
+      get_optional_bool(iso, ctx, obj, "blend"_v8(iso), desc.blend);
 
       Local<Value> attrs_value;
-      if (!get_value(iso, ctx, obj, "attrs", attrs_value) || !attrs_value->IsArray())
+      if (!get_value(ctx, obj, "attrs"_v8(iso), attrs_value) || !attrs_value->IsArray())
         return false;
       auto attrs = attrs_value.As<Array>();
       desc.attrs.clear();
@@ -181,12 +177,12 @@ namespace fxe::js {
           return false;
         auto attr_obj = attr_value.As<Object>();
         vertex_attribute attr{};
-        if (!get_required_u32(iso, ctx, attr_obj, "location", attr.shader_location))
+        if (!get_required_u32(ctx, attr_obj, "location"_v8(iso), attr.shader_location))
           return false;
-        if (!get_required_u32(iso, ctx, attr_obj, "offset", attr.offset))
+        if (!get_required_u32(ctx, attr_obj, "offset"_v8(iso), attr.offset))
           return false;
         std::string format;
-        if (!get_required_string(iso, ctx, attr_obj, "format", format))
+        if (!get_required_string(iso, ctx, attr_obj, "format"_v8(iso), format))
           return false;
         if (!parse_vertex_format(format, attr.fmt)) {
           throw_type(iso, "Pipeline: unknown vertex attribute format");

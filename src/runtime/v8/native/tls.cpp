@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <fxe/v8_strings.hpp>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -246,10 +247,10 @@ namespace fxe::runtime {
           if (fn.IsEmpty())
             return;
           auto info = Object::New(iso);
-          (void)info->Set(ctx, str(iso, "alpnProtocol"), str(iso, alpn));
-          (void)info->Set(ctx, str(iso, "peerCertificateSubject"), str(iso, subject));
+          (void)info->Set(ctx, "alpnProtocol"_v8(iso), str(iso, alpn));
+          (void)info->Set(ctx, "peerCertificateSubject"_v8(iso), str(iso, subject));
           if (!subject_error.empty())
-            (void)info->Set(ctx, str(iso, "peerCertificateError"), str(iso, subject_error));
+            (void)info->Set(ctx, "peerCertificateError"_v8(iso), str(iso, subject_error));
           Local<Value> argv[] = {info};
           Local<Value> ignored;
           (void)fn->Call(ctx, Undefined(iso), 1, argv).ToLocal(&ignored);
@@ -331,9 +332,9 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 5 || !info[0]->IsObject() || !info[1]->IsFunction() ||
           !info[2]->IsFunction() || !info[3]->IsFunction() || !info[4]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(
-            iso,
-            "__fxe_native.tls.connect(options, onConnect, onError, onData, onClose) required")));
+        iso->ThrowException(Exception::TypeError(
+            "__fxe_native.tls.connect(options, onConnect, onError, onData, onClose) required"_v8(
+                iso)));
         return;
       }
 
@@ -388,13 +389,13 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsNumber()) {
         iso->ThrowException(
-            Exception::TypeError(str(iso, "__fxe_native.tls.write(handle, data) required")));
+            Exception::TypeError("__fxe_native.tls.write(handle, data) required"_v8(iso)));
         return;
       }
       std::vector<uint8_t> bytes;
       if (!copy_bytes(iso, ctx, info[1], bytes)) {
         iso->ThrowException(
-            Exception::TypeError(str(iso, "__fxe_native.tls.write data must be bytes")));
+            Exception::TypeError("__fxe_native.tls.write data must be bytes"_v8(iso)));
         return;
       }
       auto state = lookup_socket(info[0]->Int32Value(ctx).FromMaybe(0));
@@ -473,15 +474,15 @@ namespace fxe::runtime {
   void install_native_tls(Isolate* iso, Local<Context> ctx) {
     Local<Value> native_value;
     Local<Object> native;
-    if (ctx->Global()->Get(ctx, str(iso, "__fxe_native")).ToLocal(&native_value) &&
+    if (ctx->Global()->Get(ctx, "__fxe_native"_v8(iso)).ToLocal(&native_value) &&
         native_value->IsObject()) {
       native = native_value.As<Object>();
     } else {
       native = Object::New(iso);
-      (void)ctx->Global()->DefineOwnProperty(ctx, str(iso, "__fxe_native"), native,
+      (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
                                              static_cast<PropertyAttribute>(DontEnum));
     }
-    (void)native->Set(ctx, str(iso, "tls"), make_tls_namespace(iso, ctx));
+    (void)native->Set(ctx, "tls"_v8(iso), make_tls_namespace(iso, ctx));
   }
 
 } // namespace fxe::runtime

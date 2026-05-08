@@ -2,6 +2,7 @@
 #include "../os/os.hpp"
 #include "runtime/capabilities.hpp"
 
+#include <fxe/v8_strings.hpp>
 #include <string>
 #include <string_view>
 #include <v8.h>
@@ -26,7 +27,7 @@ namespace fxe::js {
       msg.append(what);
       msg += "'";
       auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(iso->GetCurrentContext(), str(iso, "name"), str(iso, "PermissionDenied"));
+      (void)err->Set(iso->GetCurrentContext(), "name"_v8(iso), "PermissionDenied"_v8(iso));
       return err;
     }
 

@@ -1,6 +1,7 @@
 #include "runtime/uv_loop.hpp"
 
 #include <fxe/v8_host.hpp>
+#include <fxe/v8_strings.hpp>
 #include <v8.h>
 
 #include <cstdio>
@@ -73,12 +74,10 @@ namespace {
 
       auto resolver = v8::Promise::Resolver::New(ctx).ToLocalChecked();
       v8::Global<v8::Promise::Resolver> resolver_global(isolate, resolver);
-      CHECK(ctx->Global()
-                ->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "p"), resolver->GetPromise())
-                .FromMaybe(false));
+      CHECK(ctx->Global()->Set(ctx, "p"_v8(isolate), resolver->GetPromise()).FromMaybe(false));
 
-      auto source = v8::String::NewFromUtf8Literal(
-          isolate, "globalThis.thenRan = false; p.then(() => { globalThis.thenRan = true; });");
+      auto source =
+          "globalThis.thenRan = false; p.then(() => { globalThis.thenRan = true; });"_v8(isolate);
       auto script = v8::Script::Compile(ctx, source).ToLocalChecked();
       CHECK(!script->Run(ctx).IsEmpty());
       CHECK(!global_bool(isolate, ctx, "thenRan"));
@@ -160,12 +159,10 @@ namespace {
 
       auto resolver = v8::Promise::Resolver::New(ctx).ToLocalChecked();
       v8::Global<v8::Promise::Resolver> resolver_global(isolate, resolver);
-      CHECK(ctx->Global()
-                ->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "p"), resolver->GetPromise())
-                .FromMaybe(false));
+      CHECK(ctx->Global()->Set(ctx, "p"_v8(isolate), resolver->GetPromise()).FromMaybe(false));
 
-      auto source = v8::String::NewFromUtf8Literal(
-          isolate, "globalThis.thenRan = false; p.then(() => { globalThis.thenRan = true; });");
+      auto source =
+          "globalThis.thenRan = false; p.then(() => { globalThis.thenRan = true; });"_v8(isolate);
       auto script = v8::Script::Compile(ctx, source).ToLocalChecked();
       CHECK(!script->Run(ctx).IsEmpty());
       CHECK(!global_bool(isolate, ctx, "thenRan"));

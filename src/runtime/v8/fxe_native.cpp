@@ -3,6 +3,7 @@
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_fd.hpp"
 #include <fxe/v8_host.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <algorithm>
 #include <array>
@@ -454,7 +455,7 @@ namespace fxe::runtime {
         }
         if (n < 0 && errno == EINTR)
           continue;
-        iso->ThrowException(Exception::Error(str(iso, "child_process stdin write failed")));
+        iso->ThrowException(Exception::Error("child_process stdin write failed"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(Boolean::New(iso, true));
@@ -565,7 +566,7 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(Exception::TypeError(
-            str(iso, "__fxe_native.spawn.spawn(file, args, opts) requires file")));
+            "__fxe_native.spawn.spawn(file, args, opts) requires file"_v8(iso)));
         return;
       }
 
@@ -813,7 +814,7 @@ namespace fxe::runtime {
       const BOOL ok = WriteFile(h->stdin_write, *data ? *data : "",
                                 static_cast<DWORD>(data.length()), &written, nullptr);
       if (!ok) {
-        iso->ThrowException(Exception::Error(str(iso, "child_process stdin write failed")));
+        iso->ThrowException(Exception::Error("child_process stdin write failed"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(Boolean::New(iso, true));
@@ -882,7 +883,7 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(Exception::TypeError(
-            str(iso, "__fxe_native.spawn.spawn(file, args, opts) requires file")));
+            "__fxe_native.spawn.spawn(file, args, opts) requires file"_v8(iso)));
         return;
       }
       String::Utf8Value file_value(iso, info[0]);
@@ -905,7 +906,7 @@ namespace fxe::runtime {
         close_handle(stdout_write);
         close_handle(stderr_read);
         close_handle(stderr_write);
-        iso->ThrowException(Exception::Error(str(iso, "CreatePipe failed")));
+        iso->ThrowException(Exception::Error("CreatePipe failed"_v8(iso)));
         return;
       }
 
@@ -936,7 +937,7 @@ namespace fxe::runtime {
         close_handle(stdin_write);
         close_handle(stdout_read);
         close_handle(stderr_read);
-        iso->ThrowException(Exception::Error(str(iso, "CreateProcessW failed")));
+        iso->ThrowException(Exception::Error("CreateProcessW failed"_v8(iso)));
         return;
       }
 
@@ -982,7 +983,7 @@ namespace fxe::runtime {
       std::string msg = "Permission denied: ";
       msg.append(what);
       auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, str(iso, "name"), str(iso, "PermissionDenied"));
+      (void)err->Set(ctx, "name"_v8(iso), "PermissionDenied"_v8(iso));
       return err;
     }
 
@@ -1354,9 +1355,9 @@ namespace fxe::runtime {
       state->digest_size = mbedtls_md_get_size(md);
       auto out = Object::New(iso);
       auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, str(iso, "update"),
+      (void)out->Set(ctx, "update"_v8(iso),
                      Function::New(ctx, hash_update, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "digest"),
+      (void)out->Set(ctx, "digest"_v8(iso),
                      Function::New(ctx, hash_digest, external).ToLocalChecked());
       state->self.Reset(iso, out);
       state->self.SetWeak(state.get(), hash_finalizer, WeakCallbackType::kParameter);
@@ -1394,9 +1395,9 @@ namespace fxe::runtime {
       state->hmac = true;
       auto out = Object::New(iso);
       auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, str(iso, "update"),
+      (void)out->Set(ctx, "update"_v8(iso),
                      Function::New(ctx, hash_update, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "digest"),
+      (void)out->Set(ctx, "digest"_v8(iso),
                      Function::New(ctx, hash_digest, external).ToLocalChecked());
       state->self.Reset(iso, out);
       state->self.SetWeak(state.get(), hash_finalizer, WeakCallbackType::kParameter);
@@ -1471,7 +1472,7 @@ namespace fxe::runtime {
       if (!n_val->IsNumber() || !r_val->IsNumber() || !p_val->IsNumber() ||
           !keylen_val->IsNumber()) {
         iso->ThrowException(
-            Exception::TypeError(str(iso, "scrypt N, r, p, and keylen must be numbers")));
+            Exception::TypeError("scrypt N, r, p, and keylen must be numbers"_v8(iso)));
         return;
       }
       const double n_d = n_val->NumberValue(ctx).FromMaybe(-1.0);
@@ -1657,7 +1658,7 @@ namespace fxe::runtime {
       if (bytes.size > 0 && bytes.size <= coord_len)
         return true;
       iso->ThrowException(Exception::RangeError(
-          str(iso, "EC private scalar must be non-empty and no longer than the curve length")));
+          "EC private scalar must be non-empty and no longer than the curve length"_v8(iso)));
       return false;
     }
 
@@ -1790,8 +1791,8 @@ namespace fxe::runtime {
         throw_error(iso, "failed to export RSA components: " + mbedtls_err_str(rc));
         return false;
       }
-      (void)out->Set(ctx, str(iso, "n"), mpi_to_uint8_minimal(iso, &N.ctx));
-      (void)out->Set(ctx, str(iso, "e"), mpi_to_uint8_minimal(iso, &E.ctx));
+      (void)out->Set(ctx, "n"_v8(iso), mpi_to_uint8_minimal(iso, &N.ctx));
+      (void)out->Set(ctx, "e"_v8(iso), mpi_to_uint8_minimal(iso, &E.ctx));
       return true;
     }
 
@@ -1828,10 +1829,10 @@ namespace fxe::runtime {
         set_string(ctx, out, "kind", "ec");
         set_string(ctx, out, "curve", canonical_curve_name(group_id));
         (void)out->Set(
-            ctx, str(iso, "x"),
+            ctx, "x"_v8(iso),
             mpi_to_uint8_fixed(iso, &ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X), coord_len));
         (void)out->Set(
-            ctx, str(iso, "y"),
+            ctx, "y"_v8(iso),
             mpi_to_uint8_fixed(iso, &ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(Y), coord_len));
       } else {
         throw_error(iso, "unsupported PK type in SPKI");
@@ -1879,14 +1880,14 @@ namespace fxe::runtime {
                       "failed to export RSA private components: " + mbedtls_err_str(export_rc));
           return;
         }
-        (void)out->Set(ctx, str(iso, "n"), mpi_to_uint8_minimal(iso, &N.ctx));
-        (void)out->Set(ctx, str(iso, "e"), mpi_to_uint8_minimal(iso, &E.ctx));
-        (void)out->Set(ctx, str(iso, "d"), mpi_to_uint8_minimal(iso, &D.ctx));
-        (void)out->Set(ctx, str(iso, "p"), mpi_to_uint8_minimal(iso, &P.ctx));
-        (void)out->Set(ctx, str(iso, "q"), mpi_to_uint8_minimal(iso, &Q.ctx));
-        (void)out->Set(ctx, str(iso, "dp"), mpi_to_uint8_minimal(iso, &DP.ctx));
-        (void)out->Set(ctx, str(iso, "dq"), mpi_to_uint8_minimal(iso, &DQ.ctx));
-        (void)out->Set(ctx, str(iso, "qi"), mpi_to_uint8_minimal(iso, &QP.ctx));
+        (void)out->Set(ctx, "n"_v8(iso), mpi_to_uint8_minimal(iso, &N.ctx));
+        (void)out->Set(ctx, "e"_v8(iso), mpi_to_uint8_minimal(iso, &E.ctx));
+        (void)out->Set(ctx, "d"_v8(iso), mpi_to_uint8_minimal(iso, &D.ctx));
+        (void)out->Set(ctx, "p"_v8(iso), mpi_to_uint8_minimal(iso, &P.ctx));
+        (void)out->Set(ctx, "q"_v8(iso), mpi_to_uint8_minimal(iso, &Q.ctx));
+        (void)out->Set(ctx, "dp"_v8(iso), mpi_to_uint8_minimal(iso, &DP.ctx));
+        (void)out->Set(ctx, "dq"_v8(iso), mpi_to_uint8_minimal(iso, &DQ.ctx));
+        (void)out->Set(ctx, "qi"_v8(iso), mpi_to_uint8_minimal(iso, &QP.ctx));
       } else if (type == MBEDTLS_PK_ECKEY || type == MBEDTLS_PK_ECKEY_DH) {
         auto* ec = mbedtls_pk_ec(pk.ctx);
         const auto group_id = ec->MBEDTLS_PRIVATE(grp).id;
@@ -1898,12 +1899,12 @@ namespace fxe::runtime {
         set_string(ctx, out, "kind", "ec");
         set_string(ctx, out, "curve", canonical_curve_name(group_id));
         (void)out->Set(
-            ctx, str(iso, "x"),
+            ctx, "x"_v8(iso),
             mpi_to_uint8_fixed(iso, &ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X), coord_len));
         (void)out->Set(
-            ctx, str(iso, "y"),
+            ctx, "y"_v8(iso),
             mpi_to_uint8_fixed(iso, &ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(Y), coord_len));
-        (void)out->Set(ctx, str(iso, "d"),
+        (void)out->Set(ctx, "d"_v8(iso),
                        mpi_to_uint8_fixed(iso, &ec->MBEDTLS_PRIVATE(d), coord_len));
       } else {
         throw_error(iso, "unsupported PK type in PKCS8");
@@ -2266,11 +2267,11 @@ namespace fxe::runtime {
       auto out = Object::New(iso);
       set_string(ctx, out, "kind", "ec");
       set_string(ctx, out, "curve", canonical_curve_name(group_id));
-      (void)out->Set(ctx, str(iso, "x"),
+      (void)out->Set(ctx, "x"_v8(iso),
                      mpi_to_uint8_fixed(iso, &Q.ctx.MBEDTLS_PRIVATE(X), coord_len));
-      (void)out->Set(ctx, str(iso, "y"),
+      (void)out->Set(ctx, "y"_v8(iso),
                      mpi_to_uint8_fixed(iso, &Q.ctx.MBEDTLS_PRIVATE(Y), coord_len));
-      (void)out->Set(ctx, str(iso, "d"), mpi_to_uint8_fixed(iso, &d.ctx, coord_len));
+      (void)out->Set(ctx, "d"_v8(iso), mpi_to_uint8_fixed(iso, &d.ctx, coord_len));
       info.GetReturnValue().Set(out);
     }
 
@@ -2280,14 +2281,13 @@ namespace fxe::runtime {
       byte_view a, b;
       if (info.Length() < 2 || !value_to_bytes(iso, ctx, info[0], a) ||
           !value_to_bytes(iso, ctx, info[1], b)) {
-        iso->ThrowException(
-            Exception::TypeError(str(iso, "__fxe_native.pk.timingSafeEqual requires two "
-                                          "Uint8Arrays")));
+        iso->ThrowException(Exception::TypeError(
+            "__fxe_native.pk.timingSafeEqual requires two Uint8Arrays"_v8(iso)));
         return;
       }
       if (a.size != b.size) {
         iso->ThrowException(
-            Exception::RangeError(str(iso, "timingSafeEqual inputs must have the same length")));
+            Exception::RangeError("timingSafeEqual inputs must have the same length"_v8(iso)));
         return;
       }
       if (a.size == 0) {
@@ -2454,17 +2454,17 @@ namespace fxe::runtime {
       }
       auto out = Object::New(iso);
       auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, str(iso, "update"),
+      (void)out->Set(ctx, "update"_v8(iso),
                      Function::New(ctx, cipher_update, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "final"),
+      (void)out->Set(ctx, "final"_v8(iso),
                      Function::New(ctx, cipher_final, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "setAutoPadding"),
+      (void)out->Set(ctx, "setAutoPadding"_v8(iso),
                      Function::New(ctx, cipher_set_auto_padding, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "setAAD"),
+      (void)out->Set(ctx, "setAAD"_v8(iso),
                      Function::New(ctx, cipher_set_aad, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "getAuthTag"),
+      (void)out->Set(ctx, "getAuthTag"_v8(iso),
                      Function::New(ctx, cipher_get_auth_tag, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "setAuthTag"),
+      (void)out->Set(ctx, "setAuthTag"_v8(iso),
                      Function::New(ctx, cipher_set_auth_tag, external).ToLocalChecked());
       state->self.Reset(iso, out);
       state->self.SetWeak(state.get(), cipher_finalizer, WeakCallbackType::kParameter);
@@ -3196,7 +3196,7 @@ namespace fxe::runtime {
       if (!options->IsObject())
         return AF_UNSPEC;
       Local<Value> family_value;
-      if (!options.As<Object>()->Get(ctx, str(iso, "family")).ToLocal(&family_value))
+      if (!options.As<Object>()->Get(ctx, "family"_v8(iso)).ToLocal(&family_value))
         return AF_UNSPEC;
       const int family = family_value->Int32Value(ctx).FromMaybe(0);
       if (family == 4)
@@ -3210,7 +3210,7 @@ namespace fxe::runtime {
       if (!options->IsObject())
         return false;
       Local<Value> all_value;
-      if (!options.As<Object>()->Get(ctx, str(iso, "all")).ToLocal(&all_value))
+      if (!options.As<Object>()->Get(ctx, "all"_v8(iso)).ToLocal(&all_value))
         return false;
       return all_value->BooleanValue(iso);
     }
@@ -3775,7 +3775,7 @@ namespace fxe::runtime {
       auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<std::size_t>(n));
       std::memcpy(backing->Data(), buf.data(), static_cast<std::size_t>(n));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(iso->GetCurrentContext(), str(iso, "data"),
+      (void)out->Set(iso->GetCurrentContext(), "data"_v8(iso),
                      Uint8Array::New(buffer, 0, static_cast<std::size_t>(n)));
       info.GetReturnValue().Set(out);
     }
@@ -4001,7 +4001,7 @@ namespace fxe::runtime {
       auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<std::size_t>(read));
       std::memcpy(backing->Data(), buf.data(), static_cast<std::size_t>(read));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(ctx, str(iso, "data"),
+      (void)out->Set(ctx, "data"_v8(iso),
                      Uint8Array::New(buffer, 0, static_cast<std::size_t>(read)));
       info.GetReturnValue().Set(out);
     }
@@ -4289,8 +4289,7 @@ namespace fxe::runtime {
       auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<std::size_t>(n));
       std::memcpy(backing->Data(), buf.data(), static_cast<std::size_t>(n));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(ctx, str(iso, "data"),
-                     Uint8Array::New(buffer, 0, static_cast<std::size_t>(n)));
+      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(buffer, 0, static_cast<std::size_t>(n)));
       info.GetReturnValue().Set(out);
     }
 
@@ -4624,9 +4623,9 @@ namespace fxe::runtime {
         Local<Value> data;
         if (!deserialize_worker_value(iso, ctx, event.data).ToLocal(&data))
           return MaybeLocal<Object>();
-        (void)out->Set(ctx, str(iso, "data"), data);
+        (void)out->Set(ctx, "data"_v8(iso), data);
       } else if (event.type == "close") {
-        (void)out->Set(ctx, str(iso, "data"), Null(iso));
+        (void)out->Set(ctx, "data"_v8(iso), Null(iso));
       }
       if (!event.message.empty())
         set_string(ctx, out, "message", event.message);
@@ -4689,13 +4688,13 @@ namespace fxe::runtime {
       state->side = side;
       auto out = Object::New(iso);
       auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, str(iso, "postMessage"),
+      (void)out->Set(ctx, "postMessage"_v8(iso),
                      Function::New(ctx, message_port_post_message, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "drainMessages"),
+      (void)out->Set(ctx, "drainMessages"_v8(iso),
                      Function::New(ctx, message_port_drain_messages, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "close"),
+      (void)out->Set(ctx, "close"_v8(iso),
                      Function::New(ctx, message_port_close, external).ToLocalChecked());
-      (void)out->Set(ctx, str(iso, "start"),
+      (void)out->Set(ctx, "start"_v8(iso),
                      Function::New(ctx, [](const FunctionCallbackInfo<Value>& info) {
                        info.GetReturnValue().Set(True(info.GetIsolate()));
                      }).ToLocalChecked());
@@ -4710,8 +4709,8 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       auto channel = std::make_shared<message_port_channel>();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, str(iso, "port1"), make_native_message_port(iso, ctx, channel, 0));
-      (void)out->Set(ctx, str(iso, "port2"),
+      (void)out->Set(ctx, "port1"_v8(iso), make_native_message_port(iso, ctx, channel, 0));
+      (void)out->Set(ctx, "port2"_v8(iso),
                      make_native_message_port(iso, ctx, std::move(channel), 1));
       info.GetReturnValue().Set(out);
     }
@@ -4797,9 +4796,9 @@ namespace fxe::runtime {
           External::New(iso, const_cast<char*>(full_name), v8::kExternalPointerTypeTagDefault);
       auto fn = Function::New(ctx, not_implemented, data).ToLocalChecked();
       (void)ns->Set(ctx, str(iso, name), fn);
-      (void)fn->Set(ctx, str(iso, "notImplemented"), Boolean::New(iso, true));
+      (void)fn->Set(ctx, "notImplemented"_v8(iso), Boolean::New(iso, true));
       if (reason != nullptr) {
-        (void)fn->Set(ctx, str(iso, "reason"), str(iso, reason));
+        (void)fn->Set(ctx, "reason"_v8(iso), str(iso, reason));
       }
     }
 
@@ -4965,19 +4964,19 @@ namespace fxe::runtime {
 
   void install_fxe_native(Isolate* iso, Local<Context> ctx) {
     auto native = Object::New(iso);
-    (void)native->Set(ctx, str(iso, "os"), make_os_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "tty"), make_tty_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "spawn"), make_spawn_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "random"), make_random_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "hash"), make_hash_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "cipher"), make_cipher_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "kdf"), make_kdf_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "pk"), make_pk_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "worker"), make_worker_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "dns"), make_dns_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "net"), make_net_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "ipcsock"), make_ipcsock_namespace(iso, ctx));
-    (void)native->Set(ctx, str(iso, "dgram"), make_dgram_namespace(iso, ctx));
+    (void)native->Set(ctx, "os"_v8(iso), make_os_namespace(iso, ctx));
+    (void)native->Set(ctx, "tty"_v8(iso), make_tty_namespace(iso, ctx));
+    (void)native->Set(ctx, "spawn"_v8(iso), make_spawn_namespace(iso, ctx));
+    (void)native->Set(ctx, "random"_v8(iso), make_random_namespace(iso, ctx));
+    (void)native->Set(ctx, "hash"_v8(iso), make_hash_namespace(iso, ctx));
+    (void)native->Set(ctx, "cipher"_v8(iso), make_cipher_namespace(iso, ctx));
+    (void)native->Set(ctx, "kdf"_v8(iso), make_kdf_namespace(iso, ctx));
+    (void)native->Set(ctx, "pk"_v8(iso), make_pk_namespace(iso, ctx));
+    (void)native->Set(ctx, "worker"_v8(iso), make_worker_namespace(iso, ctx));
+    (void)native->Set(ctx, "dns"_v8(iso), make_dns_namespace(iso, ctx));
+    (void)native->Set(ctx, "net"_v8(iso), make_net_namespace(iso, ctx));
+    (void)native->Set(ctx, "ipcsock"_v8(iso), make_ipcsock_namespace(iso, ctx));
+    (void)native->Set(ctx, "dgram"_v8(iso), make_dgram_namespace(iso, ctx));
     install_fs_fd_native(iso, ctx, native);
 
     struct namespace_spec {
@@ -4996,7 +4995,7 @@ namespace fxe::runtime {
           make_placeholder_namespace(iso, ctx, spec.placeholder_name, spec.full_name));
     }
 
-    (void)ctx->Global()->DefineOwnProperty(ctx, str(iso, "__fxe_native"), native,
+    (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
                                            static_cast<PropertyAttribute>(DontEnum));
   }
 

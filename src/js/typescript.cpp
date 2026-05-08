@@ -1,5 +1,6 @@
 #include <fxe/types.hpp>
 #include <fxe/typescript.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <fxe/generated/fxe_types.hpp>
 #include <fxe/generated/typescript_compiler.hpp>
@@ -58,7 +59,7 @@ namespace fxe::js {
       v8::Context::Scope context_scope(ctx);
       v8::TryCatch try_catch(iso);
 
-      v8::ScriptOrigin origin(str(iso, "<fxe-typescript-compiler>"));
+      v8::ScriptOrigin origin("<fxe-typescript-compiler>"_v8(iso));
       v8::Local<v8::Script> script;
       if (!v8::Script::Compile(ctx, str(iso, k_typescript_compiler_source), &origin)
                .ToLocal(&script)) {
@@ -76,15 +77,15 @@ namespace fxe::js {
       }
 
       v8::Local<v8::Value> ts_value;
-      if (!ctx->Global()->Get(ctx, str(iso, "ts")).ToLocal(&ts_value) || !ts_value->IsObject()) {
+      if (!ctx->Global()->Get(ctx, "ts"_v8(iso)).ToLocal(&ts_value) || !ts_value->IsObject()) {
         return {false, {}, "embedded TypeScript compiler did not create global `ts`"};
       }
       auto ts = ts_value.As<v8::Object>();
       v8::Local<v8::Value> create_program;
       v8::Local<v8::Value> script_target;
-      if (!ts->Get(ctx, str(iso, "createProgram")).ToLocal(&create_program) ||
+      if (!ts->Get(ctx, "createProgram"_v8(iso)).ToLocal(&create_program) ||
           !create_program->IsFunction() ||
-          !ts->Get(ctx, str(iso, "ScriptTarget")).ToLocal(&script_target) ||
+          !ts->Get(ctx, "ScriptTarget"_v8(iso)).ToLocal(&script_target) ||
           !script_target->IsObject()) {
         return {false, {}, "embedded TypeScript compiler is missing required compiler APIs"};
       }
@@ -214,7 +215,7 @@ globalThis.__fxe_hmr ??= (() => {
     v8::Context::Scope context_scope(compiler_context);
     v8::TryCatch try_catch(iso);
 
-    v8::ScriptOrigin function_origin(str(iso, "<fxe-typescript-transpile>"));
+    v8::ScriptOrigin function_origin("<fxe-typescript-transpile>"_v8(iso));
     v8::Local<v8::Script> function_script;
     if (!v8::Script::Compile(compiler_context, str(iso, k_transpile_function_source),
                              &function_origin)
@@ -249,17 +250,17 @@ globalThis.__fxe_hmr ??= (() => {
 
     auto result = result_value.As<v8::Object>();
     v8::Local<v8::Value> ok_value;
-    if (!result->Get(compiler_context, str(iso, "ok")).ToLocal(&ok_value) ||
+    if (!result->Get(compiler_context, "ok"_v8(iso)).ToLocal(&ok_value) ||
         !ok_value->BooleanValue(iso)) {
       v8::Local<v8::Value> message_value;
       std::string message = "unknown TypeScript transpile failure";
-      if (result->Get(compiler_context, str(iso, "message")).ToLocal(&message_value))
+      if (result->Get(compiler_context, "message"_v8(iso)).ToLocal(&message_value))
         message = to_std_string(iso, message_value);
       return {false, {}, std::move(message)};
     }
 
     v8::Local<v8::Value> output_value;
-    if (!result->Get(compiler_context, str(iso, "outputText")).ToLocal(&output_value) ||
+    if (!result->Get(compiler_context, "outputText"_v8(iso)).ToLocal(&output_value) ||
         !output_value->IsString()) {
       return {false, {}, "TypeScript transpile bridge returned no outputText"};
     }

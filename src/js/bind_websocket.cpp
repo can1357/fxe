@@ -400,9 +400,9 @@ namespace fxe::js {
     inst->SetNativeDataProperty("binaryType"_v8(iso), ws_get_binary_type,
                                 ws_set_binary_type);
     // Handler properties via NativeAccessor on Name
-    auto add_handler = [&](const char* name) {
+    auto add_handler = [&](Local<String> name) {
       inst->SetNativeDataProperty(
-          String::NewFromUtf8(iso, name).ToLocalChecked(),
+          name,
           // get
           [](Local<Name> n, const PropertyCallbackInfo<Value>& i) {
             ws_get_handler(n.As<Name>(), i);
@@ -411,10 +411,10 @@ namespace fxe::js {
             ws_set_handler(n.As<Name>(), v, i);
           });
     };
-    add_handler("onopen");
-    add_handler("onmessage");
-    add_handler("onerror");
-    add_handler("onclose");
+    add_handler("onopen"_v8(iso));
+    add_handler("onmessage"_v8(iso));
+    add_handler("onerror"_v8(iso));
+    add_handler("onclose"_v8(iso));
 
     auto proto = tpl->PrototypeTemplate();
     proto->Set(iso, "send", FunctionTemplate::New(iso, ws_send));
@@ -423,14 +423,14 @@ namespace fxe::js {
     proto->Set(iso, "removeEventListener", FunctionTemplate::New(iso, ws_remove_event_listener));
 
     // Class-level constants for readyState.
-    auto attach_const = [&](const char* name, int v) {
-      tpl->Set(String::NewFromUtf8(iso, name).ToLocalChecked(), Integer::New(iso, v),
+    auto attach_const = [&](Local<String> name, int v) {
+      tpl->Set(name, Integer::New(iso, v),
                static_cast<PropertyAttribute>(v8::ReadOnly | v8::DontDelete));
     };
-    attach_const("CONNECTING", 0);
-    attach_const("OPEN", 1);
-    attach_const("CLOSING", 2);
-    attach_const("CLOSED", 3);
+    attach_const("CONNECTING"_v8(iso), 0);
+    attach_const("OPEN"_v8(iso), 1);
+    attach_const("CLOSING"_v8(iso), 2);
+    attach_const("CLOSED"_v8(iso), 3);
 
     global->Set(iso, "WebSocket", tpl);
     ws_tpl_table()[iso].Reset(iso, tpl);

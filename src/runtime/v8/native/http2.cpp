@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <fxe/v8_strings.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -621,13 +622,13 @@ namespace fxe::runtime {
   void install_native_http2(Isolate* iso, Local<Context> ctx) {
     auto global = ctx->Global();
     Local<Value> native_value;
-    if (!global->Get(ctx, str(iso, "__fxe_native")).ToLocal(&native_value) ||
+    if (!global->Get(ctx, "__fxe_native"_v8(iso)).ToLocal(&native_value) ||
         !native_value->IsObject()) {
       native_value = Object::New(iso);
-      (void)global->DefineOwnProperty(ctx, str(iso, "__fxe_native"), native_value,
+      (void)global->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native_value,
                                       static_cast<PropertyAttribute>(DontEnum));
     }
     auto native = native_value.As<Object>();
-    (void)native->Set(ctx, str(iso, "http2"), make_http2_namespace(iso, ctx));
+    (void)native->Set(ctx, "http2"_v8(iso), make_http2_namespace(iso, ctx));
   }
 } // namespace fxe::runtime

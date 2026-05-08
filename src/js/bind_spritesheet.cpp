@@ -4,6 +4,7 @@
 
 #include "bind_spritesheet.hpp"
 #include "bind_image.hpp"
+#include "weak_holder.hpp"
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
@@ -44,15 +45,6 @@ namespace fxe::js {
     };
     static sheet_resetter_register s_sheet_resetter_register;
 
-    void sheet_finalizer(const WeakCallbackInfo<spritesheet_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
-
     void throw_type(Isolate* iso, const char* msg) {
       iso->ThrowException(Exception::TypeError(
           String::NewFromUtf8(iso, msg, NewStringType::kNormal).ToLocalChecked()));
@@ -70,9 +62,7 @@ namespace fxe::js {
       auto* h = new spritesheet_holder{};
       self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SPRITESHEET));
-      auto* persistent = new Global<Object>(iso, self);
-      h->persistent = persistent;
-      persistent->SetWeak(h, sheet_finalizer, WeakCallbackType::kParameter);
+      bind_weak_holder(iso, self, h);
     }
 
     bool decode_rect([[maybe_unused]] Isolate* iso, Local<Context> ctx, Local<Value> v, u32 img_w,
@@ -192,12 +182,9 @@ namespace fxe::js {
       texture_id resolved = sh->sheet.resolve_if(requested, time_s);
 
       auto out = Object::New(iso);
-      auto set = [&](const char* k, double v) {
-        (void)out->Set(ctx, String::NewFromUtf8(iso, k).ToLocalChecked(), Number::New(iso, v));
-      };
-      auto setU = [&](const char* k, u32 v) {
-        (void)out->Set(ctx, String::NewFromUtf8(iso, k).ToLocalChecked(),
-                       Integer::NewFromUnsigned(iso, v));
+      auto set = [&](Local<String> k, double v) { (void)out->Set(ctx, k, Number::New(iso, v)); };
+      auto setU = [&](Local<String> k, u32 v) {
+        (void)out->Set(ctx, k, Integer::NewFromUnsigned(iso, v));
       };
 
       // Look up the sprite slot. Static sprite ids are stored 1-based in
@@ -210,13 +197,13 @@ namespace fxe::js {
         spr = &sh->sheet.sprites[idx - 1];
       }
       if (!spr) {
-        setU("textureId", resolved);
-        set("u0", 0.0);
-        set("v0", 0.0);
-        set("u1", 1.0);
-        set("v1", 1.0);
-        setU("width", 0);
-        setU("height", 0);
+        setU("textureId"_v8(iso), resolved);
+        set("u0"_v8(iso), 0.0);
+        set("v0"_v8(iso), 0.0);
+        set("u1"_v8(iso), 1.0);
+        set("v1"_v8(iso), 1.0);
+        setU("width"_v8(iso), 0);
+        setU("height"_v8(iso), 0);
         info.GetReturnValue().Set(out);
         return;
       }
@@ -231,13 +218,13 @@ namespace fxe::js {
         u1 = double(spr->at.x + spr->size.x) / tw;
         v1 = double(spr->at.y + spr->size.y) / th;
       }
-      setU("textureId", spr->texture);
-      set("u0", u0);
-      set("v0", v0);
-      set("u1", u1);
-      set("v1", v1);
-      setU("width", spr->size.x);
-      setU("height", spr->size.y);
+      setU("textureId"_v8(iso), spr->texture);
+      set("u0"_v8(iso), u0);
+      set("v0"_v8(iso), v0);
+      set("u1"_v8(iso), u1);
+      set("v1"_v8(iso), v1);
+      setU("width"_v8(iso), spr->size.x);
+      setU("height"_v8(iso), spr->size.y);
       info.GetReturnValue().Set(out);
     }
 

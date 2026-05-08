@@ -119,8 +119,8 @@ namespace fxe::js {
       if (db && err->IsObject()) {
         auto ctx = iso->GetCurrentContext();
         auto o = err.As<Object>();
-        (void)o->Set(ctx, s(iso, "code"), Integer::New(iso, sqlite3_extended_errcode(db)));
-        (void)o->Set(ctx, s(iso, "errno"), Integer::New(iso, sqlite3_errcode(db)));
+        (void)o->Set(ctx, "code"_v8(iso), Integer::New(iso, sqlite3_extended_errcode(db)));
+        (void)o->Set(ctx, "errno"_v8(iso), Integer::New(iso, sqlite3_errcode(db)));
       }
       iso->ThrowException(err);
       return false;
@@ -138,7 +138,7 @@ namespace fxe::js {
 
     bool sqlite_unknown_key_warning_enabled(Isolate* iso, Local<Context> ctx) {
       Local<Value> flag;
-      if (!ctx->Global()->Get(ctx, s(iso, "__FXE_SQLITE_WARN_UNKNOWN_KEYS")).ToLocal(&flag))
+      if (!ctx->Global()->Get(ctx, "__FXE_SQLITE_WARN_UNKNOWN_KEYS"_v8(iso)).ToLocal(&flag))
         return false;
       return flag->IsTrue();
     }
@@ -458,7 +458,7 @@ namespace fxe::js {
         // object whose prototype is the class prototype.
         auto cls = sh->as_class.Get(iso);
         Local<Value> proto;
-        if (cls->Get(ctx, s(iso, "prototype")).ToLocal(&proto) && proto->IsObject()) {
+        if (cls->Get(ctx, "prototype"_v8(iso)).ToLocal(&proto) && proto->IsObject()) {
           row = Object::New(iso, proto, nullptr, nullptr, 0);
         } else {
           row = Object::New(iso);
@@ -578,12 +578,12 @@ namespace fxe::js {
       int64_t rowid = sqlite3_last_insert_rowid(dh->db);
       int changes = sqlite3_changes(dh->db);
       if (dh->safe_integers) {
-        (void)out->Set(ctx, s(iso, "lastInsertRowid"), BigInt::New(iso, rowid));
-        (void)out->Set(ctx, s(iso, "changes"), Integer::New(iso, changes));
+        (void)out->Set(ctx, "lastInsertRowid"_v8(iso), BigInt::New(iso, rowid));
+        (void)out->Set(ctx, "changes"_v8(iso), Integer::New(iso, changes));
       } else {
-        (void)out->Set(ctx, s(iso, "lastInsertRowid"),
+        (void)out->Set(ctx, "lastInsertRowid"_v8(iso),
                        Number::New(iso, static_cast<double>(rowid)));
-        (void)out->Set(ctx, s(iso, "changes"), Integer::New(iso, changes));
+        (void)out->Set(ctx, "changes"_v8(iso), Integer::New(iso, changes));
       }
       return out;
     }
@@ -660,19 +660,19 @@ namespace fxe::js {
       auto* sh = unwrap_stmt(stmt_v.As<Object>());
       auto out = Object::New(iso);
       if (!sh || sh->finalized || !sh->stmt || !sh->owner || sh->owner->closed) {
-        (void)out->Set(ctx, s(iso, "value"), Undefined(iso));
-        (void)out->Set(ctx, s(iso, "done"), True(iso));
+        (void)out->Set(ctx, "value"_v8(iso), Undefined(iso));
+        (void)out->Set(ctx, "done"_v8(iso), True(iso));
         info.GetReturnValue().Set(out);
         return;
       }
       int rc = sqlite3_step(sh->stmt);
       if (rc == SQLITE_ROW) {
-        (void)out->Set(ctx, s(iso, "value"),
+        (void)out->Set(ctx, "value"_v8(iso),
                        make_row_object(iso, ctx, sh, sh->owner->safe_integers));
-        (void)out->Set(ctx, s(iso, "done"), False(iso));
+        (void)out->Set(ctx, "done"_v8(iso), False(iso));
       } else if (rc == SQLITE_DONE) {
-        (void)out->Set(ctx, s(iso, "value"), Undefined(iso));
-        (void)out->Set(ctx, s(iso, "done"), True(iso));
+        (void)out->Set(ctx, "value"_v8(iso), Undefined(iso));
+        (void)out->Set(ctx, "done"_v8(iso), True(iso));
       } else {
         (void)throw_sqlite(iso, sh->owner->db);
         return;
@@ -1138,10 +1138,10 @@ namespace fxe::js {
       auto deferred = make_txn_wrapper(iso, ctx, info.This(), fn, begin_kind::Deferred);
       auto immediate = make_txn_wrapper(iso, ctx, info.This(), fn, begin_kind::Immediate);
       auto exclusive = make_txn_wrapper(iso, ctx, info.This(), fn, begin_kind::Exclusive);
-      (void)base->Set(ctx, s(iso, "deferred"), deferred);
-      (void)base->Set(ctx, s(iso, "immediate"), immediate);
-      (void)base->Set(ctx, s(iso, "exclusive"), exclusive);
-      (void)base->Set(ctx, s(iso, "default"), base);
+      (void)base->Set(ctx, "deferred"_v8(iso), deferred);
+      (void)base->Set(ctx, "immediate"_v8(iso), immediate);
+      (void)base->Set(ctx, "exclusive"_v8(iso), exclusive);
+      (void)base->Set(ctx, "default"_v8(iso), base);
       info.GetReturnValue().Set(base);
     }
 
@@ -1159,7 +1159,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto* dh = unwrap_db(info.This());
       if (!dh || !dh->db) {
-        info.GetReturnValue().Set(s(iso, ""));
+        info.GetReturnValue().Set(""_v8(iso));
         return;
       }
       const char* fn = sqlite3_db_filename(dh->db, "main");
@@ -1253,7 +1253,7 @@ namespace fxe::js {
       persistent->SetWeak(dh, db_finalizer, WeakCallbackType::kParameter);
 
       // Stash filename for diagnostics.
-      (void)self->Set(ctx, s(iso, "filename"), s(iso, filename));
+      (void)self->Set(ctx, "filename"_v8(iso), s(iso, filename));
     }
 
     void db_static_deserialize(const FunctionCallbackInfo<Value>& info) {
@@ -1345,8 +1345,7 @@ namespace fxe::js {
                                  FunctionTemplate::New(iso, stmt_get_column_names));
       proto->SetAccessorProperty("paramsCount"_v8(iso),
                                  FunctionTemplate::New(iso, stmt_get_params_count));
-      proto->SetAccessorProperty("native"_v8(iso),
-                                 FunctionTemplate::New(iso, stmt_get_native));
+      proto->SetAccessorProperty("native"_v8(iso), FunctionTemplate::New(iso, stmt_get_native));
       proto->Set(Symbol::GetIterator(iso), FunctionTemplate::New(iso, stmt_iterate));
       proto->Set(Symbol::GetDispose(iso), FunctionTemplate::New(iso, stmt_finalize));
       return tpl;
@@ -1369,10 +1368,8 @@ namespace fxe::js {
       proto->Set(Symbol::GetDispose(iso), FunctionTemplate::New(iso, db_close));
       proto->SetAccessorProperty("inTransaction"_v8(iso),
                                  FunctionTemplate::New(iso, db_in_transaction));
-      proto->SetAccessorProperty("filename"_v8(iso),
-                                 FunctionTemplate::New(iso, db_get_filename));
-      proto->SetAccessorProperty("handle"_v8(iso),
-                                 FunctionTemplate::New(iso, db_get_handle));
+      proto->SetAccessorProperty("filename"_v8(iso), FunctionTemplate::New(iso, db_get_filename));
+      proto->SetAccessorProperty("handle"_v8(iso), FunctionTemplate::New(iso, db_get_handle));
       tpl->Set(iso, "deserialize", FunctionTemplate::New(iso, db_static_deserialize));
       tpl->Set(iso, "setCustomSQLite", FunctionTemplate::New(iso, db_static_set_custom_sqlite));
       return tpl;
@@ -1456,9 +1453,8 @@ namespace fxe::js {
   MaybeLocal<Module> build_sqlite_module(Isolate* iso, Local<Context> /*ctx*/) {
     HandleScope hs(iso);
     std::array<Local<String>, 5> exports{
-        "Database"_v8(iso),  "Statement"_v8(iso),
-        "constants"_v8(iso), "version"_v8(iso),
-        "default"_v8(iso),
+        "Database"_v8(iso), "Statement"_v8(iso), "constants"_v8(iso),
+        "version"_v8(iso),  "default"_v8(iso),
     };
     MemorySpan<const Local<String>> span(exports.data(), exports.size());
     auto module_name = "fxe:sqlite"_v8(iso);

@@ -23,6 +23,7 @@
 #include "bind_indexed_db.hpp"
 
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "../os/os.hpp"
 
@@ -84,14 +85,14 @@ namespace fxe::js {
     void throw_msg(Isolate* iso, std::string_view msg, const char* name = "Error") {
       auto err = Exception::Error(s(iso, msg)).As<Object>();
       auto ctx = iso->GetCurrentContext();
-      (void)err->Set(ctx, s(iso, "name"), s(iso, name));
+      (void)err->Set(ctx, "name"_v8(iso), s(iso, name));
       iso->ThrowException(err);
     }
 
     Local<Value> make_dom_error(Isolate* iso, std::string_view name, std::string_view msg) {
       auto err = Exception::Error(s(iso, msg)).As<Object>();
       auto ctx = iso->GetCurrentContext();
-      (void)err->Set(ctx, s(iso, "name"), s(iso, name));
+      (void)err->Set(ctx, "name"_v8(iso), s(iso, name));
       return err;
     }
 
@@ -629,19 +630,19 @@ namespace fxe::js {
       p->SetWeak(state, key_range_finalizer, WeakCallbackType::kParameter);
       // Mirror key fields as JS-visible properties.
       if (state->has_lower) {
-        (void)inst->Set(ctx, s(iso, "lower"),
+        (void)inst->Set(ctx, "lower"_v8(iso),
                         decode_key(iso, state->lower.data(), state->lower.size()));
       } else {
-        (void)inst->Set(ctx, s(iso, "lower"), Undefined(iso));
+        (void)inst->Set(ctx, "lower"_v8(iso), Undefined(iso));
       }
       if (state->has_upper) {
-        (void)inst->Set(ctx, s(iso, "upper"),
+        (void)inst->Set(ctx, "upper"_v8(iso),
                         decode_key(iso, state->upper.data(), state->upper.size()));
       } else {
-        (void)inst->Set(ctx, s(iso, "upper"), Undefined(iso));
+        (void)inst->Set(ctx, "upper"_v8(iso), Undefined(iso));
       }
-      (void)inst->Set(ctx, s(iso, "lowerOpen"), Boolean::New(iso, state->lower_open));
-      (void)inst->Set(ctx, s(iso, "upperOpen"), Boolean::New(iso, state->upper_open));
+      (void)inst->Set(ctx, "lowerOpen"_v8(iso), Boolean::New(iso, state->lower_open));
+      (void)inst->Set(ctx, "upperOpen"_v8(iso), Boolean::New(iso, state->upper_open));
       return inst;
     }
 
@@ -793,7 +794,10 @@ namespace fxe::js {
     };
 
     void request_finalizer(const WeakCallbackInfo<request_state>& info) {
-      delete info.GetParameter();
+      auto* st = info.GetParameter();
+      if (st)
+        st->self.Reset();
+      delete st;
     }
 
     void invoke_listener(Isolate* iso, Local<Context> ctx, Local<Object> req, const char* prop_name,
@@ -817,7 +821,7 @@ namespace fxe::js {
                     Local<Object>& out) {
       auto evt = Object::New(iso);
       set_str(ctx, evt, "type", type);
-      (void)evt->Set(ctx, s(iso, "target"), req);
+      (void)evt->Set(ctx, "target"_v8(iso), req);
       out = evt;
     }
 
@@ -835,18 +839,18 @@ namespace fxe::js {
       if (!transaction.IsEmpty())
         st->transaction.Reset(iso, transaction);
       inst->SetAlignedPointerInInternalField(0, st, v8::kEmbedderDataTypeTagDefault);
-      (void)inst->Set(ctx, s(iso, "result"), Undefined(iso));
-      (void)inst->Set(ctx, s(iso, "error"), Null(iso));
-      (void)inst->Set(ctx, s(iso, "readyState"), s(iso, "pending"));
-      (void)inst->Set(ctx, s(iso, "source"),
+      (void)inst->Set(ctx, "result"_v8(iso), Undefined(iso));
+      (void)inst->Set(ctx, "error"_v8(iso), Null(iso));
+      (void)inst->Set(ctx, "readyState"_v8(iso), "pending"_v8(iso));
+      (void)inst->Set(ctx, "source"_v8(iso),
                       source.IsEmpty() ? Local<Value>(Null(iso)) : source.As<Value>());
-      (void)inst->Set(ctx, s(iso, "transaction"),
+      (void)inst->Set(ctx, "transaction"_v8(iso),
                       transaction.IsEmpty() ? Local<Value>(Null(iso)) : transaction.As<Value>());
-      (void)inst->Set(ctx, s(iso, "onsuccess"), Null(iso));
-      (void)inst->Set(ctx, s(iso, "onerror"), Null(iso));
+      (void)inst->Set(ctx, "onsuccess"_v8(iso), Null(iso));
+      (void)inst->Set(ctx, "onerror"_v8(iso), Null(iso));
       if (kind == request_kind::open) {
-        (void)inst->Set(ctx, s(iso, "onupgradeneeded"), Null(iso));
-        (void)inst->Set(ctx, s(iso, "onblocked"), Null(iso));
+        (void)inst->Set(ctx, "onupgradeneeded"_v8(iso), Null(iso));
+        (void)inst->Set(ctx, "onblocked"_v8(iso), Null(iso));
       }
       return inst;
     }
@@ -859,16 +863,16 @@ namespace fxe::js {
     }
 
     void resolve_request(Isolate* iso, Local<Context> ctx, Local<Object> req, Local<Value> result) {
-      (void)req->Set(ctx, s(iso, "result"), result);
-      (void)req->Set(ctx, s(iso, "readyState"), s(iso, "done"));
+      (void)req->Set(ctx, "result"_v8(iso), result);
+      (void)req->Set(ctx, "readyState"_v8(iso), "done"_v8(iso));
       Local<Object> evt;
       make_event(iso, ctx, req, "success", evt);
       invoke_listener(iso, ctx, req, "onsuccess", evt);
     }
 
     void reject_request(Isolate* iso, Local<Context> ctx, Local<Object> req, Local<Value> error) {
-      (void)req->Set(ctx, s(iso, "error"), error);
-      (void)req->Set(ctx, s(iso, "readyState"), s(iso, "done"));
+      (void)req->Set(ctx, "error"_v8(iso), error);
+      (void)req->Set(ctx, "readyState"_v8(iso), "done"_v8(iso));
       Local<Object> evt;
       make_event(iso, ctx, req, "error", evt);
       invoke_listener(iso, ctx, req, "onerror", evt);
@@ -930,10 +934,14 @@ namespace fxe::js {
 
     void tx_finalizer(const WeakCallbackInfo<transaction_state>& info) {
       auto* st = info.GetParameter();
+      if (!st) {
+        return;
+      }
       if (st->active && !st->finished && st->db && st->db->db) {
         std::string err;
         exec_sql(st->db.get(), "ROLLBACK", err);
       }
+      st->self.Reset();
       delete st;
     }
 
@@ -1017,14 +1025,14 @@ namespace fxe::js {
       auto names = Array::New(iso, static_cast<int>(store_names.size()));
       for (size_t i = 0; i < store_names.size(); ++i)
         (void)names->Set(ctx, static_cast<uint32_t>(i), s(iso, store_names[i]));
-      (void)inst->Set(ctx, s(iso, "objectStoreNames"), names);
-      (void)inst->Set(ctx, s(iso, "mode"), s(iso, mode));
-      (void)inst->Set(ctx, s(iso, "oncomplete"), Null(iso));
-      (void)inst->Set(ctx, s(iso, "onerror"), Null(iso));
-      (void)inst->Set(ctx, s(iso, "onabort"), Null(iso));
+      (void)inst->Set(ctx, "objectStoreNames"_v8(iso), names);
+      (void)inst->Set(ctx, "mode"_v8(iso), s(iso, mode));
+      (void)inst->Set(ctx, "oncomplete"_v8(iso), Null(iso));
+      (void)inst->Set(ctx, "onerror"_v8(iso), Null(iso));
+      (void)inst->Set(ctx, "onabort"_v8(iso), Null(iso));
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       st->done_resolver.Reset(iso, resolver);
-      (void)inst->Set(ctx, s(iso, "done"), resolver->GetPromise());
+      (void)inst->Set(ctx, "done"_v8(iso), resolver->GetPromise());
       std::string err;
       if (!tx_begin(st, err)) {
         st->errored = true;
@@ -1077,16 +1085,16 @@ namespace fxe::js {
       h->persistent = p;
       p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
       auto& meta = h->db->stores.at(name);
-      (void)inst->Set(ctx, s(iso, "name"), s(iso, name));
-      (void)inst->Set(ctx, s(iso, "keyPath"),
+      (void)inst->Set(ctx, "name"_v8(iso), s(iso, name));
+      (void)inst->Set(ctx, "keyPath"_v8(iso),
                       meta.key_path ? s(iso, *meta.key_path).As<Value>() : Local<Value>(Null(iso)));
-      (void)inst->Set(ctx, s(iso, "autoIncrement"), Boolean::New(iso, meta.auto_increment));
+      (void)inst->Set(ctx, "autoIncrement"_v8(iso), Boolean::New(iso, meta.auto_increment));
       auto idx_names = Array::New(iso, static_cast<int>(meta.indexes.size()));
       uint32_t k = 0;
       for (auto& [iname, _] : meta.indexes)
         (void)idx_names->Set(ctx, k++, s(iso, iname));
-      (void)inst->Set(ctx, s(iso, "indexNames"), idx_names);
-      (void)inst->Set(ctx, s(iso, "transaction"), tx_obj);
+      (void)inst->Set(ctx, "indexNames"_v8(iso), idx_names);
+      (void)inst->Set(ctx, "transaction"_v8(iso), tx_obj);
       return inst;
     }
 
@@ -1106,13 +1114,13 @@ namespace fxe::js {
       p->SetWeak(h, store_finalizer, WeakCallbackType::kParameter);
       auto& smeta = h->db->stores.at(store);
       auto& imeta = smeta.indexes.at(index);
-      (void)inst->Set(ctx, s(iso, "name"), s(iso, index));
-      (void)inst->Set(ctx, s(iso, "keyPath"), s(iso, imeta.key_path));
-      (void)inst->Set(ctx, s(iso, "unique"), Boolean::New(iso, imeta.unique));
-      (void)inst->Set(ctx, s(iso, "multiEntry"), Boolean::New(iso, imeta.multi));
+      (void)inst->Set(ctx, "name"_v8(iso), s(iso, index));
+      (void)inst->Set(ctx, "keyPath"_v8(iso), s(iso, imeta.key_path));
+      (void)inst->Set(ctx, "unique"_v8(iso), Boolean::New(iso, imeta.unique));
+      (void)inst->Set(ctx, "multiEntry"_v8(iso), Boolean::New(iso, imeta.multi));
       // objectStore reference
       auto store_obj = create_object_store_handle(iso, ctx, h->db, tx_obj, store);
-      (void)inst->Set(ctx, s(iso, "objectStore"), store_obj);
+      (void)inst->Set(ctx, "objectStore"_v8(iso), store_obj);
       return inst;
     }
 
@@ -1738,9 +1746,9 @@ namespace fxe::js {
       if (info.Length() >= 3 && info[2]->IsObject()) {
         auto opts = info[2].As<Object>();
         Local<Value> v;
-        if (opts->Get(ctx, s(iso, "unique")).ToLocal(&v))
+        if (opts->Get(ctx, "unique"_v8(iso)).ToLocal(&v))
           unique = v->BooleanValue(iso);
-        if (opts->Get(ctx, s(iso, "multiEntry")).ToLocal(&v))
+        if (opts->Get(ctx, "multiEntry"_v8(iso)).ToLocal(&v))
           multi = v->BooleanValue(iso);
         (void)multi; // multiEntry deferred to v2
       }
@@ -1952,28 +1960,28 @@ namespace fxe::js {
           size_t col1_len = static_cast<size_t>(sqlite3_column_bytes(st->stmt, 1));
           st->last_ik.assign(col0, col0 + col0_len);
           st->last_pk.assign(col1, col1 + col1_len);
-          (void)cursor_obj->Set(ctx, s(iso, "key"), decode_key(iso, col0, col0_len));
-          (void)cursor_obj->Set(ctx, s(iso, "primaryKey"), decode_key(iso, col1, col1_len));
+          (void)cursor_obj->Set(ctx, "key"_v8(iso), decode_key(iso, col0, col0_len));
+          (void)cursor_obj->Set(ctx, "primaryKey"_v8(iso), decode_key(iso, col1, col1_len));
           if (st->has_value) {
             const auto* vdata = static_cast<const uint8_t*>(sqlite3_column_blob(st->stmt, 2));
             size_t vlen = static_cast<size_t>(sqlite3_column_bytes(st->stmt, 2));
             Local<Value> v;
             if (!deserialize_value(iso, ctx, vdata, vlen).ToLocal(&v))
               v = Undefined(iso);
-            (void)cursor_obj->Set(ctx, s(iso, "value"), v);
+            (void)cursor_obj->Set(ctx, "value"_v8(iso), v);
           }
         } else {
           // columns: k (and v for with-value)
           st->last_pk.assign(col0, col0 + col0_len);
-          (void)cursor_obj->Set(ctx, s(iso, "key"), decode_key(iso, col0, col0_len));
-          (void)cursor_obj->Set(ctx, s(iso, "primaryKey"), decode_key(iso, col0, col0_len));
+          (void)cursor_obj->Set(ctx, "key"_v8(iso), decode_key(iso, col0, col0_len));
+          (void)cursor_obj->Set(ctx, "primaryKey"_v8(iso), decode_key(iso, col0, col0_len));
           if (st->has_value) {
             const auto* vdata = static_cast<const uint8_t*>(sqlite3_column_blob(st->stmt, 1));
             size_t vlen = static_cast<size_t>(sqlite3_column_bytes(st->stmt, 1));
             Local<Value> v;
             if (!deserialize_value(iso, ctx, vdata, vlen).ToLocal(&v))
               v = Undefined(iso);
-            (void)cursor_obj->Set(ctx, s(iso, "value"), v);
+            (void)cursor_obj->Set(ctx, "value"_v8(iso), v);
           }
         }
         schedule_resolve(iso, req, cursor_obj);
@@ -2205,12 +2213,12 @@ namespace fxe::js {
       auto p = new Global<Object>(iso, cursor);
       st->persistent = p;
       p->SetWeak(st, cursor_finalizer, WeakCallbackType::kParameter);
-      (void)cursor->Set(ctx, s(iso, "source"), info.This());
-      (void)cursor->Set(ctx, s(iso, "direction"), s(iso, descending ? "prev" : "next"));
-      (void)cursor->Set(ctx, s(iso, "key"), Null(iso));
-      (void)cursor->Set(ctx, s(iso, "primaryKey"), Null(iso));
+      (void)cursor->Set(ctx, "source"_v8(iso), info.This());
+      (void)cursor->Set(ctx, "direction"_v8(iso), s(iso, descending ? "prev" : "next"));
+      (void)cursor->Set(ctx, "key"_v8(iso), Null(iso));
+      (void)cursor->Set(ctx, "primaryKey"_v8(iso), Null(iso));
       if (!keys_only)
-        (void)cursor->Set(ctx, s(iso, "value"), Undefined(iso));
+        (void)cursor->Set(ctx, "value"_v8(iso), Undefined(iso));
 
       auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
       st->request.Reset(iso, req);
@@ -2314,15 +2322,15 @@ namespace fxe::js {
       auto p = new Global<Object>(iso, inst);
       h->persistent = p;
       p->SetWeak(h, database_finalizer, WeakCallbackType::kParameter);
-      (void)inst->Set(ctx, s(iso, "name"), s(iso, db->name));
-      (void)inst->Set(ctx, s(iso, "version"), Number::New(iso, static_cast<double>(db->version)));
+      (void)inst->Set(ctx, "name"_v8(iso), s(iso, db->name));
+      (void)inst->Set(ctx, "version"_v8(iso), Number::New(iso, static_cast<double>(db->version)));
       auto names = Array::New(iso);
       uint32_t i = 0;
       for (auto& [k, _] : db->stores)
         (void)names->Set(ctx, i++, s(iso, k));
-      (void)inst->Set(ctx, s(iso, "objectStoreNames"), names);
-      (void)inst->Set(ctx, s(iso, "onversionchange"), Null(iso));
-      (void)inst->Set(ctx, s(iso, "onclose"), Null(iso));
+      (void)inst->Set(ctx, "objectStoreNames"_v8(iso), names);
+      (void)inst->Set(ctx, "onversionchange"_v8(iso), Null(iso));
+      (void)inst->Set(ctx, "onclose"_v8(iso), Null(iso));
       return inst;
     }
 
@@ -2337,7 +2345,7 @@ namespace fxe::js {
         return;
       }
       // Look up the active versionchange tx via Symbol-keyed property.
-      auto active_tx = info.This()->Get(ctx, s(iso, "__fxe_active_tx"));
+      auto active_tx = info.This()->Get(ctx, "__fxe_active_tx"_v8(iso));
       if (active_tx.IsEmpty() || !active_tx.ToLocalChecked()->IsObject()) {
         throw_msg(iso, "InvalidStateError: createObjectStore requires versionchange transaction",
                   "InvalidStateError");
@@ -2364,14 +2372,14 @@ namespace fxe::js {
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto opts = info[1].As<Object>();
         Local<Value> v;
-        if (opts->Get(ctx, s(iso, "keyPath")).ToLocal(&v)) {
+        if (opts->Get(ctx, "keyPath"_v8(iso)).ToLocal(&v)) {
           if (v->IsString())
             key_path = utf8(iso, v);
           else if (v->IsArray())
             // Compound key paths not supported in v1.
             ;
         }
-        if (opts->Get(ctx, s(iso, "autoIncrement")).ToLocal(&v))
+        if (opts->Get(ctx, "autoIncrement"_v8(iso)).ToLocal(&v))
           auto_inc = v->BooleanValue(iso);
       }
       // SQL: create store table + meta row.
@@ -2406,7 +2414,7 @@ namespace fxe::js {
       uint32_t i = 0;
       for (auto& [k, _] : h->db->stores)
         (void)names->Set(ctx, i++, s(iso, k));
-      (void)info.This()->Set(ctx, s(iso, "objectStoreNames"), names);
+      (void)info.This()->Set(ctx, "objectStoreNames"_v8(iso), names);
 
       info.GetReturnValue().Set(create_object_store_handle(iso, ctx, h->db, tx_obj, name));
     }
@@ -2417,7 +2425,7 @@ namespace fxe::js {
       auto* h = unwrap_database(info.This());
       if (!h)
         return;
-      auto active_tx = info.This()->Get(ctx, s(iso, "__fxe_active_tx"));
+      auto active_tx = info.This()->Get(ctx, "__fxe_active_tx"_v8(iso));
       if (active_tx.IsEmpty() || !active_tx.ToLocalChecked()->IsObject()) {
         throw_msg(iso, "InvalidStateError: deleteObjectStore requires versionchange transaction",
                   "InvalidStateError");
@@ -2462,7 +2470,7 @@ namespace fxe::js {
       uint32_t i = 0;
       for (auto& [k, _] : h->db->stores)
         (void)names->Set(ctx, i++, s(iso, k));
-      (void)info.This()->Set(ctx, s(iso, "objectStoreNames"), names);
+      (void)info.This()->Set(ctx, "objectStoreNames"_v8(iso), names);
     }
 
     void database_transaction(const FunctionCallbackInfo<Value>& info) {
@@ -2578,7 +2586,7 @@ namespace fxe::js {
           return;
         }
         auto db_obj = create_database_handle(iso, ctx, p->db);
-        (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), tx);
+        (void)db_obj->Set(ctx, "__fxe_active_tx"_v8(iso), tx);
         sqlite3_stmt* upd = nullptr;
         sqlite3_prepare_v2(p->db->db, "UPDATE __meta SET user_version=?1", -1, &upd, nullptr);
         sqlite3_bind_int64(upd, 1, p->requested_version);
@@ -2586,29 +2594,29 @@ namespace fxe::js {
         sqlite3_finalize(upd);
         int64_t old_version = p->db->version;
         p->db->version = p->requested_version;
-        (void)db_obj->Set(ctx, s(iso, "version"),
+        (void)db_obj->Set(ctx, "version"_v8(iso),
                           Number::New(iso, static_cast<double>(p->requested_version)));
         auto evt = Object::New(iso);
         set_str(ctx, evt, "type", "upgradeneeded");
-        (void)evt->Set(ctx, s(iso, "target"), req);
-        (void)evt->Set(ctx, s(iso, "oldVersion"),
+        (void)evt->Set(ctx, "target"_v8(iso), req);
+        (void)evt->Set(ctx, "oldVersion"_v8(iso),
                        Number::New(iso, static_cast<double>(old_version)));
-        (void)evt->Set(ctx, s(iso, "newVersion"),
+        (void)evt->Set(ctx, "newVersion"_v8(iso),
                        Number::New(iso, static_cast<double>(p->requested_version)));
-        (void)req->Set(ctx, s(iso, "result"), db_obj);
-        (void)req->Set(ctx, s(iso, "transaction"), tx);
+        (void)req->Set(ctx, "result"_v8(iso), db_obj);
+        (void)req->Set(ctx, "transaction"_v8(iso), tx);
         invoke_listener(iso, ctx, req, "onupgradeneeded", evt);
         if (tc.HasCaught()) {
           // User handler threw; abort the tx and surface the error.
           auto* tx_st = unwrap_tx(tx);
           tx_abort_internal(iso, ctx, tx, tx_st);
-          (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), Undefined(iso));
+          (void)db_obj->Set(ctx, "__fxe_active_tx"_v8(iso), Undefined(iso));
           reject_request(iso, ctx, req, tc.Exception());
           return;
         }
         auto* tx_st = unwrap_tx(tx);
         tx_commit_internal(iso, ctx, tx, tx_st);
-        (void)db_obj->Set(ctx, s(iso, "__fxe_active_tx"), Undefined(iso));
+        (void)db_obj->Set(ctx, "__fxe_active_tx"_v8(iso), Undefined(iso));
         if (tx_st && tx_st->errored) {
           reject_request(iso, ctx, req,
                          make_dom_error(iso, "AbortError", "versionchange transaction aborted"));
@@ -2789,7 +2797,7 @@ namespace fxe::js {
 
     // IDBKeyRange constructor (no instances directly; static factories return wrapped).
     auto kr_ctor = FunctionTemplate::New(iso);
-    kr_ctor->SetClassName(s(iso, "IDBKeyRange"));
+    kr_ctor->SetClassName("IDBKeyRange"_v8(iso));
     kr_ctor->InstanceTemplate()->SetInternalFieldCount(2);
     kr_ctor->PrototypeTemplate()->Set(iso, "includes",
                                       FunctionTemplate::New(iso, key_range_includes));
@@ -2802,18 +2810,18 @@ namespace fxe::js {
 
     // IDBRequest / IDBOpenDBRequest
     auto req_tpl = FunctionTemplate::New(iso);
-    req_tpl->SetClassName(s(iso, "IDBRequest"));
+    req_tpl->SetClassName("IDBRequest"_v8(iso));
     req_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     tpl_for(iso).request_tpl.Reset(iso, req_tpl);
     auto open_tpl = FunctionTemplate::New(iso);
-    open_tpl->SetClassName(s(iso, "IDBOpenDBRequest"));
+    open_tpl->SetClassName("IDBOpenDBRequest"_v8(iso));
     open_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     open_tpl->Inherit(req_tpl);
     tpl_for(iso).open_request_tpl.Reset(iso, open_tpl);
 
     // IDBDatabase
     auto db_tpl = FunctionTemplate::New(iso);
-    db_tpl->SetClassName(s(iso, "IDBDatabase"));
+    db_tpl->SetClassName("IDBDatabase"_v8(iso));
     db_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     db_tpl->PrototypeTemplate()->Set(iso, "createObjectStore",
                                      FunctionTemplate::New(iso, database_create_object_store));
@@ -2826,7 +2834,7 @@ namespace fxe::js {
 
     // IDBTransaction
     auto tx_tpl = FunctionTemplate::New(iso);
-    tx_tpl->SetClassName(s(iso, "IDBTransaction"));
+    tx_tpl->SetClassName("IDBTransaction"_v8(iso));
     tx_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     tx_tpl->PrototypeTemplate()->Set(iso, "objectStore",
                                      FunctionTemplate::New(iso, tx_object_store));
@@ -2836,7 +2844,7 @@ namespace fxe::js {
 
     // IDBObjectStore
     auto store_tpl = FunctionTemplate::New(iso);
-    store_tpl->SetClassName(s(iso, "IDBObjectStore"));
+    store_tpl->SetClassName("IDBObjectStore"_v8(iso));
     store_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     store_tpl->PrototypeTemplate()->Set(iso, "put", FunctionTemplate::New(iso, store_put));
     store_tpl->PrototypeTemplate()->Set(iso, "add", FunctionTemplate::New(iso, store_add));
@@ -2862,7 +2870,7 @@ namespace fxe::js {
 
     // IDBIndex (subset of object store ops)
     auto idx_tpl = FunctionTemplate::New(iso);
-    idx_tpl->SetClassName(s(iso, "IDBIndex"));
+    idx_tpl->SetClassName("IDBIndex"_v8(iso));
     idx_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     idx_tpl->PrototypeTemplate()->Set(iso, "get", FunctionTemplate::New(iso, store_get));
     idx_tpl->PrototypeTemplate()->Set(iso, "getKey", FunctionTemplate::New(iso, store_get_key));
@@ -2878,7 +2886,7 @@ namespace fxe::js {
 
     // IDBCursor / IDBCursorWithValue
     auto cur_tpl = FunctionTemplate::New(iso);
-    cur_tpl->SetClassName(s(iso, "IDBCursor"));
+    cur_tpl->SetClassName("IDBCursor"_v8(iso));
     cur_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     cur_tpl->PrototypeTemplate()->Set(iso, "continue", FunctionTemplate::New(iso, cursor_continue));
     cur_tpl->PrototypeTemplate()->Set(iso, "advance", FunctionTemplate::New(iso, cursor_advance));
@@ -2887,7 +2895,7 @@ namespace fxe::js {
     tpl_for(iso).cursor_tpl.Reset(iso, cur_tpl);
 
     auto cwv_tpl = FunctionTemplate::New(iso);
-    cwv_tpl->SetClassName(s(iso, "IDBCursorWithValue"));
+    cwv_tpl->SetClassName("IDBCursorWithValue"_v8(iso));
     cwv_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     cwv_tpl->Inherit(cur_tpl);
     tpl_for(iso).cursor_with_value_tpl.Reset(iso, cwv_tpl);

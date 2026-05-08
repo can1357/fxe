@@ -19,6 +19,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <fxe/v8_strings.hpp>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -102,8 +103,8 @@ namespace fxe::runtime {
       msg.append(path);
       msg.push_back('\'');
       auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, str(iso, "name"), str(iso, "PermissionDenied"));
-      (void)err->Set(ctx, str(iso, "code"), str(iso, "EACCES"));
+      (void)err->Set(ctx, "name"_v8(iso), "PermissionDenied"_v8(iso));
+      (void)err->Set(ctx, "code"_v8(iso), "EACCES"_v8(iso));
       return err;
     }
 
@@ -214,12 +215,12 @@ namespace fxe::runtime {
       }
       if (!value->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(str(iso, "fs open flags must be a string or number")));
+            Exception::TypeError("fs open flags must be a string or number"_v8(iso)));
         return false;
       }
       out = open_flag_value(string_arg(iso, value));
       if (out < 0) {
-        iso->ThrowException(Exception::TypeError(str(iso, "unsupported fs open flags")));
+        iso->ThrowException(Exception::TypeError("unsupported fs open flags"_v8(iso)));
         return false;
       }
 #if defined(_WIN32)
@@ -432,7 +433,7 @@ namespace fxe::runtime {
                                     : view_length - offset_value;
       if (offset_value < 0 || length_value < 0 || offset_value > view_length ||
           length_value > view_length - offset_value) {
-        iso->ThrowException(Exception::RangeError(str(iso, "buffer offset/length out of range")));
+        iso->ThrowException(Exception::RangeError("buffer offset/length out of range"_v8(iso)));
         return false;
       }
       const std::size_t offset = static_cast<std::size_t>(offset_value);
@@ -453,7 +454,7 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(str(iso, "__fxe_native.fs_fd.openSync(path, flags, mode)")));
+            Exception::TypeError("__fxe_native.fs_fd.openSync(path, flags, mode)"_v8(iso)));
         return;
       }
       const std::string path = string_arg(iso, info[0]);
@@ -743,9 +744,8 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(
-            rejected(iso, ctx,
-                     Exception::TypeError(str(iso, "__fxe_native.fs_fd.open(path, flags, mode)"))));
+        info.GetReturnValue().Set(rejected(
+            iso, ctx, Exception::TypeError("__fxe_native.fs_fd.open(path, flags, mode)"_v8(iso))));
         return;
       }
       const std::string path = string_arg(iso, info[0]);
@@ -847,6 +847,6 @@ namespace fxe::runtime {
     add_function(iso, ctx, ns, "fstat", fstat_async);
     add_function(iso, ctx, ns, "ftruncate", ftruncate_async);
     add_function(iso, ctx, ns, "fdatasync", fdatasync_async);
-    (void)native->Set(ctx, str(iso, "fs_fd"), ns);
+    (void)native->Set(ctx, "fs_fd"_v8(iso), ns);
   }
 } // namespace fxe::runtime

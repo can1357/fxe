@@ -1,4 +1,5 @@
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "bind_timers.hpp"
 
@@ -110,7 +111,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "setTimeout(fn, ms, ...args)")));
+        iso->ThrowException(Exception::TypeError("setTimeout(fn, ms, ...args)"_v8(iso)));
         return;
       }
       double ms = 0.0;
@@ -147,7 +148,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "setImmediate(fn, ...args)")));
+        iso->ThrowException(Exception::TypeError("setImmediate(fn, ...args)"_v8(iso)));
         return;
       }
       auto& s = state_for(iso);
@@ -186,7 +187,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "queueMicrotask(fn)")));
+        iso->ThrowException(Exception::TypeError("queueMicrotask(fn)"_v8(iso)));
         return;
       }
       iso->EnqueueMicrotask(info[0].As<Function>());
@@ -197,7 +198,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "requestAnimationFrame(fn)")));
+        iso->ThrowException(Exception::TypeError("requestAnimationFrame(fn)"_v8(iso)));
         return;
       }
       auto& s = state_for(iso);
@@ -313,7 +314,7 @@ namespace fxe::js {
           if (tc.HasCaught())
             tc.ReThrow();
           else
-            iso->ThrowException(Exception::Error(str(iso, "timer callback failed")));
+            iso->ThrowException(Exception::Error("timer callback failed"_v8(iso)));
           return;
         }
       }
@@ -376,8 +377,7 @@ namespace fxe::js {
           if (tc.HasCaught())
             tc.ReThrow();
           else
-            iso->ThrowException(
-                Exception::Error(str(iso, "requestAnimationFrame callback failed")));
+            iso->ThrowException(Exception::Error("requestAnimationFrame callback failed"_v8(iso)));
           return;
         }
       }

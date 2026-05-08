@@ -10,6 +10,7 @@
 
 #include <fxe/debug.hpp>
 #include <fxe/v8_host.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cstdint>
 #include <stdexcept>
@@ -308,7 +309,7 @@ namespace fxe::js {
     auto global = ctx->Global();
     v8::Local<v8::Value> native_value;
     v8::Local<v8::Object> native;
-    auto native_key = v8_string(iso, "__fxe_native");
+    auto native_key = "__fxe_native"_v8(iso);
     if (global->Get(ctx, native_key).ToLocal(&native_value) && native_value->IsObject()) {
       native = native_value.As<v8::Object>();
     } else {
@@ -318,11 +319,11 @@ namespace fxe::js {
     }
 
     auto hmr = v8::Object::New(iso);
-    (void)hmr->Set(ctx, v8_string(iso, "invalidate"),
+    (void)hmr->Set(ctx, "invalidate"_v8(iso),
                    v8::Function::New(ctx, hmr_invalidate_callback).ToLocalChecked());
-    (void)hmr->Set(ctx, v8_string(iso, "reimport"),
+    (void)hmr->Set(ctx, "reimport"_v8(iso),
                    v8::Function::New(ctx, hmr_reimport_callback).ToLocalChecked());
-    (void)native->Set(ctx, v8_string(iso, "hmr"), hmr);
+    (void)native->Set(ctx, "hmr"_v8(iso), hmr);
   }
 
   // Called by host::host(). The static-init pattern is unreliable for

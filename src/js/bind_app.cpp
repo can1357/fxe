@@ -9,6 +9,7 @@
 #include "../runtime/updater.hpp"
 #include "fxe/single_instance.hpp"
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 // FXE_APP_NAME and FXE_APP_VERSION may be injected by the build as quoted
 // string-literal compile definitions; keep local defaults for unbranded builds.
@@ -55,7 +56,7 @@ namespace fxe::js {
     void throw_native_error(Isolate* iso, Local<Context> ctx, const char* code,
                             const char* message) {
       auto err = Exception::Error(s(iso, message)).As<Object>();
-      (void)err->Set(ctx, s(iso, "code"), s(iso, code));
+      (void)err->Set(ctx, "code"_v8(iso), s(iso, code));
       iso->ThrowException(err);
     }
 
@@ -151,8 +152,8 @@ namespace fxe::js {
         return;
       }
       Local<Object> result = Object::New(iso);
-      (void)result->Set(ctx, s(iso, "path"), s(iso, resolved->first.c_str()));
-      (void)result->Set(ctx, s(iso, "isStale"), Boolean::New(iso, resolved->second));
+      (void)result->Set(ctx, "path"_v8(iso), s(iso, resolved->first.c_str()));
+      (void)result->Set(ctx, "isStale"_v8(iso), Boolean::New(iso, resolved->second));
       info.GetReturnValue().Set(result);
     }
 
@@ -175,14 +176,14 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
 
       Local<Value> window_ctor_value;
-      if (!ctx->Global()->Get(ctx, s(iso, "Window")).ToLocal(&window_ctor_value)) {
+      if (!ctx->Global()->Get(ctx, "Window"_v8(iso)).ToLocal(&window_ctor_value)) {
         // Preserve the pending V8 exception from global Window lookup.
         return;
       }
 
       if (!window_ctor_value->IsFunction()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.openWindow requires global Window constructor")));
+            Exception::TypeError("App.openWindow requires global Window constructor"_v8(iso)));
         return;
       }
 
@@ -262,10 +263,10 @@ namespace fxe::js {
       set_obj_string(iso, ctx, obj, "value", c.value);
       set_obj_string(iso, ctx, obj, "domain", c.domain);
       set_obj_string(iso, ctx, obj, "path", c.path.empty() ? std::string("/") : c.path);
-      (void)obj->Set(ctx, s(iso, "expires"), Number::New(iso, static_cast<double>(c.expires)));
-      (void)obj->Set(ctx, s(iso, "secure"), Boolean::New(iso, c.secure));
-      (void)obj->Set(ctx, s(iso, "httpOnly"), Boolean::New(iso, c.http_only));
-      (void)obj->Set(ctx, s(iso, "hostOnly"), Boolean::New(iso, c.host_only));
+      (void)obj->Set(ctx, "expires"_v8(iso), Number::New(iso, static_cast<double>(c.expires)));
+      (void)obj->Set(ctx, "secure"_v8(iso), Boolean::New(iso, c.secure));
+      (void)obj->Set(ctx, "httpOnly"_v8(iso), Boolean::New(iso, c.http_only));
+      (void)obj->Set(ctx, "hostOnly"_v8(iso), Boolean::New(iso, c.host_only));
       set_obj_string(iso, ctx, obj, "sameSite", fxe::net::cookie_same_site_name(c.same_site));
       return obj;
     }
@@ -332,7 +333,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsObject()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.session.cookies.set requires a cookie object")));
+            Exception::TypeError("App.session.cookies.set requires a cookie object"_v8(iso)));
         return;
       }
       std::string error;
@@ -343,7 +344,7 @@ namespace fxe::js {
       }
       if (!fxe::net::http_client::instance().cookies().set(std::move(*cookie))) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.session.cookies.set rejected invalid cookie")));
+            Exception::TypeError("App.session.cookies.set rejected invalid cookie"_v8(iso)));
       }
     }
 
@@ -354,7 +355,7 @@ namespace fxe::js {
         return;
       if (info.Length() < 2 || !info[1]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.session.cookies.remove requires a URL")));
+            Exception::TypeError("App.session.cookies.remove requires a URL"_v8(iso)));
         return;
       }
       (void)fxe::net::http_client::instance().cookies().remove(name, to_str(iso, info[1]));
@@ -374,12 +375,12 @@ namespace fxe::js {
     void install_app_session_cookies(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
       Local<Value> session_value;
       Local<Object> session;
-      if (appObj->Get(ctx, s(iso, "session")).ToLocal(&session_value) &&
+      if (appObj->Get(ctx, "session"_v8(iso)).ToLocal(&session_value) &&
           session_value->IsObject()) {
         session = session_value.As<Object>();
       } else {
         session = Object::New(iso);
-        (void)appObj->Set(ctx, s(iso, "session"), session);
+        (void)appObj->Set(ctx, "session"_v8(iso), session);
       }
       auto cookies = Object::New(iso);
       auto set_fn = [&](const char* name, FunctionCallback cb) {
@@ -390,7 +391,7 @@ namespace fxe::js {
       set_fn("remove", session_cookies_remove);
       set_fn("clear", session_cookies_clear);
       set_fn("persist", session_cookies_persist);
-      (void)session->Set(ctx, s(iso, "cookies"), cookies);
+      (void)session->Set(ctx, "cookies"_v8(iso), cookies);
     }
 
     bool bytes_from_value(Local<Value> value, std::vector<std::uint8_t>& out) {
@@ -415,9 +416,9 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (info.Length() < 3 || !info[0]->IsString() || !info[1]->IsString() ||
           !info[2]->IsString()) {
-        iso->ThrowException(Exception::TypeError(s(
-            iso,
-            "App.__fxeVerifyUpdateSignature requires signature, manifest, and publicKey strings")));
+        iso->ThrowException(Exception::TypeError(
+            "App.__fxeVerifyUpdateSignature requires signature, manifest, and publicKey strings"_v8(
+                iso)));
         return;
       }
       std::string error;
@@ -438,8 +439,9 @@ namespace fxe::js {
       };
 
       if (info.Length() < 2 || !info[0]->IsObject()) {
-        iso->ThrowException(Exception::TypeError(s(
-            iso, "App.__fxeStageUpdate requires an update descriptor object and artifact bytes")));
+        iso->ThrowException(Exception::TypeError(
+            "App.__fxeStageUpdate requires an update descriptor object and artifact bytes"_v8(
+                iso)));
         return;
       }
       fxe::runtime::update_descriptor d;
@@ -459,36 +461,37 @@ namespace fxe::js {
         auto parsed = fxe::runtime::updater::parse_channel(channel);
         if (!parsed) {
           iso->ThrowException(Exception::TypeError(
-              s(iso, "App.__fxeStageUpdate descriptor.channel must be stable, beta, or alpha")));
+              "App.__fxeStageUpdate descriptor.channel must be stable, beta, or alpha"_v8(iso)));
           return;
         }
         d.channel = *parsed;
       }
       if (d.version.empty()) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.__fxeStageUpdate requires descriptor.version as a non-empty string")));
+            "App.__fxeStageUpdate requires descriptor.version as a non-empty string"_v8(iso)));
         return;
       }
       if (d.url.empty()) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.__fxeStageUpdate requires descriptor.url as a non-empty string")));
+            "App.__fxeStageUpdate requires descriptor.url as a non-empty string"_v8(iso)));
         return;
       }
       if (d.sha256.size() != 64) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.__fxeStageUpdate requires descriptor.sha256 as a 64-character string")));
+            "App.__fxeStageUpdate requires descriptor.sha256 as a 64-character string"_v8(iso)));
         return;
       }
       if (!d.signature.empty() && (d.canonical_manifest.empty() || d.expected_public_key.empty())) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.__fxeStageUpdate requires descriptor.canonicalManifest and "
-                   "descriptor.expectedPublicKey for signed updates")));
+            "App.__fxeStageUpdate requires descriptor.canonicalManifest and descriptor.expectedPublicKey for signed updates"_v8(
+                iso)));
         return;
       }
       d.user_data_dir = fxe::os::get_path("userData");
       if (!bytes_from_value(info[1], d.artifact)) {
-        iso->ThrowException(Exception::TypeError(s(
-            iso, "App.__fxeStageUpdate requires artifact bytes as an ArrayBuffer or typed array")));
+        iso->ThrowException(Exception::TypeError(
+            "App.__fxeStageUpdate requires artifact bytes as an ArrayBuffer or typed array"_v8(
+                iso)));
         return;
       }
       std::string error;
@@ -496,7 +499,7 @@ namespace fxe::js {
       if (!pending) {
         const std::string message = error.empty() ? "failed to stage update" : error;
         auto err = Exception::Error(s(iso, message.c_str())).As<Object>();
-        (void)err->Set(ctx, s(iso, "code"), s(iso, "ERR_FXE_UPDATE_STAGE_FAILED"));
+        (void)err->Set(ctx, "code"_v8(iso), "ERR_FXE_UPDATE_STAGE_FAILED"_v8(iso));
         iso->ThrowException(err);
         return;
       }
@@ -509,13 +512,13 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.update.setChannel requires stable, beta, or alpha")));
+            Exception::TypeError("App.update.setChannel requires stable, beta, or alpha"_v8(iso)));
         return;
       }
       auto parsed = fxe::runtime::updater::parse_channel(to_str(iso, info[0]));
       if (!parsed) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.update.setChannel requires stable, beta, or alpha")));
+            Exception::TypeError("App.update.setChannel requires stable, beta, or alpha"_v8(iso)));
         return;
       }
       std::string error;
@@ -535,7 +538,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.__fxeResolveUpdateFeedUrl requires a URL")));
+            Exception::TypeError("App.__fxeResolveUpdateFeedUrl requires a URL"_v8(iso)));
         return;
       }
       const auto resolved = fxe::runtime::updater::substitute_channel(to_str(iso, info[0]));
@@ -559,7 +562,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsNumber()) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.__fxeUpdateRolloutEligible requires rollout percent")));
+            "App.__fxeUpdateRolloutEligible requires rollout percent"_v8(iso)));
         return;
       }
       int percent = info[0]->Int32Value(ctx).FromMaybe(0);
@@ -585,8 +588,8 @@ namespace fxe::js {
       if (!fxe::runtime::updater::rollback(error)) {
         const std::string message = error.empty() ? "failed to roll back update" : error;
         auto err = Exception::Error(s(iso, message.c_str())).As<Object>();
-        (void)err->Set(iso->GetCurrentContext(), s(iso, "code"),
-                       s(iso, "ERR_FXE_UPDATE_ROLLBACK_FAILED"));
+        (void)err->Set(iso->GetCurrentContext(), "code"_v8(iso),
+                       "ERR_FXE_UPDATE_ROLLBACK_FAILED"_v8(iso));
         iso->ThrowException(err);
         return;
       }
@@ -620,13 +623,13 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() > 0 && info[0]->IsObject()) {
         Local<Value> install_update;
-        if (info[0].As<Object>()->Get(ctx, s(iso, "installUpdate")).ToLocal(&install_update) &&
+        if (info[0].As<Object>()->Get(ctx, "installUpdate"_v8(iso)).ToLocal(&install_update) &&
             install_update->BooleanValue(iso)) {
           std::string error;
           if (!fxe::runtime::updater::apply_pending(error)) {
             const std::string message = error.empty() ? "failed to apply pending update" : error;
             auto err = Exception::Error(s(iso, message.c_str())).As<Object>();
-            (void)err->Set(ctx, s(iso, "code"), s(iso, "ERR_FXE_UPDATE_APPLY_FAILED"));
+            (void)err->Set(ctx, "code"_v8(iso), "ERR_FXE_UPDATE_APPLY_FAILED"_v8(iso));
             iso->ThrowException(err);
             return;
           }
@@ -970,7 +973,7 @@ namespace fxe::js {
       }
       if (!value->IsFunction()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "installAppRunFrameBridge must evaluate to a function")));
+            Exception::TypeError("installAppRunFrameBridge must evaluate to a function"_v8(iso)));
         return;
       }
       Local<Value> argv[1] = {appObj};
@@ -1008,7 +1011,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsFunction()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.__fxeOnSecondInstance requires a function")));
+            Exception::TypeError("App.__fxeOnSecondInstance requires a function"_v8(iso)));
         return;
       }
       auto refs = make_persistent_callback(iso, iso->GetCurrentContext(), info[0].As<Function>());
@@ -1035,7 +1038,7 @@ namespace fxe::js {
     void app_install_open_url_callback(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(s(iso, "App.__fxeOnOpenUrl requires a function")));
+        iso->ThrowException(Exception::TypeError("App.__fxeOnOpenUrl requires a function"_v8(iso)));
         return;
       }
       auto refs = make_persistent_callback(iso, iso->GetCurrentContext(), info[0].As<Function>());
@@ -1055,7 +1058,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsFunction()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.__fxeOnOpenFile requires a function")));
+            Exception::TypeError("App.__fxeOnOpenFile requires a function"_v8(iso)));
         return;
       }
       auto refs = make_persistent_callback(iso, iso->GetCurrentContext(), info[0].As<Function>());
@@ -1118,13 +1121,13 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(s(iso, "App.recentDocuments.add requires a path string")));
+            Exception::TypeError("App.recentDocuments.add requires a path string"_v8(iso)));
         return;
       }
       std::string path = to_str(iso, info[0]);
       if (path.empty()) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "App.recentDocuments.add requires a non-empty path string")));
+            "App.recentDocuments.add requires a non-empty path string"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(Boolean::New(iso, fxe::os::app::add_recent_document(path)));
@@ -1148,17 +1151,17 @@ namespace fxe::js {
     void install_app_recent_documents(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
       Local<Object> recent;
       Local<Value> existing;
-      if (appObj->Get(ctx, s(iso, "recentDocuments")).ToLocal(&existing) && existing->IsObject()) {
+      if (appObj->Get(ctx, "recentDocuments"_v8(iso)).ToLocal(&existing) && existing->IsObject()) {
         recent = existing.As<Object>();
       } else {
         recent = Object::New(iso);
-        (void)appObj->Set(ctx, s(iso, "recentDocuments"), recent);
+        (void)appObj->Set(ctx, "recentDocuments"_v8(iso), recent);
       }
-      (void)recent->Set(ctx, s(iso, "add"),
+      (void)recent->Set(ctx, "add"_v8(iso),
                         Function::New(ctx, app_recent_documents_add).ToLocalChecked());
-      (void)recent->Set(ctx, s(iso, "list"),
+      (void)recent->Set(ctx, "list"_v8(iso),
                         Function::New(ctx, app_recent_documents_list).ToLocalChecked());
-      (void)recent->Set(ctx, s(iso, "clear"),
+      (void)recent->Set(ctx, "clear"_v8(iso),
                         Function::New(ctx, app_recent_documents_clear).ToLocalChecked());
     }
 
@@ -1239,7 +1242,7 @@ namespace fxe::js {
       }
       if (!value->IsFunction()) {
         iso->ThrowException(Exception::TypeError(
-            s(iso, "installAppSingleInstanceBridge must evaluate to a function")));
+            "installAppSingleInstanceBridge must evaluate to a function"_v8(iso)));
         return;
       }
       Local<Value> argv[1] = {appObj};
@@ -1267,15 +1270,15 @@ namespace fxe::js {
     set_fn("openWindow", app_open_window);
     set_fn("relaunch", app_relaunch);
     Local<Object> bookmark = Object::New(iso);
-    (void)bookmark->Set(ctx, s(iso, "persist"),
+    (void)bookmark->Set(ctx, "persist"_v8(iso),
                         Function::New(ctx, app_bookmark_persist).ToLocalChecked());
-    (void)bookmark->Set(ctx, s(iso, "resolve"),
+    (void)bookmark->Set(ctx, "resolve"_v8(iso),
                         Function::New(ctx, app_bookmark_resolve).ToLocalChecked());
-    (void)bookmark->Set(ctx, s(iso, "startAccessing"),
+    (void)bookmark->Set(ctx, "startAccessing"_v8(iso),
                         Function::New(ctx, app_bookmark_start_accessing).ToLocalChecked());
-    (void)bookmark->Set(ctx, s(iso, "stopAccessing"),
+    (void)bookmark->Set(ctx, "stopAccessing"_v8(iso),
                         Function::New(ctx, app_bookmark_stop_accessing).ToLocalChecked());
-    (void)appObj->Set(ctx, s(iso, "bookmark"), bookmark);
+    (void)appObj->Set(ctx, "bookmark"_v8(iso), bookmark);
     set_fn("__fxeVerifyUpdateSignature", app_verify_update_signature);
     set_fn("__fxeStageUpdate", app_stage_update);
     set_fn("__fxeSetUpdateChannel", app_set_update_channel);
@@ -1287,24 +1290,24 @@ namespace fxe::js {
     install_app_run_frame_bridge(iso, ctx, appObj);
     auto check_for_updates = make_check_for_updates(iso, ctx);
     if (!check_for_updates.IsEmpty())
-      (void)appObj->Set(ctx, s(iso, "checkForUpdates"), check_for_updates);
+      (void)appObj->Set(ctx, "checkForUpdates"_v8(iso), check_for_updates);
     auto install_update = make_install_update(iso, ctx);
     if (!install_update.IsEmpty())
-      (void)appObj->Set(ctx, s(iso, "installUpdate"), install_update);
+      (void)appObj->Set(ctx, "installUpdate"_v8(iso), install_update);
     Local<Object> update = Object::New(iso);
-    (void)update->Set(ctx, s(iso, "setChannel"),
+    (void)update->Set(ctx, "setChannel"_v8(iso),
                       Function::New(ctx, app_set_update_channel).ToLocalChecked());
-    (void)update->Set(ctx, s(iso, "getChannel"),
+    (void)update->Set(ctx, "getChannel"_v8(iso),
                       Function::New(ctx, app_get_update_channel).ToLocalChecked());
-    (void)update->Set(ctx, s(iso, "rollback"),
+    (void)update->Set(ctx, "rollback"_v8(iso),
                       Function::New(ctx, app_update_rollback).ToLocalChecked());
-    (void)update->Set(ctx, s(iso, "history"),
+    (void)update->Set(ctx, "history"_v8(iso),
                       Function::New(ctx, app_update_history).ToLocalChecked());
     if (!check_for_updates.IsEmpty())
-      (void)update->Set(ctx, s(iso, "checkForUpdates"), check_for_updates);
+      (void)update->Set(ctx, "checkForUpdates"_v8(iso), check_for_updates);
     if (!install_update.IsEmpty())
-      (void)update->Set(ctx, s(iso, "install"), install_update);
-    (void)appObj->Set(ctx, s(iso, "update"), update);
+      (void)update->Set(ctx, "install"_v8(iso), install_update);
+    (void)appObj->Set(ctx, "update"_v8(iso), update);
     install_app_recent_documents(iso, ctx, appObj);
     install_app_session_cookies(iso, ctx, appObj);
     // ---- NEW: single-instance / deep-link / file-association bindings ----

@@ -245,7 +245,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "chdir(path)")));
+        iso->ThrowException(Exception::TypeError("chdir(path)"_v8(iso)));
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -253,7 +253,7 @@ namespace fxe::js {
       std::filesystem::current_path(p, ec);
       if (ec) {
         auto err = Exception::Error(str(iso, "chdir: " + ec.message())).As<Object>();
-        (void)err->Set(iso->GetCurrentContext(), str(iso, "code"), str(iso, "ENOENT"));
+        (void)err->Set(iso->GetCurrentContext(), "code"_v8(iso), "ENOENT"_v8(iso));
         iso->ThrowException(err);
       }
     }
@@ -290,7 +290,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "on(event, fn)")));
+        iso->ThrowException(Exception::TypeError("on(event, fn)"_v8(iso)));
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -322,15 +322,14 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "nextTick(fn, ...args)")));
+        iso->ThrowException(Exception::TypeError("nextTick(fn, ...args)"_v8(iso)));
         return;
       }
       auto ctx = iso->GetCurrentContext();
       auto fn = info[0].As<Function>();
       Local<Value> bind_value;
-      if (!fn->Get(ctx, "bind"_v8(iso)).ToLocal(&bind_value) ||
-          !bind_value->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "nextTick(fn, ...args)")));
+      if (!fn->Get(ctx, "bind"_v8(iso)).ToLocal(&bind_value) || !bind_value->IsFunction()) {
+        iso->ThrowException(Exception::TypeError("nextTick(fn, ...args)"_v8(iso)));
         return;
       }
       std::vector<Local<Value>> argv;
@@ -343,7 +342,7 @@ namespace fxe::js {
                ->Call(ctx, fn, static_cast<int>(argv.size()), argv.data())
                .ToLocal(&bound_value) ||
           !bound_value->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "nextTick(fn, ...args)")));
+        iso->ThrowException(Exception::TypeError("nextTick(fn, ...args)"_v8(iso)));
         return;
       }
       iso->EnqueueMicrotask(bound_value.As<Function>());
@@ -413,7 +412,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsNumber()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "kill(pid[, signal])")));
+        iso->ThrowException(Exception::TypeError("kill(pid[, signal])"_v8(iso)));
         return;
       }
       const int pid = info[0]->Int32Value(ctx).FromMaybe(0);
@@ -421,22 +420,22 @@ namespace fxe::js {
       const int sig =
           process_signal_arg(iso, ctx, info.Length() > 1 ? info[1] : Undefined(iso), ok_signal);
       if (!ok_signal) {
-        iso->ThrowException(Exception::TypeError(str(iso, "unknown signal")));
+        iso->ThrowException(Exception::TypeError("unknown signal"_v8(iso)));
         return;
       }
 #if defined(_WIN32)
       HANDLE process = OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, static_cast<DWORD>(pid));
       if (!process) {
-        auto err = Exception::Error(str(iso, "kill: process not found")).As<Object>();
-        (void)err->Set(ctx, str(iso, "code"), str(iso, "ESRCH"));
+        auto err = Exception::Error("kill: process not found"_v8(iso)).As<Object>();
+        (void)err->Set(ctx, "code"_v8(iso), "ESRCH"_v8(iso));
         iso->ThrowException(err);
         return;
       }
       const bool success = sig == 0 || TerminateProcess(process, 1);
       CloseHandle(process);
       if (!success) {
-        auto err = Exception::Error(str(iso, "kill: permission denied")).As<Object>();
-        (void)err->Set(ctx, str(iso, "code"), str(iso, "EPERM"));
+        auto err = Exception::Error("kill: permission denied"_v8(iso)).As<Object>();
+        (void)err->Set(ctx, "code"_v8(iso), "EPERM"_v8(iso));
         iso->ThrowException(err);
         return;
       }
@@ -444,7 +443,7 @@ namespace fxe::js {
       if (::kill(pid, sig) != 0) {
         auto err =
             Exception::Error(str(iso, std::string("kill: ") + std::strerror(errno))).As<Object>();
-        (void)err->Set(ctx, str(iso, "code"), str(iso, errno == ESRCH ? "ESRCH" : "EPERM"));
+        (void)err->Set(ctx, "code"_v8(iso), str(iso, errno == ESRCH ? "ESRCH" : "EPERM"));
         iso->ThrowException(err);
         return;
       }
@@ -462,7 +461,7 @@ namespace fxe::js {
         mask = info[0]->Int32Value(ctx).FromMaybe(0);
         if (mask < 0 || mask > 0777) {
           iso->ThrowException(
-              Exception::RangeError(str(iso, "umask mask must be between 0 and 0o777")));
+              Exception::RangeError("umask mask must be between 0 and 0o777"_v8(iso)));
           return;
         }
       }
@@ -566,11 +565,11 @@ namespace fxe::js {
           continue;
         auto entry = entry_value.As<Object>();
         Local<Value> fn_value;
-        if (!entry->Get(ctx, str(iso, "fn")).ToLocal(&fn_value) || !fn_value->IsFunction())
+        if (!entry->Get(ctx, "fn"_v8(iso)).ToLocal(&fn_value) || !fn_value->IsFunction())
           continue;
         bool once = false;
         Local<Value> once_value;
-        if (entry->Get(ctx, str(iso, "once")).ToLocal(&once_value))
+        if (entry->Get(ctx, "once"_v8(iso)).ToLocal(&once_value))
           once = once_value->BooleanValue(iso);
         Local<Value> argv[1] = {arg.IsEmpty() ? Undefined(iso) : arg};
         Local<Value> ignored;
@@ -583,7 +582,7 @@ namespace fxe::js {
       }
       for (uint32_t i = 0; i < keep.size(); ++i)
         (void)listeners->Set(ctx, i, keep[i]);
-      (void)listeners->Set(ctx, str(iso, "length"),
+      (void)listeners->Set(ctx, "length"_v8(iso),
                            Integer::NewFromUnsigned(iso, static_cast<uint32_t>(keep.size())));
       return true;
     }
@@ -592,8 +591,7 @@ namespace fxe::js {
                                    std::size_t size) {
       auto ctx = iso->GetCurrentContext();
       Local<Value> encoding;
-      if (input->Get(ctx, str(iso, "readableEncoding")).ToLocal(&encoding) &&
-          encoding->IsString()) {
+      if (input->Get(ctx, "readableEncoding"_v8(iso)).ToLocal(&encoding) && encoding->IsString()) {
         return String::NewFromUtf8(iso, data, NewStringType::kNormal, static_cast<int>(size))
             .ToLocalChecked();
       }
@@ -610,7 +608,7 @@ namespace fxe::js {
 #else
       auto ctx = iso->GetCurrentContext();
       Local<Value> marked;
-      if (input->Get(ctx, str(iso, "__fxe_stdin_nonblocking")).ToLocal(&marked) &&
+      if (input->Get(ctx, "__fxe_stdin_nonblocking"_v8(iso)).ToLocal(&marked) &&
           marked->BooleanValue(iso))
         return true;
       int flags = fcntl(0, F_GETFL, 0);
@@ -618,7 +616,7 @@ namespace fxe::js {
         return errno == EBADF;
       if ((flags & O_NONBLOCK) == 0)
         (void)fcntl(0, F_SETFL, flags | O_NONBLOCK);
-      (void)input->Set(ctx, str(iso, "__fxe_stdin_nonblocking"), Boolean::New(iso, true));
+      (void)input->Set(ctx, "__fxe_stdin_nonblocking"_v8(iso), Boolean::New(iso, true));
       return true;
 #endif
     }
@@ -646,19 +644,19 @@ namespace fxe::js {
           continue;
         }
         if (n == 0) {
-          (void)input->Set(ctx, str(iso, "readable"), Boolean::New(iso, false));
-          (void)input->Set(ctx, str(iso, "__fxe_stdin_ended"), Boolean::New(iso, true));
+          (void)input->Set(ctx, "readable"_v8(iso), Boolean::New(iso, false));
+          (void)input->Set(ctx, "__fxe_stdin_ended"_v8(iso), Boolean::New(iso, true));
           (void)stdin_emit(iso, input, "end");
           keep_polling = false;
           break;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)
           break;
-        (void)input->Set(ctx, str(iso, "readable"), Boolean::New(iso, false));
+        (void)input->Set(ctx, "readable"_v8(iso), Boolean::New(iso, false));
         if (errno != EBADF) {
           auto err = Exception::Error(str(iso, std::string("stdin read: ") + std::strerror(errno)))
                          .As<Object>();
-          (void)err->Set(ctx, str(iso, "code"), str(iso, std::strerror(errno)));
+          (void)err->Set(ctx, "code"_v8(iso), str(iso, std::strerror(errno)));
           (void)stdin_emit(iso, input, "error", err);
         }
         keep_polling = false;
@@ -672,7 +670,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      (void)info.This()->Set(ctx, str(iso, "__fxe_stdin_flowing"), Boolean::New(iso, true));
+      (void)info.This()->Set(ctx, "__fxe_stdin_flowing"_v8(iso), Boolean::New(iso, true));
       constexpr const char kResume[] = R"JS(
 (function(input) {
   if (input.__fxe_stdin_timer !== undefined || input.__fxe_stdin_ended) return input;
@@ -730,10 +728,10 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "setEncoding(encoding)")));
+        iso->ThrowException(Exception::TypeError("setEncoding(encoding)"_v8(iso)));
         return;
       }
-      (void)info.This()->Set(ctx, str(iso, "readableEncoding"), info[0]);
+      (void)info.This()->Set(ctx, "readableEncoding"_v8(iso), info[0]);
       info.GetReturnValue().Set(info.This());
     }
 
@@ -741,7 +739,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError(str(iso, "on(event, fn)")));
+        iso->ThrowException(Exception::TypeError("on(event, fn)"_v8(iso)));
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -763,13 +761,13 @@ namespace fxe::js {
       auto fn = info[1].As<Function>();
       if (add) {
         auto entry = Object::New(iso);
-        (void)entry->Set(ctx, str(iso, "fn"), fn);
-        (void)entry->Set(ctx, str(iso, "once"), Boolean::New(iso, once));
+        (void)entry->Set(ctx, "fn"_v8(iso), fn);
+        (void)entry->Set(ctx, "once"_v8(iso), Boolean::New(iso, once));
         (void)listeners->Set(ctx, listeners->Length(), entry);
         if (event == "data") {
           Local<Value> resume_value;
           Local<Value> ignored;
-          if (info.This()->Get(ctx, str(iso, "resume")).ToLocal(&resume_value) &&
+          if (info.This()->Get(ctx, "resume"_v8(iso)).ToLocal(&resume_value) &&
               resume_value->IsFunction())
             (void)resume_value.As<Function>()->Call(ctx, info.This(), 0, nullptr).ToLocal(&ignored);
         }
@@ -781,13 +779,13 @@ namespace fxe::js {
             continue;
           auto entry = entry_value.As<Object>();
           Local<Value> fn_value;
-          if (!entry->Get(ctx, str(iso, "fn")).ToLocal(&fn_value) || !fn_value->StrictEquals(fn)) {
+          if (!entry->Get(ctx, "fn"_v8(iso)).ToLocal(&fn_value) || !fn_value->StrictEquals(fn)) {
             if (out != i)
               (void)listeners->Set(ctx, out, entry);
             ++out;
           }
         }
-        (void)listeners->Set(ctx, str(iso, "length"), Integer::NewFromUnsigned(iso, out));
+        (void)listeners->Set(ctx, "length"_v8(iso), Integer::NewFromUnsigned(iso, out));
       }
       info.GetReturnValue().Set(info.This());
     }
@@ -806,8 +804,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto result = Object::New(iso);
-      (void)result->Set(ctx, str(iso, "done"), Boolean::New(iso, true));
-      (void)result->Set(ctx, str(iso, "value"), Undefined(iso));
+      (void)result->Set(ctx, "done"_v8(iso), Boolean::New(iso, true));
+      (void)result->Set(ctx, "value"_v8(iso), Undefined(iso));
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       (void)resolver->Resolve(ctx, result);
       info.GetReturnValue().Set(resolver->GetPromise());
@@ -818,7 +816,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto iterator = Object::New(iso);
-      (void)iterator->Set(ctx, str(iso, "next"),
+      (void)iterator->Set(ctx, "next"_v8(iso),
                           Function::New(ctx, stdin_async_iterator_next).ToLocalChecked());
       info.GetReturnValue().Set(iterator);
     }
@@ -852,7 +850,7 @@ namespace fxe::js {
       const char* name = platform_name();
       if (!name) {
         iso->ThrowException(
-            Exception::Error(str(iso, "process.platform is unsupported for this build target")));
+            Exception::Error("process.platform is unsupported for this build target"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(str(iso, name));
@@ -864,7 +862,7 @@ namespace fxe::js {
       const char* name = arch_name();
       if (!name) {
         iso->ThrowException(
-            Exception::Error(str(iso, "process.arch is unsupported for this build target")));
+            Exception::Error("process.arch is unsupported for this build target"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(str(iso, name));
@@ -893,8 +891,7 @@ namespace fxe::js {
     proc->Set(iso, "hrtime", hrtime);
     proc->SetAccessorProperty("platform"_v8(iso),
                               FunctionTemplate::New(iso, process_platform_getter));
-    proc->SetAccessorProperty("arch"_v8(iso),
-                              FunctionTemplate::New(iso, process_arch_getter));
+    proc->SetAccessorProperty("arch"_v8(iso), FunctionTemplate::New(iso, process_arch_getter));
     proc->Set(iso, "pid", Integer::New(iso, static_cast<int32_t>(fxe_getpid())));
 
     auto versions = ObjectTemplate::New(iso);
@@ -937,8 +934,7 @@ namespace fxe::js {
       // use a property accessor that materialises the current argv lazily.
     }
     proc->SetAccessorProperty(
-        "argv"_v8(iso),
-        FunctionTemplate::New(iso, [](const FunctionCallbackInfo<Value>& info) {
+        "argv"_v8(iso), FunctionTemplate::New(iso, [](const FunctionCallbackInfo<Value>& info) {
           auto* iso = info.GetIsolate();
           HandleScope hs(iso);
           auto ctx = iso->GetCurrentContext();
@@ -956,8 +952,7 @@ namespace fxe::js {
     // env is a per-instance object; install via accessor that builds it once
     // per context. The handler-based template provides Proxy-like semantics.
     proc->SetAccessorProperty(
-        "env"_v8(iso),
-        FunctionTemplate::New(iso, [](const FunctionCallbackInfo<Value>& info) {
+        "env"_v8(iso), FunctionTemplate::New(iso, [](const FunctionCallbackInfo<Value>& info) {
           auto* iso = info.GetIsolate();
           HandleScope hs(iso);
           auto ctx = iso->GetCurrentContext();

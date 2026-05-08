@@ -43,8 +43,7 @@ namespace fxe::js {
 
 } // namespace fxe::js
 
-template <typename Iso>
-auto v8_string_literal::operator()(Iso* iso) const {
+template <typename Iso> auto v8_string_literal::operator()(Iso* iso) const {
   static_assert(std::is_same_v<Iso, v8::Isolate>,
                 "_v8 literal must be invoked with a v8::Isolate*");
   return ::fxe::js::intern_literal(iso, *this);

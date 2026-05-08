@@ -171,6 +171,51 @@ ctest --preset release --output-on-failure
 - **Errors:** Bindings throw Node-shaped errors `{code, errno, syscall, path}`
   where applicable (`EAUDIO_DECODE`, `ERR_FXE_UPDATE_*`, etc.). Async fs
   surfaces `AbortError` for AbortSignal cancellation.
+- **V8 string literals (`_v8(iso)`):** Use the user-defined literal from
+  `<fxe/v8_strings.hpp>` for any string passed across the V8 boundary —
+  `obj->Get(ctx, "width"_v8(iso))`, `iso->ThrowException(Exception::TypeError("..."_v8(iso)))`,
+  `obj->Set(ctx, "name"_v8(iso), value)`. It returns a per-isolate
+  internalized `v8::Local<v8::String>` cached in an `Eternal` slot, so
+  repeated calls are a hash lookup, not a fresh `String::NewFromUtf8`.
+  Don't write `String::NewFromUtf8(iso, "width").ToLocalChecked()` in
+  bindings — it's slower and noisier. The cache is installed/uninstalled
+  per isolate via `install_string_cache` / `uninstall_string_cache`; new
+  isolates spun up outside the host must call `install_string_cache`
+  before any binding code runs (a missing cache falls back to an
+  uncached internalized string, never an empty handle).
+- **V8 weak callbacks (`Global<T>::SetWeak`):** V8 requires the
+  first-pass weak callback to either `Reset()` the persistent that
+  triggered it or call `SetSecondPassCallback()`. Doing neither aborts
+  the process with `Handle not reset in first callback` during the next
+  GC. The repo convention: store the persistent on the holder so the
+  finalizer can reset and free it.
+
+  ```cpp
+  struct foo_holder {
+    /* … real fields … */
+    v8::Global<v8::Object>* persistent = nullptr;
+  };
+
+  void foo_finalizer(const v8::WeakCallbackInfo<foo_holder>& info) {
+    auto* h = info.GetParameter();
+    if (h && h->persistent) {
+      h->persistent->Reset();
+      delete h->persistent;
+    }
+    delete h;
+  }
+
+  // wrap site
+  auto* persistent = new v8::Global<v8::Object>(iso, obj);
+  h->persistent = persistent;
+  persistent->SetWeak(h, foo_finalizer, v8::WeakCallbackType::kParameter);
+  ```
+
+  Equivalent alternative used in a few bindings: store
+  `v8::Global<v8::Object> self;` directly on the holder, call
+  `h->self.SetWeak(h, finalizer, kParameter)`, and `h->self.Reset()` in
+  the finalizer. Either pattern is fine; never `delete info.GetParameter()`
+  on its own without resetting the persistent.
 
 ## fxe-ui — UI toolkit
 

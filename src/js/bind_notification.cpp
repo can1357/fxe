@@ -5,6 +5,7 @@
 #include "bind_notification.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/v8_strings.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -45,11 +46,11 @@ namespace fxe::js {
       Context::Scope cs(cb_ctx);
       Local<Object> event = Object::New(iso);
       (void)event->Set(
-          cb_ctx, s(iso, "id"),
+          cb_ctx, "id"_v8(iso),
           String::NewFromUtf8(iso, action_id.c_str(), NewStringType::kNormal).ToLocalChecked());
       if (input) {
         (void)event->Set(
-            cb_ctx, s(iso, "input"),
+            cb_ctx, "input"_v8(iso),
             String::NewFromUtf8(iso, input->c_str(), NewStringType::kNormal).ToLocalChecked());
       }
       Local<Value> argv[] = {event};
@@ -83,7 +84,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(s(iso, "Notification must be called with new")));
+        iso->ThrowException(Exception::TypeError("Notification must be called with new"_v8(iso)));
         return;
       }
       auto* h = new opts_holder();
@@ -146,7 +147,7 @@ namespace fxe::js {
       info.GetReturnValue().Set(resolver->GetPromise());
       auto* h = unwrap_self(info.This());
       if (!h) {
-        (void)resolver->Reject(ctx, Exception::Error(s(iso, "invalid Notification this")));
+        (void)resolver->Reject(ctx, Exception::Error("invalid Notification this"_v8(iso)));
         return;
       }
       std::shared_ptr<action_callback_state> action_state;
@@ -186,18 +187,18 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto r = Promise::Resolver::New(ctx).ToLocalChecked();
-      (void)r->Resolve(ctx, s(iso, "granted"));
+      (void)r->Resolve(ctx, "granted"_v8(iso));
       info.GetReturnValue().Set(r->GetPromise());
     }
   } // namespace
 
   void install_notification_global(Isolate* iso, Local<ObjectTemplate> global) {
     auto tpl = FunctionTemplate::New(iso, notif_constructor);
-    tpl->SetClassName(s(iso, "Notification"));
+    tpl->SetClassName("Notification"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(1);
     auto proto = tpl->PrototypeTemplate();
     proto->Set(iso, "show", FunctionTemplate::New(iso, notif_show));
-    tpl->SetNativeDataProperty(s(iso, "permission"), notif_permission_getter);
+    tpl->SetNativeDataProperty("permission"_v8(iso), notif_permission_getter);
     tpl->Set(iso, "requestPermission", FunctionTemplate::New(iso, notif_request_permission));
     global->Set(iso, "Notification", tpl);
   }

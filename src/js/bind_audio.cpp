@@ -224,8 +224,7 @@ namespace fxe::js {
           auto info = Object::New(iso);
           (void)info->Set(ctx, "frameCount"_v8(iso),
                           Number::New(iso, static_cast<double>(chunk.frame_count)));
-          (void)info->Set(ctx, "channels"_v8(iso),
-                          Integer::NewFromUnsigned(iso, chunk.channels));
+          (void)info->Set(ctx, "channels"_v8(iso), Integer::NewFromUnsigned(iso, chunk.channels));
           (void)info->Set(ctx, "sampleRate"_v8(iso),
                           Integer::NewFromUnsigned(iso, chunk.sample_rate));
           Local<Value> argv[] = {view, info};
@@ -293,8 +292,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       // Internal-only constructor. JS callers must use Audio.load(...).
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(
-            "Sound is not user-constructible; use Audio.load"_v8(iso)));
+        iso->ThrowException(
+            Exception::TypeError("Sound is not user-constructible; use Audio.load"_v8(iso)));
         return;
       }
       // Allow construction: make_sound_object calls NewInstance which lands
@@ -304,36 +303,33 @@ namespace fxe::js {
     void capture_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError("CaptureSession is not user-constructible; use Audio.startCapture"_v8(iso)));
+        iso->ThrowException(Exception::TypeError(
+            "CaptureSession is not user-constructible; use Audio.startCapture"_v8(iso)));
         return;
       }
     }
 
-    bool read_number(Isolate* iso, Local<Context> ctx, Local<Object> opts, const char* key,
-                     double& out) {
+    bool read_number(Local<Context> ctx, Local<Object> opts, Local<String> key, double& out) {
       Local<Value> v;
-      auto k = String::NewFromUtf8(iso, key, NewStringType::kNormal).ToLocalChecked();
-      if (!opts->Get(ctx, k).ToLocal(&v) || v->IsUndefined())
+      if (!opts->Get(ctx, key).ToLocal(&v) || v->IsUndefined())
         return false;
       out = v->NumberValue(ctx).FromMaybe(out);
       return true;
     }
 
-    bool read_bool(Isolate* iso, Local<Context> ctx, Local<Object> opts, const char* key,
+    bool read_bool(Isolate* iso, Local<Context> ctx, Local<Object> opts, Local<String> key,
                    bool& out) {
       Local<Value> v;
-      auto k = String::NewFromUtf8(iso, key, NewStringType::kNormal).ToLocalChecked();
-      if (!opts->Get(ctx, k).ToLocal(&v) || v->IsUndefined())
+      if (!opts->Get(ctx, key).ToLocal(&v) || v->IsUndefined())
         return false;
       out = v->BooleanValue(iso);
       return true;
     }
 
-    bool read_string(Isolate* iso, Local<Context> ctx, Local<Object> opts, const char* key,
+    bool read_string(Isolate* iso, Local<Context> ctx, Local<Object> opts, Local<String> key,
                      std::string& out) {
       Local<Value> v;
-      auto k = String::NewFromUtf8(iso, key, NewStringType::kNormal).ToLocalChecked();
-      if (!opts->Get(ctx, k).ToLocal(&v) || v->IsUndefined())
+      if (!opts->Get(ctx, key).ToLocal(&v) || v->IsUndefined())
         return false;
       if (!v->IsString())
         return false;
@@ -344,10 +340,10 @@ namespace fxe::js {
       return true;
     }
 
-    bool read_positive_u32(Isolate* iso, Local<Context> ctx, Local<Object> opts, const char* key,
+    bool read_positive_u32(Local<Context> ctx, Local<Object> opts, Local<String> key,
                            std::optional<uint32_t>& out) {
       double value = 0.0;
-      if (!read_number(iso, ctx, opts, key, value))
+      if (!read_number(ctx, opts, key, value))
         return true;
       if (!std::isfinite(value) || value <= 0.0 ||
           value > static_cast<double>(std::numeric_limits<uint32_t>::max()))
@@ -363,9 +359,9 @@ namespace fxe::js {
       if (!value->IsObject())
         return false;
       auto obj = value.As<Object>();
-      if (!read_positive_u32(iso, ctx, obj, "sampleRate", opts.sample_rate))
+      if (!read_positive_u32(ctx, obj, "sampleRate"_v8(iso), opts.sample_rate))
         return false;
-      if (!read_positive_u32(iso, ctx, obj, "channels", opts.channels))
+      if (!read_positive_u32(ctx, obj, "channels"_v8(iso), opts.channels))
         return false;
       Local<Value> device_value;
       auto device_key = "deviceId"_v8(iso);
@@ -373,7 +369,7 @@ namespace fxe::js {
         if (!device_value->IsString())
           return false;
         std::string device_id;
-        if (!read_string(iso, ctx, obj, "deviceId", device_id))
+        if (!read_string(iso, ctx, obj, "deviceId"_v8(iso), device_id))
           return false;
         opts.device_id = std::move(device_id);
       }
@@ -429,7 +425,7 @@ namespace fxe::js {
       auto err = (type_error ? Exception::TypeError(js_string(iso, message.c_str()))
                              : Exception::Error(js_string(iso, message.c_str())))
                      .As<Object>();
-      (void)err->Set(ctx, js_string(iso, "code"), js_string(iso, code));
+      (void)err->Set(ctx, "code"_v8(iso), js_string(iso, code));
       return err;
     }
 
@@ -466,9 +462,9 @@ namespace fxe::js {
       bool loop = false;
       if (info.Length() >= 1 && info[0]->IsObject()) {
         auto opts = info[0].As<Object>();
-        read_number(iso, ctx, opts, "volume", volume);
-        read_number(iso, ctx, opts, "rate", rate);
-        read_bool(iso, ctx, opts, "loop", loop);
+        read_number(ctx, opts, "volume"_v8(iso), volume);
+        read_number(ctx, opts, "rate"_v8(iso), rate);
+        read_bool(iso, ctx, opts, "loop"_v8(iso), loop);
       }
       auto err =
           audio::play(holder->handle, static_cast<float>(volume), loop, static_cast<float>(rate));
@@ -623,12 +619,9 @@ namespace fxe::js {
       auto arr = Array::New(iso, static_cast<int>(devices.size()));
       for (std::size_t i = 0; i < devices.size(); ++i) {
         auto obj = Object::New(iso);
-        (void)obj->Set(ctx, "id"_v8(iso),
-                       js_string(iso, devices[i].id.c_str()));
-        (void)obj->Set(ctx, "name"_v8(iso),
-                       js_string(iso, devices[i].name.c_str()));
-        (void)obj->Set(ctx, "isDefault"_v8(iso),
-                       Boolean::New(iso, devices[i].is_default));
+        (void)obj->Set(ctx, "id"_v8(iso), js_string(iso, devices[i].id.c_str()));
+        (void)obj->Set(ctx, "name"_v8(iso), js_string(iso, devices[i].name.c_str()));
+        (void)obj->Set(ctx, "isDefault"_v8(iso), Boolean::New(iso, devices[i].is_default));
         (void)arr->Set(ctx, static_cast<uint32_t>(i), obj);
       }
       info.GetReturnValue().Set(arr);

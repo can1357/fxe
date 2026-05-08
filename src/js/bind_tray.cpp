@@ -2,6 +2,7 @@
 #include "../os/os.hpp"
 #include "bind_menu.hpp"
 
+#include <fxe/v8_strings.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -74,7 +75,7 @@ namespace fxe::js {
     void tray_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(s(iso, "Tray must be called with new")));
+        iso->ThrowException(Exception::TypeError("Tray must be called with new"_v8(iso)));
         return;
       }
       std::string icon = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
@@ -214,7 +215,7 @@ namespace fxe::js {
 
   void install_tray_global(Isolate* iso, Local<ObjectTemplate> global) {
     auto tpl = FunctionTemplate::New(iso, tray_constructor);
-    tpl->SetClassName(s(iso, "Tray"));
+    tpl->SetClassName("Tray"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(1);
     auto proto = tpl->PrototypeTemplate();
     proto->Set(iso, "setMenu", FunctionTemplate::New(iso, tray_set_menu_cb));
