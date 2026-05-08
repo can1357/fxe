@@ -99,6 +99,28 @@ test('Window constructor requires new and tolerates hidden minimal options', () 
   ignored.close();
 });
 
+test('Window isolate modes expose shared vs dedicated runtime ids and validate input', () => {
+  const shared = new Window({ visible: false, isolate: 'shared' });
+  assertEqual(shared.isolateMode, 'shared');
+  assertEqual(shared.isolateId, 0);
+  shared.close();
+
+  const ownA = new Window({ visible: false, isolate: 'own' });
+  const ownB = new Window({ visible: false, isolate: 'own' });
+  assertEqual(ownA.isolateMode, 'own');
+  assertEqual(ownB.isolateMode, 'own');
+  assert(ownA.isolateId > 0, 'own isolate should expose a dedicated runtime id');
+  assert(ownB.isolateId > 0, 'second own isolate should expose a dedicated runtime id');
+  assert(ownA.isolateId !== ownB.isolateId, 'own windows should get distinct runtime ids');
+  ownA.close();
+  ownB.close();
+
+  assertThrows(
+    () => new Window({ visible: false, isolate: 'invalid' as 'shared' }),
+    /must be 'shared' or 'own'/,
+  );
+});
+
 test('Window event listener methods validate inputs and return disposers', () => {
   withHiddenWindow((win) => {
     let seen = 0;

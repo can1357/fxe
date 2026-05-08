@@ -140,7 +140,11 @@ export function buildAccessibilityTree(
     };
     nodesById[node.id] = snapshot;
     if (parentId !== null) {
-      const existing = childrenById[parentId] ?? (childrenById[parentId] = []);
+      let existing = childrenById[parentId];
+      if (existing === undefined) {
+        existing = [];
+        childrenById[parentId] = existing;
+      }
       existing.push(node.id);
     } else {
       childrenById[node.id] = [];

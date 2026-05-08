@@ -79,33 +79,14 @@ test('node:https server APIs reject truthfully', () => {
   assertThrows(() => createServer({}), /native TLS server implementation|not implemented yet/i);
 });
 
-test('node:http2 exposes constants and client request stream over fetch', async () => {
+test('node:http2 exposes constants and module surface', () => {
+  // Real http2 client+server round-trips are covered in node_compat_http2_test.
+  // This contract test only verifies the module shape after the F5 native
+  // binding replaced the prior h2-over-fetch fallback.
   assertEqual(constants.HTTP2_HEADER_METHOD, ':method');
   assertEqual(constants.HTTP_STATUS_OK, 200);
-  (globalThis as MutableGlobal).fetch = async () => new Response('h2-body', { status: 200 });
-
-  const session = connect('https://h2.example.test');
   assertEqual(http2Default.connect, connect);
-  const stream = session.request({
-    [constants.HTTP2_HEADER_METHOD]: 'GET',
-    [constants.HTTP2_HEADER_PATH]: '/resource',
-  });
-  const { promise, resolve, reject } = Promise.withResolvers<void>();
-  stream.on('response', (headers: unknown) => {
-    assert(
-      headers !== null && typeof headers === 'object' && constants.HTTP2_HEADER_STATUS in headers,
-      'http2 response should include :status',
-    );
-  });
-  void collectBody(stream).then((body) => {
-    assertEqual(body, 'h2-body');
-    resolve();
-  }, reject);
-  stream.on('error', reject);
-  stream.end();
-  await promise;
-  session.close();
-  assertThrows(() => createSecureServer({}), /native HTTP\/2 server implementation/i);
+  assert(typeof createSecureServer === 'function', 'createSecureServer should be exported');
 });
 
 test('node:tls exposes secure context and asynchronous unavailable connect errors', async () => {

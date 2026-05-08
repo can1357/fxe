@@ -191,14 +191,100 @@ test('fetch rejects missing and empty URLs with TypeError messages', async () =>
   await assertRejects(() => fetch(''), 'fetch: empty url');
 });
 
-test('fetch rejects unsupported stream request bodies', async () => {
-  await assertRejects(
-    () =>
-      fetch('http://127.0.0.1/upload', {
-        body: { getReader() {} } as unknown as ArrayBuffer,
-      }),
-    'fetch: ReadableStream body is not supported in v0',
-  );
+test('fetch streams ReadableStream request bodies through libcurl upload callbacks', async () => {
+  const sockets = new Set<TestSocket>();
+  const received = Promise.withResolvers<number>();
+  const server = net.createServer((socket: TestSocket) => {
+    sockets.add(socket);
+    let request = '';
+    let responded = false;
+    socket.on('data', (chunk?: Uint8Array) => {
+      if (!chunk || responded) {
+        return;
+      }
+      request += Array.from(chunk, (byte) => String.fromCharCode(byte)).join('');
+      const headerEnd = request.indexOf('\r\n\r\n');
+      if (headerEnd < 0) {
+        return;
+      }
+      const headers = request.slice(0, headerEnd);
+      const body = request.slice(headerEnd + 4);
+      const lengthMatch = /\r\ncontent-length:\s*(\d+)/i.exec(`\r\n${headers}`);
+      let total = 0;
+      let complete = false;
+      if (lengthMatch) {
+        total = Number(lengthMatch[1]);
+        complete = body.length >= total;
+      } else if (/\r\ntransfer-encoding:\s*chunked/i.test(`\r\n${headers}`)) {
+        let offset = 0;
+        complete = true;
+        while (true) {
+          const lineEnd = body.indexOf('\r\n', offset);
+          if (lineEnd < 0) {
+            complete = false;
+            break;
+          }
+          const size = Number.parseInt(body.slice(offset, lineEnd).split(';', 1)[0] || '0', 16);
+          if (!Number.isFinite(size)) {
+            complete = false;
+            break;
+          }
+          const dataStart = lineEnd + 2;
+          const dataEnd = dataStart + size;
+          if (body.length < dataEnd + 2) {
+            complete = false;
+            break;
+          }
+          total += size;
+          if (body.slice(dataEnd, dataEnd + 2) !== '\r\n') {
+            complete = false;
+            break;
+          }
+          offset = dataEnd + 2;
+          if (size === 0) {
+            complete = body.length >= offset + 2 && body.slice(offset, offset + 2) === '\r\n';
+            break;
+          }
+        }
+      }
+      if (!complete) {
+        return;
+      }
+      responded = true;
+      received.resolve(total);
+      const payload = `${total}`;
+      socket.end(
+        `HTTP/1.1 200 OK\r\nContent-Length: ${payload.length}\r\nConnection: close\r\n\r\n${payload}`,
+      );
+    });
+  });
+  const { promise: listenPromise, resolve: resolveListen } = Promise.withResolvers<void>();
+  server.listen(0, '127.0.0.1', resolveListen);
+  await listenPromise;
+  const address = server.address() as { port: number };
+  try {
+    let pulls = 0;
+    const stream = new ReadableStream({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(100_000).fill(97));
+        pulls += 1;
+        if (pulls >= 10) {
+          controller.close();
+        }
+      },
+    });
+    const response = await fetch(`http://127.0.0.1:${address.port}/upload`, {
+      method: 'POST',
+      body: stream,
+    });
+    assertEqual(await response.text(), '1000000');
+    assertEqual(await received.promise, 1_000_000);
+  } finally {
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    server.close();
+  }
 });
 
 test('fetch rejects pre-aborted signals before network submission', async () => {

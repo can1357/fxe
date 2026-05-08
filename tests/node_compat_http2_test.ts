@@ -77,7 +77,10 @@ type Connect = (
   url: string,
   options?: unknown,
 ) => {
-  request(headers: Record<string, string>): EventSource & { end(): void };
+  request(
+    headers: Record<string, string>,
+    options?: { signal?: AbortSignal; timeout?: number; timeoutMs?: number },
+  ): EventSource & { end(): void };
   close(): void;
 };
 
@@ -159,6 +162,53 @@ test('node:http2 performs localhost TLS HTTP/2 GET roundtrip', async () => {
   }, reject);
   stream.on('error', reject);
   stream.end();
+  await promise;
+  session.close();
+  server.close();
+});
+
+test('node:http2 aborts a native request via AbortSignal', async () => {
+  const server = nativeCreateSecureServer(
+    { cert: CERT_PEM, key: KEY_PEM },
+    (
+      stream: EventSource & {
+        respond(headers: Record<string, string | number>): void;
+        end(chunk?: string): void;
+      },
+    ) => {
+      setTimeout(() => {
+        stream.respond({
+          [constants.HTTP2_HEADER_STATUS]: constants.HTTP_STATUS_OK,
+          'content-type': 'text/plain',
+        });
+        stream.end('late-body');
+      }, 200);
+    },
+  ) as Http2ServerLike;
+  await listen(server);
+  const address = server.address();
+  assert(address && typeof address.port === 'number' && address.port > 0);
+
+  const session = nativeConnect(`https://127.0.0.1:${address.port}`, { ca: CERT_PEM });
+  const controller = new AbortController();
+  const stream = session.request(
+    {
+      [constants.HTTP2_HEADER_METHOD]: 'GET',
+      [constants.HTTP2_HEADER_PATH]: '/large',
+    },
+    { signal: controller.signal },
+  );
+
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  stream.on('response', () => reject(new Error('request should abort before response')));
+  stream.on('error', (error: unknown) => {
+    const abort = error as { name?: string; code?: string };
+    assert(abort?.name === 'AbortError' || abort?.code === 'ABORT_ERR');
+    resolve();
+  });
+  stream.end();
+  await Promise.resolve();
+  controller.abort();
   await promise;
   session.close();
   server.close();

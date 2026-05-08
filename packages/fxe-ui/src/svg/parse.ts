@@ -176,10 +176,11 @@ function tokenizeXml(source: string): XmlToken[] {
 function parseAttributes(source: string): Record<string, string> {
   const attributes: Record<string, string> = {};
   const pattern = /([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(source)) !== null) {
+  let match: RegExpExecArray | null = pattern.exec(source);
+  while (match !== null) {
     const value = match[2] ?? match[3] ?? match[4] ?? '';
     attributes[match[1]] = value;
+    match = pattern.exec(source);
   }
   return attributes;
 }
@@ -581,13 +582,14 @@ function applyPathData(path: Path, d: string, transform: Affine): void {
 function tokenizePathData(data: string): Array<string | number> {
   const tokens: Array<string | number> = [];
   const pattern = /([AaCcHhLlMmQqSsTtVvZz])|([-+]?(?:\d+\.\d+|\d+\.?|\.\d+)(?:[eE][-+]?\d+)?)/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(data)) !== null) {
+  let match: RegExpExecArray | null = pattern.exec(data);
+  while (match !== null) {
     if (match[1]) {
       tokens.push(match[1]);
     } else if (match[2]) {
       tokens.push(Number.parseFloat(match[2]));
     }
+    match = pattern.exec(data);
   }
   return tokens;
 }
@@ -771,12 +773,13 @@ function parseTransform(raw: string | undefined): Affine {
   if (!raw) return IDENTITY;
   const pattern = /([A-Za-z]+)\s*\(([^)]*)\)/g;
   let out = IDENTITY;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(raw)) !== null) {
+  let match: RegExpExecArray | null = pattern.exec(raw);
+  while (match !== null) {
     const op = match[1].toLowerCase();
     const values = parseNumberList(match[2]);
     const opMatrix = transformOp(op, values);
     out = composeAffine(out, opMatrix);
+    match = pattern.exec(raw);
   }
   return out;
 }
@@ -897,10 +900,11 @@ function parseNumber(raw: string | undefined): number | undefined {
 function parseNumberList(raw: string): number[] {
   const out: number[] = [];
   FLOAT_PATTERN.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = FLOAT_PATTERN.exec(raw)) !== null) {
+  let match: RegExpExecArray | null = FLOAT_PATTERN.exec(raw);
+  while (match !== null) {
     const value = Number.parseFloat(match[0]);
     if (Number.isFinite(value)) out.push(value);
+    match = FLOAT_PATTERN.exec(raw);
   }
   return out;
 }

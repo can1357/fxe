@@ -171,6 +171,12 @@ declare namespace FXE {
      */
     preload?: string;
     /**
+     * Run this window in its own V8 isolate. Default 'shared'. v1 starts a
+     * dedicated isolate thread for 'own', while GLFW/render objects still stay
+     * on the shared main-thread path until cross-thread marshaling lands.
+     */
+    isolate?: 'shared' | 'own';
+    /**
      * Capability allowlists. When unset, all operations are permitted (legacy
      * default). When set, every binding consults the allowlist before performing
      * the operation; disallowed calls throw an Error tagged with name 'PermissionDenied'.
@@ -338,6 +344,9 @@ declare namespace FXE {
 
   class Window {
     constructor(options?: WindowOptions);
+    readonly isolateMode: 'shared' | 'own';
+    /** 0 for the shared/main isolate, otherwise the dedicated runtime id. */
+    readonly isolateId: number;
     static exit(): void;
 
     poll(): void;
@@ -498,6 +507,8 @@ declare namespace FXE {
     getChannel(): UpdateChannel;
     rollback(): boolean;
     history(): string[];
+    markReady(): boolean;
+    hasPendingFirstLaunch(): boolean;
     checkForUpdates(url: string, opts?: AutoUpdateOptions): Promise<AutoUpdateResult>;
     install(opts?: InstallUpdateOptions): Promise<InstallUpdateResult>;
   }
@@ -606,6 +617,7 @@ declare namespace FXE {
     /** Live snapshot of registered windows (window 0 = the first opened). */
     windows(): Window[];
     openWindow(options?: WindowOptions): Window;
+    openDevTools(window?: Window): Window | null;
     checkForUpdates(url: string, opts?: AutoUpdateOptions): Promise<AutoUpdateResult>;
     installUpdate(opts?: InstallUpdateOptions): Promise<InstallUpdateResult>;
     update: UpdateNamespace;
@@ -616,6 +628,8 @@ declare namespace FXE {
     session: SessionNamespace;
     crashReporter: CrashReporter;
     crashReport: CrashReporter;
+    /** @internal Raw accessibility snapshot bridge for native providers. */
+    __fxeUpdateAccessibilityTree(windowId: number, snapshotJson: string): void;
   }
 
   interface PrimitivesNamespace {
@@ -1675,10 +1689,35 @@ interface CookieFilter extends FXE.CookieFilter {}
 interface CookiesNamespace extends FXE.CookiesNamespace {}
 interface SessionNamespace extends FXE.SessionNamespace {}
 
+interface SystemNamespace {
+  /** OS preference: user has requested reduced motion. */
+  prefersReducedMotion(): boolean;
+  /** OS preference: high-contrast / increased-contrast accessibility setting. */
+  prefersHighContrast(): boolean;
+  /** OS text-scale factor. 1.0 = default. */
+  fontScale(): number;
+  /** OS color scheme: 'light' | 'dark' | 'no-preference'. */
+  colorScheme(): 'light' | 'dark' | 'no-preference';
+  /** Lowercase RRGGBB accent color hex string, or "" if unknown. */
+  accentColor(): string;
+  /** Platform identifier: 'macos' | 'win' | 'linux' | 'other'. */
+  platform(): 'macos' | 'win' | 'linux' | 'other';
+  /**
+   * Event surface for OS preference changes. v1 uses a 5-second poll; native
+   * NSNotificationCenter/WM_SETTINGCHANGE/gsettings hooks land later.
+   * Runtime polling driver pending follow-up implementation.
+   */
+  on(
+    event: 'change',
+    cb: (ev: { kind: string; previous: unknown; current: unknown }) => void,
+  ): () => void;
+}
+
 interface AppNamespace {
   getName(): string;
   getVersion(): string;
   getPath(kind: 'userData' | 'documents' | 'downloads' | 'temp' | 'home'): string;
+  openDevTools(window?: InstanceType<typeof Window>): InstanceType<typeof Window> | null;
   requestSingleInstanceLock(appId?: string): boolean;
   on(event: 'second-instance', cb: AppSecondInstanceCallback): () => void;
   on(event: 'open-url', cb: AppOpenUrlCallback): () => void;
@@ -1697,6 +1736,9 @@ interface AppNamespace {
   recentDocuments: FXE.RecentDocumentsNamespace;
   session: FXE.SessionNamespace;
   crashReporter: FXE.CrashReporter;
+  system: SystemNamespace;
+  /** @internal Raw accessibility snapshot bridge for native providers. */
+  __fxeUpdateAccessibilityTree(windowId: number, snapshotJson: string): void;
 }
 declare namespace FXE {
   type AppSecondInstanceCallback = (argv: string[], cwd: string) => void;
@@ -1747,10 +1789,28 @@ declare namespace FXE {
   interface SessionNamespace {
     cookies: CookiesNamespace;
   }
+  interface SystemNamespace {
+    prefersReducedMotion(): boolean;
+    prefersHighContrast(): boolean;
+    fontScale(): number;
+    colorScheme(): 'light' | 'dark' | 'no-preference';
+    accentColor(): string;
+    platform(): 'macos' | 'win' | 'linux' | 'other';
+    /**
+     * Event surface for OS preference changes. v1 uses a 5-second poll; native
+     * NSNotificationCenter/WM_SETTINGCHANGE/gsettings hooks land later.
+     */
+    on(
+      event: 'change',
+      cb: (ev: { kind: string; previous: unknown; current: unknown }) => void,
+    ): () => void;
+  }
+
   interface AppNamespace {
     getName(): string;
     getVersion(): string;
     getPath(kind: 'userData' | 'documents' | 'downloads' | 'temp' | 'home'): string;
+    openDevTools(window?: Window): Window | null;
     requestSingleInstanceLock(appId?: string): boolean;
     on(event: 'second-instance', cb: AppSecondInstanceCallback): () => void;
     on(event: 'open-url', cb: AppOpenUrlCallback): () => void;
@@ -1771,6 +1831,9 @@ declare namespace FXE {
     recentDocuments: RecentDocumentsNamespace;
     session: SessionNamespace;
     crashReporter: CrashReporter;
+    system: SystemNamespace;
+    /** @internal Raw accessibility snapshot bridge for native providers. */
+    __fxeUpdateAccessibilityTree(windowId: number, snapshotJson: string): void;
   }
 }
 
@@ -1918,7 +1981,20 @@ interface ReadableStreamDefaultReader<T = Uint8Array> {
 }
 
 declare class ReadableStream<T = Uint8Array> {
+  constructor(underlyingSource?: {
+    start?: (controller: ReadableStreamDefaultController<T>) => void | Promise<void>;
+    pull?: (controller: ReadableStreamDefaultController<T>) => void | Promise<void>;
+    cancel?: (reason?: unknown) => void | Promise<void>;
+    type?: 'bytes';
+  });
   getReader(): ReadableStreamDefaultReader<T>;
+  cancel(reason?: unknown): Promise<void>;
+}
+interface ReadableStreamDefaultController<T> {
+  enqueue(chunk: T): void;
+  close(): void;
+  error(reason?: unknown): void;
+  readonly desiredSize: number | null;
 }
 
 declare class Blob {
@@ -1944,7 +2020,7 @@ type HeadersInit = Headers | Record<string, string> | [string, string][];
 interface RequestInit {
   method?: string;
   headers?: HeadersInit;
-  body?: string | ArrayBuffer | ArrayBufferView;
+  body?: string | ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array>;
   signal?: AbortSignal;
   proxy?: string;
   range?: string;
@@ -2127,12 +2203,26 @@ interface WebSocketCloseEvent extends WebSocketEvent {
 interface WebSocketErrorEvent extends WebSocketEvent {
   message: string;
 }
+/** FXE-specific options for the global `WebSocket` constructor. Standard browsers accept only `(url, protocols)`. */
+interface WebSocketOptions {
+  /** Disable the `permessage-deflate` extension offer. Default true. */
+  perMessageDeflate?: boolean;
+  /** Maximum message size in bytes (post-decompression); larger triggers close 1009. */
+  maxMessageBytes?: number;
+  /** Maximum outbound fragment size in bytes for send-path fragmentation. */
+  maxFragmentBytes?: number;
+  /** Idle timeout in ms before sending a ping. */
+  idleTimeoutMs?: number;
+  /** Pong timeout in ms after a ping; missing pong closes 1011. */
+  pongTimeoutMs?: number;
+}
+
 declare class WebSocket {
   static readonly CONNECTING: 0;
   static readonly OPEN: 1;
   static readonly CLOSING: 2;
   static readonly CLOSED: 3;
-  constructor(url: string, protocols?: string | string[]);
+  constructor(url: string, protocols?: string | string[], options?: WebSocketOptions);
   readonly url: string;
   readonly readyState: 0 | 1 | 2 | 3;
   readonly bufferedAmount: number;
@@ -2642,6 +2732,53 @@ declare module 'node:net' {
   export default _default;
 }
 // === node:net compatibility end ===
+// === node:vm compatibility begin ===
+interface FxeVmOptions {
+  filename?: string;
+  lineOffset?: number;
+  columnOffset?: number;
+  microtaskMode?: string;
+}
+declare module 'node:vm' {
+  export type Context = Record<string, unknown>;
+  export class Script {
+    constructor(code: string, options?: FxeVmOptions);
+    runInThisContext(options?: FxeVmOptions): unknown;
+    runInContext(contextifiedObject: Context, options?: FxeVmOptions): unknown;
+    runInNewContext(contextObject?: Record<string, unknown>, options?: FxeVmOptions): unknown;
+  }
+  export function createContext(sandbox?: Record<string, unknown>): Context;
+  export function isContext(obj: unknown): obj is Context;
+  export function runInThisContext(code: string, options?: FxeVmOptions): unknown;
+  export function runInContext(
+    code: string,
+    contextifiedObject: Context,
+    options?: FxeVmOptions,
+  ): unknown;
+  export function runInNewContext(
+    code: string,
+    contextObject?: Record<string, unknown>,
+    options?: FxeVmOptions,
+  ): unknown;
+  export function compileFunction(
+    code: string,
+    params?: string[],
+    options?: FxeVmOptions,
+  ): (...args: unknown[]) => unknown;
+  export function measureMemory(): Promise<never>;
+  const _default: {
+    Script: typeof Script;
+    createContext: typeof createContext;
+    isContext: typeof isContext;
+    runInThisContext: typeof runInThisContext;
+    runInContext: typeof runInContext;
+    runInNewContext: typeof runInNewContext;
+    compileFunction: typeof compileFunction;
+    measureMemory: typeof measureMemory;
+  };
+  export default _default;
+}
+// === node:vm compatibility end ===
 // === node:crypto compatibility begin ===
 type FxeBufferSource = ArrayBuffer | ArrayBufferView;
 type FxeKeyFormat = 'raw' | 'jwk' | 'spki' | 'pkcs8';
@@ -3322,3 +3459,136 @@ declare const indexedDB: IDBFactory;
 // `lib: ["ESNext"]` setting in tsconfig.json. No explicit declaration is
 // required here; this comment documents the wiring.
 // === Intl note end ===
+
+// === node:wasi ===
+declare module 'node:wasi' {
+  export type WasiImportObject = {
+    wasi_snapshot_preview1: {
+      proc_exit(code: number): never;
+      fd_write(fd: number, iovsPtr: number, iovsLen: number, nwrittenPtr: number): number;
+      fd_read(fd: number, iovsPtr: number, iovsLen: number, nreadPtr: number): number;
+      fd_close(fd: number): number;
+      fd_seek(
+        fd: number,
+        offsetLow: number,
+        offsetHigh: number,
+        whence: number,
+        newOffsetPtr: number,
+      ): number;
+      fd_fdstat_get(fd: number, statPtr: number): number;
+      fd_fdstat_set_flags(fd: number, flags: number): number;
+      random_get(buf: number, len: number): number;
+      clock_time_get(id: number, precision: bigint | number, timeOutPtr: number): number;
+      clock_res_get(id: number, resOutPtr: number): number;
+      environ_get(envPtr: number, envBufPtr: number): number;
+      environ_sizes_get(countPtr: number, sizePtr: number): number;
+      args_get(argvPtr: number, argvBufPtr: number): number;
+      args_sizes_get(countPtr: number, sizePtr: number): number;
+      path_open(
+        fd: number,
+        dirflags: number,
+        pathPtr: number,
+        pathLen: number,
+        oflags: number,
+        rightsBaseLow: number,
+        rightsBaseHigh: number,
+        rightsInheritingLow: number,
+        rightsInheritingHigh: number,
+        fdflags: number,
+        openedFdPtr: number,
+      ): number;
+      [name: string]: ((...args: any[]) => number) | ((code: number) => never);
+    };
+  };
+
+  export interface WASIOptions {
+    args?: string[];
+    env?: Record<string, string | number | boolean>;
+  }
+
+  export interface WASIMemory {
+    buffer: ArrayBufferLike;
+  }
+
+  export interface WASIStartInstance {
+    exports: {
+      memory: WASIMemory;
+      _start?: () => unknown;
+    };
+  }
+
+  export interface WASIInitializeInstance {
+    exports: {
+      memory: WASIMemory;
+      _initialize?: () => unknown;
+    };
+  }
+
+  export class WASI {
+    constructor(options?: WASIOptions);
+    args: string[];
+    env: string[];
+    exitCode: number;
+    start(instance: WASIStartInstance): void;
+    initialize(instance: WASIInitializeInstance): void;
+    getImportObject(): WasiImportObject;
+  }
+}
+declare module 'wasi' {
+  export { WASI } from 'node:wasi';
+}
+
+// === Internal Node-compat audit hook ===
+//
+// Returns a JSON string `{"specifier":"<s>","source":"native"|"unenv"|"unsupported","assetPath"?:"<p>"}`
+// for the given Node builtin specifier. Test-only; may be removed without notice.
+declare const __fxe_node_compat_status: (specifier: string) => string;
+
+// === node:v8 minimal declaration ===
+// Real implementation is provided by the host binding. This declaration covers
+// only the named exports that consumer code references; broader Node parity
+// is intentionally not declared here.
+declare module 'node:v8' {
+  export function getHeapStatistics(): {
+    total_heap_size: number;
+    total_heap_size_executable: number;
+    total_physical_size: number;
+    total_available_size: number;
+    used_heap_size: number;
+    heap_size_limit: number;
+    malloced_memory: number;
+    peak_malloced_memory: number;
+    does_zap_garbage: number;
+    number_of_native_contexts: number;
+    number_of_detached_contexts: number;
+    total_global_handles_size: number;
+    used_global_handles_size: number;
+    external_memory: number;
+  };
+  export function getHeapSpaceStatistics(): Array<{
+    space_name: string;
+    space_size: number;
+    space_used_size: number;
+    space_available_size: number;
+    physical_space_size: number;
+  }>;
+  export function getHeapCodeStatistics(): {
+    code_and_metadata_size: number;
+    bytecode_and_metadata_size: number;
+    external_script_source_size: number;
+  };
+  export function cachedDataVersionTag(): number;
+  export function serialize(value: unknown): Uint8Array;
+  export function deserialize(bytes: ArrayBufferView | ArrayBuffer): unknown;
+  export function writeHeapSnapshot(filePath: string): string | null;
+  const def: {
+    getHeapStatistics: typeof getHeapStatistics;
+    getHeapSpaceStatistics: typeof getHeapSpaceStatistics;
+    getHeapCodeStatistics: typeof getHeapCodeStatistics;
+    cachedDataVersionTag: typeof cachedDataVersionTag;
+    serialize: typeof serialize;
+    deserialize: typeof deserialize;
+    writeHeapSnapshot: typeof writeHeapSnapshot;
+  };
+  export default def;
+}

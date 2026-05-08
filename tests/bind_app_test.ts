@@ -82,6 +82,17 @@ test('App.windows returns an empty snapshot when no windows exist', () => {
   assertEqual(windows.length, 0, 'bind_app_test must run without creating windows');
 });
 
+test('App.system.on returns a disposer and accepts removal without throwing', () => {
+  const changes: Array<{ kind: string; previous: unknown; current: unknown }> = [];
+  const listener = (ev: { kind: string; previous: unknown; current: unknown }) => {
+    changes.push(ev);
+  };
+  const off = App.system.on('change', listener);
+  assertEqual(typeof off, 'function');
+  off();
+  assertEqual(changes.length, 0);
+});
+
 const appRunTypeOnly = (): void => {
   App.run();
   App.run({ animate: false });

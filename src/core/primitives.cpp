@@ -1670,7 +1670,7 @@ namespace fxe::primitives {
         const float w = kBlurKernel[std::abs(x)][std::abs(y)];
         const math::vec2 uv{float(x) * ires.x, float(y) * ires.y};
         // Sentinel contract: tx == framebuffer_texture_id means the renderer
-        // composites this batch in the post-blur framebuffer sample pass.
+        // treats this quad as a captured-frame sample in the composite pass.
         const texture_id tex = framebuffer_texture_id;
         const u8 a0 = u8(math::fclamp(ca[0] * w, 0.0f, 255.0f));
         const u8 a1 = u8(math::fclamp(ca[1] * w, 0.0f, 255.0f));

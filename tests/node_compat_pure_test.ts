@@ -107,6 +107,19 @@ test('AsyncLocalStorage supports synchronous run and enterWith stores', () => {
   assertEqual(storage.getStore()?.traceId, 'entered');
 });
 
+test('AsyncLocalStorage preserves stores across await', async () => {
+  const storage = new AsyncLocalStorage<{ id: string }>();
+  await storage.run({ id: 'A' }, async () => {
+    await new Promise((resolve) => {
+      void sleep(10).then(resolve);
+    });
+    const current = storage.getStore();
+    if (!current || current.id !== 'A') {
+      throw new Error(`ALS lost across await: ${JSON.stringify(current)}`);
+    }
+  });
+});
+
 test('Readable.from surface is available and consumers.text reports not implemented', () => {
   const stream = Readable.from(['hello', ' ', Buffer.from('world')]);
   assert(stream !== undefined, 'expected Readable.from to return a stream');

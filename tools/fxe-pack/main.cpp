@@ -7,7 +7,7 @@
 //            [--identity <codesign-id>] [--notarize-profile <profile>]
 //            [--cert <path-or-subject>] [--appimage] [--dmg] [--msi] [--msix]
 //            [--update-url <url>] [--public-key <key>] [--channel stable|beta|alpha]
-//            [--compress zstd|none]
+//            [--version <semver>] [--manufacturer <name>|--publisher <name>] [--compress zstd|none]
 
 #include <algorithm>
 #include <cctype>
@@ -52,6 +52,8 @@ namespace {
     std::string update_url;
     std::string public_key;
     std::string channel = "stable";
+    std::string version = "0.1.0";
+    std::string manufacturer = "fxe";
     Compression compress = Compression::None;
     std::vector<std::string> includes;
   };
@@ -129,6 +131,12 @@ namespace {
       return "zstd";
     }
     return "none";
+  }
+  std::string four_part_version(const std::string& version) {
+    const usize dot_count = static_cast<usize>(std::count(version.begin(), version.end(), '.'));
+    if (dot_count == 2)
+      return version + ".0";
+    return version;
   }
 
   bool tool_exists(const std::string& name) {
@@ -290,6 +298,10 @@ namespace {
         a.notarize_profile = need("--notarize-profile");
       else if (s == "--cert")
         a.cert = need("--cert");
+      else if (s == "--version")
+        a.version = need("--version");
+      else if (s == "--manufacturer" || s == "--publisher")
+        a.manufacturer = need("--manufacturer/--publisher");
       else if (s == "--appimage")
         a.appimage = true;
       else if (s == "--dmg")
@@ -314,6 +326,7 @@ namespace {
             << "                [--cert PATH_OR_SUBJECT] [--appimage] [--dmg] [--msi] [--msix]\n"
             << "                [--update-url URL] [--public-key KEY] [--channel "
                "stable|beta|alpha]\n"
+            << "                [--version SEMVER] [--manufacturer NAME|--publisher NAME]\n"
             << "                [--compress zstd|none]\n"
             << "\nExamples:\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.app --platform macos\n"
@@ -639,7 +652,7 @@ namespace {
     std::string plist =
         subst(load_template_or(tmpl_dir, "Info.plist.in", ""), "FXE_APP_NAME", a.name);
     plist = subst(plist, "FXE_APP_BUNDLE_ID", "com.fxe." + a.name);
-    plist = subst(plist, "FXE_APP_VERSION", "0.1.0");
+    plist = subst(plist, "FXE_APP_VERSION", a.version);
     spit(app / "Contents" / "Info.plist", plist);
 
     if (!a.icon.empty())
@@ -926,8 +939,8 @@ namespace {
     }
     std::string wxs_body = load_template_or(tmpl_dir, "wix_product.wxs.in", "");
     wxs_body = subst(wxs_body, "APP_NAME", xml_escape(a.name));
-    wxs_body = subst(wxs_body, "VERSION", "0.1.0");
-    wxs_body = subst(wxs_body, "MANUFACTURER", "fxe");
+    wxs_body = subst(wxs_body, "VERSION", a.version);
+    wxs_body = subst(wxs_body, "MANUFACTURER", a.manufacturer);
     wxs_body = subst(wxs_body, "PRODUCT_CODE", generate_uuid());
     wxs_body = subst(wxs_body, "UPGRADE_CODE", "8F128C0A-5D3F-4F71-8CC0-34796C1FCB5D");
     wxs_body = subst(wxs_body, "EXE_RELATIVE_PATH", xml_escape(exe.filename().string()));
@@ -975,8 +988,8 @@ namespace {
 
     std::string manifest = load_template_or(tmpl_dir, "AppxManifest.xml.in", "");
     manifest = subst(manifest, "APP_NAME", xml_escape(a.name));
-    manifest = subst(manifest, "VERSION", "0.1.0.0");
-    manifest = subst(manifest, "MANUFACTURER", "fxe");
+    manifest = subst(manifest, "VERSION", four_part_version(a.version));
+    manifest = subst(manifest, "MANUFACTURER", a.manufacturer);
     manifest = subst(manifest, "IDENTITY_NAME", "com.fxe." + xml_escape(safe_identifier(a.name)));
     manifest = subst(manifest, "PUBLISHER", xml_escape(msix_publisher(a)));
     manifest = subst(manifest, "EXE_RELATIVE_PATH", xml_escape(exe.filename().string()));
@@ -1057,8 +1070,9 @@ namespace {
     wxs_body
         << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         << "<Wix xmlns=\"http://schemas.microsoft.com/wix/2006/wi\">\n"
-        << "<Product Id=\"*\" Name=\"" << xml_escape(a.name)
-        << "\" Language=\"1033\" Version=\"0.1.0\" Manufacturer=\"fxe\" "
+        << "<Product Id=\"*\" Name=\"" << xml_escape(a.name) << "\" Language=\"1033\" Version=\""
+        << xml_escape(a.version) << "\" Manufacturer=\"" << xml_escape(a.manufacturer)
+        << "\" "
            "UpgradeCode=\"8F128C0A-5D3F-4F71-8CC0-34796C1FCB5D\">\n"
         << "<Package InstallerVersion=\"500\" Compressed=\"yes\" InstallScope=\"perMachine\"/>\n"
         << "<MediaTemplate EmbedCab=\"yes\"/>\n"
@@ -1115,10 +1129,11 @@ namespace {
            "xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\" "
            "IgnorableNamespaces=\"uap\">\n"
         << "<Identity Name=\"com.fxe." << xml_escape(identity) << "\" Publisher=\""
-        << xml_escape(publisher) << "\" Version=\"0.1.0.0\"/>\n"
+        << xml_escape(publisher) << "\" Version=\"" << xml_escape(four_part_version(a.version))
+        << "\"/>\n"
         << "<Properties><DisplayName>" << xml_escape(a.name)
-        << "</DisplayName><PublisherDisplayName>fxe</PublisherDisplayName>"
-           "<Logo>Assets\\StoreLogo.png</Logo></Properties>\n"
+        << "</DisplayName><PublisherDisplayName>"
+        << xml_escape(a.manufacturer) "<Logo>Assets\\StoreLogo.png</Logo></Properties>\n"
         << "<Resources><Resource Language=\"en-us\"/></Resources>\n"
         << "<Dependencies><TargetDeviceFamily Name=\"Windows.Desktop\" MinVersion=\"10.0.17763.0\" "
            "MaxVersionTested=\"10.0.22621.0\"/></Dependencies>\n"
@@ -1182,7 +1197,7 @@ int main(int argc, char** argv) {
   std::string err;
   fxe::bundle::ManifestMetadata manifest;
   manifest.app_name = a.name;
-  manifest.version = "0.1.0";
+  manifest.version = a.version;
   manifest.entry = files.entry_archive;
   manifest.created_at = utc_timestamp();
   manifest.compression = compression_name(a.compress);

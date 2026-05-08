@@ -43,3 +43,4 @@ vcpkg_installed/
 node_modules/
 
 __pycache__/
+TODO.md
