@@ -1,5 +1,7 @@
 #pragma once
 
+#include "weak_holder.hpp"
+
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
 
@@ -14,9 +16,8 @@ namespace fxe::js {
   // multiple JS handles (and the bytes() Uint8Array view) can share storage
   // without double-free hazards. dispose() resets `tex` to release the JS-side
   // reference; remaining shared_ptr holders keep the pixels alive.
-  struct image_holder {
+  struct image_holder : weak_holder<image_holder> {
     std::shared_ptr<fxe::texture_data> tex;
-    v8::Global<v8::Object>* persistent = nullptr;
   };
 
   // Install the `Image` global namespace + ImageHandle constructor template

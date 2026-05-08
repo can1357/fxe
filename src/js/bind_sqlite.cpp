@@ -20,6 +20,7 @@
 // touched from the V8 thread.
 
 #include "bind_sqlite.hpp"
+#include "weak_holder.hpp"
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_strings.hpp>
@@ -72,8 +73,11 @@ namespace fxe::js {
     // --- holder structs ------------------------------------------------------
 
     struct stmt_holder; // fwd
+    struct db_holder;
+    void close_db_holder(db_holder*);
+    void mark_stmt_finalized(stmt_holder*);
 
-    struct db_holder {
+    struct db_holder : weak_holder<db_holder> {
       sqlite3* db = nullptr;
       bool safe_integers = false;
       bool strict = false;
@@ -84,10 +88,11 @@ namespace fxe::js {
       // Transaction nesting depth; depth 0 uses BEGIN/COMMIT/ROLLBACK, depth>0
       // uses SAVEPOINT/RELEASE/ROLLBACK TO.
       int txn_depth = 0;
-      Global<Object>* persistent = nullptr;
+
+      void on_finalize(v8::Isolate*) { close_db_holder(this); }
     };
 
-    struct stmt_holder {
+    struct stmt_holder : weak_holder<stmt_holder> {
       sqlite3_stmt* stmt = nullptr;
       db_holder* owner = nullptr;
       std::string sql;
@@ -96,7 +101,8 @@ namespace fxe::js {
       std::vector<std::string> column_names;
       // `as` class prototype, if any; column name keys are reused across rows.
       Global<Function> as_class;
-      Global<Object>* persistent = nullptr;
+
+      void on_finalize(v8::Isolate*) { mark_stmt_finalized(this); }
     };
 
     // --- utilities -----------------------------------------------------------
@@ -210,25 +216,9 @@ namespace fxe::js {
 
     // --- finalisers ---------------------------------------------------------
 
-    void db_finalizer(const WeakCallbackInfo<db_holder>& info) {
-      auto* h = info.GetParameter();
-      close_db_holder(h);
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
+    // db_holder cleanup runs through weak_holder::on_finalize.
 
-    void stmt_finalizer(const WeakCallbackInfo<stmt_holder>& info) {
-      auto* h = info.GetParameter();
-      mark_stmt_finalized(h);
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
+    // stmt_holder cleanup runs through weak_holder::on_finalize.
 
     // --- value coercion: JS -> sqlite parameter binding ---------------------
 
@@ -767,9 +757,7 @@ namespace fxe::js {
       owner->open_stmts.push_back(sh);
       obj->SetInternalField(0, External::New(iso, sh, v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_STATEMENT));
-      auto* persistent = new Global<Object>(iso, obj);
-      sh->persistent = persistent;
-      persistent->SetWeak(sh, stmt_finalizer, WeakCallbackType::kParameter);
+      sh->bind(iso, obj);
       return obj;
     }
 
@@ -1248,9 +1236,7 @@ namespace fxe::js {
       dh->strict = strict;
       self->SetInternalField(0, External::New(iso, dh, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_DATABASE));
-      auto* persistent = new Global<Object>(iso, self);
-      dh->persistent = persistent;
-      persistent->SetWeak(dh, db_finalizer, WeakCallbackType::kParameter);
+      dh->bind(iso, self);
 
       // Stash filename for diagnostics.
       (void)self->Set(ctx, "filename"_v8(iso), s(iso, filename));
@@ -1315,9 +1301,7 @@ namespace fxe::js {
       dh->db = db;
       self->SetInternalField(0, External::New(iso, dh, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_DATABASE));
-      auto* persistent = new Global<Object>(iso, self);
-      dh->persistent = persistent;
-      persistent->SetWeak(dh, db_finalizer, WeakCallbackType::kParameter);
+      dh->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
 

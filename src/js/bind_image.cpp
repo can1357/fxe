@@ -53,23 +53,12 @@ namespace fxe::js {
       return *u ? std::string(*u, u.length()) : std::string{};
     }
 
-    void image_finalizer(const WeakCallbackInfo<image_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
-
     Local<Object> wrap_image(Isolate* iso, Local<Context> ctx, image_holder* h) {
       auto inst =
           image_tpl_table()[iso].Get(iso)->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       inst->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       inst->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_IMAGE));
-      auto* persistent = new Global<Object>(iso, inst);
-      h->persistent = persistent;
-      persistent->SetWeak(h, image_finalizer, WeakCallbackType::kParameter);
+      h->bind(iso, inst);
       return inst;
     }
 
@@ -89,7 +78,7 @@ namespace fxe::js {
 
     image_holder* make_holder_from_decoded(std::vector<u8>& encoded) {
       auto td = std::make_shared<texture_data>(load_texture(std::span<const u8>(encoded)));
-      return new image_holder{std::move(td)};
+      return new image_holder{{}, std::move(td)};
     }
 
     image_holder* make_holder_from_raw(const u8* bytes, usize len, u32 w, u32 h) {
@@ -99,7 +88,7 @@ namespace fxe::js {
       td->size = {w, h};
       td->pixels.resize(static_cast<usize>(w) * h);
       std::memcpy(td->pixels.data(), bytes, len);
-      return new image_holder{std::move(td)};
+      return new image_holder{{}, std::move(td)};
     }
 
     void throw_type(Isolate* iso, const char* msg) {
@@ -134,13 +123,12 @@ namespace fxe::js {
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       info.GetReturnValue().Set(resolver->GetPromise());
       if (info.Length() < 1 || !info[0]->IsString()) {
-        (void)resolver->Reject(ctx,
-                               Exception::TypeError(str(iso, "Image.loadAsync(path: string)")));
+        (void)resolver->Reject(ctx, Exception::TypeError("Image.loadAsync(path: string)"_v8(iso)));
         return;
       }
       std::vector<u8> bytes;
       if (!read_file_bytes(utf8(iso, info[0]), bytes)) {
-        (void)resolver->Reject(ctx, Exception::Error(str(iso, "Image.loadAsync: read failed")));
+        (void)resolver->Reject(ctx, Exception::Error("Image.loadAsync: read failed"_v8(iso)));
         return;
       }
       try {

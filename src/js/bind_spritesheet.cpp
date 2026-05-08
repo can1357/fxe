@@ -4,7 +4,6 @@
 
 #include "bind_spritesheet.hpp"
 #include "bind_image.hpp"
-#include "weak_holder.hpp"
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
@@ -62,7 +61,7 @@ namespace fxe::js {
       auto* h = new spritesheet_holder{};
       self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SPRITESHEET));
-      bind_weak_holder(iso, self, h);
+      h->bind(iso, self);
     }
 
     bool decode_rect([[maybe_unused]] Isolate* iso, Local<Context> ctx, Local<Value> v, u32 img_w,

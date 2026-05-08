@@ -3,14 +3,15 @@
 // Type tag 'PIPL'.
 
 #include "bind_pipeline.hpp"
+#include "weak_holder.hpp"
 
 #include "bind_image.hpp"
 
 #include <fxe/js_bindings.hpp>
-#include <fxe/v8_strings.hpp>
 #include <fxe/pipeline.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/spritesheet.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -50,20 +51,10 @@ namespace fxe::js {
     };
     static pipeline_resetter_register s_pipeline_resetter_register;
 
-    struct pipeline_holder {
+    struct pipeline_holder : weak_holder<pipeline_holder> {
       std::unique_ptr<pipeline> owned;
       uint32_t vertex_stride = 0;
-      Global<Object>* persistent = nullptr;
     };
-
-    void pipeline_finalizer(const WeakCallbackInfo<pipeline_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
 
     [[nodiscard]] std::string utf8(Isolate* iso, Local<Value> value) {
       String::Utf8Value s(iso, value);
@@ -218,13 +209,11 @@ namespace fxe::js {
       }
       try {
         auto p = pipeline::create(*r, desc);
-        auto* h = new pipeline_holder{std::move(p), desc.vertex_stride};
+        auto* h = new pipeline_holder{{}, std::move(p), desc.vertex_stride};
         auto self = info.This();
         self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
         self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_PIPELINE));
-        auto* persistent = new Global<Object>(iso, self);
-        h->persistent = persistent;
-        persistent->SetWeak(h, pipeline_finalizer, WeakCallbackType::kParameter);
+        h->bind(iso, self);
       } catch (const std::exception& e) {
         throw_error(iso, e.what());
       }

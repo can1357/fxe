@@ -1,10 +1,11 @@
 #include "bind_offscreen.hpp"
+#include "weak_holder.hpp"
 
 #include <fxe/js_bindings.hpp>
-#include <fxe/v8_strings.hpp>
 #include <fxe/offscreen.hpp>
-#include <fxe/spritesheet.hpp>
 #include <fxe/renderer.hpp>
+#include <fxe/spritesheet.hpp>
+#include <fxe/v8_strings.hpp>
 #if FXE_HAS_WGPU
 #include "../wgpu/pipeline.hpp"
 #endif
@@ -43,19 +44,9 @@ namespace fxe::js {
     };
     static offscreen_resetter_register s_offscreen_resetter_register;
 
-    struct offscreen_holder {
+    struct offscreen_holder : weak_holder<offscreen_holder> {
       std::unique_ptr<offscreen_renderer> owned;
-      Global<Object>* persistent = nullptr;
     };
-
-    void offscreen_finalizer(const WeakCallbackInfo<offscreen_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
 
     void throw_type(Isolate* iso, const char* msg) {
       iso->ThrowException(Exception::TypeError(
@@ -78,21 +69,18 @@ namespace fxe::js {
         opts.width = v->Uint32Value(ctx).FromMaybe(0);
       if (o->Get(ctx, "height"_v8(iso)).ToLocal(&v))
         opts.height = v->Uint32Value(ctx).FromMaybe(0);
-      if (o->Get(ctx, "multisample"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined())
+      if (o->Get(ctx, "multisample"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
         opts.multisample = v->Uint32Value(ctx).FromMaybe(opts.multisample);
-      if (o->Get(ctx, "mipLevels"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined())
+      if (o->Get(ctx, "mipLevels"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
         opts.mip_levels = v->Uint32Value(ctx).FromMaybe(opts.mip_levels);
-      if (o->Get(ctx, "enableDepth"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined())
+      if (o->Get(ctx, "enableDepth"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
         opts.enable_depth = v->BooleanValue(iso);
       // `parent`: existing Renderer/OffscreenRenderer whose device this
       // offscreen will share. Required for cross-renderer sampling, e.g.
       // when the offscreen's color attachment will be bound on the main
       // window renderer via `bindUserTexture(...)`.
-      if (o->Get(ctx, "parent"_v8(iso)).ToLocal(&v) &&
-          !v->IsUndefined() && !v->IsNull() && v->IsObject()) {
+      if (o->Get(ctx, "parent"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull() &&
+          v->IsObject()) {
 #if FXE_HAS_WGPU
         auto* parent_r = static_cast<renderer*>(unwrap(v.As<Object>(), TAG_RENDERER));
         if (auto* dpa = dynamic_cast<dawn_pipeline_device_access*>(parent_r)) {
@@ -130,8 +118,7 @@ namespace fxe::js {
         return;
       }
       if (!r) {
-        iso->ThrowException(
-            Exception::Error("offscreen create failed"_v8(iso)));
+        iso->ThrowException(Exception::Error("offscreen create failed"_v8(iso)));
         return;
       }
 
@@ -142,14 +129,12 @@ namespace fxe::js {
           r->set_atlas(tex.size.x, tex.size.y, reinterpret_cast<const u8*>(tex.pixels.data()));
       }
 
-      auto* h = new offscreen_holder{std::move(r)};
+      auto* h = new offscreen_holder{{}, std::move(r)};
       auto self = info.This();
       self->SetInternalField(
           0, External::New(iso, h->owned.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RENDERER));
-      auto* persistent = new Global<Object>(iso, self);
-      h->persistent = persistent;
-      persistent->SetWeak(h, offscreen_finalizer, WeakCallbackType::kParameter);
+      h->bind(iso, self);
     }
 
     bool read_vec3(Local<Value> value, math::vec3& out) {

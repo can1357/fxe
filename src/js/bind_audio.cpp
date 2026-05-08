@@ -20,6 +20,7 @@
 #include "../audio/audio.hpp"
 #include "../os/os.hpp"
 #include "bind_timers.hpp"
+#include "weak_holder.hpp"
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
@@ -76,10 +77,14 @@ namespace fxe::js {
     };
     static sound_resetter_register s_sound_resetter_register;
 
-    struct sound_holder {
+    struct sound_holder : weak_holder<sound_holder> {
       audio::sound_handle handle;
       bool disposed = false;
-      Global<Object>* persistent = nullptr;
+
+      void on_finalize(v8::Isolate*) {
+        if (!disposed && handle.valid())
+          (void)audio::unload(handle);
+      }
     };
 
     struct capture_chunk {
@@ -101,16 +106,6 @@ namespace fxe::js {
       Global<Object>* persistent = nullptr;
     };
 
-    void sound_finalizer(const WeakCallbackInfo<sound_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && !h->disposed && h->handle.valid())
-        (void)audio::unload(h->handle);
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
 
     sound_holder* unwrap_sound(Local<Object> self) {
       return static_cast<sound_holder*>(unwrap(self, TAG_AUDIO_SOUND));
@@ -121,12 +116,10 @@ namespace fxe::js {
       auto tpl = sound_tpl_table()[iso].Get(iso);
       auto fn = tpl->GetFunction(ctx).ToLocalChecked();
       auto obj = fn->NewInstance(ctx).ToLocalChecked();
-      auto* holder = new sound_holder{handle, false};
+      auto* holder = new sound_holder{{}, handle, false};
       obj->SetInternalField(0, External::New(iso, holder, v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_AUDIO_SOUND));
-      auto* persistent = new Global<Object>(iso, obj);
-      holder->persistent = persistent;
-      persistent->SetWeak(holder, sound_finalizer, WeakCallbackType::kParameter);
+      holder->bind(iso, obj);
       return hs.Escape(obj);
     }
 

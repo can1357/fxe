@@ -8,6 +8,7 @@
 // cases (IDN, percent-encoded host, file:// quirks) are out of scope for v0.
 
 #include "bind_url.hpp"
+#include "weak_holder.hpp"
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
@@ -408,45 +409,25 @@ namespace fxe::js {
 
     // ---------------- url_data <-> object plumbing --------------------------
 
-    struct url_holder {
+    struct url_holder : weak_holder<url_holder> {
       std::unique_ptr<url_data> data;
-      Global<Object>* persistent = nullptr;
     };
-    struct usp_holder {
+    struct usp_holder : weak_holder<usp_holder> {
       std::unique_ptr<usp_data> data;
       // Optional weak reference to a parent URL holder so writes to the
       // search params propagate back to the URL's `search`.
       url_holder* parent = nullptr;
-      Global<Object>* persistent = nullptr;
     };
 
-    void url_finalizer(const WeakCallbackInfo<url_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
-    void usp_finalizer(const WeakCallbackInfo<usp_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
 
     Local<Object> wrap_usp(Isolate* iso, Local<Context> ctx, std::unique_ptr<usp_data> d) {
       auto tpl = usp_tpl_table()[iso].Get(iso);
       Local<Object> obj = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
-      auto* h = new usp_holder{std::move(d)};
+      auto* h = new usp_holder{{}, std::move(d)};
       obj->SetInternalField(0,
                             External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
       obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URLSEARCH));
-      auto* persistent = new Global<Object>(iso, obj);
-      h->persistent = persistent;
-      persistent->SetWeak(h, usp_finalizer, WeakCallbackType::kParameter);
+      h->bind(iso, obj);
       return obj;
     }
 
@@ -491,14 +472,12 @@ namespace fxe::js {
       // Replace `this`'s instance bookkeeping by re-wrapping. We installed
       // an instance template with internal field count 2; populate them
       // directly on `info.This()`.
-      auto* h = new url_holder{std::move(d)};
+      auto* h = new url_holder{{}, std::move(d)};
       auto self = info.This();
       self->SetInternalField(0,
                              External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URL));
-      auto* persistent = new Global<Object>(iso, self);
-      h->persistent = persistent;
-      persistent->SetWeak(h, url_finalizer, WeakCallbackType::kParameter);
+      h->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
 
@@ -691,14 +670,12 @@ namespace fxe::js {
           }
         }
       }
-      auto* h = new usp_holder{std::move(data), nullptr};
+      auto* h = new usp_holder{{}, std::move(data), nullptr};
       auto self = info.This();
       self->SetInternalField(0,
                              External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URLSEARCH));
-      auto* persistent = new Global<Object>(iso, self);
-      h->persistent = persistent;
-      persistent->SetWeak(h, usp_finalizer, WeakCallbackType::kParameter);
+      h->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
 

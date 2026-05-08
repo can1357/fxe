@@ -12,9 +12,6 @@
 namespace fxe::js {
   using namespace v8;
   namespace {
-    Local<String> s(Isolate* iso, const char* str) {
-      return String::NewFromUtf8(iso, str, NewStringType::kNormal).ToLocalChecked();
-    }
     Local<String> s(Isolate* iso, const std::string& str) {
       return String::NewFromUtf8(iso, str.data(), NewStringType::kNormal,
                                  static_cast<int>(str.size()))

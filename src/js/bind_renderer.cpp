@@ -4,6 +4,7 @@
 // Type tag 'REND'.
 
 #include "bind_pipeline.hpp"
+#include "weak_holder.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/offscreen.hpp>
@@ -44,21 +45,15 @@ namespace fxe::js {
 
     // Owned-renderer holder. Borrowed wraps (install_renderer_global) skip
     // ownership so the engine retains lifetime control.
-    struct rend_holder {
+    struct rend_holder : weak_holder<rend_holder> {
       std::unique_ptr<renderer> owned;
-      Global<Object>* persistent = nullptr;
+
+      void on_finalize(v8::Isolate* iso) {
+        if (owned)
+          unregister_renderer_for_isolate(iso, owned.get());
+      }
     };
 
-    void rend_finalizer(const WeakCallbackInfo<rend_holder>& info) {
-      auto* h = info.GetParameter();
-      if (h && h->owned)
-        unregister_renderer_for_isolate(info.GetIsolate(), h->owned.get());
-      if (h && h->persistent) {
-        h->persistent->Reset();
-        delete h->persistent;
-      }
-      delete h;
-    }
 
     renderer* unwrap_rend(Local<Object> self) {
       return static_cast<renderer*>(unwrap(self, TAG_RENDERER));
@@ -119,14 +114,12 @@ namespace fxe::js {
           }
         }
       }
-      auto* h = new rend_holder{std::move(r)};
+      auto* h = new rend_holder{{}, std::move(r)};
       auto self = info.This();
       self->SetInternalField(
           0, External::New(iso, h->owned.get(), v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RENDERER));
-      auto* persistent = new Global<Object>(iso, self);
-      h->persistent = persistent;
-      persistent->SetWeak(h, rend_finalizer, WeakCallbackType::kParameter);
+      h->bind(iso, self);
       register_renderer_for_isolate(iso, win, h->owned.get());
     }
 

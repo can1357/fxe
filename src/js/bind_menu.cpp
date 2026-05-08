@@ -9,9 +9,6 @@
 namespace fxe::js {
   using namespace v8;
   namespace {
-    Local<String> s(Isolate* iso, const char* str) {
-      return String::NewFromUtf8(iso, str, NewStringType::kNormal).ToLocalChecked();
-    }
     std::string to_str(Isolate* iso, Local<Value> v) {
       if (v.IsEmpty() || !v->IsString())
         return {};

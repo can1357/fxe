@@ -15,6 +15,7 @@
 #include "runtime/capabilities.hpp"
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_watcher.hpp"
+#include "weak_holder.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -642,10 +643,9 @@ namespace fxe::js {
       return !ec;
     }
 
-    struct glob_iter_state {
+    struct glob_iter_state : weak_holder<glob_iter_state> {
       std::vector<std::string> entries;
       size_t index = 0;
-      Global<Object>* persistent = nullptr;
     };
 
     glob_iter_state* glob_iter_from(Local<Object> self) {
@@ -655,16 +655,6 @@ namespace fxe::js {
           self->GetInternalField(0).As<External>()->Value(v8::kExternalPointerTypeTagDefault));
     }
 
-    void glob_iter_finalizer(const WeakCallbackInfo<glob_iter_state>& info) {
-      auto* state = info.GetParameter();
-      if (!state)
-        return;
-      if (state->persistent) {
-        state->persistent->Reset();
-        delete state->persistent;
-      }
-      delete state;
-    }
 
     void glob_iter_async_iterator(const FunctionCallbackInfo<Value>& info) {
       info.GetReturnValue().Set(info.This());
@@ -696,9 +686,7 @@ namespace fxe::js {
       auto* state = new glob_iter_state();
       state->entries = std::move(entries);
       obj->SetInternalField(0, External::New(iso, state, v8::kExternalPointerTypeTagDefault));
-      auto* persistent = new Global<Object>(iso, obj);
-      state->persistent = persistent;
-      persistent->SetWeak(state, glob_iter_finalizer, WeakCallbackType::kParameter);
+      state->bind(iso, obj);
       auto fn = Function::New(ctx, glob_iter_async_iterator).ToLocalChecked();
       (void)obj->Set(ctx, Symbol::GetAsyncIterator(iso), fn);
       return obj;
