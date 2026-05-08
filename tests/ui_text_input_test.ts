@@ -201,4 +201,140 @@ test('selectable Text copies the dragged read-only selection', () => {
   }
 });
 
+test('TextInput onEditCommand routes Edit menu actions to the focused input', () => {
+  clearHitTargets();
+  clearFocus();
+  const renderer = new CommandBuffer() as Renderer;
+  renderer.beginFrame = () => renderer.clear();
+  renderer.endFrame = () => undefined;
+  const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();
+  let clipboard = 'pasted';
+  const win = {
+    framebufferSize: () => [160, 100] as [number, number],
+    requestRedraw: () => undefined,
+    clipboardText: () => clipboard,
+    setClipboardText: (text: string) => {
+      clipboard = text;
+    },
+    on: <T extends WindowEventName>(event: T, cb: (ev: WindowEventMap[T]) => void) => {
+      listeners.set(event, cb as (ev: WindowEventMap[WindowEventName]) => void);
+      return () => listeners.delete(event);
+    },
+  } as unknown as Window;
+  // Provide the global clipboard sink that the menu-driven path uses.
+  (
+    globalThis as {
+      __fxe_clipboard?: { read: () => string; write: (t: string) => void };
+    }
+  ).__fxe_clipboard = {
+    read: () => clipboard,
+    write: (t) => {
+      clipboard = t;
+    },
+  };
+  const changes: string[] = [];
+  const dispose = mount(
+    TextInput({
+      key: 'edit-cmd-input',
+      value: 'hello',
+      style: { width: 200, height: 32 },
+      onChange: (v) => changes.push(v),
+    }),
+    win,
+    { renderer },
+  );
+  const rerender = () => listeners.get('resize')?.({ type: 'resize', width: 160, height: 100 });
+  try {
+    dispatchMouseDown({ type: 'mousedown', x: 1, y: 1, button: 0, modifiers: 0 });
+    dispatchMouseUp({ type: 'mouseup', x: 1, y: 1, button: 0, modifiers: 0 });
+    rerender();
+    let target = focusTarget();
+    assert(target?.componentType === 'TextInput', 'TextInput must be focused');
+    target?.onEditCommand?.('selectAll');
+    rerender();
+    target = focusTarget();
+    target?.onEditCommand?.('copy');
+    assertDeepEqual(clipboard, 'hello');
+    clipboard = 'X';
+    target?.onEditCommand?.('paste');
+    rerender();
+    assertDeepEqual(changes.at(-1), 'X');
+    target = focusTarget();
+    target?.onEditCommand?.('selectAll');
+    rerender();
+    target = focusTarget();
+    target?.onEditCommand?.('cut');
+    rerender();
+    assertDeepEqual(clipboard, 'X');
+    assertDeepEqual(changes.at(-1), '');
+    target = focusTarget();
+    target?.onEditCommand?.('undo');
+    rerender();
+    assertDeepEqual(changes.at(-1), 'X');
+    target = focusTarget();
+    target?.onEditCommand?.('redo');
+    rerender();
+    assertDeepEqual(changes.at(-1), '');
+  } finally {
+    dispose();
+    clearHitTargets();
+    clearFocus();
+    delete (globalThis as { __fxe_clipboard?: unknown }).__fxe_clipboard;
+  }
+});
+
+test('TextInput drag inside selection requests a drag-out via the drag sink', () => {
+  clearHitTargets();
+  clearFocus();
+  const renderer = new CommandBuffer() as Renderer;
+  renderer.beginFrame = () => renderer.clear();
+  renderer.endFrame = () => undefined;
+  const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();
+  const dragPayloads: Array<{ text?: string }> = [];
+  const win = {
+    framebufferSize: () => [320, 100] as [number, number],
+    requestRedraw: () => undefined,
+    clipboardText: () => '',
+    setClipboardText: () => undefined,
+    startDrag: (payload: { text?: string }) => {
+      dragPayloads.push(payload);
+      return true;
+    },
+    on: <T extends WindowEventName>(event: T, cb: (ev: WindowEventMap[T]) => void) => {
+      listeners.set(event, cb as (ev: WindowEventMap[WindowEventName]) => void);
+      return () => listeners.delete(event);
+    },
+  } as unknown as Window;
+  const dispose = mount(
+    TextInput({
+      key: 'drag-out-input',
+      value: 'hello world',
+      style: { width: 240, height: 32 },
+    }),
+    win,
+    { renderer },
+  );
+  const rerender = () => listeners.get('resize')?.({ type: 'resize', width: 320, height: 100 });
+  try {
+    // Click to focus, select all via Cmd+A, then verify a drag initiated
+    // from inside the selection invokes the drag sink with the selected
+    // text payload. Routing goes through the window listeners so the
+    // mount-installed `dragSink` is wired.
+    listeners.get('mousedown')?.({ type: 'mousedown', x: 1, y: 1, button: 0, modifiers: 0 });
+    listeners.get('mouseup')?.({ type: 'mouseup', x: 1, y: 1, button: 0, modifiers: 0 });
+    rerender();
+    listeners.get('keydown')?.({ type: 'keydown', key: 65, scancode: 0, modifiers: 8 });
+    rerender();
+    listeners.get('mousedown')?.({ type: 'mousedown', x: 40, y: 16, button: 0, modifiers: 0 });
+    listeners.get('mousemove')?.({ type: 'mousemove', x: 80, y: 16, dx: 40, dy: 0, modifiers: 0 });
+    listeners.get('mouseup')?.({ type: 'mouseup', x: 80, y: 16, button: 0, modifiers: 0 });
+    assert(dragPayloads.length === 1, 'startDrag was invoked exactly once');
+    assertDeepEqual(dragPayloads[0]?.text, 'hello world');
+  } finally {
+    dispose();
+    clearHitTargets();
+    clearFocus();
+  }
+});
+
 await run();

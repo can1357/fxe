@@ -7,7 +7,7 @@
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/window.hpp>
-#include <libbase64.h>
+#include <sodium.h>
 
 #include <chrono>
 #include <cstdio>
@@ -241,12 +241,15 @@ namespace {
     CHECK(out.at("height").get<double>() == 1.0);
     CHECK(out.at("byteSize").get<double>() > 0.0);
     const auto b64 = out.at("dataBase64").get<std::string>();
-    std::vector<u8> png(b64.size() / 4 * 3 + 3);
-    usize png_len = 0;
-    const int rc =
-        ::base64_decode(b64.data(), b64.size(), reinterpret_cast<char*>(png.data()), &png_len, 0);
-    CHECK(rc == 1);
-    png.resize(png_len);
+    std::vector<u8> png(b64.size() * 3 / 4 + 3);
+    size_t png_len = 0;
+    const char* b64_end = nullptr;
+    CHECK(::sodium_init() >= 0);
+    const int rc = ::sodium_base642bin(png.data(), png.size(), b64.data(), b64.size(), nullptr, &png_len,
+                                       &b64_end, sodium_base64_VARIANT_ORIGINAL);
+    CHECK(rc == 0);
+    CHECK(b64_end == b64.data() + b64.size());
+    png.resize(static_cast<usize>(png_len));
     CHECK(png_has_ihdr_size(png, 2, 1));
 
     auto cap = rdr.capture_frame();
