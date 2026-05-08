@@ -770,6 +770,37 @@ namespace fxe::os {
       return std::string(raw.substr(first, last - first));
     }
 
+    // Best-effort gsettings reader without linking to glib: shell out and cache
+    // values briefly to avoid repeated process launches on hot paths.
+    std::optional<std::string> gsettings_get(std::string_view schema, std::string_view key) {
+      if (!command_exists("gsettings"))
+        return std::nullopt;
+      static std::mutex cache_mu;
+      static std::unordered_map<std::string,
+                                std::pair<std::chrono::steady_clock::time_point, std::string>>
+          cache;
+      const std::string cache_key = std::string(schema) + "\n" + std::string(key);
+      const auto now = std::chrono::steady_clock::now();
+      {
+        std::lock_guard<std::mutex> lock(cache_mu);
+        auto found = cache.find(cache_key);
+        if (found != cache.end() && now < found->second.first)
+          return found->second.second;
+      }
+      command_result result =
+          run_command_capture({"gsettings", "get", std::string(schema), std::string(key)});
+      if (result.exit_code != 0)
+        return std::nullopt;
+      std::string value = trim_copy(result.stdout_text);
+      if (value.size() >= 2 && value.front() == '\'' && value.back() == '\'')
+        value = value.substr(1, value.size() - 2);
+      {
+        std::lock_guard<std::mutex> lock(cache_mu);
+        cache[cache_key] = {now + std::chrono::seconds(30), value};
+      }
+      return value;
+    }
+
     std::string join_strings(const std::vector<std::string>& parts, char delimiter) {
       std::string out;
       for (const auto& part : parts) {
@@ -2067,6 +2098,51 @@ namespace fxe::os {
     if (kind == "downloads")
       return xdg_user_dir("DOWNLOAD", "Downloads", home);
     return {};
+  }
+  bool system_prefers_reduced_motion() {
+    // TODO(D6 events): Linux reduced-motion detection is toolkit-specific.
+    // Keep a deterministic default until we add a desktop-settings backend.
+    return false;
+  }
+
+  bool system_prefers_high_contrast() {
+    auto theme = gsettings_get("org.gnome.desktop.interface", "gtk-theme");
+    if (!theme)
+      return false;
+    return lower_ascii(*theme).find("highcontrast") != std::string::npos;
+  }
+
+  double system_font_scale() {
+    auto scale = gsettings_get("org.gnome.desktop.interface", "text-scaling-factor");
+    if (!scale)
+      return 1.0;
+    char* end = nullptr;
+    errno = 0;
+    double parsed = std::strtod(scale->c_str(), &end);
+    if (end == scale->c_str() || errno != 0 || parsed <= 0.0)
+      return 1.0;
+    return parsed;
+  }
+
+  std::string system_color_scheme() {
+    auto scheme = gsettings_get("org.gnome.desktop.interface", "color-scheme");
+    if (!scheme)
+      return "no-preference";
+    std::string value = lower_ascii(*scheme);
+    if (value == "prefer-dark")
+      return "dark";
+    if (value == "prefer-light")
+      return "light";
+    return "no-preference";
+  }
+
+  std::string system_accent_color() {
+    return {};
+  }
+
+  bool install_system_change_observer(std::function<void(const char* kind)> cb) {
+    (void)cb;
+    return false;
   }
 
   bool open_external(std::string_view url) {

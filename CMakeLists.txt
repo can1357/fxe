@@ -137,18 +137,22 @@ if(FXE_WARNINGS_AS_ERRORS)
 endif()
 
 # OS shims (App, shell, dialog, notification, menu, tray, globalShortcut).
-# Common sources live at src/os/*.cpp; per-platform impls live in
-# src/os/{macos,linux,win32}/ and are picked up by directory glob.
-file(GLOB _fxe_os_sources CONFIGURE_DEPENDS src/os/*.cpp)
+set(
+    _fxe_os_sources
+    src/os/a11y.cpp
+    src/os/crash_common.cpp
+    src/os/single_instance.cpp
+)
 add_library(fxe_os STATIC ${_fxe_os_sources})
 target_include_directories(fxe_os PUBLIC src include)
 target_compile_features(fxe_os PUBLIC cxx_std_20)
 if(APPLE)
-    file(
-        GLOB _fxe_os_platform
-        CONFIGURE_DEPENDS
-        src/os/macos/*.cpp
-        src/os/macos/*.mm
+    set(
+        _fxe_os_platform
+        src/os/macos/a11y_macos.mm
+        src/os/macos/crash.mm
+        src/os/macos/os_macos.mm
+        src/os/macos/power.mm
     )
     target_sources(fxe_os PRIVATE ${_fxe_os_platform})
     set_source_files_properties(
@@ -623,6 +627,12 @@ if(FXE_ENABLE_V8)
         dgram_adapter
         dns_adapter
         dns_promises_adapter
+        vm_adapter
+        v8_adapter
+        wasi_adapter
+        inspector_adapter
+        inspector_promises_adapter
+        zlib_adapter
         tls_adapter
         tls_native_adapter
         https_adapter
@@ -630,6 +640,7 @@ if(FXE_ENABLE_V8)
         http2_adapter
         http2_native_adapter
         events_adapter
+        async_hooks_adapter
         buffer_adapter
         process_adapter
         path_adapter
@@ -637,6 +648,9 @@ if(FXE_ENABLE_V8)
         path_win32_adapter
         url_adapter
         querystring_adapter
+        readline_adapter
+        readline_promises_adapter
+        repl_adapter
         util_adapter
         util_types_adapter
         console_adapter
@@ -689,12 +703,17 @@ if(FXE_ENABLE_V8)
     # src/runner/ so it is not picked up here.
     file(GLOB _fxe_js_sources CONFIGURE_DEPENDS src/js/*.cpp)
     file(GLOB _fxe_runtime_v8_sources CONFIGURE_DEPENDS src/runtime/v8/*.cpp)
+    list(APPEND _fxe_runtime_v8_sources src/runtime/v8/native/v8_module.cpp
+                                            src/runtime/v8/native/async_hooks.cpp
+                                            src/runtime/v8/native/inspector.cpp
+                                            src/runtime/v8/native/vm.cpp)
     if(FXE_ENABLE_NATIVE_TLS_HTTP2)
         file(
             GLOB _fxe_runtime_v8_native
             CONFIGURE_DEPENDS
             src/runtime/v8/native/*.cpp
         )
+        list(FILTER _fxe_runtime_v8_native EXCLUDE REGEX "src/runtime/v8/native/v8_module\\.cpp$")
         list(APPEND _fxe_runtime_v8_sources ${_fxe_runtime_v8_native})
     endif()
     add_library(
@@ -943,6 +962,7 @@ if(FXE_BUILD_TESTS)
     fxe_add_cpp_test(fxe_font_tests tests/font_module_test.cpp fxe_font)
     fxe_add_cpp_test(fxe_font_render_tests tests/font_render_test.cpp fxe_font)
     fxe_add_cpp_test(fxe_uv_loop_tests tests/uv_loop_test.cpp fxe_runtime)
+    fxe_add_cpp_test(fxe_update_manifest_v2_tests tests/update_manifest_v2_test.cpp fxe_runtime fxe_os)
     if(UNIX)
         fxe_add_cpp_test(fxe_net_http_advanced_tests tests/net_http_advanced_test.cpp fxe_net fxe_runtime)
     endif()

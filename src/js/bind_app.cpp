@@ -5,6 +5,7 @@
 
 #include "bind_app.hpp"
 #include "../net/http_client.hpp"
+#include "../os/a11y.hpp"
 #include "../os/os.hpp"
 #include "../runtime/updater.hpp"
 #include "fxe/single_instance.hpp"
@@ -20,6 +21,7 @@
 #ifndef FXE_APP_VERSION
 #define FXE_APP_VERSION "0.0.0"
 #endif
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <fxe/types.hpp>
@@ -200,6 +202,12 @@ namespace fxe::js {
 
       info.GetReturnValue().Set(window);
     }
+    void app_open_devtools(const FunctionCallbackInfo<Value>& info) {
+      (void)info;
+      // TODO(E1): spawn a child host window for the devtools shell and wire the
+      // global shortcut (Cmd-Opt-I / Ctrl-Shift-I) to this entrypoint.
+      info.GetReturnValue().SetNull();
+    }
     void app_request_single_instance_lock(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       std::string id = info.Length() > 0 ? to_str(iso, info[0]) : std::string{"fxe"};
@@ -212,6 +220,19 @@ namespace fxe::js {
         n = static_cast<int>(
             info[0]->Int32Value(info.GetIsolate()->GetCurrentContext()).FromMaybe(0));
       fxe::os::set_badge_count(n);
+    }
+    void app_update_accessibility_tree(const FunctionCallbackInfo<Value>& info) {
+      if (info.Length() < 2)
+        return;
+      auto* iso = info.GetIsolate();
+      const auto win_id = info[0]->IntegerValue(iso->GetCurrentContext()).FromMaybe(0);
+      String::Utf8Value json(iso, info[1]);
+      auto snap = std::make_shared<fxe::os::a11y::snapshot>();
+      snap->json = *json ? std::string(*json, json.length()) : std::string{};
+      static std::atomic<uint64_t> g_gen{0};
+      snap->generation = ++g_gen;
+      fxe::os::a11y::install_snapshot(reinterpret_cast<void*>(static_cast<uintptr_t>(win_id)),
+                                      std::move(snap));
     }
     void app_when_ready(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -596,6 +617,17 @@ namespace fxe::js {
       for (usize i = 0; i < history.size(); ++i)
         (void)out->Set(ctx, static_cast<u32>(i), s(iso, history[i].c_str()));
       info.GetReturnValue().Set(out);
+    }
+
+    void app_update_mark_ready(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      info.GetReturnValue().Set(Boolean::New(iso, fxe::runtime::updater::mark_ready()));
+    }
+
+    void app_update_has_pending_first_launch(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      info.GetReturnValue().Set(
+          Boolean::New(iso, fxe::runtime::updater::has_pending_first_launch()));
     }
 
     void app_apply_pending_update(const FunctionCallbackInfo<Value>& info) {
@@ -1232,8 +1264,82 @@ namespace fxe::js {
       }
       Local<Value> argv[1] = {appObj};
       Local<Value> ignored;
+
       if (!value.As<Function>()->Call(ctx, ctx->Global(), 1, argv).ToLocal(&ignored)) {
         // Preserve the pending V8 exception thrown while installing the bridge.
+        return;
+      }
+    }
+
+    void install_app_system_poller(Isolate* iso, Local<Context> ctx, Local<Object> systemObj) {
+      constexpr const char* kSource = R"JS(
+(function installAppSystemPoller(sys) {
+  if (!sys) {
+    throw new TypeError('installAppSystemPoller requires App.system object');
+  }
+  const listeners = [];
+  const snap = () => ({
+    prefersReducedMotion: sys.prefersReducedMotion(),
+    prefersHighContrast: sys.prefersHighContrast(),
+    fontScale: sys.fontScale(),
+    colorScheme: sys.colorScheme(),
+    accentColor: sys.accentColor(),
+  });
+  let last = snap();
+  const poll = () => {
+    const next = snap();
+    for (const key of Object.keys(next)) {
+      if (next[key] === last[key]) continue;
+      const previous = last[key];
+      last[key] = next[key];
+      const event = { kind: key, previous, current: next[key] };
+      for (const listener of listeners.slice()) {
+        try {
+          listener(event);
+        } catch (_) {}
+      }
+    }
+  };
+  const timer = setInterval(poll, 5000);
+  if (timer && typeof timer === 'object' && typeof timer.unref === 'function') {
+    timer.unref();
+  }
+  sys.on = function on(event, cb) {
+    if (event !== 'change' || typeof cb !== 'function') {
+      return function off() {};
+    }
+    listeners.push(cb);
+    return function off() {
+      const index = listeners.indexOf(cb);
+      if (index >= 0) listeners.splice(index, 1);
+    };
+  };
+  sys.off = function off(event, cb) {
+    if (event !== 'change') return;
+    const index = listeners.indexOf(cb);
+    if (index >= 0) listeners.splice(index, 1);
+  };
+})
+)JS";
+      v8::ScriptOrigin origin("<App.system poller>"_v8(iso));
+      Local<Script> script;
+      if (!Script::Compile(ctx, s(iso, kSource), &origin).ToLocal(&script)) {
+        // Preserve the pending V8 exception from compiling the embedded poller.
+        return;
+      }
+      Local<Value> value;
+      if (!script->Run(ctx).ToLocal(&value)) {
+        // Preserve the pending V8 exception from poller script execution.
+        return;
+      }
+      if (!value->IsFunction()) {
+        (void)throw_type_error(iso, "installAppSystemPoller must evaluate to a function");
+        return;
+      }
+      Local<Value> argv[1] = {systemObj};
+      Local<Value> ignored;
+      if (!value.As<Function>()->Call(ctx, ctx->Global(), 1, argv).ToLocal(&ignored)) {
+        // Preserve the pending V8 exception thrown while installing the poller.
         return;
       }
     }
@@ -1253,6 +1359,7 @@ namespace fxe::js {
     set_fn("setBadgeCount", app_set_badge_count);
     set_fn("whenReady", app_when_ready);
     set_fn("openWindow", app_open_window);
+    set_fn("openDevTools", app_open_devtools);
     set_fn("relaunch", app_relaunch);
     Local<Object> bookmark = Object::New(iso);
     (void)bookmark->Set(ctx, "persist"_v8(iso),
@@ -1272,6 +1379,8 @@ namespace fxe::js {
     set_fn("__fxeUpdateDeviceId", app_update_device_id);
     set_fn("__fxeUpdateRolloutEligible", app_update_rollout_eligible);
     set_fn("__fxeApplyPendingUpdate", app_apply_pending_update);
+    set_fn("__fxeUpdateAccessibilityTree", app_update_accessibility_tree);
+    // TODO(C1): wire updater::auto_rollback_if_unready into startup before user JS runs.
     install_app_run_frame_bridge(iso, ctx, appObj);
     auto check_for_updates = make_check_for_updates(iso, ctx);
     if (!check_for_updates.IsEmpty())
@@ -1288,6 +1397,10 @@ namespace fxe::js {
                       Function::New(ctx, app_update_rollback).ToLocalChecked());
     (void)update->Set(ctx, "history"_v8(iso),
                       Function::New(ctx, app_update_history).ToLocalChecked());
+    (void)update->Set(ctx, "markReady"_v8(iso),
+                      Function::New(ctx, app_update_mark_ready).ToLocalChecked());
+    (void)update->Set(ctx, "hasPendingFirstLaunch"_v8(iso),
+                      Function::New(ctx, app_update_has_pending_first_launch).ToLocalChecked());
     if (!check_for_updates.IsEmpty())
       (void)update->Set(ctx, "checkForUpdates"_v8(iso), check_for_updates);
     if (!install_update.IsEmpty())
@@ -1295,6 +1408,47 @@ namespace fxe::js {
     (void)appObj->Set(ctx, "update"_v8(iso), update);
     install_app_recent_documents(iso, ctx, appObj);
     install_app_session_cookies(iso, ctx, appObj);
+    Local<Object> system = Object::New(iso);
+    auto add_system_fn = [&](const char* name, FunctionCallback cb) {
+      auto fn = Function::New(ctx, cb).ToLocalChecked();
+      (void)system->Set(ctx, s(iso, name), fn);
+    };
+    add_system_fn("prefersReducedMotion", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(
+          Boolean::New(info.GetIsolate(), fxe::os::system_prefers_reduced_motion()));
+    });
+    add_system_fn("prefersHighContrast", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(
+          Boolean::New(info.GetIsolate(), fxe::os::system_prefers_high_contrast()));
+    });
+    add_system_fn("fontScale", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(Number::New(info.GetIsolate(), fxe::os::system_font_scale()));
+    });
+    add_system_fn("colorScheme", [](const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      std::string scheme = fxe::os::system_color_scheme();
+      info.GetReturnValue().Set(s(iso, scheme.c_str()));
+    });
+    add_system_fn("accentColor", [](const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      std::string accent = fxe::os::system_accent_color();
+      info.GetReturnValue().Set(s(iso, accent.c_str()));
+    });
+    add_system_fn("platform", [](const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+#if defined(__APPLE__)
+      info.GetReturnValue().Set(s(iso, "macos"));
+#elif defined(_WIN32)
+      info.GetReturnValue().Set(s(iso, "win"));
+#elif defined(__linux__)
+      info.GetReturnValue().Set(s(iso, "linux"));
+#else
+      info.GetReturnValue().Set(s(iso, "other"));
+#endif
+    });
+    (void)appObj->Set(ctx, "system"_v8(iso), system);
+    install_app_system_poller(iso, ctx, system);
+
     // ---- NEW: single-instance / deep-link / file-association bindings ----
     set_fn("__fxeOnSecondInstance", app_install_second_instance_callback);
     set_fn("__fxeOnOpenUrl", app_install_open_url_callback);

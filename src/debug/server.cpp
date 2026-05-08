@@ -257,6 +257,8 @@ namespace fxe::debug {
     fxe::window* win = nullptr;
     fxe::renderer* rdr = nullptr;
     std::function<void()> wake;
+    std::mutex client_waiters_mu;
+    std::vector<std::function<void()>> client_waiters;
 
     // Listening socket + accept thread.
     socket_t listen_sock = kInvalidSocket;
@@ -267,6 +269,7 @@ namespace fxe::debug {
     session_id next_session_id = 1;
     std::unordered_map<session_id, std::shared_ptr<session>> sessions_;
     std::vector<std::shared_ptr<session>> all_sessions_;
+    std::atomic<u32> live_clients{0};
 
     // Render-thread inbound queue.
     std::mutex inbox_mu;
@@ -282,6 +285,37 @@ namespace fxe::debug {
       if (opts.max_clients == 0)
         opts.max_clients = 8;
       paused.store(opts.start_paused);
+    }
+
+    bool has_clients() const noexcept {
+      return live_clients.load(std::memory_order_acquire) != 0;
+    }
+
+    void notify_client_attached() {
+      std::vector<std::function<void()>> waiters;
+      {
+        std::lock_guard<std::mutex> g(client_waiters_mu);
+        waiters.swap(client_waiters);
+      }
+      for (auto& waiter : waiters) {
+        if (waiter)
+          waiter();
+      }
+    }
+
+    void when_client_attached(std::function<void()> cb) {
+      if (!cb)
+        return;
+      if (has_clients()) {
+        cb();
+        return;
+      }
+      std::lock_guard<std::mutex> g(client_waiters_mu);
+      if (has_clients()) {
+        cb();
+        return;
+      }
+      client_waiters.push_back(std::move(cb));
     }
 
     ~impl() {
@@ -525,6 +559,8 @@ namespace fxe::debug {
           sessions_.emplace(sess->id, sess);
           all_sessions_.push_back(sess);
         }
+        live_clients.fetch_add(1, std::memory_order_acq_rel);
+        notify_client_attached();
 
         sess->writer_thread = std::thread(&impl::writer_loop, this, sess);
         sess->reader_thread = std::thread(&impl::session_loop, this, sess);
@@ -639,6 +675,8 @@ namespace fxe::debug {
           mask = aggregate_channel_mask_locked();
         }
       }
+      if (removed)
+        live_clients.fetch_sub(1, std::memory_order_acq_rel);
       if (removed)
         update_global_channel_mask(mask);
     }
@@ -968,6 +1006,18 @@ namespace fxe::debug {
   }
   std::string server::last_error() const {
     return p_->last_error;
+  }
+
+  bool server::has_clients() const noexcept {
+    return p_->has_clients();
+  }
+
+  void server::when_client_attached(std::function<void()> cb) {
+    p_->when_client_attached(std::move(cb));
+  }
+
+  server* active_server() noexcept {
+    return g_active_server.load(std::memory_order_acquire);
   }
 
   void server::_internal_set_pause(bool paused, bool single_step) noexcept {

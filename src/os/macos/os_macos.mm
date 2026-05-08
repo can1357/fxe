@@ -39,6 +39,70 @@ namespace fxe::os {
                                       std::optional<std::string> input);
 }
 
+namespace {
+  std::mutex g_system_change_observer_mu;
+  std::function<void(const char*)> g_system_change_cb;
+  bool g_system_change_observer_installed = false;
+
+  void emit_system_change(const char* kind) {
+    if (!kind || *kind == '\0')
+      return;
+    std::function<void(const char*)> cb;
+    {
+      std::lock_guard<std::mutex> lock(g_system_change_observer_mu);
+      cb = g_system_change_cb;
+    }
+    if (!cb)
+      return;
+    if ([NSThread isMainThread]) {
+      cb(kind);
+      return;
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+      std::function<void(const char*)> main_cb;
+      {
+        std::lock_guard<std::mutex> lock(g_system_change_observer_mu);
+        main_cb = g_system_change_cb;
+      }
+      if (main_cb)
+        main_cb(kind);
+    });
+  }
+}
+
+@interface FxeSystemObserver : NSObject
++ (instancetype)shared;
+- (void)appearanceChanged:(NSNotification*)notification;
+- (void)accessibilityDisplayOptionsChanged:(NSNotification*)notification;
+- (void)systemColorsChanged:(NSNotification*)notification;
+@end
+
+@implementation FxeSystemObserver
++ (instancetype)shared {
+  static FxeSystemObserver* observer = [[FxeSystemObserver alloc] init];
+  return observer;
+}
+
+- (void)appearanceChanged:(NSNotification*)notification {
+  (void)notification;
+  emit_system_change("colorScheme");
+}
+
+- (void)accessibilityDisplayOptionsChanged:(NSNotification*)notification {
+  (void)notification;
+  emit_system_change("prefersReducedMotion");
+  emit_system_change("prefersHighContrast");
+}
+
+- (void)systemColorsChanged:(NSNotification*)notification {
+  (void)notification;
+  emit_system_change("accentColor");
+}
+@end
+
+
+
+
 @interface FxeNotificationDelegate : NSObject <UNUserNotificationCenterDelegate>
 @end
 
@@ -175,6 +239,128 @@ namespace fxe::os {
     }
     return url ? from_ns([url path]) : std::string{};
   }
+  bool system_prefers_reduced_motion() {
+    @autoreleasepool {
+      @try {
+        return [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldReduceMotion] == YES;
+      } @catch (NSException*) {
+        return false;
+      }
+    }
+  }
+
+  bool system_prefers_high_contrast() {
+    @autoreleasepool {
+      @try {
+        return [[NSWorkspace sharedWorkspace] accessibilityDisplayShouldIncreaseContrast] == YES;
+      } @catch (NSException*) {
+        return false;
+      }
+    }
+  }
+
+  double system_font_scale() {
+    @autoreleasepool {
+      @try {
+        // macOS does not expose a straightforward system text scaling factor in AppKit.
+        return 1.0;
+      } @catch (NSException*) {
+        return 1.0;
+      }
+    }
+  }
+
+  std::string system_color_scheme() {
+    @autoreleasepool {
+      @try {
+        NSAppearance* appearance = NSApp ? [NSApp effectiveAppearance] : nil;
+        if (appearance) {
+          NSString* match = [appearance
+              bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+          if ([match isEqualToString:NSAppearanceNameDarkAqua])
+            return "dark";
+          if ([match isEqualToString:NSAppearanceNameAqua])
+            return "light";
+        }
+
+        NSString* style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
+        if ([style caseInsensitiveCompare:@"Dark"] == NSOrderedSame)
+          return "dark";
+        return "light";
+      } @catch (NSException*) {
+        return "no-preference";
+      }
+    }
+  }
+
+  std::string system_accent_color() {
+    @autoreleasepool {
+      @try {
+        if (@available(macOS 10.14, *)) {
+          NSColor* accent = [NSColor controlAccentColor];
+          if (!accent)
+            return {};
+          NSColor* rgb = [accent colorUsingColorSpace:[NSColorSpace sRGBColorSpace]];
+          if (!rgb)
+            return {};
+          CGFloat r = 0;
+          CGFloat g = 0;
+          CGFloat b = 0;
+          CGFloat a = 0;
+          [rgb getRed:&r green:&g blue:&b alpha:&a];
+          int r8 = static_cast<int>(std::clamp(static_cast<double>(r), 0.0, 1.0) * 255.0 + 0.5);
+          int g8 = static_cast<int>(std::clamp(static_cast<double>(g), 0.0, 1.0) * 255.0 + 0.5);
+          int b8 = static_cast<int>(std::clamp(static_cast<double>(b), 0.0, 1.0) * 255.0 + 0.5);
+          NSString* hex = [NSString stringWithFormat:@"%02x%02x%02x", r8, g8, b8];
+          return from_ns(hex);
+        }
+        return {};
+      } @catch (NSException*) {
+        return {};
+      }
+    }
+  }
+
+  bool install_system_change_observer(std::function<void(const char* kind)> cb) {
+    {
+      std::lock_guard<std::mutex> lock(g_system_change_observer_mu);
+      g_system_change_cb = std::move(cb);
+    }
+    __block bool installed = false;
+    run_on_main_sync_void(^{
+      @autoreleasepool {
+        @try {
+          if (!g_system_change_observer_installed) {
+            FxeSystemObserver* observer = [FxeSystemObserver shared];
+            [[NSDistributedNotificationCenter defaultCenter]
+                addObserver:observer
+                   selector:@selector(appearanceChanged:)
+                       name:@"AppleInterfaceThemeChangedNotification"
+                     object:nil];
+            [[[NSWorkspace sharedWorkspace] notificationCenter]
+                addObserver:observer
+                   selector:@selector(accessibilityDisplayOptionsChanged:)
+                       name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+                     object:nil];
+            [[NSNotificationCenter defaultCenter]
+                addObserver:observer
+                   selector:@selector(systemColorsChanged:)
+                       name:NSSystemColorsDidChangeNotification
+                     object:nil];
+            g_system_change_observer_installed = true;
+          }
+          installed = true;
+        } @catch (NSException*) {
+          installed = false;
+        }
+      }
+    });
+    return installed;
+  }
+
+
+
+
 
   bool open_external(std::string_view url) {
     NSURL* u = [NSURL URLWithString:ns(url)];

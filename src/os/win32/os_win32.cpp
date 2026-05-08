@@ -29,6 +29,7 @@
 #define NOMINMAX
 #endif
 #include <commctrl.h>
+#include <dwmapi.h>
 #include <inspectable.h>
 #include <knownfolders.h>
 #include <objbase.h>
@@ -52,6 +53,7 @@
 #pragma comment(lib, "uuid.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "runtimeobject.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "WindowsApp.lib")
@@ -109,6 +111,15 @@ namespace fxe::os {
       std::string out(static_cast<usize>(n - 1), '\0');
       WideCharToMultiByte(CP_UTF8, 0, s, -1, out.data(), n, nullptr, nullptr);
       return out;
+    }
+    std::optional<DWORD> read_reg_dword(HKEY root, const wchar_t* subkey, const wchar_t* value) {
+      DWORD data = 0;
+      DWORD type = 0;
+      DWORD size = sizeof(data);
+      LONG rc = RegGetValueW(root, subkey, value, RRF_RT_REG_DWORD, &type, &data, &size);
+      if (rc != ERROR_SUCCESS || type != REG_DWORD)
+        return std::nullopt;
+      return data;
     }
 
     std::string narrow_hstring(HSTRING value) {
@@ -1447,7 +1458,56 @@ namespace fxe::os {
     }
     return {};
   }
+  bool system_prefers_reduced_motion() {
+    BOOL animations_enabled = TRUE;
+    if (!SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &animations_enabled, 0))
+      return false;
+    return animations_enabled == FALSE;
+  }
 
+  bool system_prefers_high_contrast() {
+    HIGHCONTRASTW hc{};
+    hc.cbSize = sizeof(hc);
+    if (!SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(hc), &hc, 0))
+      return false;
+    return (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
+  }
+
+  double system_font_scale() {
+    auto percent = read_reg_dword(HKEY_CURRENT_USER, L"Software\\Microsoft\\Accessibility",
+                                  L"TextScaleFactor");
+    if (!percent || *percent == 0)
+      return 1.0;
+    return static_cast<double>(*percent) / 100.0;
+  }
+
+  std::string system_color_scheme() {
+    auto use_light = read_reg_dword(
+        HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        L"AppsUseLightTheme");
+    if (!use_light)
+      return "no-preference";
+    return *use_light == 0 ? "dark" : "light";
+  }
+
+  std::string system_accent_color() {
+    DWORD color = 0;
+    BOOL opaque = FALSE;
+    if (DwmGetColorizationColor(&color, &opaque) != S_OK)
+      return {};
+    (void)opaque;
+    unsigned r = static_cast<unsigned>((color >> 16) & 0xFFu);
+    unsigned g = static_cast<unsigned>((color >> 8) & 0xFFu);
+    unsigned b = static_cast<unsigned>(color & 0xFFu);
+    char hex[7] = {};
+    std::snprintf(hex, sizeof(hex), "%02x%02x%02x", r, g, b);
+    return std::string(hex);
+  }
+
+  bool install_system_change_observer(std::function<void(const char* kind)> cb) {
+    (void)cb;
+    return false;
+  }
   bool open_external(std::string_view url) {
     std::wstring target = widen(url);
     if (target.empty())

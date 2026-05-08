@@ -42,6 +42,16 @@ namespace fxe::os {
     std::vector<std::string> recent_documents();
     bool clear_recent_documents();
   } // namespace app
+  // -------- System accessibility / appearance -----------------------------
+  bool system_prefers_reduced_motion();
+  bool system_prefers_high_contrast();
+  double system_font_scale();        // 1.0 = default
+  std::string system_color_scheme(); // "light" | "dark" | "no-preference"
+  std::string system_accent_color(); // lowercase RRGGBB hex, empty if unknown
+  // Install a change observer for system preferences. Callback fires on the
+  // main thread when a known preference flips. Returns true if any observers
+  // installed; false means callers should fall back to polling.
+  bool install_system_change_observer(std::function<void(const char* kind)> cb);
 
   // -------- Dialogs --------------------------------------------------------
   struct dialog_filter {

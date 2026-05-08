@@ -97,9 +97,16 @@ namespace fxe::debug {
     // Enqueue an arbitrary protocol event (pushed to the connected client).
     void emit_event(std::string_view method, json params);
 
+    // Inspector/native bindings need a best-effort view of transport state.
+    [[nodiscard]] bool has_clients() const noexcept;
+    void when_client_attached(std::function<void()> cb);
+
     struct impl;
 
   private:
     std::unique_ptr<impl> p_;
   };
+
+  // Returns the currently-running debug server for this process, if any.
+  [[nodiscard]] server* active_server() noexcept;
 } // namespace fxe::debug
