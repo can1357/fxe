@@ -121,7 +121,7 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
     return ThemeProvider({ theme: opts.theme, children: withRootLayout(root, width, height) });
   }, 'FXEUIFrameRoot');
 
-  disposers.push(window.on('mousemove', (ev) => dispatchMouseMove(ev, window)));
+  disposers.push(window.on('mousemove', (ev) => dispatchMouseMove(ev, window, window)));
   disposers.push(window.on('mousedown', dispatchMouseDown));
   disposers.push(window.on('mouseup', dispatchMouseUp));
   disposers.push(window.on('wheel', dispatchWheel));

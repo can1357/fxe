@@ -968,9 +968,7 @@ namespace fxe::os {
       }
       if (!id.empty()) {
         post_main_thread_dispatch([id]() {
-          // The public set_application_menu API carries command ids but no JS callback.
-          // Keep routing on the V8 thread boundary for future host integration.
-          (void)id;
+          fxe::os::detail::dispatch_application_menu_command(id);
         });
       }
     }

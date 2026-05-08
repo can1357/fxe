@@ -146,6 +146,7 @@ set(
     _fxe_os_sources
     src/os/a11y.cpp
     src/os/crash_common.cpp
+    src/os/menu_handler.cpp
     src/os/single_instance.cpp
 )
 add_library(fxe_os STATIC ${_fxe_os_sources})

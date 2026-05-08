@@ -1085,12 +1085,7 @@ namespace fxe::os {
           return;
         std::string id = it->second;
         post_main_thread_dispatch([id] {
-          // Application menu has no JS callback by default; selection is
-          // routed through the same notification-click registry by id.
-          std::lock_guard<std::mutex> g(g_notif_mu);
-          auto cbi = g_notif_cbs.find(0);
-          (void)cbi;
-          (void)id; // Reserved hook; integration may extend.
+          fxe::os::detail::dispatch_application_menu_command(id);
         });
       };
       NSMenu* m = build_menu(items, s_target, &s_tag_to_id, app_menu_item_registry());
@@ -1149,8 +1144,24 @@ namespace fxe::os {
         });
       };
       NSMenu* m = build_menu(items, target, tag_map.get(), nil);
-      NSPoint loc = NSMakePoint(static_cast<CGFloat>(x), static_cast<CGFloat>(y));
-      BOOL clicked = [m popUpMenuPositioningItem:nil atLocation:loc inView:nil];
+      // ev.x/ev.y arrive in window-content coordinates with a top-left origin
+      // (GLFW / web mouse-event convention). popUpMenuPositioningItem:atLocation:
+      // inView:nil interprets atLocation as *screen* coordinates, which lands
+      // the menu at an unrelated point. Resolve the active window's content view
+      // and pop relative to it; AppKit views are bottom-left by default, so
+      // flip y by the content height.
+      NSWindow* win = [NSApp keyWindow];
+      if (!win)
+        win = [NSApp mainWindow];
+      NSView* view = [win contentView];
+      NSPoint loc;
+      if (view) {
+        const CGFloat h = view.bounds.size.height;
+        loc = NSMakePoint(static_cast<CGFloat>(x), h - static_cast<CGFloat>(y));
+      } else {
+        loc = NSMakePoint(static_cast<CGFloat>(x), static_cast<CGFloat>(y));
+      }
+      BOOL clicked = [m popUpMenuPositioningItem:nil atLocation:loc inView:view];
       if (!clicked) {
         auto cbref = cb;
         post_main_thread_dispatch([cbref] {

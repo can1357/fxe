@@ -126,6 +126,17 @@ namespace fxe::os {
   };
 
   void set_application_menu(const std::vector<menu_item>& items);
+
+  // Register a handler invoked on the main thread when the user activates
+  // an application-menu item. The handler receives the `id` of the activated
+  // menu_item; only one handler is active at a time and re-registering
+  // replaces the previous one. Pass an empty function to clear.
+  void set_application_menu_handler(std::function<void(const std::string& id)> handler);
+  // Internal: platform menu dispatch invokes this on the main thread when a
+  // menu item is activated. Defined in src/os/menu_handler.cpp.
+  namespace detail {
+    void dispatch_application_menu_command(const std::string& id);
+  }
   void show_context_menu(const std::vector<menu_item>& items, int x, int y,
                          std::function<void(const std::string& id)> on_select);
   // Per-item mutation. menu_item is identified by its `id` (which must be unique per

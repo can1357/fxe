@@ -1944,6 +1944,13 @@ declare const Menu: {
     },
   ): boolean;
   findItem(id: string): MenuItemHandle | null;
+  /**
+   * Register a callback fired when the user activates an item in the
+   * application menu (set via `setApplicationMenu`). The callback receives
+   * the activated `MenuItem.id`. Single-slot: re-registering replaces the
+   * previous handler. Pass `null` to clear.
+   */
+  onCommand(handler: ((id: string) => void) | null): void;
 };
 
 type TrayEvent = 'click' | 'right-click' | 'double-click';

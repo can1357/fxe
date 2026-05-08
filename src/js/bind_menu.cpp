@@ -182,6 +182,61 @@ namespace fxe::js {
                      Function::New(ctx, menu_item_set_accelerator).ToLocalChecked());
       info.GetReturnValue().Set(obj);
     }
+
+    // Persistent JS callback for application-menu activations. Single-slot:
+    // re-registering replaces the previous handler. The OS handler bridges
+    // to V8 inside an Isolate/HandleScope.
+    Global<Function>* g_menu_command_callback = nullptr;
+    Isolate* g_menu_command_isolate = nullptr;
+
+    void invoke_menu_command_callback(const std::string& id) {
+      if (!g_menu_command_callback || !g_menu_command_isolate)
+        return;
+      Isolate* iso = g_menu_command_isolate;
+      Isolate::Scope is(iso);
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      if (ctx.IsEmpty())
+        return;
+      Context::Scope cs(ctx);
+      auto fn = g_menu_command_callback->Get(iso);
+      if (fn.IsEmpty())
+        return;
+      Local<String> arg_str;
+      if (!String::NewFromUtf8(iso, id.data(), NewStringType::kNormal,
+                               static_cast<int>(id.size()))
+               .ToLocal(&arg_str)) {
+        return;
+      }
+      Local<Value> argv[1] = {arg_str};
+      TryCatch tc(iso);
+      (void)fn->Call(ctx, ctx->Global(), 1, argv);
+      if (tc.HasCaught())
+        tc.ReThrow();
+    }
+
+    void menu_on_command(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      // Clear: Menu.onCommand(null) or Menu.onCommand() removes the handler.
+      if (info.Length() < 1 || !info[0]->IsFunction()) {
+        if (g_menu_command_callback) {
+          g_menu_command_callback->Reset();
+          delete g_menu_command_callback;
+          g_menu_command_callback = nullptr;
+        }
+        g_menu_command_isolate = nullptr;
+        fxe::os::set_application_menu_handler({});
+        return;
+      }
+      if (g_menu_command_callback) {
+        g_menu_command_callback->Reset();
+        delete g_menu_command_callback;
+      }
+      g_menu_command_callback = new Global<Function>(iso, info[0].As<Function>());
+      g_menu_command_isolate = iso;
+      fxe::os::set_application_menu_handler(
+          [](const std::string& id) { invoke_menu_command_callback(id); });
+    }
   } // namespace
 
   void install_menu_global(Isolate* iso, Local<ObjectTemplate> global) {
@@ -190,6 +245,7 @@ namespace fxe::js {
     t->Set(iso, "popup", FunctionTemplate::New(iso, menu_popup));
     t->Set(iso, "updateItem", FunctionTemplate::New(iso, menu_update_item));
     t->Set(iso, "findItem", FunctionTemplate::New(iso, menu_find_item));
+    t->Set(iso, "onCommand", FunctionTemplate::New(iso, menu_on_command));
     global->Set(iso, "Menu", t);
   }
 } // namespace fxe::js

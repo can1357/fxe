@@ -60,9 +60,43 @@ export interface ClipboardSink {
   setClipboardText?(text: string): void;
 }
 
-export function dispatchMouseMove(ev: MouseMoveEvent, cursorSink?: CursorSink): void {
+export interface DragOutPayload {
+  files?: string[];
+  text?: string;
+  html?: string;
+}
+
+/** Sink that initiates an OS-level drag-out from a synthetic mouse drag. */
+export interface DragSink {
+  startDrag?(payload: DragOutPayload): boolean;
+}
+
+export function dispatchMouseMove(
+  ev: MouseMoveEvent,
+  cursorSink?: CursorSink,
+  dragSink?: DragSink,
+): void {
   if (captured) {
-    captured.onDrag?.(makeSyntheticEvent(ev, ev.x, ev.y));
+    const synthetic = makeSyntheticEvent(ev, ev.x, ev.y) as ReturnType<
+      typeof makeSyntheticEvent<MouseMoveEvent>
+    > & { requestDragOut?: (payload: DragOutPayload) => boolean };
+    let dragStarted = false;
+    if (dragSink?.startDrag) {
+      synthetic.requestDragOut = (payload) => {
+        const ok = dragSink.startDrag?.(payload) ?? false;
+        if (ok) {
+          // Hand control to the OS drag session: stop further drag dispatch
+          // until the next mousedown so the captured target can't extend
+          // its selection while the user is dragging out.
+          captured = null;
+          pressed = null;
+          dragStarted = true;
+        }
+        return ok;
+      };
+    }
+    captured.onDrag?.(synthetic);
+    if (dragStarted) return;
   }
   const next = hitTest(ev.x, ev.y);
   if (next !== hovered) {
