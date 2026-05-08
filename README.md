@@ -22,7 +22,9 @@
 </p>
 
 <p align="center">
-  <img src="assets/login_form.png" alt="FXE login form example" width="420">
+  <img src="assets/login_form.png" alt="FXE login form example" width="460">
+  <br>
+  <sub><i>Frameless, transparent V8 + Dawn window driving the <code>fxe-ui</code> reconciler — see <a href="examples/js/login_form.tsx"><code>examples/js/login_form.tsx</code></a>.</i></sub>
 </p>
 
 <table align="center"><td>
@@ -44,7 +46,7 @@ function LoginForm() {
 		<View style={s.root}>
 			<View style={s.shell}>
 				<View style={s.rail}>
-					<Text style={s.railKicker}>FXE ACCESS</Text>
+					<Text style={s.railKicker}>FXE · ACCESS</Text>
 					<Text style={s.railWordmark}>Sign in</Text>
 					<Text style={s.railBody}>A compact native login surface…</Text>
 					<View style={s.railBadge}>
@@ -52,8 +54,9 @@ function LoginForm() {
 					</View>
 				</View>
 				<View style={s.panel}>
+					<Text style={s.eyebrow}>ACCOUNT · SIGN IN</Text>
 					<Text style={s.title}>Welcome back 👋</Text>
-					<Text style={s.copy}>Continue to your workspace …</Text>
+					<Text style={s.copy}>Pick up where you left off…</Text>
 					<View style={s.form}>
 						<Text style={s.label}>Email address</Text>
 						<TextInput
@@ -78,7 +81,13 @@ function LoginForm() {
 	);
 }
 
-const win = new Window({ width: 560, height: 440, title: "fxe-ui login form" });
+const win = new Window({
+	width: 620,
+	height: 480,
+	title: "fxe-ui login form",
+	transparent: true,
+	decorated: false,
+});
 mount(<LoginForm />, win, { lazy: false });
 App.run({ animate: true, fps: 60 });
 ```

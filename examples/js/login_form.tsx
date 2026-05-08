@@ -9,53 +9,130 @@ const s = StyleSheet.create({
     height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 0x080b10ff,
+    backgroundColor: 0x00000000,
   },
+  // Outer glow / soft halo behind the card
+  halo: {
+    position: 'absolute',
+    width: 620,
+    height: 480,
+    borderRadius: 32,
+    backgroundColor: 0x6f7bff14,
+  },
+  haloAccent: {
+    position: 'absolute',
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: 0xd8b66a1a,
+    top: 60,
+    left: 60,
+  },
+  // Frosted glass card
   shell: {
-    width: 500,
-    height: 320,
+    width: 540,
+    height: 360,
     flexDirection: 'row',
-    gap: 18,
-    padding: 18,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: 0x31384aff,
-    backgroundColor: 0x101620ff,
+    borderColor: 0xffffff1f,
+    backgroundColor: 0x0c1018cc,
+    overflow: 'hidden',
   },
+  // Left rail — accent gradient-ish stack
   rail: {
-    width: 138,
-    height: 284,
-    padding: 16,
+    width: 180,
+    height: 360,
+    padding: 22,
     gap: 10,
-    backgroundColor: 0x171f30ff,
+    backgroundColor: 0x12182366,
+    borderRightWidth: 1,
+    borderRightColor: 0xffffff14,
   },
-  railKicker: { height: 16, color: 0x90a6c7ff, fontSize: 11, letterSpacing: 1 },
-  railWordmark: { height: 34, color: 0xf3ecdeff, fontSize: 28 },
-  railBody: { color: 0x9ca8baff, fontSize: 13, lineHeight: 18 },
-  railBadge: {
-    width: 106,
-    height: 26,
-    marginTop: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
+  railKicker: { height: 14, color: 0xd8b66aff, fontSize: 10, letterSpacing: 2 },
+  railWordmark: { height: 38, color: 0xf5f0e8ff, fontSize: 30 },
+  railRule: {
+    width: 28,
+    height: 2,
+    marginTop: 4,
+    marginBottom: 6,
     backgroundColor: 0xd8b66aff,
   },
-  railBadgeText: { height: 16, color: 0x17130aff, fontSize: 11 },
-  panel: { width: 308, height: 284, gap: 10, justifyContent: 'center' },
-  title: { height: 30, color: 0xf5f0e8ff, fontSize: 24 },
-  copy: { color: 0x9da9bdff, fontSize: 13, lineHeight: 18 },
-  form: { height: 172, gap: 8, marginTop: 10 },
-  label: { height: 16, color: 0xc7d1e2ff, fontSize: 12 },
-  input: {
-    width: 308,
-    height: 40,
-    paddingX: 12,
-    borderWidth: 1,
-    borderColor: 0x384255ff,
-    backgroundColor: 0x1a2130ff,
+  railBody: { color: 0x9ca8baff, fontSize: 12, lineHeight: 17 },
+  railFooter: {
+    marginTop: 'auto',
+    color: 0x7a8699ff,
+    fontSize: 10,
+    letterSpacing: 1,
+    height: 14,
   },
-  button: { width: 308, height: 50, marginTop: 10, backgroundColor: 0xd8b66aff },
-  buttonText: { color: 0x17130aff, fontSize: 16 },
-  foot: { height: 18, color: 0xd8b66aff, fontSize: 12 },
+  railBadge: {
+    width: 116,
+    height: 24,
+    marginTop: 12,
+    paddingX: 10,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    backgroundColor: 0xd8b66a26,
+    borderWidth: 1,
+    borderColor: 0xd8b66a55,
+  },
+  railBadgeText: { height: 14, color: 0xefd591ff, fontSize: 10, letterSpacing: 1 },
+  // Right panel
+  panel: {
+    width: 360,
+    height: 360,
+    paddingX: 28,
+    paddingY: 30,
+    gap: 8,
+    justifyContent: 'center',
+  },
+  eyebrow: { height: 14, color: 0x8a93a8ff, fontSize: 10, letterSpacing: 2 },
+  title: { height: 34, color: 0xf5f0e8ff, fontSize: 26 },
+  copy: { color: 0x9da9bdff, fontSize: 12, lineHeight: 17, marginBottom: 4 },
+  form: { gap: 8, marginTop: 6 },
+  label: { height: 14, color: 0xb6c0d2ff, fontSize: 11, letterSpacing: 1 },
+  input: {
+    width: 304,
+    height: 38,
+    paddingX: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 0xffffff1a,
+    backgroundColor: 0x0a0f1980,
+    color: 0xf3ecdeff,
+    fontSize: 13,
+  },
+  button: {
+    width: 304,
+    height: 44,
+    marginTop: 12,
+    borderRadius: 10,
+    backgroundColor: 0xd8b66aff,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonText: { color: 0x17130aff, fontSize: 14, letterSpacing: 1 },
+  foot: { height: 16, color: 0xd8b66aff, fontSize: 11, marginTop: 8 },
+  // Custom traffic-light cluster (since we're frameless)
+  dragBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 540,
+    height: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingX: 12,
+    gap: 6,
+  },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  dotClose: { backgroundColor: 0xff5f57ff },
+  dotMin: { backgroundColor: 0xfebc2eff },
+  dotMax: { backgroundColor: 0x28c840ff },
 });
 
 function LoginForm(): Node {
@@ -66,31 +143,41 @@ function LoginForm(): Node {
   const submit = (): void => {
     setMessage(
       email.includes('@') && password.length >= 6
-        ? 'Credentials look ready.'
+        ? '✓ Credentials look ready.'
         : 'Use an email and a 6+ character password.',
     );
   };
 
   return (
     <View style={s.root}>
+      <View style={s.halo} />
+      <View style={s.haloAccent} />
       <View style={s.shell}>
+        <View style={s.dragBar}>
+          <View style={[s.dot, s.dotClose]} />
+          <View style={[s.dot, s.dotMin]} />
+          <View style={[s.dot, s.dotMax]} />
+        </View>
         <View style={s.rail}>
-          <Text style={s.railKicker}>FXE ACCESS</Text>
+          <Text style={s.railKicker}>FXE · ACCESS</Text>
           <Text style={s.railWordmark}>Sign in</Text>
+          <View style={s.railRule} />
           <Text style={s.railBody}>
             A compact native login surface tuned for keyboard-first workflows.
           </Text>
           <View style={s.railBadge}>
             <Text style={s.railBadgeText}>🔒 ENCRYPTED</Text>
           </View>
+          <Text style={s.railFooter}>v1 · LOCAL</Text>
         </View>
         <View style={s.panel}>
+          <Text style={s.eyebrow}>ACCOUNT · SIGN IN</Text>
           <Text style={s.title}>Welcome back 👋</Text>
           <Text style={s.copy}>
-            Continue to your workspace with the credentials you use every day.
+            Pick up where you left off with the credentials you use every day.
           </Text>
           <View style={s.form}>
-            <Text style={s.label}>Email address</Text>
+            <Text style={s.label}>EMAIL</Text>
             <TextInput
               style={s.input}
               value={email}
@@ -98,7 +185,7 @@ function LoginForm(): Node {
               onChange={setEmail}
               onSubmit={submit}
             />
-            <Text style={s.label}>Password</Text>
+            <Text style={s.label}>PASSWORD</Text>
             <TextInput
               style={s.input}
               value={password}
@@ -106,7 +193,7 @@ function LoginForm(): Node {
               onChange={setPassword}
               onSubmit={submit}
             />
-            <Button title="Continue" style={s.button} textStyle={s.buttonText} onPress={submit} />
+            <Button title="Continue →" style={s.button} textStyle={s.buttonText} onPress={submit} />
           </View>
           <Text style={s.foot}>{message || 'Tab between fields, then press Enter.'}</Text>
         </View>
@@ -115,6 +202,12 @@ function LoginForm(): Node {
   );
 }
 
-const win = new Window({ width: 560, height: 440, title: 'fxe-ui login form' });
-mount(<LoginForm />, win, { lazy: false });
-App.run({ animate: true, fps: 60 });
+const win = new Window({
+  width: 620,
+  height: 480,
+  title: 'fxe-ui login form',
+  transparent: true,
+  decorated: false,
+});
+mount(<LoginForm />, win);
+App.run();
