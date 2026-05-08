@@ -136,13 +136,22 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
   );
 
   frame();
-  if (!shouldRunFrameLoop) window.requestRedraw();
   if (shouldRunFrameLoop) {
     try {
       frameLoopDispose = startFrameLoop();
     } catch {
       frameLoopDispose = null;
     }
+  } else {
+    // Lazy mode: drive frames on demand from window redraw acks. setState
+    // / signals call window.requestRedraw() via requestRenderTargetRedraw;
+    // the OS event loop (App.run / Window.run) consumes that flag and
+    // invokes the per-window onFrame we register here. Test stubs may not
+    // expose this method, so we feature-detect rather than hard-require.
+    if (typeof window.setFrameCallback === 'function') {
+      window.setFrameCallback(frame);
+    }
+    window.requestRedraw();
   }
 
   return () => {
@@ -150,6 +159,9 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
     disposed = true;
     frameLoopDispose?.();
     frameLoopDispose = null;
+    if (!shouldRunFrameLoop && typeof window.setFrameCallback === 'function') {
+      window.setFrameCallback(null);
+    }
     for (const dispose of disposers.splice(0)) dispose();
     resetEventPipeline();
     clearHitTargets();

@@ -329,6 +329,14 @@ declare namespace FXE {
     requestRedraw(): void;
     takeRedrawRequest(): boolean;
     run(callback: (window: Window) => void | Promise<void>, options?: WindowRunOptions): void;
+    /**
+     * Register a per-frame callback without entering App.run / Window.run.
+     * Call once during setup (typically from a UI compositor); pass `null`
+     * to clear. The callback is invoked once per `requestRedraw()` ack
+     * while the OS event loop is running, so a separate `App.run()` is
+     * still required to drive ticks.
+     */
+    setFrameCallback(cb: ((window: Window) => void) | null): void;
 
     title(): string;
     getTitle(): string;

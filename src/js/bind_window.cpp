@@ -1937,6 +1937,37 @@ namespace fxe::js {
       app_run_loop(iso, opts.frame_period);
     }
 
+    // setFrameCallback(cb): register the per-window onFrame without
+    // entering app_run_loop. Use this from compositors / mount layers that
+    // expect a separate App.run() / Window.run() driver. The callback is
+    // invoked once per `window.requestRedraw()` ack while the OS event
+    // loop is running.
+    //
+    // Pass `null` to clear.
+    void win_set_frame_callback(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto self = info.This();
+      auto* w = unwrap_win(self);
+      if (!w)
+        return;
+      auto* hh = lookup_holder(w);
+      if (!hh)
+        return;
+      if (info.Length() < 1 || info[0]->IsNullOrUndefined()) {
+        hh->on_frame.Reset();
+        hh->self_strong.Reset();
+        return;
+      }
+      if (!info[0]->IsFunction()) {
+        iso->ThrowException(Exception::TypeError(
+            String::NewFromUtf8Literal(iso, "setFrameCallback: expected function or null")));
+        return;
+      }
+      hh->on_frame.Reset(iso, info[0].As<Function>());
+      hh->self_strong.Reset(iso, self);
+    }
+
     // ---- Monitors namespace -------------------------------------------------
 
     Local<Object> monitor_to_js(Isolate* iso, Local<Context> ctx, const monitor_info& m) {
@@ -2035,6 +2066,7 @@ namespace fxe::js {
     proto->Set(iso, "takeRedrawRequest", FunctionTemplate::New(iso, win_take_redraw_request));
     proto->Set(iso, "send", FunctionTemplate::New(iso, win_send));
     proto->Set(iso, "run", FunctionTemplate::New(iso, win_run));
+    proto->Set(iso, "setFrameCallback", FunctionTemplate::New(iso, win_set_frame_callback));
 
     proto->Set(iso, "setTitle", FunctionTemplate::New(iso, win_set_title));
     proto->Set(iso, "title", FunctionTemplate::New(iso, win_title));

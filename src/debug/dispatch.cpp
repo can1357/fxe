@@ -476,6 +476,12 @@ namespace fxe::debug {
 
     json h_page_screenshot(dispatch_context& cx, const json& params) {
       auto* rdr = resolve_renderer(cx, params);
+      // Lazy-mode mounts only render when the window has a pending redraw
+      // request. The first capture_frame() call below arms the readback;
+      // without a posted redraw, no end_frame() will fire and the second
+      // call (after the SDK's retry sleep) finds nothing to capture. Force
+      // a redraw here so the OS event loop drives a render between calls.
+      rdr->get_window().post_redraw();
 
       // ---- parse params ----
       std::string format =
