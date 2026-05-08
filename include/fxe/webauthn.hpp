@@ -168,7 +168,6 @@ namespace fxe::webauthn {
     std::unique_ptr<impl> impl_;
   };
 
-
   // Platform backend that drives real authenticators (Touch ID / Face ID /
   // Windows Hello / USB security keys / etc.). Selected per OS:
   //   macOS  → ASAuthorizationController (AuthenticationServices.framework)
@@ -194,11 +193,9 @@ namespace fxe::webauthn {
     platform_authenticator& operator=(const platform_authenticator&) = delete;
 
     virtual std::string_view backend_name() const = 0;
-    virtual std::string register_credential(const creation_options& opts,
-                                            std::string_view origin,
+    virtual std::string register_credential(const creation_options& opts, std::string_view origin,
                                             register_response& out) = 0;
-    virtual std::string assert_credential(const request_options& opts,
-                                          std::string_view origin,
+    virtual std::string assert_credential(const request_options& opts, std::string_view origin,
                                           assert_response& out) = 0;
     virtual void cancel() = 0;
 

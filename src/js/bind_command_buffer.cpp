@@ -290,10 +290,10 @@ namespace fxe::js {
       }
       auto [mn, mx] = cb->get_boundaries();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "x"_v8(iso), Number::New(iso, mn.x));
-      (void)out->Set(ctx, "y"_v8(iso), Number::New(iso, mn.y));
-      (void)out->Set(ctx, "width"_v8(iso), Number::New(iso, mx.x - mn.x));
-      (void)out->Set(ctx, "height"_v8(iso), Number::New(iso, mx.y - mn.y));
+      (void)out->Set(ctx, "x"_v8(iso), Number::New(iso, static_cast<double>(mn.x)));
+      (void)out->Set(ctx, "y"_v8(iso), Number::New(iso, static_cast<double>(mn.y)));
+      (void)out->Set(ctx, "width"_v8(iso), Number::New(iso, static_cast<double>(mx.x - mn.x)));
+      (void)out->Set(ctx, "height"_v8(iso), Number::New(iso, static_cast<double>(mx.y - mn.y)));
       info.GetReturnValue().Set(out);
     }
 

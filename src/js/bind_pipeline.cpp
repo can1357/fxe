@@ -67,10 +67,6 @@ namespace fxe::js {
       (void)throw_type_error(iso, msg);
     }
 
-    void throw_error(Isolate* iso, const std::string& msg) {
-      (void)throw_error(iso, msg.c_str());
-    }
-
     renderer* unwrap_renderer(Local<Value> value) {
       if (value.IsEmpty() || !value->IsObject())
         return nullptr;

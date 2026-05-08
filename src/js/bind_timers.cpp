@@ -101,10 +101,6 @@ namespace fxe::js {
       state->raf_cancelled.clear();
     }
 
-    Local<String> str(Isolate* iso, const char* s) {
-      return String::NewFromUtf8(iso, s).ToLocalChecked();
-    }
-
     void pump_microtasks(Isolate* iso) {
       iso->PerformMicrotaskCheckpoint();
     }

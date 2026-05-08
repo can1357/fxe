@@ -369,7 +369,7 @@ namespace fxe::os {
     }
 #endif
 
-    bool is_dump_parseable(const std::string& path) {
+    [[maybe_unused]] bool is_dump_parseable(const std::string& path) {
       std::ifstream in(path, std::ios::binary);
       if (!in)
         return false;

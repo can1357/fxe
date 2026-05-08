@@ -37,7 +37,9 @@ namespace fxe::webauthn {
   namespace {
 
     struct fido_init_once {
-      fido_init_once() { fido_init(0); }
+      fido_init_once() {
+        fido_init(0);
+      }
     };
     void ensure_initialized() {
       static fido_init_once once;
@@ -59,11 +61,15 @@ namespace fxe::webauthn {
     // RAII wrappers.
     struct cred_holder {
       fido_cred_t* p = fido_cred_new();
-      ~cred_holder() { fido_cred_free(&p); }
+      ~cred_holder() {
+        fido_cred_free(&p);
+      }
     };
     struct assert_holder {
       fido_assert_t* p = fido_assert_new();
-      ~assert_holder() { fido_assert_free(&p); }
+      ~assert_holder() {
+        fido_assert_free(&p);
+      }
     };
     struct dev_holder {
       fido_dev_t* p = fido_dev_new();
@@ -140,9 +146,13 @@ namespace fxe::webauthn {
     class linux_authenticator final : public platform_authenticator {
     public:
       linux_authenticator() = default;
-      ~linux_authenticator() override { cancel(); }
+      ~linux_authenticator() override {
+        cancel();
+      }
 
-      std::string_view backend_name() const override { return "linux.libfido2"; }
+      std::string_view backend_name() const override {
+        return "linux.libfido2";
+      }
 
       std::string register_credential(const creation_options& opts, std::string_view origin,
                                       register_response& out) override {
@@ -160,8 +170,8 @@ namespace fxe::webauthn {
         if (!ch.p)
           return "platform.linux: fido_cred_new failed";
 
-        cose_algorithm chosen_alg = opts.pub_key_params.empty() ? cose_algorithm::es256
-                                                                : opts.pub_key_params.front();
+        cose_algorithm chosen_alg =
+            opts.pub_key_params.empty() ? cose_algorithm::es256 : opts.pub_key_params.front();
         int rv = fido_cred_set_type(ch.p, cose_alg_value(chosen_alg));
         if (rv != FIDO_OK)
           return fido_err("fido_cred_set_type", rv);
@@ -172,12 +182,11 @@ namespace fxe::webauthn {
                               opts.rp_name.empty() ? nullptr : opts.rp_name.c_str());
         if (rv != FIDO_OK)
           return fido_err("fido_cred_set_rp", rv);
-        rv = fido_cred_set_user(ch.p, opts.user.id.empty() ? nullptr : opts.user.id.data(),
-                                opts.user.id.size(),
-                                opts.user.name.empty() ? nullptr : opts.user.name.c_str(),
-                                opts.user.display_name.empty() ? nullptr
-                                                               : opts.user.display_name.c_str(),
-                                /*icon=*/nullptr);
+        rv = fido_cred_set_user(
+            ch.p, opts.user.id.empty() ? nullptr : opts.user.id.data(), opts.user.id.size(),
+            opts.user.name.empty() ? nullptr : opts.user.name.c_str(),
+            opts.user.display_name.empty() ? nullptr : opts.user.display_name.c_str(),
+            /*icon=*/nullptr);
         if (rv != FIDO_OK)
           return fido_err("fido_cred_set_user", rv);
         if (uv_opt(opts.user_verification) != FIDO_OPT_OMIT) {
@@ -228,8 +237,8 @@ namespace fxe::webauthn {
           return "platform.linux: empty authData";
 
         // Fetch the COSE-encoded public key blob the spec embeds in authData.
-        if (auto parsed = parse_authenticator_data(
-                std::span<const uint8_t>(auth_data, auth_data_len));
+        if (auto parsed =
+                parse_authenticator_data(std::span<const uint8_t>(auth_data, auth_data_len));
             parsed && parsed->attested) {
           out.public_key = parsed->attested->cose_public_key;
           out.credential_id = parsed->attested->credential_id;
@@ -257,8 +266,8 @@ namespace fxe::webauthn {
             cbor::cmap stmt;
             stmt.push_back({std::string("alg"),
                             cbor::value(static_cast<int64_t>(cose_alg_value(chosen_alg)))});
-            stmt.push_back({std::string("sig"),
-                            cbor::value(std::vector<uint8_t>(sig, sig + sig_len))});
+            stmt.push_back(
+                {std::string("sig"), cbor::value(std::vector<uint8_t>(sig, sig + sig_len))});
             if (x5c && x5c_len > 0u) {
               cbor::array x5c_arr;
               x5c_arr.push_back(cbor::value(std::vector<uint8_t>(x5c, x5c + x5c_len)));

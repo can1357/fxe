@@ -211,15 +211,15 @@ namespace fxe::webauthn {
     using PFN_WebAuthNIsUserVerifyingPlatformAuthenticatorAvailable =
         HRESULT(WINAPI*)(BOOL* pbIsUserVerifyingPlatformAuthenticatorAvailable);
     using PFN_WebAuthNAuthenticatorMakeCredential = HRESULT(WINAPI*)(
-        HWND hWnd, const WEBAUTHN_RP_ENTITY_INFORMATION*,
-        const WEBAUTHN_USER_ENTITY_INFORMATION*, const WEBAUTHN_COSE_CREDENTIAL_PARAMETERS*,
-        const WEBAUTHN_CLIENT_DATA*, const WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS*,
+        HWND hWnd, const WEBAUTHN_RP_ENTITY_INFORMATION*, const WEBAUTHN_USER_ENTITY_INFORMATION*,
+        const WEBAUTHN_COSE_CREDENTIAL_PARAMETERS*, const WEBAUTHN_CLIENT_DATA*,
+        const WEBAUTHN_AUTHENTICATOR_MAKE_CREDENTIAL_OPTIONS*,
         WEBAUTHN_CREDENTIAL_ATTESTATION** ppWebAuthNCredentialAttestation);
-    using PFN_WebAuthNAuthenticatorGetAssertion = HRESULT(WINAPI*)(
-        HWND hWnd, LPCWSTR pwszRpId, const WEBAUTHN_CLIENT_DATA*,
-        const WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS*, WEBAUTHN_ASSERTION** ppWebAuthNAssertion);
-    using PFN_WebAuthNFreeCredentialAttestation =
-        void(WINAPI*)(WEBAUTHN_CREDENTIAL_ATTESTATION*);
+    using PFN_WebAuthNAuthenticatorGetAssertion =
+        HRESULT(WINAPI*)(HWND hWnd, LPCWSTR pwszRpId, const WEBAUTHN_CLIENT_DATA*,
+                         const WEBAUTHN_AUTHENTICATOR_GET_ASSERTION_OPTIONS*,
+                         WEBAUTHN_ASSERTION** ppWebAuthNAssertion);
+    using PFN_WebAuthNFreeCredentialAttestation = void(WINAPI*)(WEBAUTHN_CREDENTIAL_ATTESTATION*);
     using PFN_WebAuthNFreeAssertion = void(WINAPI*)(WEBAUTHN_ASSERTION*);
     using PFN_WebAuthNGetCancellationId = HRESULT(WINAPI*)(GUID*);
     using PFN_WebAuthNCancelCurrentOperation = HRESULT(WINAPI*)(const GUID*);
@@ -381,9 +381,13 @@ namespace fxe::webauthn {
       win32_authenticator() {
         std::memset(&cancel_id_, 0, sizeof(cancel_id_));
       }
-      ~win32_authenticator() override { cancel(); }
+      ~win32_authenticator() override {
+        cancel();
+      }
 
-      std::string_view backend_name() const override { return "win32.webauthn.dll"; }
+      std::string_view backend_name() const override {
+        return "win32.webauthn.dll";
+      }
 
       std::string register_credential(const creation_options& opts, std::string_view origin,
                                       register_response& out) override {
@@ -476,8 +480,8 @@ namespace fxe::webauthn {
           if (FAILED(w.get_cancel_id(&cancel_id)))
             std::memset(&cancel_id, 0, sizeof(cancel_id));
         }
-        mco.pCancellationId = (cancel_id.Data1 || cancel_id.Data2 || cancel_id.Data3) ? &cancel_id
-                                                                                      : nullptr;
+        mco.pCancellationId =
+            (cancel_id.Data1 || cancel_id.Data2 || cancel_id.Data3) ? &cancel_id : nullptr;
         {
           std::lock_guard<std::mutex> lock(mu_);
           cancel_id_ = cancel_id;
@@ -564,8 +568,8 @@ namespace fxe::webauthn {
           if (FAILED(w.get_cancel_id(&cancel_id)))
             std::memset(&cancel_id, 0, sizeof(cancel_id));
         }
-        gao.pCancellationId = (cancel_id.Data1 || cancel_id.Data2 || cancel_id.Data3) ? &cancel_id
-                                                                                      : nullptr;
+        gao.pCancellationId =
+            (cancel_id.Data1 || cancel_id.Data2 || cancel_id.Data3) ? &cancel_id : nullptr;
         {
           std::lock_guard<std::mutex> lock(mu_);
           cancel_id_ = cancel_id;

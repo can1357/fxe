@@ -245,8 +245,8 @@ namespace {
     size_t png_len = 0;
     const char* b64_end = nullptr;
     CHECK(::sodium_init() >= 0);
-    const int rc = ::sodium_base642bin(png.data(), png.size(), b64.data(), b64.size(), nullptr, &png_len,
-                                       &b64_end, sodium_base64_VARIANT_ORIGINAL);
+    const int rc = ::sodium_base642bin(png.data(), png.size(), b64.data(), b64.size(), nullptr,
+                                       &png_len, &b64_end, sodium_base64_VARIANT_ORIGINAL);
     CHECK(rc == 0);
     CHECK(b64_end == b64.data() + b64.size());
     png.resize(static_cast<usize>(png_len));

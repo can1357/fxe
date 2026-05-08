@@ -9,8 +9,14 @@
 
 namespace fxe::webauthn {
 
-  bool platform_authenticator::is_available() { return false; }
-  bool platform_authenticator::is_user_verifying_platform_available() { return false; }
-  std::unique_ptr<platform_authenticator> platform_authenticator::create() { return nullptr; }
+  bool platform_authenticator::is_available() {
+    return false;
+  }
+  bool platform_authenticator::is_user_verifying_platform_available() {
+    return false;
+  }
+  std::unique_ptr<platform_authenticator> platform_authenticator::create() {
+    return nullptr;
+  }
 
 } // namespace fxe::webauthn

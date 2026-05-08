@@ -16,7 +16,7 @@ namespace fxe::js {
   using namespace v8;
 
   namespace {
-    std::atomic_bool g_auto_self_test_ran{false};
+    [[maybe_unused]] std::atomic_bool g_auto_self_test_ran{false};
     Local<String> s(Isolate* iso, const char* str) {
       return String::NewFromUtf8(iso, str, NewStringType::kNormal).ToLocalChecked();
     }

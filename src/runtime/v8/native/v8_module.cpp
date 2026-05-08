@@ -150,9 +150,9 @@ namespace fxe::runtime {
     void get_heap_space_statistics(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const int count = iso->NumberOfHeapSpaces();
-      auto out = Array::New(iso, count);
-      for (int i = 0; i < count; ++i) {
+      const size_t count = iso->NumberOfHeapSpaces();
+      auto out = Array::New(iso, static_cast<int>(count));
+      for (size_t i = 0; i < count; ++i) {
         HeapSpaceStatistics stats;
         if (!iso->GetHeapSpaceStatistics(&stats, i))
           continue;
@@ -164,7 +164,7 @@ namespace fxe::runtime {
                    static_cast<double>(stats.space_available_size()));
         set_number(ctx, entry, "physical_space_size",
                    static_cast<double>(stats.physical_space_size()));
-        (void)out->Set(ctx, i, entry);
+        (void)out->Set(ctx, static_cast<uint32_t>(i), entry);
       }
       info.GetReturnValue().Set(out);
     }
