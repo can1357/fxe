@@ -17,18 +17,11 @@ jobs:
       - name: Add node_modules/.bin to PATH
         run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
       - uses: extractions/setup-just@v2
-      - name: Cache pipx tools
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.local/pipx
-            /opt/pipx
-          key: pipx-${{ runner.os }}-clang-format-22.1.4
       - name: Install lint/format toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck pipx
-          pipx install --global clang-format==22.1.4
+          sudo pipx install --global --force clang-format==22.1.4
       - run: just ci-quick
 
   build:
