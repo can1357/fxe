@@ -699,6 +699,19 @@ namespace fxe::os {
       return args;
     }
 
+    std::string executable_stem() {
+      std::vector<std::string> args = read_cmdline_args();
+      if (!args.empty())
+        return std::filesystem::path(args.front()).stem().string();
+      char exe_buffer[4096];
+      ssize_t len = ::readlink("/proc/self/exe", exe_buffer, sizeof(exe_buffer) - 1);
+      if (len > 0) {
+        exe_buffer[len] = '\0';
+        return std::filesystem::path(exe_buffer).stem().string();
+      }
+      return "fxe";
+    }
+
     void add_zenity_file_filters(std::vector<std::string>& args,
                                  const std::vector<dialog_filter>& filters) {
       for (const auto& filter : filters) {
@@ -2014,19 +2027,6 @@ namespace fxe::os {
 
       std::optional<std::string> response = wait_for_portal_request(conn, msg, false);
       return response.has_value();
-    }
-
-    std::string executable_stem() {
-      std::vector<std::string> args = read_cmdline_args();
-      if (!args.empty())
-        return std::filesystem::path(args.front()).stem().string();
-      char exe_buffer[4096];
-      ssize_t len = ::readlink("/proc/self/exe", exe_buffer, sizeof(exe_buffer) - 1);
-      if (len > 0) {
-        exe_buffer[len] = '\0';
-        return std::filesystem::path(exe_buffer).stem().string();
-      }
-      return "fxe";
     }
 
     std::string desktop_file_uri() {
