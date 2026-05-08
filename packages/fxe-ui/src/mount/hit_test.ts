@@ -16,12 +16,19 @@ export interface HitTarget {
   id: string;
   rect: LayoutResult;
   z: number;
+  /** Tab traversal order. Negative = unfocusable. Default 0 (registration order). */
+  tabIndex?: number;
+  /** Logical group id; focus trap can scope traversal to a single group. */
+  focusGroup?: string;
+  componentType?: string;
+  a11y?: AccessibilityProps;
   cursor?: CursorKind;
   onHoverIn?: (ev: SyntheticEvent) => void;
   onHoverOut?: (ev: SyntheticEvent) => void;
   onPressIn?: (ev: SyntheticEvent) => void;
   onPressOut?: (ev: SyntheticEvent) => void;
   onPress?: (ev: SyntheticEvent) => void;
+  onContextMenu?: (ev: SyntheticEvent<MouseButtonEvent>) => void;
   onDrag?: (ev: SyntheticEvent) => void;
   onWheel?: (ev: SyntheticEvent & { dx: number; dy: number }) => void;
   onFocus?: () => void;
@@ -29,6 +36,23 @@ export interface HitTarget {
   onKeyDown?: (ev: unknown) => void;
   onKeyPress?: (ev: unknown) => void;
   onCompose?: (ev: ComposeEvent) => void;
+}
+function isInteractiveTarget(target: HitTarget): boolean {
+  return Boolean(
+    target.onHoverIn ||
+      target.onHoverOut ||
+      target.onPressIn ||
+      target.onPressOut ||
+      target.onPress ||
+      target.onContextMenu ||
+      target.onDrag ||
+      target.onWheel ||
+      target.onFocus ||
+      target.onBlur ||
+      target.onKeyDown ||
+      target.onKeyPress ||
+      target.onCompose,
+  );
 }
 
 const targets: HitTarget[] = [];
@@ -71,11 +95,14 @@ export function replayHitTargets(captured: readonly HitTarget[]): void {
 }
 
 export function hitTest(x: number, y: number): HitTarget | null {
+  let passive: HitTarget | null = null;
   for (const target of [...targets].sort((a, b) => b.z - a.z)) {
     const r = target.rect;
-    if (x >= r.x && y >= r.y && x <= r.x + r.width && y <= r.y + r.height) return target;
+    if (x < r.x || y < r.y || x > r.x + r.width || y > r.y + r.height) continue;
+    if (isInteractiveTarget(target)) return target;
+    passive ??= target;
   }
-  return null;
+  return passive;
 }
 
 export function makeSyntheticEvent<T>(nativeEvent: T, x: number, y: number): SyntheticEvent<T> {

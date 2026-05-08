@@ -1,6 +1,6 @@
 import type {
-  CursorKind,
   ComposeEvent,
+  CursorKind,
   KeyEvent,
   KeypressEvent,
   MouseButtonEvent,
@@ -8,11 +8,48 @@ import type {
   WheelEvent,
 } from 'fxe';
 import { focusTarget } from './focus.ts';
-import { type HitTarget, hitTest, makeSyntheticEvent } from './hit_test.ts';
+import { type HitTarget, hitTargets, hitTest, makeSyntheticEvent } from './hit_test.ts';
 
 let hovered: HitTarget | null = null;
 let pressed: HitTarget | null = null;
 let captured: HitTarget | null = null;
+let focusTrapGroup: string | null = null;
+
+function isFocusable(target: HitTarget): boolean {
+  return Boolean(target.onFocus || target.onBlur || target.onKeyDown || target.onKeyPress);
+}
+
+function orderedFocusableTargets(): HitTarget[] {
+  const scoped = hitTargets().filter(
+    (target) =>
+      isFocusable(target) &&
+      (target.tabIndex ?? 0) >= 0 &&
+      (focusTrapGroup == null || target.focusGroup === focusTrapGroup),
+  );
+  return [...scoped].sort((a, b) => {
+    const byTabIndex = (a.tabIndex ?? 0) - (b.tabIndex ?? 0);
+    if (byTabIndex !== 0) return byTabIndex;
+    return a.z - b.z;
+  });
+}
+
+function focusRelative(direction: 'next' | 'previous'): HitTarget | null {
+  const focusables = orderedFocusableTargets();
+  if (focusables.length === 0) return null;
+  const current = focusTarget();
+  // Match historical behavior: when nothing is focused, treat the current
+  // position as 0 (so first 'next' Tab focuses index 1, first 'previous' Tab
+  // focuses index length-1). Tests rely on this; D5 sort still applies above.
+  const idx = current ? focusables.findIndex((target) => target.id === current.id) : -1;
+  const at = Math.max(0, idx);
+  const delta = direction === 'next' ? 1 : -1;
+  const wrapped = (at + delta + focusables.length) % focusables.length;
+  return focusTarget(focusables[wrapped].id);
+}
+
+export function setFocusTrapGroup(id: string | null): void {
+  focusTrapGroup = id;
+}
 
 export interface CursorSink {
   setCursor?(kind: CursorKind): void;
@@ -32,23 +69,30 @@ export function dispatchMouseMove(ev: MouseMoveEvent, cursorSink?: CursorSink): 
     if (hovered?.onHoverOut) hovered.onHoverOut(makeSyntheticEvent(ev, ev.x, ev.y));
     hovered = next;
     if (hovered?.onHoverIn) hovered.onHoverIn(makeSyntheticEvent(ev, ev.x, ev.y));
-    if (cursorSink && hovered?.cursor) cursorSink.setCursor?.(hovered.cursor);
+    cursorSink?.setCursor?.(hovered?.cursor ?? 'arrow');
   }
 }
 
 export function dispatchMouseDown(ev: MouseButtonEvent): void {
-  pressed = hitTest(ev.x, ev.y);
-  captured = ev.button === 0 ? pressed : null;
+  const target = hitTest(ev.x, ev.y);
+  if (ev.button === 1) {
+    target?.onContextMenu?.(makeSyntheticEvent(ev, ev.x, ev.y));
+    return;
+  }
+  if (ev.button !== 0) return;
+  pressed = target;
+  captured = pressed;
   if (!pressed) return;
   focusTarget(pressed.id);
   pressed.onPressIn?.(makeSyntheticEvent(ev, ev.x, ev.y));
 }
 
 export function dispatchMouseUp(ev: MouseButtonEvent): void {
+  if (ev.button !== 0) return;
   const released = hitTest(ev.x, ev.y);
   const down = pressed;
   pressed = null;
-  if (ev.button === 0) captured = null;
+  captured = null;
   if (!down) return;
   const event = makeSyntheticEvent(ev, ev.x, ev.y);
   down.onPressOut?.(event);
@@ -63,7 +107,7 @@ export function dispatchWheel(ev: WheelEvent & { x?: number; y?: number }): void
 }
 
 export function dispatchKeyDown(ev: KeyEvent, clipboardSink?: ClipboardSink): void {
-  if (ev.key === 258) focusTarget(ev.modifiers & 1 ? 'previous' : 'next');
+  if (ev.key === 258) focusRelative(ev.modifiers & 1 ? 'previous' : 'next');
   const target = focusTarget();
   const routed = clipboardSink
     ? {
@@ -87,4 +131,5 @@ export function resetEventPipeline(): void {
   hovered = null;
   pressed = null;
   captured = null;
+  focusTrapGroup = null;
 }
