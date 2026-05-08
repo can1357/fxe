@@ -25,6 +25,8 @@
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_strings.hpp>
 
+#include <fxe/v8_helpers.hpp>
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -89,7 +91,9 @@ namespace fxe::js {
       // uses SAVEPOINT/RELEASE/ROLLBACK TO.
       int txn_depth = 0;
 
-      void on_finalize(v8::Isolate*) { close_db_holder(this); }
+      void on_finalize(v8::Isolate*) {
+        close_db_holder(this);
+      }
     };
 
     struct stmt_holder : weak_holder<stmt_holder> {
@@ -102,7 +106,9 @@ namespace fxe::js {
       // `as` class prototype, if any; column name keys are reused across rows.
       Global<Function> as_class;
 
-      void on_finalize(v8::Isolate*) { mark_stmt_finalized(this); }
+      void on_finalize(v8::Isolate*) {
+        mark_stmt_finalized(this);
+      }
     };
 
     // --- utilities -----------------------------------------------------------
@@ -129,16 +135,6 @@ namespace fxe::js {
         (void)o->Set(ctx, "errno"_v8(iso), Integer::New(iso, sqlite3_errcode(db)));
       }
       iso->ThrowException(err);
-      return false;
-    }
-
-    [[nodiscard]] bool throw_msg(Isolate* iso, std::string_view msg) {
-      iso->ThrowException(Exception::Error(s(iso, msg)));
-      return false;
-    }
-
-    [[nodiscard]] bool throw_type(Isolate* iso, std::string_view msg) {
-      iso->ThrowException(Exception::TypeError(s(iso, msg)));
       return false;
     }
 
@@ -246,7 +242,7 @@ namespace fxe::js {
           std::string msg = "BigInt value '";
           msg += (*u ? std::string(*u, u.length()) : std::string{});
           msg += "' is out of range";
-          return throw_msg(iso, msg);
+          return throw_error(iso, msg);
         }
         if (sqlite3_bind_int64(stmt, idx, i) != SQLITE_OK)
           return throw_sqlite(iso, sqlite3_db_handle(stmt));
@@ -294,7 +290,7 @@ namespace fxe::js {
       auto str = v->ToString(ctx);
       Local<String> sv;
       if (!str.ToLocal(&sv))
-        return throw_type(iso, "unsupported sqlite parameter type");
+        return throw_type_error(iso, "unsupported sqlite parameter type");
       String::Utf8Value u(iso, sv);
       if (sqlite3_bind_text(stmt, idx, *u ? *u : "", static_cast<int>(u.length()),
                             SQLITE_TRANSIENT) != SQLITE_OK)
@@ -334,7 +330,7 @@ namespace fxe::js {
         Local<Array> keys;
         std::vector<std::string> ignored_unknown_keys;
         if (!obj->GetOwnPropertyNames(ctx).ToLocal(&keys))
-          return throw_msg(iso, "failed to read parameter object keys");
+          return throw_error(iso, "failed to read parameter object keys");
         for (uint32_t i = 0; i < keys->Length(); ++i) {
           Local<Value> k;
           if (!keys->Get(ctx, i).ToLocal(&k))
@@ -358,7 +354,7 @@ namespace fxe::js {
                 idx = sqlite3_bind_parameter_index(stmt, p.c_str());
               }
               if (idx == 0)
-                return throw_msg(iso, "Missing parameter \"" + name + "\"");
+                return throw_error(iso, "Missing parameter \"" + name + "\"");
             } else {
               // Non-strict: ignore unknown keys for Bun compatibility.
               if (warn_unknown_keys && !sqlite_unknown_keys_warned())
@@ -379,7 +375,7 @@ namespace fxe::js {
             if (!bound[static_cast<size_t>(i)]) {
               const char* nm = sqlite3_bind_parameter_name(stmt, i);
               std::string nstr = nm ? nm : ("?" + std::to_string(i));
-              return throw_msg(iso, "Missing parameter \"" + nstr + "\"");
+              return throw_error(iso, "Missing parameter \"" + nstr + "\"");
             }
           }
         }
@@ -479,11 +475,11 @@ namespace fxe::js {
 
     bool ensure_stmt_live(Isolate* iso, stmt_holder* sh) {
       if (!sh)
-        return throw_msg(iso, "invalid statement");
+        return throw_error(iso, "invalid statement");
       if (sh->finalized || !sh->stmt)
-        return throw_msg(iso, "statement is finalized");
+        return throw_error(iso, "statement is finalized");
       if (!sh->owner || sh->owner->closed)
-        return throw_msg(iso, "database is closed");
+        return throw_error(iso, "database is closed");
       return true;
     }
 
@@ -625,7 +621,7 @@ namespace fxe::js {
       if (!sh)
         return;
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        (void)throw_type(iso, "Statement.as expects a class");
+        (void)throw_type_error(iso, "Statement.as expects a class");
         return;
       }
       sh->as_class.Reset(iso, info[0].As<Function>());
@@ -644,7 +640,7 @@ namespace fxe::js {
       auto self = info.This();
       Local<Value> stmt_v = self->GetInternalField(0).As<Value>();
       if (!stmt_v->IsObject()) {
-        (void)throw_msg(iso, "invalid iterator");
+        (void)throw_error(iso, "invalid iterator");
         return;
       }
       auto* sh = unwrap_stmt(stmt_v.As<Object>());
@@ -755,8 +751,7 @@ namespace fxe::js {
       sh->owner = owner;
       sh->sql = std::move(sql);
       owner->open_stmts.push_back(sh);
-      obj->SetInternalField(0, External::New(iso, sh, v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_STATEMENT));
+      set_native(iso, obj, sh, TAG_SQLITE_STATEMENT);
       sh->bind(iso, obj);
       return obj;
     }
@@ -764,7 +759,8 @@ namespace fxe::js {
     void stmt_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        (void)throw_type(iso, "Statement is not user-constructible; use Database.prototype.query");
+        (void)throw_type_error(iso,
+                               "Statement is not user-constructible; use Database.prototype.query");
         return;
       }
       // Internal-only call from wrap_statement; fields filled by caller.
@@ -774,9 +770,9 @@ namespace fxe::js {
 
     bool ensure_db_live(Isolate* iso, db_holder* dh) {
       if (!dh)
-        return throw_msg(iso, "invalid database");
+        return throw_error(iso, "invalid database");
       if (dh->closed || !dh->db)
-        return throw_msg(iso, "database is closed");
+        return throw_error(iso, "database is closed");
       return true;
     }
 
@@ -788,7 +784,7 @@ namespace fxe::js {
       if (!ensure_db_live(iso, dh))
         return;
       if (info.Length() < 1 || !info[0]->IsString()) {
-        (void)throw_type(iso, "Database.query/prepare expects a SQL string");
+        (void)throw_type_error(iso, "Database.query/prepare expects a SQL string");
         return;
       }
       String::Utf8Value sql(iso, info[0]);
@@ -801,7 +797,7 @@ namespace fxe::js {
         return;
       }
       if (!stmt) {
-        (void)throw_msg(iso, "Database.query: empty SQL");
+        (void)throw_error(iso, "Database.query: empty SQL");
         return;
       }
       info.GetReturnValue().Set(
@@ -823,7 +819,7 @@ namespace fxe::js {
       if (!ensure_db_live(iso, dh))
         return;
       if (info.Length() < 1 || !info[0]->IsString()) {
-        (void)throw_type(iso, "Database.run expects a SQL string");
+        (void)throw_type_error(iso, "Database.run expects a SQL string");
         return;
       }
       String::Utf8Value sql(iso, info[0]);
@@ -835,7 +831,7 @@ namespace fxe::js {
           std::string msg = err ? err : "sqlite error";
           if (err)
             sqlite3_free(err);
-          (void)throw_msg(iso, msg);
+          (void)throw_error(iso, msg);
           return;
         }
         info.GetReturnValue().Set(make_run_result(iso, ctx, dh));
@@ -876,7 +872,7 @@ namespace fxe::js {
       if (throw_if_busy) {
         for (auto* sh : dh->open_stmts) {
           if (sh && !sh->finalized) {
-            (void)throw_msg(iso, "database has pending statements");
+            (void)throw_error(iso, "database has pending statements");
             return;
           }
         }
@@ -899,7 +895,7 @@ namespace fxe::js {
       sqlite3_int64 size = 0;
       unsigned char* buf = sqlite3_serialize(dh->db, schema, &size, 0);
       if (!buf) {
-        (void)throw_msg(iso, "Database.serialize failed");
+        (void)throw_error(iso, "Database.serialize failed");
         return;
       }
       auto ab = ArrayBuffer::New(iso, static_cast<size_t>(size));
@@ -916,7 +912,7 @@ namespace fxe::js {
       if (!ensure_db_live(iso, dh))
         return;
       if (info.Length() < 1 || !info[0]->IsString()) {
-        (void)throw_type(iso, "loadExtension expects a path string");
+        (void)throw_type_error(iso, "loadExtension expects a path string");
         return;
       }
       String::Utf8Value path(iso, info[0]);
@@ -927,7 +923,7 @@ namespace fxe::js {
 #ifdef SQLITE_OMIT_LOAD_EXTENSION
       (void)path;
       (void)entry;
-      (void)throw_msg(iso, "sqlite built without load_extension support");
+      (void)throw_error(iso, "sqlite built without load_extension support");
       return;
 #else
       sqlite3_db_config(dh->db, SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION, 1, nullptr);
@@ -937,7 +933,7 @@ namespace fxe::js {
         std::string msg = err ? err : sqlite3_errmsg(dh->db);
         if (err)
           sqlite3_free(err);
-        (void)throw_msg(iso, msg);
+        (void)throw_error(iso, msg);
       }
 #endif
     }
@@ -950,7 +946,7 @@ namespace fxe::js {
       if (!ensure_db_live(iso, dh))
         return;
       if (info.Length() < 2)
-        return (void)throw_type(iso, "fileControl expects (cmd, value)");
+        return (void)throw_type_error(iso, "fileControl expects (cmd, value)");
       int op = static_cast<int>(info[0]->Int32Value(ctx).FromMaybe(0));
       auto v = info[1];
       // Supported value shapes: number, TypedArray, null/undefined.
@@ -973,7 +969,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(Integer::New(iso, rc));
         return;
       }
-      (void)throw_type(iso, "fileControl value must be number, typed array, or null");
+      (void)throw_type_error(iso, "fileControl value must be number, typed array, or null");
     }
 
     // --- Transaction wrapper ------------------------------------------------
@@ -1025,7 +1021,7 @@ namespace fxe::js {
         std::string msg = err ? err : "sqlite transaction error";
         if (err)
           sqlite3_free(err);
-        return throw_msg(iso, msg);
+        return throw_error(iso, msg);
       }
       return true;
     }
@@ -1036,13 +1032,12 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto data = info.Data();
       if (!data->IsExternal()) {
-        (void)throw_msg(iso, "invalid transaction wrapper");
+        (void)throw_error(iso, "invalid transaction wrapper");
         return;
       }
-      auto* td =
-          static_cast<txn_data*>(data.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      auto* td = external_ptr<txn_data>(data);
       if (!td) {
-        (void)throw_msg(iso, "invalid transaction wrapper");
+        (void)throw_error(iso, "invalid transaction wrapper");
         return;
       }
       auto db_obj = td->db_obj.Get(iso);
@@ -1106,7 +1101,7 @@ namespace fxe::js {
       td->fn.Reset(iso, fn);
       td->db_obj.Reset(iso, db_obj);
       td->kind = k;
-      auto ext = External::New(iso, td, v8::kExternalPointerTypeTagDefault);
+      auto ext = make_external(iso, td);
       auto wrapper = Function::New(ctx, txn_invoke, ext).ToLocalChecked();
       // Tie td lifetime to the wrapper Function GC.
       auto* persistent = new Global<Function>(iso, wrapper);
@@ -1120,7 +1115,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsFunction())
-        return (void)throw_type(iso, "Database.transaction expects a function");
+        return (void)throw_type_error(iso, "Database.transaction expects a function");
       auto fn = info[0].As<Function>();
       auto base = make_txn_wrapper(iso, ctx, info.This(), fn, begin_kind::Default);
       auto deferred = make_txn_wrapper(iso, ctx, info.This(), fn, begin_kind::Deferred);
@@ -1175,7 +1170,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall())
-        return (void)throw_type(iso, "Database must be called with `new`");
+        return (void)throw_type_error(iso, "Database must be called with `new`");
 
       std::string filename = ":memory:";
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull()) {
@@ -1188,7 +1183,7 @@ namespace fxe::js {
           // Bun accepts a flags integer in the first slot too; ignore it here
           // and use defaults.
         } else {
-          return (void)throw_type(iso, "Database: filename must be a string");
+          return (void)throw_type_error(iso, "Database: filename must be a string");
         }
       }
 
@@ -1225,7 +1220,7 @@ namespace fxe::js {
         std::string msg = db ? sqlite3_errmsg(db) : sqlite3_errstr(rc);
         if (db)
           sqlite3_close_v2(db);
-        (void)throw_msg(iso, msg);
+        (void)throw_error(iso, msg);
         return;
       }
 
@@ -1234,8 +1229,7 @@ namespace fxe::js {
       dh->db = db;
       dh->safe_integers = safe_integers;
       dh->strict = strict;
-      self->SetInternalField(0, External::New(iso, dh, v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_DATABASE));
+      set_native(iso, self, dh, TAG_SQLITE_DATABASE);
       dh->bind(iso, self);
 
       // Stash filename for diagnostics.
@@ -1247,7 +1241,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsArrayBufferView())
-        return (void)throw_type(iso, "Database.deserialize expects a typed array");
+        return (void)throw_type_error(iso, "Database.deserialize expects a typed array");
       auto view = info[0].As<ArrayBufferView>();
       bool readonly = false;
       if (info.Length() >= 2 && info[1]->IsObject()) {
@@ -1261,7 +1255,7 @@ namespace fxe::js {
       if (rc != SQLITE_OK) {
         if (db)
           sqlite3_close_v2(db);
-        (void)throw_msg(iso, "Database.deserialize: cannot open in-memory db");
+        (void)throw_error(iso, "Database.deserialize: cannot open in-memory db");
         return;
       }
       const size_t n = view->ByteLength();
@@ -1269,7 +1263,7 @@ namespace fxe::js {
       auto* copy = static_cast<unsigned char*>(sqlite3_malloc64(n ? n : 1));
       if (!copy) {
         sqlite3_close_v2(db);
-        (void)throw_msg(iso, "Database.deserialize: out of memory");
+        (void)throw_error(iso, "Database.deserialize: out of memory");
         return;
       }
       if (n > 0) {
@@ -1284,7 +1278,7 @@ namespace fxe::js {
       if (rc != SQLITE_OK) {
         std::string msg = sqlite3_errmsg(db);
         sqlite3_close_v2(db);
-        (void)throw_msg(iso, msg);
+        (void)throw_error(iso, msg);
         return;
       }
 
@@ -1299,8 +1293,7 @@ namespace fxe::js {
         close_db_holder(prev);
       auto* dh = new db_holder{};
       dh->db = db;
-      self->SetInternalField(0, External::New(iso, dh, v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SQLITE_DATABASE));
+      set_native(iso, self, dh, TAG_SQLITE_DATABASE);
       dh->bind(iso, self);
       info.GetReturnValue().Set(self);
     }

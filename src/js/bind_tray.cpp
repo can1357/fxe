@@ -2,6 +2,7 @@
 #include "../os/os.hpp"
 #include "bind_menu.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <memory>
 #include <string>
@@ -69,13 +70,13 @@ namespace fxe::js {
 
     holder* unwrap(Local<Object> self) {
       auto v = self->GetInternalField(kSlotHandle);
-      return static_cast<holder*>(v.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      return external_ptr<holder>(v);
     }
 
     void tray_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError("Tray must be called with new"_v8(iso)));
+        (void)throw_type_error(iso, "Tray must be called with new");
         return;
       }
       std::string icon = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
@@ -83,8 +84,7 @@ namespace fxe::js {
       auto* h = new holder();
       h->h = fxe::os::tray_create(icon, tip);
       auto self = info.This();
-      self->SetInternalField(kSlotHandle,
-                             External::New(iso, h, v8::kExternalPointerTypeTagDefault));
+      self->SetInternalField(kSlotHandle, make_external(iso, h));
       auto* gp = new Global<Object>(iso, self);
       h->persistent = gp;
       gp->SetWeak(h, finalizer_cb, WeakCallbackType::kParameter);

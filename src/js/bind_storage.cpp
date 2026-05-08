@@ -5,6 +5,8 @@
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_strings.hpp>
 
+#include <fxe/v8_helpers.hpp>
+
 #include "../os/os.hpp"
 
 #include <filesystem>
@@ -55,11 +57,6 @@ namespace fxe::js {
              name == "key" || name == "length";
     }
 
-    bool throw_msg(Isolate* iso, std::string_view msg) {
-      iso->ThrowException(Exception::Error(s(iso, msg)));
-      return false;
-    }
-
     bool throw_sqlite(Isolate* iso, sqlite3* db, const char* fallback = "storage sqlite error") {
       const char* msg = db ? sqlite3_errmsg(db) : fallback;
       if (!msg || !*msg)
@@ -98,8 +95,7 @@ namespace fxe::js {
     storage_area* area_from_data(Local<Value> data) {
       if (data.IsEmpty() || !data->IsExternal())
         return nullptr;
-      return static_cast<storage_area*>(
-          data.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      return external_ptr<storage_area>(data);
     }
 
     bool exec_sql(Isolate* iso, sqlite3* db, const char* sql) {
@@ -109,7 +105,7 @@ namespace fxe::js {
         return true;
       std::string msg = err ? err : sqlite3_errmsg(db);
       sqlite3_free(err);
-      return throw_msg(iso, msg);
+      return throw_error(iso, msg);
     }
 
     bool ensure_db(Isolate* iso, storage_area& area) {
@@ -121,11 +117,12 @@ namespace fxe::js {
       if (area.kind == storage_kind::local) {
         auto user_data = fxe::os::get_path("userData");
         if (user_data.empty())
-          return throw_msg(iso, "localStorage cannot resolve App.getPath('userData')");
+          return throw_error(iso, "localStorage cannot resolve App.getPath('userData')");
         std::error_code ec;
         std::filesystem::create_directories(user_data, ec);
         if (ec)
-          return throw_msg(iso, "localStorage cannot create userData directory: " + ec.message());
+          return throw_error(iso, "localStorage cannot create userData directory: {}",
+                             ec.message());
         filename = (std::filesystem::path(user_data) / "storage.sqlite3").string();
         const int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX;
         if (sqlite3_open_v2(filename.c_str(), &db, flags, nullptr) != SQLITE_OK) {
@@ -392,7 +389,7 @@ namespace fxe::js {
     void storage_set_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 2) {
-        iso->ThrowException(Exception::TypeError("Storage.setItem requires key and value"_v8(iso)));
+        (void)throw_type_error(iso, "Storage.setItem requires key and value");
         return;
       }
       auto maybe_key = value_to_string(iso, info[0]);
@@ -407,7 +404,7 @@ namespace fxe::js {
     void storage_get_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1) {
-        iso->ThrowException(Exception::TypeError("Storage.getItem requires key"_v8(iso)));
+        (void)throw_type_error(iso, "Storage.getItem requires key");
         return;
       }
       auto maybe_key = value_to_string(iso, info[0]);
@@ -427,7 +424,7 @@ namespace fxe::js {
     void storage_remove_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1) {
-        iso->ThrowException(Exception::TypeError("Storage.removeItem requires key"_v8(iso)));
+        (void)throw_type_error(iso, "Storage.removeItem requires key");
         return;
       }
       auto maybe_key = value_to_string(iso, info[0]);
@@ -496,7 +493,7 @@ namespace fxe::js {
 
     Local<ObjectTemplate> make_storage_template(Isolate* iso, storage_area* area) {
       auto t = ObjectTemplate::New(iso);
-      auto data = External::New(iso, area, v8::kExternalPointerTypeTagDefault);
+      auto data = make_external(iso, area);
       NamedPropertyHandlerConfiguration cfg(storage_getter, storage_setter, storage_query,
                                             storage_deleter, storage_enumerator, data);
       t->SetHandler(cfg);

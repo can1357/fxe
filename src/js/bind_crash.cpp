@@ -2,6 +2,7 @@
 
 #include <fxe/crash.hpp>
 
+#include <fxe/v8_helpers.hpp>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -46,8 +47,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsObject()) {
-        iso->ThrowException(
-            Exception::TypeError("App.crashReporter.start requires an options object"_v8(iso)));
+        (void)throw_type_error(iso, "App.crashReporter.start requires an options object");
         return;
       }
 
@@ -55,8 +55,7 @@ namespace fxe::js {
       fxe::os::crash_options opts;
       opts.product_name = get_optional_string(iso, ctx, opts_obj, "productName");
       if (opts.product_name.empty()) {
-        iso->ThrowException(
-            Exception::TypeError("App.crashReporter.start requires options.productName"_v8(iso)));
+        (void)throw_type_error(iso, "App.crashReporter.start requires options.productName");
         return;
       }
       opts.product_version = get_optional_string(iso, ctx, opts_obj, "productVersion");
@@ -92,7 +91,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto result = fxe::os::crash_self_test();
       if (!result.ok && !result.error.empty()) {
-        iso->ThrowException(Exception::Error(s(iso, result.error.c_str())));
+        (void)throw_error(iso, result.error.c_str());
         return;
       }
       info.GetReturnValue().Set(Boolean::New(iso, result.ok));

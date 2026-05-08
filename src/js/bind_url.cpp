@@ -10,6 +10,7 @@
 #include "bind_url.hpp"
 #include "weak_holder.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
@@ -404,7 +405,7 @@ namespace fxe::js {
     }
 
     void throw_type(Isolate* iso, const char* msg) {
-      iso->ThrowException(Exception::TypeError(String::NewFromUtf8(iso, msg).ToLocalChecked()));
+      (void)throw_type_error(iso, msg);
     }
 
     // ---------------- url_data <-> object plumbing --------------------------
@@ -419,14 +420,11 @@ namespace fxe::js {
       url_holder* parent = nullptr;
     };
 
-
     Local<Object> wrap_usp(Isolate* iso, Local<Context> ctx, std::unique_ptr<usp_data> d) {
       auto tpl = usp_tpl_table()[iso].Get(iso);
       Local<Object> obj = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       auto* h = new usp_holder{{}, std::move(d)};
-      obj->SetInternalField(0,
-                            External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URLSEARCH));
+      set_native(iso, obj, h->data.get(), TAG_URLSEARCH);
       h->bind(iso, obj);
       return obj;
     }
@@ -474,9 +472,7 @@ namespace fxe::js {
       // directly on `info.This()`.
       auto* h = new url_holder{{}, std::move(d)};
       auto self = info.This();
-      self->SetInternalField(0,
-                             External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URL));
+      set_native(iso, self, h->data.get(), TAG_URL);
       h->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
@@ -672,9 +668,7 @@ namespace fxe::js {
       }
       auto* h = new usp_holder{{}, std::move(data), nullptr};
       auto self = info.This();
-      self->SetInternalField(0,
-                             External::New(iso, h->data.get(), v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_URLSEARCH));
+      set_native(iso, self, h->data.get(), TAG_URLSEARCH);
       h->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
@@ -806,26 +800,18 @@ namespace fxe::js {
     auto uproto = utpl->PrototypeTemplate();
     auto uinst = utpl->InstanceTemplate();
 
-    uinst->SetNativeDataProperty("href"_v8(iso), url_get_href,
-                                 url_set_href);
-    uinst->SetNativeDataProperty("protocol"_v8(iso), url_get_protocol,
-                                 url_set_protocol);
+    uinst->SetNativeDataProperty("href"_v8(iso), url_get_href, url_set_href);
+    uinst->SetNativeDataProperty("protocol"_v8(iso), url_get_protocol, url_set_protocol);
     uinst->SetNativeDataProperty("host"_v8(iso), url_get_host);
-    uinst->SetNativeDataProperty("hostname"_v8(iso), url_get_hostname,
-                                 url_set_hostname);
-    uinst->SetNativeDataProperty("port"_v8(iso), url_get_port,
-                                 url_set_port);
-    uinst->SetNativeDataProperty("pathname"_v8(iso), url_get_pathname,
-                                 url_set_pathname);
-    uinst->SetNativeDataProperty("search"_v8(iso), url_get_search,
-                                 url_set_search);
-    uinst->SetNativeDataProperty("hash"_v8(iso), url_get_hash,
-                                 url_set_hash);
+    uinst->SetNativeDataProperty("hostname"_v8(iso), url_get_hostname, url_set_hostname);
+    uinst->SetNativeDataProperty("port"_v8(iso), url_get_port, url_set_port);
+    uinst->SetNativeDataProperty("pathname"_v8(iso), url_get_pathname, url_set_pathname);
+    uinst->SetNativeDataProperty("search"_v8(iso), url_get_search, url_set_search);
+    uinst->SetNativeDataProperty("hash"_v8(iso), url_get_hash, url_set_hash);
     uinst->SetNativeDataProperty("origin"_v8(iso), url_get_origin);
     uinst->SetNativeDataProperty("username"_v8(iso), url_get_username);
     uinst->SetNativeDataProperty("password"_v8(iso), url_get_password);
-    uinst->SetNativeDataProperty("searchParams"_v8(iso),
-                                 url_get_search_params, nullptr);
+    uinst->SetNativeDataProperty("searchParams"_v8(iso), url_get_search_params, nullptr);
     uproto->Set(iso, "toString", FunctionTemplate::New(iso, url_to_string));
     uproto->Set(iso, "toJSON", FunctionTemplate::New(iso, url_to_string));
 

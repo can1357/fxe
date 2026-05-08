@@ -7,6 +7,7 @@
 
 #include "bind_image.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/pipeline.hpp>
 #include <fxe/renderer.hpp>
@@ -62,13 +63,11 @@ namespace fxe::js {
     }
 
     void throw_type(Isolate* iso, const char* msg) {
-      iso->ThrowException(Exception::TypeError(
-          String::NewFromUtf8(iso, msg, NewStringType::kNormal).ToLocalChecked()));
+      (void)throw_type_error(iso, msg);
     }
 
     void throw_error(Isolate* iso, const std::string& msg) {
-      iso->ThrowException(Exception::Error(
-          String::NewFromUtf8(iso, msg.c_str(), NewStringType::kNormal).ToLocalChecked()));
+      (void)throw_error(iso, msg.c_str());
     }
 
     renderer* unwrap_renderer(Local<Value> value) {
@@ -211,8 +210,7 @@ namespace fxe::js {
         auto p = pipeline::create(*r, desc);
         auto* h = new pipeline_holder{{}, std::move(p), desc.vertex_stride};
         auto self = info.This();
-        self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-        self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_PIPELINE));
+        set_native(iso, self, h, TAG_PIPELINE);
         h->bind(iso, self);
       } catch (const std::exception& e) {
         throw_error(iso, e.what());

@@ -5,6 +5,7 @@
 #include "bind_notification.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <memory>
 #include <optional>
@@ -84,7 +85,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError("Notification must be called with new"_v8(iso)));
+        (void)throw_type_error(iso, "Notification must be called with new");
         return;
       }
       auto* h = new opts_holder();
@@ -128,7 +129,7 @@ namespace fxe::js {
         }
       }
       auto self = info.This();
-      self->SetInternalField(kSlotOpts, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
+      self->SetInternalField(kSlotOpts, make_external(iso, h));
       auto* gp = new Global<Object>(iso, self);
       h->persistent = gp;
       gp->SetWeak(h, finalizer_cb, WeakCallbackType::kParameter);
@@ -137,7 +138,7 @@ namespace fxe::js {
 
     opts_holder* unwrap_self(Local<Object> self) {
       auto v = self->GetInternalField(kSlotOpts);
-      return static_cast<opts_holder*>(v.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      return external_ptr<opts_holder>(v);
     }
 
     void notif_show(const FunctionCallbackInfo<Value>& info) {

@@ -12,7 +12,6 @@ namespace fxe::js {
     using namespace v8;
     namespace fs = std::filesystem;
 
-
     std::string utf8(Isolate* iso, Local<Value> v) {
       String::Utf8Value u(iso, v);
       if (*u)

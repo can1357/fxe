@@ -2,6 +2,7 @@
 #include "../../include/fxe/power.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <algorithm>
 #include <atomic>
 #include <fxe/v8_strings.hpp>
@@ -176,15 +177,13 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
-        iso->ThrowException(
-            Exception::TypeError("powerMonitor.on requires an event string and callback"_v8(iso)));
+        (void)throw_type_error(iso, "powerMonitor.on requires an event string and callback");
         return;
       }
 
       std::string event = to_str(iso, info[0]);
       if (!valid_event(event)) {
-        iso->ThrowException(
-            Exception::TypeError("powerMonitor.on received an unknown event"_v8(iso)));
+        (void)throw_type_error(iso, "powerMonitor.on received an unknown event");
         return;
       }
 
@@ -224,8 +223,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsObject()) {
-        iso->ThrowException(
-            Exception::TypeError("App.power.inhibitSleep requires an options object"_v8(iso)));
+        (void)throw_type_error(iso, "App.power.inhibitSleep requires an options object");
         return;
       }
       auto options = info[0].As<Object>();
@@ -233,19 +231,16 @@ namespace fxe::js {
       Local<Value> what_value;
       if (!options->Get(ctx, "reason"_v8(iso)).ToLocal(&reason_value) ||
           !reason_value->IsString()) {
-        iso->ThrowException(
-            Exception::TypeError("App.power.inhibitSleep requires options.reason"_v8(iso)));
+        (void)throw_type_error(iso, "App.power.inhibitSleep requires options.reason");
         return;
       }
       std::string reason = to_str(iso, reason_value);
       if (reason.empty()) {
-        iso->ThrowException(Exception::TypeError(
-            "App.power.inhibitSleep requires a non-empty options.reason"_v8(iso)));
+        (void)throw_type_error(iso, "App.power.inhibitSleep requires a non-empty options.reason");
         return;
       }
       if (!options->Get(ctx, "what"_v8(iso)).ToLocal(&what_value) || !what_value->IsString()) {
-        iso->ThrowException(
-            Exception::TypeError("App.power.inhibitSleep requires options.what"_v8(iso)));
+        (void)throw_type_error(iso, "App.power.inhibitSleep requires options.what");
         return;
       }
       std::string what = to_str(iso, what_value);
@@ -255,14 +250,14 @@ namespace fxe::js {
       } else if (what == "sleep") {
         kind = fxe::os::sleep_inhibit_kind::sleep;
       } else {
-        iso->ThrowException(Exception::TypeError(
-            "App.power.inhibitSleep options.what must be 'idle' or 'sleep'"_v8(iso)));
+        (void)throw_type_error(iso,
+                               "App.power.inhibitSleep options.what must be 'idle' or 'sleep'");
         return;
       }
 
       auto handle = fxe::os::inhibit_sleep(reason, kind);
       if (!handle) {
-        iso->ThrowException(Exception::Error("App.power.inhibitSleep failed"_v8(iso)));
+        (void)throw_error(iso, "App.power.inhibitSleep failed");
         return;
       }
       uint32_t id = g_next_inhibit.fetch_add(1);

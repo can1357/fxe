@@ -8,6 +8,7 @@
 // SetWeak callback. Wrapping engine-owned buffers (renderer, etc.) skips the
 // finaliser by setting field 0 with EXT_FLAG_BORROWED encoded into the tag.
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/command_buffer.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/renderer.hpp>
@@ -113,8 +114,7 @@ namespace fxe::js {
       if (info.Length() >= 1)
         top = info[0]->Uint32Value(ctx).FromMaybe(0);
       if (top >= static_cast<u32>(vertex_topology::max)) {
-        iso->ThrowException(
-            Exception::RangeError("topology out of range"_v8(iso)));
+        (void)throw_range_error(iso, "topology out of range");
         return;
       }
       info.GetReturnValue().Set(
@@ -174,8 +174,7 @@ namespace fxe::js {
         return;
       math::mat4x4 m{1.0f};
       if (info.Length() < 1 || !decode_mat4(iso, ctx, info[0], m)) {
-        iso->ThrowException(Exception::TypeError(
-            "transform: expected Float32Array(16)"_v8(iso)));
+        (void)throw_type_error(iso, "transform: expected Float32Array(16)");
         return;
       }
       cb->transform(m);
@@ -189,21 +188,18 @@ namespace fxe::js {
       if (!cb)
         return;
       if (info.Length() < 1 || !info[0]->IsObject()) {
-        iso->ThrowException(
-            Exception::TypeError("queue: expected CommandBuffer"_v8(iso)));
+        (void)throw_type_error(iso, "queue: expected CommandBuffer");
         return;
       }
       auto* other = unwrap_cb(info[0].As<Object>());
       if (!other) {
-        iso->ThrowException(Exception::TypeError(
-            "queue: argument is not a CommandBuffer"_v8(iso)));
+        (void)throw_type_error(iso, "queue: argument is not a CommandBuffer");
         return;
       }
       math::mat4x4 m = math::identity();
       if (info.Length() >= 2 && !info[1]->IsUndefined()) {
         if (!decode_mat4(iso, ctx, info[1], m)) {
-          iso->ThrowException(Exception::TypeError(
-              "queue: mat must be Float32Array(16)"_v8(iso)));
+          (void)throw_type_error(iso, "queue: mat must be Float32Array(16)");
           return;
         }
       }
@@ -211,8 +207,7 @@ namespace fxe::js {
       if (info.Length() >= 3 && !info[2]->IsUndefined()) {
         math::vec4 t{1, 1, 1, 1};
         if (!decode_vec4(iso, info[2], t)) {
-          iso->ThrowException(Exception::TypeError(
-              "queue: tint must be Float32Array(4)"_v8(iso)));
+          (void)throw_type_error(iso, "queue: tint must be Float32Array(4)");
           return;
         }
         tint = t;
@@ -226,8 +221,7 @@ namespace fxe::js {
     }
 
     void set_buffer_epoch(Isolate* iso, Local<Context> ctx, Local<Object> out, u32 epoch) {
-      (void)out->Set(ctx, "epoch"_v8(iso),
-                     Integer::NewFromUnsigned(iso, epoch));
+      (void)out->Set(ctx, "epoch"_v8(iso), Integer::NewFromUnsigned(iso, epoch));
     }
 
     bool read_topology_arg(const FunctionCallbackInfo<Value>& info, u32 index, u32& top) {
@@ -237,8 +231,7 @@ namespace fxe::js {
                 ? info[static_cast<int>(index)]->Uint32Value(ctx).FromMaybe(0)
                 : 0;
       if (top >= static_cast<u32>(vertex_topology::max)) {
-        iso->ThrowException(
-            Exception::RangeError("topology out of range"_v8(iso)));
+        (void)throw_range_error(iso, "topology out of range");
         return false;
       }
       return true;
@@ -262,8 +255,7 @@ namespace fxe::js {
       auto iab = array_buffer_view(iso, ibuf.data(), ibuf.size() * sizeof(u32));
       (void)out->Set(ctx, "verts"_v8(iso),
                      Float32Array::New(vab, 0, vbuf.size() * sizeof(vertex) / sizeof(float)));
-      (void)out->Set(ctx, "idxs"_v8(iso),
-                     Uint32Array::New(iab, 0, ibuf.size()));
+      (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, ibuf.size()));
       set_buffer_epoch(iso, ctx, out, cb->epoch);
       info.GetReturnValue().Set(out);
     }
@@ -339,8 +331,7 @@ namespace fxe::js {
       auto tpl = cb_tpl_table()[iso].Get(iso);
       auto inst = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       auto* h = new cb_holder{fresh, true, nullptr};
-      inst->SetInternalField(0, External::New(iso, fresh, v8::kExternalPointerTypeTagDefault));
-      inst->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_COMMAND_BUFFER));
+      set_native(iso, inst, fresh, TAG_COMMAND_BUFFER);
       auto* persistent = new Global<Object>(iso, inst);
       h->self = persistent;
       persistent->SetWeak(h, cb_finalizer, WeakCallbackType::kParameter);
@@ -360,8 +351,7 @@ namespace fxe::js {
       if (!cb)
         return;
       if (info.Length() < 3) {
-        iso->ThrowException(
-            Exception::TypeError("allocate(vtx, idx, top)"_v8(iso)));
+        (void)throw_type_error(iso, "allocate(vtx, idx, top)");
         return;
       }
       auto vtx = info[0]->Uint32Value(ctx).FromMaybe(0);
@@ -385,10 +375,8 @@ namespace fxe::js {
       auto out = Object::New(iso);
       (void)out->Set(ctx, "verts"_v8(iso), verts);
       (void)out->Set(ctx, "idxs"_v8(iso), idxs);
-      (void)out->Set(ctx, "base"_v8(iso),
-                     Integer::NewFromUnsigned(iso, base));
-      (void)out->Set(ctx, "indexBase"_v8(iso),
-                     Integer::NewFromUnsigned(iso, index_base));
+      (void)out->Set(ctx, "base"_v8(iso), Integer::NewFromUnsigned(iso, base));
+      (void)out->Set(ctx, "indexBase"_v8(iso), Integer::NewFromUnsigned(iso, index_base));
       set_buffer_epoch(iso, ctx, out, cb->epoch);
       info.GetReturnValue().Set(out);
     }
@@ -396,14 +384,12 @@ namespace fxe::js {
     void cb_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(
-            "CommandBuffer must be invoked with new"_v8(iso)));
+        (void)throw_type_error(iso, "CommandBuffer must be invoked with new");
         return;
       }
       auto self = info.This();
       auto* h = new cb_holder{new command_buffer(), true, nullptr};
-      self->SetInternalField(0, External::New(iso, h->ptr, v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_COMMAND_BUFFER));
+      set_native(iso, self, h->ptr, TAG_COMMAND_BUFFER);
       // Tie the heap allocation to GC.
       auto* persistent = new Global<Object>(iso, self);
       h->self = persistent;
@@ -416,8 +402,7 @@ namespace fxe::js {
   Local<Object> wrap(Isolate* iso, Local<Context> ctx, Local<FunctionTemplate> tpl, void* native,
                      u32 type_tag) {
     auto inst = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
-    inst->SetInternalField(0, External::New(iso, native, v8::kExternalPointerTypeTagDefault));
-    inst->SetInternalField(1, Integer::NewFromUnsigned(iso, type_tag));
+    set_native(iso, inst, native, type_tag);
     return inst;
   }
 

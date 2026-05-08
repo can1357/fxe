@@ -5,6 +5,7 @@
 #include "bind_spritesheet.hpp"
 #include "bind_image.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
@@ -45,8 +46,7 @@ namespace fxe::js {
     static sheet_resetter_register s_sheet_resetter_register;
 
     void throw_type(Isolate* iso, const char* msg) {
-      iso->ThrowException(Exception::TypeError(
-          String::NewFromUtf8(iso, msg, NewStringType::kNormal).ToLocalChecked()));
+      (void)throw_type_error(iso, msg);
     }
 
     spritesheet_holder* self_of(Local<Object> obj) {
@@ -59,8 +59,7 @@ namespace fxe::js {
         return throw_type(iso, "Spritesheet must be constructed with `new`");
       auto self = info.This();
       auto* h = new spritesheet_holder{};
-      self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_SPRITESHEET));
+      set_native(iso, self, h, TAG_SPRITESHEET);
       h->bind(iso, self);
     }
 

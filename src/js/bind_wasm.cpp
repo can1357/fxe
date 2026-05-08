@@ -29,6 +29,7 @@
 #include <string>
 #include <utility>
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <v8.h>
 
@@ -189,7 +190,7 @@ namespace fxe::js {
       wrap_resolver->Resolve(ctx, ab_promise_v).Check();
       auto p = wrap_resolver->GetPromise();
 
-      auto data = External::New(iso, st, v8::kExternalPointerTypeTagDefault);
+      auto data = make_external(iso, st);
       auto on_ok = Function::New(ctx, on_bytes_resolved, data).ToLocalChecked();
       auto on_err = Function::New(ctx, on_bytes_rejected, data).ToLocalChecked();
       (void)p->Then(ctx, on_ok, on_err);
@@ -278,7 +279,7 @@ namespace fxe::js {
       resolver->Resolve(ctx, info[0]).Check();
       auto p = resolver->GetPromise();
 
-      auto data = External::New(iso, st, v8::kExternalPointerTypeTagDefault);
+      auto data = make_external(iso, st);
       auto on_ok = Function::New(ctx, on_response_resolved, data).ToLocalChecked();
       auto on_err = Function::New(ctx, on_response_rejected, data).ToLocalChecked();
       (void)p->Then(ctx, on_ok, on_err);

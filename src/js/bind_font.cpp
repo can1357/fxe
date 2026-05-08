@@ -8,6 +8,7 @@
 
 #include "bind_font.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/font.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
@@ -29,8 +30,7 @@ namespace fxe::js {
     constexpr double kEngineMinFontSizePx = 1.0;
 
     void throw_type(Isolate* iso, const char* msg) {
-      iso->ThrowException(Exception::TypeError(
-          String::NewFromUtf8(iso, msg, NewStringType::kNormal).ToLocalChecked()));
+      (void)throw_type_error(iso, msg);
     }
 
     std::string utf8(Isolate* iso, Local<Value> v) {
@@ -98,12 +98,10 @@ namespace fxe::js {
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
         Local<Value> field;
-        if (o->Get(ctx, "sizePx"_v8(iso)).ToLocal(&field) &&
-            field->IsNumber()) {
+        if (o->Get(ctx, "sizePx"_v8(iso)).ToLocal(&field) && field->IsNumber()) {
           size_px = field->NumberValue(ctx).FromMaybe(16.0);
         }
-        if (o->Get(ctx, "style"_v8(iso)).ToLocal(&field) &&
-            field->IsString()) {
+        if (o->Get(ctx, "style"_v8(iso)).ToLocal(&field) && field->IsString()) {
           const std::string s = utf8(iso, field);
           if (s == "bold")
             want_style = fxe::font::Style::bold;

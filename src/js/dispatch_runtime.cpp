@@ -6,6 +6,8 @@
 // that need an active host. The first time a host is constructed, the
 // registration helper runs.
 
+#include <fxe/v8_helpers.hpp>
+
 #include "../debug/dispatch.hpp"
 
 #include <fxe/debug.hpp>
@@ -252,14 +254,11 @@ namespace fxe::js {
       return std::string(*utf8, utf8.length());
     }
 
-    void throw_type_error(v8::Isolate* iso, std::string_view message) {
-      iso->ThrowException(v8::Exception::TypeError(v8_string(iso, message)));
-    }
 
     bool hmr_path_arg(const v8::FunctionCallbackInfo<v8::Value>& info, std::string& out) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_type_error(iso, "__fxe_native.hmr expects a module path string");
+        (void)throw_type_error(iso, "__fxe_native.hmr expects a module path string");
         return false;
       }
       out = to_std_string(iso, info[0]);
@@ -275,7 +274,7 @@ namespace fxe::js {
       std::string error;
       auto evicted = invalidate_module_for_isolate(iso, path, error);
       if (!error.empty()) {
-        iso->ThrowException(v8::Exception::Error(v8_string(iso, error)));
+        (void)throw_error(iso, error);
         return;
       }
       auto ctx = iso->GetCurrentContext();
@@ -297,7 +296,7 @@ namespace fxe::js {
       if (!reimport_module_for_isolate(iso, ctx, path, error).ToLocal(&module_namespace)) {
         if (error.empty())
           error = "HMR module reimport failed";
-        iso->ThrowException(v8::Exception::Error(v8_string(iso, error)));
+        (void)throw_error(iso, error);
         return;
       }
       info.GetReturnValue().Set(module_namespace);

@@ -22,6 +22,7 @@
 #include "bind_timers.hpp"
 #include "weak_holder.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
@@ -106,7 +107,6 @@ namespace fxe::js {
       Global<Object>* persistent = nullptr;
     };
 
-
     sound_holder* unwrap_sound(Local<Object> self) {
       return static_cast<sound_holder*>(unwrap(self, TAG_AUDIO_SOUND));
     }
@@ -117,8 +117,7 @@ namespace fxe::js {
       auto fn = tpl->GetFunction(ctx).ToLocalChecked();
       auto obj = fn->NewInstance(ctx).ToLocalChecked();
       auto* holder = new sound_holder{{}, handle, false};
-      obj->SetInternalField(0, External::New(iso, holder, v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_AUDIO_SOUND));
+      set_native(iso, obj, holder, TAG_AUDIO_SOUND);
       holder->bind(iso, obj);
       return hs.Escape(obj);
     }
@@ -273,8 +272,7 @@ namespace fxe::js {
       auto fn = tpl->GetFunction(ctx).ToLocalChecked();
       auto obj = fn->NewInstance(ctx).ToLocalChecked();
       auto* ref = new std::shared_ptr<capture_holder>(std::move(holder));
-      obj->SetInternalField(0, External::New(iso, ref, v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_AUDIO_CAPTURE));
+      set_native(iso, obj, ref, TAG_AUDIO_CAPTURE);
       auto* persistent = new Global<Object>(iso, obj);
       (*ref)->persistent = persistent;
       persistent->SetWeak(ref, capture_finalizer, WeakCallbackType::kParameter);
@@ -285,8 +283,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       // Internal-only constructor. JS callers must use Audio.load(...).
       if (!info.IsConstructCall()) {
-        iso->ThrowException(
-            Exception::TypeError("Sound is not user-constructible; use Audio.load"_v8(iso)));
+        (void)throw_type_error(iso, "Sound is not user-constructible; use Audio.load");
         return;
       }
       // Allow construction: make_sound_object calls NewInstance which lands
@@ -296,8 +293,8 @@ namespace fxe::js {
     void capture_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(
-            "CaptureSession is not user-constructible; use Audio.startCapture"_v8(iso)));
+        (void)throw_type_error(iso,
+                               "CaptureSession is not user-constructible; use Audio.startCapture");
         return;
       }
     }

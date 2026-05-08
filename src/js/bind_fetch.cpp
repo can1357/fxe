@@ -10,6 +10,7 @@
 
 #include "../net/http_client.hpp"
 #include "runtime/capabilities.hpp"
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
@@ -109,7 +110,7 @@ namespace fxe::js {
       return s;
     }
     void throw_type(Isolate* iso, const char* m) {
-      iso->ThrowException(Exception::TypeError(String::NewFromUtf8(iso, m).ToLocalChecked()));
+      (void)throw_type_error(iso, m);
     }
 
     Local<Value> make_permission_denied(Isolate* iso, std::string_view what) {
@@ -159,7 +160,6 @@ namespace fxe::js {
       std::vector<std::pair<std::string, std::string>> entries;
     };
 
-
     headers_data* unwrap_headers(Local<Object> o) {
       return static_cast<headers_data*>(unwrap(o, TAG_HEADERS));
     }
@@ -167,8 +167,7 @@ namespace fxe::js {
     Local<Object> wrap_headers(Isolate* iso, Local<Context> ctx, std::unique_ptr<headers_data> d) {
       auto tpl = headers_tpl_table()[iso].Get(iso);
       Local<Object> obj = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
-      obj->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_HEADERS));
+      set_native(iso, obj, d.get(), TAG_HEADERS);
       auto* raw = d.release();
       raw->bind(iso, obj);
       return obj;
@@ -223,8 +222,7 @@ namespace fxe::js {
       if (info.Length() >= 1)
         headers_populate_from_value(iso, ctx, info[0], *d);
       auto self = info.This();
-      self->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_HEADERS));
+      set_native(iso, self, d.get(), TAG_HEADERS);
       auto* raw = d.release();
       raw->bind(iso, self);
       info.GetReturnValue().Set(self);
@@ -336,7 +334,6 @@ namespace fxe::js {
       std::vector<Global<Function>> listeners; // 'abort' event listeners
     };
 
-
     abort_signal_data* unwrap_abort_signal(Local<Object> o) {
       return static_cast<abort_signal_data*>(unwrap(o, TAG_ABORT));
     }
@@ -346,8 +343,7 @@ namespace fxe::js {
       Local<Object> obj = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       auto* d = new abort_signal_data();
       out_ptr = d;
-      obj->SetInternalField(0, External::New(iso, d, v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_ABORT));
+      set_native(iso, obj, d, TAG_ABORT);
       d->bind(iso, obj);
       return obj;
     }
@@ -427,8 +423,7 @@ namespace fxe::js {
       auto sig_obj = make_abort_signal(iso, ctx, d->signal);
       d->signal_obj.Reset(iso, sig_obj);
       auto self = info.This();
-      self->SetInternalField(0, External::New(iso, d, v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_ABORT + 1));
+      set_native(iso, self, d, TAG_ABORT + 1);
       // Expose `signal` directly on the instance.
       self->Set(ctx, "signal"_v8(iso), sig_obj).Check();
       d->bind(iso, self);
@@ -502,8 +497,7 @@ namespace fxe::js {
                                 std::unique_ptr<response_data> d) {
       auto tpl = response_tpl_table()[iso].Get(iso);
       Local<Object> obj = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
-      obj->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RESPONSE));
+      set_native(iso, obj, d.get(), TAG_RESPONSE);
       auto* raw = d.release();
       raw->bind(iso, obj);
       return obj;
@@ -657,8 +651,7 @@ namespace fxe::js {
         if (init->Get(ctx, "status"_v8(iso)).ToLocal(&v) && !v->IsUndefined()) {
           auto status = v->Int32Value(ctx).FromMaybe(200);
           if (status < 200 || status > 599) {
-            iso->ThrowException(
-                Exception::RangeError("Response: status must be in the range 200 to 599"_v8(iso)));
+            (void)throw_range_error(iso, "Response: status must be in the range 200 to 599");
             return;
           }
           d->status = status;
@@ -671,8 +664,7 @@ namespace fxe::js {
       d->headers_obj.Reset(iso, wrap_headers(iso, ctx, std::move(h_data)));
 
       auto self = info.This();
-      self->SetInternalField(0, External::New(iso, d.get(), v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RESPONSE));
+      set_native(iso, self, d.get(), TAG_RESPONSE);
       auto* raw = d.release();
       raw->bind(iso, self);
       info.GetReturnValue().Set(self);
@@ -775,8 +767,7 @@ namespace fxe::js {
         }
       }
       auto self = info.This();
-      self->SetInternalField(0, External::New(iso, d, v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_REQUEST));
+      set_native(iso, self, d, TAG_REQUEST);
       d->bind(iso, self);
       // Expose simple props as own properties so JS readers see them.
       self->Set(ctx, "url"_v8(iso), s8(iso, d->url)).Check();
@@ -1037,12 +1028,11 @@ namespace fxe::js {
         if (sig) {
           auto* lctx = new abort_listener_context{state};
           state->abort_ctx = lctx;
-          auto data = External::New(iso, lctx, v8::kExternalPointerTypeTagDefault);
+          auto data = make_external(iso, lctx);
           auto fn_maybe = Function::New(
               ctx,
               [](const FunctionCallbackInfo<Value>& i) {
-                auto* a = static_cast<abort_listener_context*>(
-                    i.Data().As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+                auto* a = external_ptr<abort_listener_context>(i.Data());
                 if (!a || !a->st || a->st->settled)
                   return;
                 auto* iso = i.GetIsolate();

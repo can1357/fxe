@@ -26,6 +26,7 @@
 #include <fxe/v8_strings.hpp>
 
 #include "../os/os.hpp"
+#include <fxe/v8_helpers.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -103,10 +104,6 @@ namespace fxe::js {
       if (!val->IsExternal())
         return nullptr;
       return static_cast<T*>(val.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
-    }
-
-    template <typename T> Local<External> make_external(Isolate* iso, T* ptr) {
-      return External::New(iso, ptr, v8::kExternalPointerTypeTagDefault);
     }
 
     // ============================== Key encoding ==============================

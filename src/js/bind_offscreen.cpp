@@ -1,6 +1,7 @@
 #include "bind_offscreen.hpp"
 #include "weak_holder.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/renderer.hpp>
@@ -49,8 +50,7 @@ namespace fxe::js {
     };
 
     void throw_type(Isolate* iso, const char* msg) {
-      iso->ThrowException(Exception::TypeError(
-          String::NewFromUtf8(iso, msg, NewStringType::kNormal).ToLocalChecked()));
+      (void)throw_type_error(iso, msg);
     }
 
     offscreen_renderer* unwrap_offscreen(Local<Object> self) {
@@ -113,12 +113,11 @@ namespace fxe::js {
       try {
         r = offscreen_renderer::create(opts);
       } catch (const std::exception& e) {
-        iso->ThrowException(Exception::Error(
-            String::NewFromUtf8(iso, e.what(), NewStringType::kNormal).ToLocalChecked()));
+        (void)throw_error(iso, e.what());
         return;
       }
       if (!r) {
-        iso->ThrowException(Exception::Error("offscreen create failed"_v8(iso)));
+        (void)throw_error(iso, "offscreen create failed");
         return;
       }
 
@@ -131,9 +130,7 @@ namespace fxe::js {
 
       auto* h = new offscreen_holder{{}, std::move(r)};
       auto self = info.This();
-      self->SetInternalField(
-          0, External::New(iso, h->owned.get(), v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RENDERER));
+      set_native(iso, self, h->owned.get(), TAG_RENDERER);
       h->bind(iso, self);
     }
 

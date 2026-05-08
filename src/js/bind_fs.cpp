@@ -15,6 +15,7 @@
 #include "runtime/capabilities.hpp"
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_watcher.hpp"
+#include <fxe/v8_helpers.hpp>
 #include "weak_holder.hpp"
 
 #include <algorithm>
@@ -651,10 +652,8 @@ namespace fxe::js {
     glob_iter_state* glob_iter_from(Local<Object> self) {
       if (self->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<glob_iter_state*>(
-          self->GetInternalField(0).As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      return external_ptr<glob_iter_state>(self->GetInternalField(0));
     }
-
 
     void glob_iter_async_iterator(const FunctionCallbackInfo<Value>& info) {
       info.GetReturnValue().Set(info.This());
@@ -685,7 +684,7 @@ namespace fxe::js {
       auto obj = tpl->NewInstance(ctx).ToLocalChecked();
       auto* state = new glob_iter_state();
       state->entries = std::move(entries);
-      obj->SetInternalField(0, External::New(iso, state, v8::kExternalPointerTypeTagDefault));
+      obj->SetInternalField(0, make_external(iso, state));
       state->bind(iso, obj);
       auto fn = Function::New(ctx, glob_iter_async_iterator).ToLocalChecked();
       (void)obj->Set(ctx, Symbol::GetAsyncIterator(iso), fn);
@@ -698,7 +697,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("readFileSync(path, opts?)"_v8(iso)));
+        (void)throw_type_error(iso, "readFileSync(path, opts?)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -725,7 +724,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("writeFileSync(path, data)"_v8(iso)));
+        (void)throw_type_error(iso, "writeFileSync(path, data)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -733,7 +732,7 @@ namespace fxe::js {
         return;
       std::vector<uint8_t> data;
       if (!extract_data(iso, info[1], data)) {
-        iso->ThrowException(Exception::TypeError("data must be string or TypedArray"_v8(iso)));
+        (void)throw_type_error(iso, "data must be string or TypedArray");
         return;
       }
       std::error_code ec;
@@ -763,7 +762,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("statSync(path)"_v8(iso)));
+        (void)throw_type_error(iso, "statSync(path)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -782,7 +781,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("readdirSync(path, opts?)"_v8(iso)));
+        (void)throw_type_error(iso, "readdirSync(path, opts?)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -803,7 +802,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("mkdirSync(path, {recursive?})"_v8(iso)));
+        (void)throw_type_error(iso, "mkdirSync(path, {recursive?})");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -822,7 +821,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("rmSync(path, {recursive?, force?})"_v8(iso)));
+        (void)throw_type_error(iso, "rmSync(path, {recursive?, force?})");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -843,7 +842,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError("renameSync(from, to)"_v8(iso)));
+        (void)throw_type_error(iso, "renameSync(from, to)");
         return;
       }
       auto from = utf8(iso, info[0]);
@@ -860,7 +859,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("realpathSync(path)"_v8(iso)));
+        (void)throw_type_error(iso, "realpathSync(path)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -879,7 +878,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError("copyFileSync(src, dest)"_v8(iso)));
+        (void)throw_type_error(iso, "copyFileSync(src, dest)");
         return;
       }
       auto src = utf8(iso, info[0]);
@@ -896,7 +895,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError("cpSync(src, dest, opts?)"_v8(iso)));
+        (void)throw_type_error(iso, "cpSync(src, dest, opts?)");
         return;
       }
       auto src = utf8(iso, info[0]);
@@ -914,7 +913,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError("symlinkSync(target, path, type?)"_v8(iso)));
+        (void)throw_type_error(iso, "symlinkSync(target, path, type?)");
         return;
       }
       auto target = utf8(iso, info[0]);
@@ -936,7 +935,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("readlinkSync(path)"_v8(iso)));
+        (void)throw_type_error(iso, "readlinkSync(path)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -955,7 +954,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        iso->ThrowException(Exception::TypeError("linkSync(existing, path)"_v8(iso)));
+        (void)throw_type_error(iso, "linkSync(existing, path)");
         return;
       }
       auto existing = utf8(iso, info[0]);
@@ -972,7 +971,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("lstatSync(path)"_v8(iso)));
+        (void)throw_type_error(iso, "lstatSync(path)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -992,7 +991,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("accessSync(path, mode?)"_v8(iso)));
+        (void)throw_type_error(iso, "accessSync(path, mode?)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1009,7 +1008,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("chmodSync(path, mode)"_v8(iso)));
+        (void)throw_type_error(iso, "chmodSync(path, mode)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1025,7 +1024,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("lchmodSync(path, mode)"_v8(iso)));
+        (void)throw_type_error(iso, "lchmodSync(path, mode)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1041,7 +1040,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("chownSync(path, uid, gid)"_v8(iso)));
+        (void)throw_type_error(iso, "chownSync(path, uid, gid)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1058,8 +1057,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(str(
-            iso, nofollow ? "lutimesSync(path, atime, mtime)" : "utimesSync(path, atime, mtime)")));
+        (void)throw_type_error(iso, nofollow ? "lutimesSync(path, atime, mtime)"
+                                             : "utimesSync(path, atime, mtime)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1082,7 +1081,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("writeFileAtomicSync(path, data)"_v8(iso)));
+        (void)throw_type_error(iso, "writeFileAtomicSync(path, data)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -1090,7 +1089,7 @@ namespace fxe::js {
         return;
       std::vector<uint8_t> data;
       if (!extract_data(iso, info[1], data)) {
-        iso->ThrowException(Exception::TypeError("data must be string or TypedArray"_v8(iso)));
+        (void)throw_type_error(iso, "data must be string or TypedArray");
         return;
       }
       auto tmp = random_temp_path(fs::path(p));
@@ -1113,7 +1112,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("globSync(pattern, opts?)"_v8(iso)));
+        (void)throw_type_error(iso, "globSync(pattern, opts?)");
         return;
       }
       std::vector<std::string> entries;
@@ -1135,7 +1134,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("glob(pattern, opts?)"_v8(iso)));
+        (void)throw_type_error(iso, "glob(pattern, opts?)");
         return;
       }
       std::vector<std::string> entries;
@@ -1158,7 +1157,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsInt32()) {
-        iso->ThrowException(Exception::TypeError("lockSync(fd, opts?)"_v8(iso)));
+        (void)throw_type_error(iso, "lockSync(fd, opts?)");
         return;
       }
       int fd = info[0]->Int32Value(ctx).FromMaybe(-1);
@@ -1186,7 +1185,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsInt32()) {
-        iso->ThrowException(Exception::TypeError("unlockSync(fd)"_v8(iso)));
+        (void)throw_type_error(iso, "unlockSync(fd)");
         return;
       }
       int fd = info[0]->Int32Value(ctx).FromMaybe(-1);
@@ -1478,12 +1477,11 @@ namespace fxe::js {
           !add_value->IsFunction())
         return;
       auto* listener_ctx = new fs_abort_listener_ctx{work.cancel, nullptr};
-      auto data = External::New(iso, listener_ctx, v8::kExternalPointerTypeTagDefault);
+      auto data = make_external(iso, listener_ctx);
       auto listener_maybe = Function::New(
           ctx,
           [](const FunctionCallbackInfo<Value>& cb_info) {
-            auto* listener_ctx = static_cast<fs_abort_listener_ctx*>(
-                cb_info.Data().As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+            auto* listener_ctx = external_ptr<fs_abort_listener_ctx>(cb_info.Data());
             if (!listener_ctx || !listener_ctx->token)
               return;
             listener_ctx->token->aborted.store(true, std::memory_order_release);
@@ -2289,8 +2287,7 @@ namespace fxe::js {
     fs_watch_state* fs_watch_state_from(Local<Object> self) {
       if (self->InternalFieldCount() < 1)
         return nullptr;
-      return static_cast<fs_watch_state*>(
-          self->GetInternalField(0).As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      return external_ptr<fs_watch_state>(self->GetInternalField(0));
     }
 
     void fs_watch_close(const FunctionCallbackInfo<Value>& info) {
@@ -2325,7 +2322,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("watch(path[, options], listener)"_v8(iso)));
+        (void)throw_type_error(iso, "watch(path[, options], listener)");
         return;
       }
 
@@ -2340,7 +2337,7 @@ namespace fxe::js {
           callback = info[2];
       }
       if (callback.IsEmpty() || !callback->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("watch listener must be a function"_v8(iso)));
+        (void)throw_type_error(iso, "watch listener must be a function");
         return;
       }
 
@@ -2391,7 +2388,7 @@ namespace fxe::js {
       tpl->SetInternalFieldCount(1);
       tpl->Set(iso, "close", FunctionTemplate::New(iso, fs_watch_close));
       auto watcher = tpl->NewInstance(ctx).ToLocalChecked();
-      watcher->SetInternalField(0, External::New(iso, state, v8::kExternalPointerTypeTagDefault));
+      watcher->SetInternalField(0, make_external(iso, state));
       auto* persistent = new Global<Object>(iso, watcher);
       state->persistent = persistent;
       persistent->SetWeak(state, fs_watch_finalizer, WeakCallbackType::kParameter);

@@ -423,7 +423,8 @@ namespace fxe {
         wgpu::CommandBuffer cmds = encoder.Finish(&cb_desc);
         queue_.Submit(1, &cmds);
         finish_readback(readback_size);
-        if (instance_) instance_.ProcessEvents();
+        if (instance_)
+          instance_.ProcessEvents();
       }
 
       bool queue_dev(const command_buffer& src, const vshader_cbuf&,
@@ -1043,10 +1044,12 @@ namespace fxe {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (!done.load(std::memory_order_acquire) &&
                std::chrono::steady_clock::now() < deadline) {
-          if (instance_) instance_.ProcessEvents();
+          if (instance_)
+            instance_.ProcessEvents();
           std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        if (instance_) instance_.ProcessEvents();
+        if (instance_)
+          instance_.ProcessEvents();
         if (!done.load(std::memory_order_acquire) || !ok.load(std::memory_order_acquire))
           return;
         const auto* mapped = static_cast<const u8*>(readback_buf_.GetConstMappedRange(0, needed));

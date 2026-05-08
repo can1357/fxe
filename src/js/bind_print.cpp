@@ -1,10 +1,11 @@
 #include "bind_print.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/command_buffer.hpp>
-#include <fxe/v8_strings.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/print_pdf.hpp>
 #include <fxe/renderer.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cstdio>
 #include <filesystem>
@@ -22,8 +23,7 @@ namespace fxe::js {
     }
 
     void throw_type(Isolate* iso, const char* msg) {
-      iso->ThrowException(Exception::TypeError(
-          String::NewFromUtf8(iso, msg, NewStringType::kNormal).ToLocalChecked()));
+      (void)throw_type_error(iso, msg);
     }
 
     command_buffer* unwrap_cb(Local<Value> value) {
@@ -77,8 +77,7 @@ namespace fxe::js {
           return;
         }
         Local<Value> cb_value;
-        if (!page_obj->Get(ctx, "commandBuffer"_v8(iso))
-                 .ToLocal(&cb_value)) {
+        if (!page_obj->Get(ctx, "commandBuffer"_v8(iso)).ToLocal(&cb_value)) {
           throw_type(iso, "Print.toPdf: page requires commandBuffer");
           return;
         }

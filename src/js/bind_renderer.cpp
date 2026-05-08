@@ -4,10 +4,11 @@
 // Type tag 'REND'.
 
 #include "bind_pipeline.hpp"
+#include <fxe/v8_helpers.hpp>
 #include "weak_holder.hpp"
 #include <fxe/js_bindings.hpp>
-#include <fxe/renderer.hpp>
 #include <fxe/offscreen.hpp>
+#include <fxe/renderer.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
@@ -54,7 +55,6 @@ namespace fxe::js {
       }
     };
 
-
     renderer* unwrap_rend(Local<Object> self) {
       return static_cast<renderer*>(unwrap(self, TAG_RENDERER));
     }
@@ -63,19 +63,16 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(
-            "Renderer must be invoked with new"_v8(iso)));
+        (void)throw_type_error(iso, "Renderer must be invoked with new");
         return;
       }
       if (info.Length() < 1 || !info[0]->IsObject()) {
-        iso->ThrowException(
-            Exception::TypeError("Renderer(window, options)"_v8(iso)));
+        (void)throw_type_error(iso, "Renderer(window, options)");
         return;
       }
       auto* win = static_cast<window*>(unwrap(info[0].As<Object>(), TAG_WINDOW));
       if (!win) {
-        iso->ThrowException(Exception::TypeError(
-            "Renderer: first arg must be Window"_v8(iso)));
+        (void)throw_type_error(iso, "Renderer: first arg must be Window");
         return;
       }
       renderer_options opts;
@@ -98,8 +95,7 @@ namespace fxe::js {
         opts.vsync = runner_overrides.vsync;
       auto r = create_renderer(*win, opts);
       if (!r) {
-        iso->ThrowException(
-            Exception::Error("create_renderer failed"_v8(iso)));
+        (void)throw_error(iso, "create_renderer failed");
         return;
       }
       // Lazily initialise the default font (system TTF or procedural fallback)
@@ -116,9 +112,7 @@ namespace fxe::js {
       }
       auto* h = new rend_holder{{}, std::move(r)};
       auto self = info.This();
-      self->SetInternalField(
-          0, External::New(iso, h->owned.get(), v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_RENDERER));
+      set_native(iso, self, h->owned.get(), TAG_RENDERER);
       h->bind(iso, self);
       register_renderer_for_isolate(iso, win, h->owned.get());
     }
@@ -159,7 +153,7 @@ namespace fxe::js {
       if (!r)
         return;
       if (info.Length() < 2) {
-        iso->ThrowException(Exception::TypeError("bindUserTexture(slot, offscreenOrNull)"_v8(iso)));
+        (void)throw_type_error(iso, "bindUserTexture(slot, offscreenOrNull)");
         return;
       }
       auto ctx = iso->GetCurrentContext();
@@ -171,25 +165,24 @@ namespace fxe::js {
         return;
       }
       if (!info[1]->IsObject()) {
-        iso->ThrowException(Exception::TypeError("bindUserTexture: source must be an OffscreenRenderer or null"_v8(iso)));
+        (void)throw_type_error(iso, "bindUserTexture: source must be an OffscreenRenderer or null");
         return;
       }
       auto* inner_r = static_cast<renderer*>(unwrap(info[1].As<Object>(), TAG_RENDERER));
       auto* off = inner_r ? dynamic_cast<offscreen_renderer*>(inner_r) : nullptr;
       if (!off) {
-        iso->ThrowException(Exception::TypeError("bindUserTexture: source must be an OffscreenRenderer"_v8(iso)));
+        (void)throw_type_error(iso, "bindUserTexture: source must be an OffscreenRenderer");
         return;
       }
       auto view = off->color_texture_view();
       if (!view) {
-        iso->ThrowException(Exception::Error("bindUserTexture: source has no sampleable color attachment"_v8(iso)));
+        (void)throw_error(iso, "bindUserTexture: source has no sampleable color attachment");
         return;
       }
       r->bind_user_texture(slot, std::move(view));
 #else
       (void)slot;
-      iso->ThrowException(Exception::Error(
-          "bindUserTexture: WGPU backend not enabled"_v8(iso)));
+      (void)throw_error(iso, "bindUserTexture: WGPU backend not enabled");
 #endif
     }
 

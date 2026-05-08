@@ -2,6 +2,7 @@
 
 #include "bind_ipc.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_strings.hpp>
 
@@ -45,7 +46,7 @@ namespace fxe::js {
     bool require_channel(Isolate* iso, const FunctionCallbackInfo<Value>& info, int index,
                          const char* signature, std::string& out) {
       if (info.Length() <= index || !info[index]->IsString()) {
-        iso->ThrowException(Exception::TypeError(s(iso, signature)));
+        (void)throw_type_error(iso, signature);
         return false;
       }
       out = to_string(iso, info[index]);
@@ -190,7 +191,7 @@ namespace fxe::js {
       if (!require_channel(iso, info, 0, "ipc.handle(channel, fn)", channel))
         return;
       if (info.Length() < 2 || !info[1]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("ipc.handle(channel, fn)"_v8(iso)));
+        (void)throw_type_error(iso, "ipc.handle(channel, fn)");
         return;
       }
       auto& handlers = state_for(iso).handlers;
@@ -225,8 +226,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       if (!info.Data()->IsExternal())
         return;
-      auto* task = static_cast<invoke_task*>(
-          info.Data().As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      auto* task = external_ptr<invoke_task>(info.Data());
       if (!task)
         return;
 
@@ -284,7 +284,7 @@ namespace fxe::js {
       task->payload.Reset(iso, info.Length() > 1 ? info[1] : Local<Value>(Undefined(iso)));
       auto* raw = task.get();
       st.invoke_tasks.push_back(std::move(task));
-      auto data = External::New(iso, raw, v8::kExternalPointerTypeTagDefault);
+      auto data = make_external(iso, raw);
       Local<Function> microtask;
       if (!Function::New(ctx, invoke_task_cb, data).ToLocal(&microtask)) {
         raw->reset();
@@ -300,8 +300,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       if (!info.Data()->IsExternal())
         return;
-      auto* data = static_cast<disposer_data*>(
-          info.Data().As<External>()->Value(v8::kExternalPointerTypeTagDefault));
+      auto* data = external_ptr<disposer_data>(info.Data());
       if (!data || data->disposed) {
         info.GetReturnValue().Set(False(iso));
         return;
@@ -321,7 +320,7 @@ namespace fxe::js {
       if (!require_channel(iso, info, 0, "ipc.on(channel, listener)", channel))
         return;
       if (info.Length() < 2 || !info[1]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("ipc.on(channel, listener)"_v8(iso)));
+        (void)throw_type_error(iso, "ipc.on(channel, listener)");
         return;
       }
       auto listener = info[1].As<Function>();
@@ -333,12 +332,12 @@ namespace fxe::js {
       disposer->listener.Reset(iso, listener);
       auto* raw = disposer.get();
       st.disposers.push_back(std::move(disposer));
-      auto data = External::New(iso, raw, v8::kExternalPointerTypeTagDefault);
+      auto data = make_external(iso, raw);
       Local<Function> fn;
       if (!Function::New(ctx, disposer_cb, data).ToLocal(&fn)) {
         raw->reset();
         raw->disposed = true;
-        iso->ThrowException(Exception::Error("ipc disposer creation failed"_v8(iso)));
+        (void)throw_error(iso, "ipc disposer creation failed");
         return;
       }
       info.GetReturnValue().Set(fn);
@@ -351,7 +350,7 @@ namespace fxe::js {
       if (!require_channel(iso, info, 0, "ipc.off(channel, listener)", channel))
         return;
       if (info.Length() < 2 || !info[1]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("ipc.off(channel, listener)"_v8(iso)));
+        (void)throw_type_error(iso, "ipc.off(channel, listener)");
         return;
       }
       (void)remove_listener(iso, state_for(iso), channel, info[1].As<Function>());
@@ -370,7 +369,7 @@ namespace fxe::js {
         return;
       }
       if (!info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("ipc.removeAllListeners(channel?)"_v8(iso)));
+        (void)throw_type_error(iso, "ipc.removeAllListeners(channel?)");
         return;
       }
       std::string channel = to_string(iso, info[0]);

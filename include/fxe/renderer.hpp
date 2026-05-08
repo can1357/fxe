@@ -9,7 +9,6 @@
 
 #include <fxe/command_buffer.hpp>
 
-
 #ifndef FXE_HAS_WGPU
 #define FXE_HAS_WGPU 0
 #endif

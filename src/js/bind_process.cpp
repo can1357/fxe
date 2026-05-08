@@ -1,3 +1,4 @@
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_strings.hpp>
 
@@ -245,7 +246,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("chdir(path)"_v8(iso)));
+        (void)throw_type_error(iso, "chdir(path)");
         return;
       }
       auto p = utf8(iso, info[0]);
@@ -290,7 +291,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("on(event, fn)"_v8(iso)));
+        (void)throw_type_error(iso, "on(event, fn)");
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -322,14 +323,14 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("nextTick(fn, ...args)"_v8(iso)));
+        (void)throw_type_error(iso, "nextTick(fn, ...args)");
         return;
       }
       auto ctx = iso->GetCurrentContext();
       auto fn = info[0].As<Function>();
       Local<Value> bind_value;
       if (!fn->Get(ctx, "bind"_v8(iso)).ToLocal(&bind_value) || !bind_value->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("nextTick(fn, ...args)"_v8(iso)));
+        (void)throw_type_error(iso, "nextTick(fn, ...args)");
         return;
       }
       std::vector<Local<Value>> argv;
@@ -342,7 +343,7 @@ namespace fxe::js {
                ->Call(ctx, fn, static_cast<int>(argv.size()), argv.data())
                .ToLocal(&bound_value) ||
           !bound_value->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("nextTick(fn, ...args)"_v8(iso)));
+        (void)throw_type_error(iso, "nextTick(fn, ...args)");
         return;
       }
       iso->EnqueueMicrotask(bound_value.As<Function>());
@@ -412,7 +413,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsNumber()) {
-        iso->ThrowException(Exception::TypeError("kill(pid[, signal])"_v8(iso)));
+        (void)throw_type_error(iso, "kill(pid[, signal])");
         return;
       }
       const int pid = info[0]->Int32Value(ctx).FromMaybe(0);
@@ -420,7 +421,7 @@ namespace fxe::js {
       const int sig =
           process_signal_arg(iso, ctx, info.Length() > 1 ? info[1] : Undefined(iso), ok_signal);
       if (!ok_signal) {
-        iso->ThrowException(Exception::TypeError("unknown signal"_v8(iso)));
+        (void)throw_type_error(iso, "unknown signal");
         return;
       }
 #if defined(_WIN32)
@@ -460,8 +461,7 @@ namespace fxe::js {
       if (has_arg) {
         mask = info[0]->Int32Value(ctx).FromMaybe(0);
         if (mask < 0 || mask > 0777) {
-          iso->ThrowException(
-              Exception::RangeError("umask mask must be between 0 and 0o777"_v8(iso)));
+          (void)throw_range_error(iso, "umask mask must be between 0 and 0o777");
           return;
         }
       }
@@ -728,7 +728,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError("setEncoding(encoding)"_v8(iso)));
+        (void)throw_type_error(iso, "setEncoding(encoding)");
         return;
       }
       (void)info.This()->Set(ctx, "readableEncoding"_v8(iso), info[0]);
@@ -739,7 +739,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("on(event, fn)"_v8(iso)));
+        (void)throw_type_error(iso, "on(event, fn)");
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -849,8 +849,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       const char* name = platform_name();
       if (!name) {
-        iso->ThrowException(
-            Exception::Error("process.platform is unsupported for this build target"_v8(iso)));
+        (void)throw_error(iso, "process.platform is unsupported for this build target");
         return;
       }
       info.GetReturnValue().Set(str(iso, name));
@@ -861,8 +860,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       const char* name = arch_name();
       if (!name) {
-        iso->ThrowException(
-            Exception::Error("process.arch is unsupported for this build target"_v8(iso)));
+        (void)throw_error(iso, "process.arch is unsupported for this build target");
         return;
       }
       info.GetReturnValue().Set(str(iso, name));

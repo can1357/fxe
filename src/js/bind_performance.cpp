@@ -121,8 +121,7 @@ namespace fxe::js {
     v8::HandleScope hs(iso);
     auto ctx = iso->GetCurrentContext();
     v8::Local<v8::Value> perf_v;
-    if (!global->Get(ctx, "performance"_v8(iso)).ToLocal(&perf_v) ||
-        !perf_v->IsObject()) {
+    if (!global->Get(ctx, "performance"_v8(iso)).ToLocal(&perf_v) || !perf_v->IsObject()) {
       // No existing `performance`; create a stub host-side caller can extend.
       perf_v = v8::Object::New(iso);
       (void)global->Set(ctx, "performance"_v8(iso), perf_v);

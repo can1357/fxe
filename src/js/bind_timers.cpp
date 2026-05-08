@@ -1,3 +1,4 @@
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_strings.hpp>
 
@@ -111,7 +112,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("setTimeout(fn, ms, ...args)"_v8(iso)));
+        (void)throw_type_error(iso, "setTimeout(fn, ms, ...args)");
         return;
       }
       double ms = 0.0;
@@ -148,7 +149,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("setImmediate(fn, ...args)"_v8(iso)));
+        (void)throw_type_error(iso, "setImmediate(fn, ...args)");
         return;
       }
       auto& s = state_for(iso);
@@ -187,7 +188,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("queueMicrotask(fn)"_v8(iso)));
+        (void)throw_type_error(iso, "queueMicrotask(fn)");
         return;
       }
       iso->EnqueueMicrotask(info[0].As<Function>());
@@ -198,7 +199,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsFunction()) {
-        iso->ThrowException(Exception::TypeError("requestAnimationFrame(fn)"_v8(iso)));
+        (void)throw_type_error(iso, "requestAnimationFrame(fn)");
         return;
       }
       auto& s = state_for(iso);
@@ -314,7 +315,7 @@ namespace fxe::js {
           if (tc.HasCaught())
             tc.ReThrow();
           else
-            iso->ThrowException(Exception::Error("timer callback failed"_v8(iso)));
+            (void)throw_error(iso, "timer callback failed");
           return;
         }
       }
@@ -377,7 +378,7 @@ namespace fxe::js {
           if (tc.HasCaught())
             tc.ReThrow();
           else
-            iso->ThrowException(Exception::Error("requestAnimationFrame callback failed"_v8(iso)));
+            (void)throw_error(iso, "requestAnimationFrame callback failed");
           return;
         }
       }

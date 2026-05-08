@@ -1,5 +1,6 @@
 #include "bind_blob.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
@@ -74,7 +75,7 @@ namespace fxe::js {
     }
 
     void throw_type(Isolate* iso, const char* m) {
-      iso->ThrowException(Exception::TypeError(String::NewFromUtf8(iso, m).ToLocalChecked()));
+      (void)throw_type_error(iso, m);
     }
 
     std::string normalize_type(std::string type) {
@@ -143,20 +144,17 @@ namespace fxe::js {
     }
 
     void init_blob_object(Isolate* iso, Local<Object> obj, blob_holder* h) {
-      obj->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_BLOB));
+      set_native(iso, obj, h, TAG_BLOB);
       h->self.Reset(iso, obj);
       h->self.SetWeak(h, blob_finalizer, WeakCallbackType::kParameter);
     }
     void init_stream_object(Isolate* iso, Local<Object> obj, stream_holder* h) {
-      obj->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_READABLE_STREAM));
+      set_native(iso, obj, h, TAG_READABLE_STREAM);
       h->self.Reset(iso, obj);
       h->self.SetWeak(h, stream_finalizer, WeakCallbackType::kParameter);
     }
     void init_reader_object(Isolate* iso, Local<Object> obj, reader_holder* h) {
-      obj->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      obj->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_STREAM_READER));
+      set_native(iso, obj, h, TAG_STREAM_READER);
       h->self.Reset(iso, obj);
       h->self.SetWeak(h, reader_finalizer, WeakCallbackType::kParameter);
     }
@@ -260,9 +258,7 @@ namespace fxe::js {
       if (options.IsEmpty() || !options->IsObject())
         return {};
       Local<Value> type_value;
-      if (!options.As<Object>()
-               ->Get(ctx, "type"_v8(iso))
-               .ToLocal(&type_value) ||
+      if (!options.As<Object>()->Get(ctx, "type"_v8(iso)).ToLocal(&type_value) ||
           type_value->IsUndefined())
         return {};
       return normalize_type(to_str(iso, type_value));
@@ -468,9 +464,7 @@ namespace fxe::js {
         const auto* data = h->length == 0 ? nullptr : h->bytes->data() + h->offset;
         auto ab = copy_array_buffer(iso, data, h->length);
         result->Set(ctx, "done"_v8(iso), Boolean::New(iso, false)).Check();
-        result
-            ->Set(ctx, "value"_v8(iso), Uint8Array::New(ab, 0, h->length))
-            .Check();
+        result->Set(ctx, "value"_v8(iso), Uint8Array::New(ab, 0, h->length)).Check();
       }
       resolver->Resolve(ctx, result).Check();
       info.GetReturnValue().Set(resolver->GetPromise());
@@ -496,10 +490,8 @@ namespace fxe::js {
     auto blob_tpl = FunctionTemplate::New(iso, blob_ctor);
     blob_tpl->SetClassName("Blob"_v8(iso));
     blob_tpl->InstanceTemplate()->SetInternalFieldCount(2);
-    blob_tpl->InstanceTemplate()->SetNativeDataProperty("size"_v8(iso),
-                                                        blob_get_size, nullptr);
-    blob_tpl->InstanceTemplate()->SetNativeDataProperty("type"_v8(iso),
-                                                        blob_get_type, nullptr);
+    blob_tpl->InstanceTemplate()->SetNativeDataProperty("size"_v8(iso), blob_get_size, nullptr);
+    blob_tpl->InstanceTemplate()->SetNativeDataProperty("type"_v8(iso), blob_get_type, nullptr);
     auto blob_proto = blob_tpl->PrototypeTemplate();
     blob_proto->Set(iso, "slice", FunctionTemplate::New(iso, blob_slice));
     blob_proto->Set(iso, "arrayBuffer", FunctionTemplate::New(iso, blob_array_buffer));

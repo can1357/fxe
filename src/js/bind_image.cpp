@@ -5,6 +5,7 @@
 
 #include "bind_image.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
@@ -56,8 +57,7 @@ namespace fxe::js {
     Local<Object> wrap_image(Isolate* iso, Local<Context> ctx, image_holder* h) {
       auto inst =
           image_tpl_table()[iso].Get(iso)->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
-      inst->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      inst->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_IMAGE));
+      set_native(iso, inst, h, TAG_IMAGE);
       h->bind(iso, inst);
       return inst;
     }
@@ -92,8 +92,7 @@ namespace fxe::js {
     }
 
     void throw_type(Isolate* iso, const char* msg) {
-      iso->ThrowException(Exception::TypeError(
-          String::NewFromUtf8(iso, msg, NewStringType::kNormal).ToLocalChecked()));
+      (void)throw_type_error(iso, msg);
     }
 
     // ------------------------------------------------------------------------

@@ -10,6 +10,7 @@
 #include "bind_blob.hpp"
 
 #include "../net/websocket_client.hpp"
+#include <fxe/v8_helpers.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
@@ -109,7 +110,7 @@ namespace fxe::js {
       return std::string(*u ? *u : "", *u ? u.length() : 0);
     }
     void throw_type(Isolate* iso, const char* m) {
-      iso->ThrowException(Exception::TypeError(String::NewFromUtf8(iso, m).ToLocalChecked()));
+      (void)throw_type_error(iso, m);
     }
 
     void ws_finalizer(const WeakCallbackInfo<ws_holder>& info) {
@@ -150,8 +151,7 @@ namespace fxe::js {
       h->client->connect(url, protocols);
 
       auto self = info.This();
-      self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_WEBSOCKET));
+      set_native(iso, self, h, TAG_WEBSOCKET);
       self->Set(ctx, "url"_v8(iso), s8(iso, url)).Check();
       h->isolate = iso;
       h->self.Reset(iso, self);
@@ -389,16 +389,11 @@ namespace fxe::js {
     tpl->SetClassName("WebSocket"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto inst = tpl->InstanceTemplate();
-    inst->SetNativeDataProperty("readyState"_v8(iso), ws_get_ready_state,
-                                nullptr);
-    inst->SetNativeDataProperty("bufferedAmount"_v8(iso),
-                                ws_get_buffered_amount, nullptr);
-    inst->SetNativeDataProperty("protocol"_v8(iso), ws_get_protocol,
-                                nullptr);
-    inst->SetNativeDataProperty("extensions"_v8(iso), ws_get_extensions,
-                                nullptr);
-    inst->SetNativeDataProperty("binaryType"_v8(iso), ws_get_binary_type,
-                                ws_set_binary_type);
+    inst->SetNativeDataProperty("readyState"_v8(iso), ws_get_ready_state, nullptr);
+    inst->SetNativeDataProperty("bufferedAmount"_v8(iso), ws_get_buffered_amount, nullptr);
+    inst->SetNativeDataProperty("protocol"_v8(iso), ws_get_protocol, nullptr);
+    inst->SetNativeDataProperty("extensions"_v8(iso), ws_get_extensions, nullptr);
+    inst->SetNativeDataProperty("binaryType"_v8(iso), ws_get_binary_type, ws_set_binary_type);
     // Handler properties via NativeAccessor on Name
     auto add_handler = [&](Local<String> name) {
       inst->SetNativeDataProperty(
@@ -468,8 +463,7 @@ namespace fxe::js::bind_websocket {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("message"));
           if (h->binary_type == "blob") {
             auto bytes = std::make_shared<std::vector<std::uint8_t>>(std::move(ev.binary));
-            eo->Set(ctx, "data"_v8(iso),
-                    fxe::js::make_blob_object(iso, ctx, std::move(bytes)))
+            eo->Set(ctx, "data"_v8(iso), fxe::js::make_blob_object(iso, ctx, std::move(bytes)))
                 .Check();
           } else {
             auto store = ArrayBuffer::NewBackingStore(iso, ev.binary.size());
@@ -482,18 +476,14 @@ namespace fxe::js::bind_websocket {
         } break;
         case fxe::net::ws_event_kind::error_: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("error"));
-          eo->Set(ctx, "message"_v8(iso), fxe::js::s8(iso, ev.text))
-              .Check();
+          eo->Set(ctx, "message"_v8(iso), fxe::js::s8(iso, ev.text)).Check();
           fxe::js::dispatch(iso, ctx, h, "error", eo);
         } break;
         case fxe::net::ws_event_kind::close: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("close"));
           eo->Set(ctx, "code"_v8(iso), Integer::New(iso, ev.code)).Check();
-          eo->Set(ctx, "reason"_v8(iso), fxe::js::s8(iso, ev.reason))
-              .Check();
-          eo->Set(ctx, "wasClean"_v8(iso),
-                  v8::Boolean::New(iso, ev.was_clean))
-              .Check();
+          eo->Set(ctx, "reason"_v8(iso), fxe::js::s8(iso, ev.reason)).Check();
+          eo->Set(ctx, "wasClean"_v8(iso), v8::Boolean::New(iso, ev.was_clean)).Check();
           fxe::js::dispatch(iso, ctx, h, "close", eo);
         } break;
         }

@@ -42,8 +42,7 @@ struct v8_string_literal {
 
   // Defined in <fxe/v8_strings.hpp>. Templated on the V8 isolate type so this
   // header does not need to know about v8::Isolate.
-  template <typename Iso>
-  auto operator()(Iso* iso) const;
+  template <typename Iso> auto operator()(Iso* iso) const;
 };
 
 constexpr v8_string_literal operator""_v8(const char* s, usize n) noexcept {
