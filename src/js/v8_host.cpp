@@ -50,6 +50,7 @@
 #include "bind_storage.hpp"
 #include "bind_timers.hpp"
 #include "bind_tray.hpp"
+#include "bind_text_document.hpp"
 #include "bind_url.hpp"
 #include "bind_wasm.hpp"
 #include "bind_webauthn.hpp"
@@ -1837,6 +1838,7 @@ Error.prepareStackTrace = function(err, frames) {
       install_offscreen_template(isolate, global);
       install_window_template(isolate, global);
       install_primitives_namespace(isolate, global);
+      install_text_document_template(isolate, global);
       install_print_global(isolate, global);
       install_render_stats_global(isolate, global);
       install_image_global(isolate, global);

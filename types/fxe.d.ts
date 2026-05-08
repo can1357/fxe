@@ -49,6 +49,85 @@ declare namespace FXE {
     allocate(vertexCount: number, indexCount: number, topology: VertexTopology): Allocation;
   }
 
+  /**
+   * Native rope-style text buffer for editor-grade documents. Stores text
+   * as UTF-16 code units (offsets line up with V8 string indices). Backed
+   * by a piece array over an immutable seed + append-only edit buffer; all
+   * O(log P) for offset/line lookups, O(log P + edit length) for replace.
+   *
+   * No JS-side string is ever rebuilt for an edit — the V8 trampoline cost
+   * is the only per-keystroke overhead. For a 10 MB file load+single-char
+   * insert the budget is < 0.5 ms on M-series.
+   */
+  class TextDocument {
+    constructor(initial?: string);
+    /** Total UTF-16 code-unit length. */
+    length(): number;
+    /** Number of lines (a doc with N newlines has N+1 lines). */
+    lineCount(): number;
+    /** Bumped on every replace / applyBatch. */
+    revision(): number;
+    /** Number of pieces in the underlying rope. Diagnostic only. */
+    pieceCount(): number;
+    /** Whole-document UTF-16 string. Allocates. */
+    text(): string;
+    /** Slice [start, end) of the buffer. */
+    slice(start: number, end?: number): string;
+    /** UTF-16 code-unit at offset, or 0 if out of range. */
+    charCodeAt(offset: number): number;
+    /** Offset of the start of the given line (0-indexed). */
+    lineToOffset(line: number): number;
+    /** 0-indexed line number containing `offset`. */
+    offsetToLine(offset: number): number;
+    /** {start, end} of `line`. `end` excludes the trailing '\n'. */
+    lineRange(line: number): { start: number; end: number };
+    /** Line text, no trailing '\n'. */
+    lineText(line: number): string;
+    /** Convert offset → {line, col} in one call (faster than two). */
+    offsetToLineCol(offset: number): { line: number; col: number };
+    /** Convert {line, col} → offset. col is clamped to the line length. */
+    lineColToOffset(line: number, col: number): number;
+    /**
+     * Replace [start, end) with `text`. Returns the captured edit, including
+     * deleted text for undo. Bumps revision and notifies subscribers.
+     */
+    replace(start: number, end: number, text: string): TextDocumentEdit;
+    /**
+     * Apply N replaces in one revision. Edits MUST be sorted ascending by
+     * `start` and non-overlapping (overlap throws RangeError).
+     */
+    applyBatch(
+      edits: ReadonlyArray<{ start: number; removed: number; inserted: string }>,
+    ): TextDocumentEdit[];
+    /**
+     * Listen for edits. Callback receives the array of applied edits in
+     * ascending start order. Returns a subscription id usable with
+     * `unsubscribe()`.
+     */
+    subscribe(fn: (edits: TextDocumentEdit[]) => void): bigint;
+    unsubscribe(id: bigint | number): void;
+    /**
+     * Linear literal substring scan over the document. Use
+     * `caseInsensitive` for ASCII-folded matching. `limit` caps the result
+     * count; the scan stops as soon as `limit` matches are produced.
+     */
+    searchLiteral(
+      needle: string,
+      opts?: { from?: number; limit?: number; caseInsensitive?: boolean },
+    ): Array<{ start: number; end: number }>;
+  }
+
+  interface TextDocumentEdit {
+    /** Pre-edit start offset. */
+    start: number;
+    /** Number of characters removed. */
+    removed: number;
+    /** Inserted text. */
+    inserted: string;
+    /** Removed text — captured for undo. */
+    deleted: string;
+  }
+
   class Path {
     constructor();
     moveTo(x: number, y: number): this;
@@ -1170,6 +1249,8 @@ declare module 'fxe' {
   export type Paint = FXE.Paint;
   export import VertexTopology = FXE.VertexTopology;
   export import CommandBuffer = FXE.CommandBuffer;
+  export import TextDocument = FXE.TextDocument;
+  export type TextDocumentEdit = FXE.TextDocumentEdit;
   export import Renderer = FXE.Renderer;
   export import OffscreenRenderer = FXE.OffscreenRenderer;
   export type VertexFormat = FXE.VertexFormat;
@@ -1246,6 +1327,7 @@ declare const Renderer: typeof FXE.Renderer;
 declare const OffscreenRenderer: typeof FXE.OffscreenRenderer;
 declare const Window: typeof FXE.Window;
 declare const Path: typeof FXE.Path;
+declare const TextDocument: typeof FXE.TextDocument;
 declare const Primitives: FXE.PrimitivesNamespace;
 declare const Monitors: FXE.MonitorsNamespace;
 declare const App: FXE.AppNamespace;
