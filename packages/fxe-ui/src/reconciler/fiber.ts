@@ -26,7 +26,7 @@ import type {
   WindowEventMap,
   WindowEventName,
 } from 'fxe';
-import { CommandBuffer, Primitives } from 'fxe';
+import { CommandBuffer, OffscreenRenderer, Primitives, Renderer } from 'fxe';
 import { tickAnimatedFrames } from '../animated/timing.ts';
 import {
   captureHitTargetsSince,
@@ -151,6 +151,116 @@ export function Layer(props: LayerProps): Node {
 
 export function Draw(fn: (cb: CommandBuffer) => void, deps?: ReadonlyArray<unknown>): Node {
   return { type: 'draw', props: { fn, deps } };
+}
+
+// ----------------------------------------------------- Surface caching
+//
+// When a Layer's cache survives unchanged for SURFACE_BAKE_HITS frames AND
+// its rasterized vertex count clears SURFACE_MIN_VERTS, we transparently
+// bake the cached subtree into an offscreen GPU texture and replace future
+// cache replays with a single drawTextureQuad. This collapses N vertex
+// uploads + N glyph samples per frame into 4 verts + one bilinear sample.
+//
+// Slot count is capped at 4 (matches the WGSL `user_tex_*` bindings).
+// Beyond 4 stable expensive subtrees we simply skip baking the rest;
+// already-baked surfaces continue to replay normally.
+const SURFACE_BAKE_HITS = 4;
+const SURFACE_MIN_VERTS = 200;
+const SURFACE_SLOT_CAP = 4;
+const SURFACE_PAD = 1;
+
+interface SurfaceCacheEntry {
+  off: OffscreenRenderer;
+  slot: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  renderer: Renderer;
+  bakedEpoch: number;
+}
+
+interface RendererSurfaceState {
+  free: number[];
+}
+const g_renderer_surface_state = new WeakMap<Renderer, RendererSurfaceState>();
+
+function rendererSurfaceState(r: Renderer): RendererSurfaceState {
+  let s = g_renderer_surface_state.get(r);
+  if (!s) {
+    s = { free: [0, 1, 2, 3].slice(0, SURFACE_SLOT_CAP) };
+    g_renderer_surface_state.set(r, s);
+  }
+  return s;
+}
+
+function allocSurfaceSlot(r: Renderer): number | null {
+  const s = rendererSurfaceState(r);
+  return s.free.length > 0 ? (s.free.shift() as number) : null;
+}
+
+function freeSurfaceSlot(r: Renderer, slot: number): void {
+  const s = rendererSurfaceState(r);
+  if (!s.free.includes(slot)) s.free.push(slot);
+}
+
+function translateMat(tx: number, ty: number): Float32Array {
+  const m = new Float32Array(16);
+  m[0] = 1;
+  m[5] = 1;
+  m[10] = 1;
+  m[15] = 1;
+  m[12] = tx;
+  m[13] = ty;
+  return m;
+}
+
+function bakeFiberSurface(
+  cache: CommandBuffer,
+  renderer: Renderer,
+): SurfaceCacheEntry | null {
+  const bb = cache.bounds();
+  if (!bb || bb.width <= 0 || bb.height <= 0) return null;
+  const slot = allocSurfaceSlot(renderer);
+  if (slot === null) return null;
+  const pad = SURFACE_PAD;
+  const w = Math.max(1, Math.ceil(bb.width + pad * 2));
+  const h = Math.max(1, Math.ceil(bb.height + pad * 2));
+  let off: OffscreenRenderer;
+  try {
+    off = new OffscreenRenderer({
+      width: w,
+      height: h,
+      parent: renderer,
+    });
+  } catch (_e) {
+    freeSurfaceSlot(renderer, slot);
+    return null;
+  }
+  off.beginFrame();
+  off.setClearColor(0, 0, 0, 0);
+  off.queue(cache, translateMat(-bb.x + pad, -bb.y + pad));
+  off.endFrame();
+  renderer.bindUserTexture(slot, off);
+  return {
+    off,
+    slot,
+    x: bb.x - pad,
+    y: bb.y - pad,
+    width: w,
+    height: h,
+    renderer,
+    bakedEpoch: cache.epoch(),
+  };
+}
+
+function releaseSurface(entry: SurfaceCacheEntry): void {
+  try {
+    entry.renderer.bindUserTexture(entry.slot, null);
+  } catch (_e) {
+    /* renderer may already be torn down */
+  }
+  freeSurfaceSlot(entry.renderer, entry.slot);
 }
 
 export function Component<P>(
@@ -388,6 +498,14 @@ interface Fiber {
   // keyboard targets survive Layer caching (otherwise hit_test would clear and
   // never re-register them on the cached path).
   cachedHitTargets: HitTarget[] | null;
+  // Surface caching state. When a Layer's `cache` survives unchanged for
+  // SURFACE_BAKE_HITS frames AND the cached buffer's vertex count clears
+  // SURFACE_MIN_VERTS, we bake it into an offscreen texture and replace
+  // future cache replays with a single drawTextureQuad. surfaceHits is the
+  // running stability counter; surface holds the baked offscreen + the
+  // user-tex slot it's bound to.
+  surfaceHits: number;
+  surface: SurfaceCacheEntry | null;
   // Component-only:
   hooks: HookSlot[];
   lastProps: unknown;
@@ -605,6 +723,8 @@ function newFiber(key: string, parent: Fiber | null): Fiber {
     providedValue: undefined,
     dirty: true,
     failed: false,
+    surfaceHits: 0,
+    surface: null,
   };
   const fiberId = ensureFiberDebugMetadata(fiber).id;
   registerFiberWork(fiberId, () => {
@@ -673,6 +793,11 @@ interface RenderCtx {
   frameCallbacks: { fiber: Fiber; fn: (dtMs: number) => void }[];
   contextStack: ContextFrame[];
   parentTarget: CommandBuffer | Renderer;
+  // Root renderer for this render pass. Surface caching needs it to
+  // allocate user-texture slots and create offscreens that share the
+  // device. null when the top-level target was a CommandBuffer (test
+  // contexts), in which case surface caching is silently disabled.
+  rootRenderer: Renderer | null;
 }
 
 let g_ctx: RenderCtx | null = null;
@@ -974,6 +1099,10 @@ function unmountFiber(f: Fiber): void {
   f.children.clear();
   f.hooks = [];
   f.cache = null;
+  if (f.surface !== null) {
+    releaseSurface(f.surface);
+    f.surface = null;
+  }
   f.lastProps = undefined;
   f.providedContext = null;
   f.providedValue = undefined;
@@ -1076,6 +1205,7 @@ function renderNode(
       frameCallbacks: ctx.frameCallbacks,
       contextStack: ctx.contextStack,
       parentTarget: target,
+      rootRenderer: ctx.rootRenderer,
     };
     g_ctx = myCtx;
     beginFiberHookDebugDeps(fiber);
@@ -1206,16 +1336,68 @@ function renderNode(
 
   if (cacheable && fiber.cache) {
     const cached = fiber.cache;
+    // Surface cache fast path. If we baked this fiber on a previous frame
+    // and its cache hasn't changed underneath us, draw a single textured
+    // quad sampling the baked surface instead of replaying the vertex
+    // stream. Falls back to the regular replay if the bake was discarded
+    // (slot freed, parent transform mismatch, etc.).
+    if (
+      fiber.surface !== null &&
+      fiber.surface.bakedEpoch === cached.epoch() &&
+      target instanceof Renderer
+    ) {
+      const s = fiber.surface;
+      // Per-Layer transform/tint propagate through the textured quad's
+      // tint channel; the rect itself is in absolute coords so user
+      // transforms are applied via the standard target.queue() with the
+      // surface emitting through the renderer's primitive pipeline. For
+      // simplicity we ignore props.transform/tint here — surface caching
+      // is opt-out for transformed/tinted layers (covered by the
+      // !shouldSurfaceCache check below).
+      Primitives.drawTextureQuad(target, s.slot, s.x, s.y, s.width, s.height);
+      if (fiber.cachedHitTargets && fiber.cachedHitTargets.length > 0) {
+        replayHitTargets(fiber.cachedHitTargets);
+      }
+      RenderStats.recordCacheHit();
+      recordFiberCacheStatus(fiber, 'hit', false);
+      return;
+    }
     queueInto(target, cached, props.transform, props.tint);
     if (fiber.cachedHitTargets && fiber.cachedHitTargets.length > 0) {
       replayHitTargets(fiber.cachedHitTargets);
     }
     RenderStats.recordCacheHit();
     recordFiberCacheStatus(fiber, 'hit', false);
+    // Stability counter — kicks the bake heuristic. We only bake when the
+    // layer is "expensive enough" (vertex count above the threshold) AND
+    // not already running a transform/tint (those would need per-frame
+    // re-bake, defeating the purpose).
+    if (
+      fiber.surface === null &&
+      ctx.rootRenderer !== null &&
+      props.transform === undefined &&
+      props.tint === undefined &&
+      cached.vertexCount() >= SURFACE_MIN_VERTS
+    ) {
+      fiber.surfaceHits++;
+      if (fiber.surfaceHits >= SURFACE_BAKE_HITS) {
+        const baked = bakeFiberSurface(cached, ctx.rootRenderer);
+        if (baked !== null) fiber.surface = baked;
+        // Reset so we don't re-attempt every frame on a slot-cap miss.
+        fiber.surfaceHits = 0;
+      }
+    }
     return;
   }
 
   // Rebuild path.
+  // Cache invalidated → any baked surface is stale. Free its slot back to
+  // the renderer pool so other fibers can claim it.
+  if (fiber.surface !== null) {
+    releaseSurface(fiber.surface);
+    fiber.surface = null;
+  }
+  fiber.surfaceHits = 0;
   RenderStats.recordRebuild();
   RenderStats.recordCacheMiss();
   recordFiberCacheStatus(fiber, 'miss', true);
@@ -1293,6 +1475,10 @@ export function render(
     frameCallbacks: [],
     contextStack: [],
     parentTarget: target,
+    // Top-level Renderer is the surface-cache root. Test contexts and
+    // nested portal renders that pass a CommandBuffer get null and
+    // surface caching no-ops.
+    rootRenderer: target instanceof Renderer ? target : null,
   };
   // Top-level slot is a single child under $root.
   const children = reconcileChildren(g_root, [root]);

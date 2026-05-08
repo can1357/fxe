@@ -3,6 +3,10 @@
 #include <fxe/js_bindings.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/spritesheet.hpp>
+#include <fxe/renderer.hpp>
+#if FXE_HAS_WGPU
+#include "../wgpu/pipeline.hpp"
+#endif
 
 #include <cstring>
 #include <exception>
@@ -76,6 +80,20 @@ namespace fxe::js {
       if (o->Get(ctx, String::NewFromUtf8Literal(iso, "enableDepth")).ToLocal(&v) &&
           !v->IsUndefined())
         opts.enable_depth = v->BooleanValue(iso);
+      // `parent`: existing Renderer/OffscreenRenderer whose device this
+      // offscreen will share. Required for cross-renderer sampling, e.g.
+      // when the offscreen's color attachment will be bound on the main
+      // window renderer via `bindUserTexture(...)`.
+      if (o->Get(ctx, String::NewFromUtf8Literal(iso, "parent")).ToLocal(&v) &&
+          !v->IsUndefined() && !v->IsNull() && v->IsObject()) {
+#if FXE_HAS_WGPU
+        auto* parent_r = static_cast<renderer*>(unwrap(v.As<Object>(), TAG_RENDERER));
+        if (auto* dpa = dynamic_cast<dawn_pipeline_device_access*>(parent_r)) {
+          opts.parent_device = dpa->device();
+          opts.parent_queue = dpa->queue();
+        }
+#endif
+      }
       ok = opts.width > 0 && opts.height > 0;
     }
 

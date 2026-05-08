@@ -6,6 +6,7 @@
 #include "bind_pipeline.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/renderer.hpp>
+#include <fxe/offscreen.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
 #include <fxe/window.hpp>
@@ -141,6 +142,61 @@ namespace fxe::js {
       bool b = info.Length() >= 1 && info[0]->BooleanValue(iso);
       r->set_bloom_enabled(b);
     }
+    // bindUserTexture(slot, source)
+    //
+    // `source` may be:
+    //   * an OffscreenRenderer instance — its color attachment is bound,
+    //   * `null` / `undefined` — clears the slot back to the placeholder.
+    //
+    // Slot is 0..3 (matches USER_TEX_FLAG slot mask in main.wgsl).
+    //
+    // The bind survives across frames; rebind after the source is resized
+    // since the underlying TextureView identity changes.
+    void rend_bind_user_texture(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      if (info.Length() < 2) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "bindUserTexture(slot, offscreenOrNull)")));
+        return;
+      }
+      auto ctx = iso->GetCurrentContext();
+      const u32 slot = info[0]->Uint32Value(ctx).FromMaybe(0);
+#if FXE_HAS_WGPU
+      // Null / undefined → clear the slot.
+      if (info[1]->IsNullOrUndefined()) {
+        r->bind_user_texture(slot, wgpu::TextureView{});
+        return;
+      }
+      if (!info[1]->IsObject()) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "bindUserTexture: source must be an OffscreenRenderer or null")));
+        return;
+      }
+      auto* inner_r = static_cast<renderer*>(unwrap(info[1].As<Object>(), TAG_RENDERER));
+      auto* off = inner_r ? dynamic_cast<offscreen_renderer*>(inner_r) : nullptr;
+      if (!off) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "bindUserTexture: source must be an OffscreenRenderer")));
+        return;
+      }
+      auto view = off->color_texture_view();
+      if (!view) {
+        iso->ThrowException(Exception::Error(String::NewFromUtf8Literal(
+            iso, "bindUserTexture: source has no sampleable color attachment")));
+        return;
+      }
+      r->bind_user_texture(slot, std::move(view));
+#else
+      (void)slot;
+      iso->ThrowException(Exception::Error(
+          String::NewFromUtf8Literal(iso, "bindUserTexture: WGPU backend not enabled")));
+#endif
+    }
+
     void rend_screen(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -281,6 +337,7 @@ namespace fxe::js {
     proto->Set(iso, "setBloom", FunctionTemplate::New(iso, rend_set_bloom));
     proto->Set(iso, "setClearColor", FunctionTemplate::New(iso, rend_set_clear_color));
     proto->Set(iso, "screen", FunctionTemplate::New(iso, rend_screen));
+    proto->Set(iso, "bindUserTexture", FunctionTemplate::New(iso, rend_bind_user_texture));
     proto->Set(iso, "worldToScreen", FunctionTemplate::New(iso, rend_world_to_screen));
     proto->Set(iso, "viewport", FunctionTemplate::New(iso, rend_viewport));
 

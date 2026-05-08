@@ -9,6 +9,13 @@
 
 #include <fxe/command_buffer.hpp>
 
+
+#ifndef FXE_HAS_WGPU
+#define FXE_HAS_WGPU 0
+#endif
+#if FXE_HAS_WGPU
+#include <webgpu/webgpu_cpp.h>
+#endif
 namespace fxe {
   enum class blend_mode : u8 { none = 0, alpha, premultiplied, additive, multiply };
 
@@ -50,6 +57,24 @@ namespace fxe {
       (void)height;
       (void)rgba_pixels;
     }
+
+    // Bind a sampleable texture view to one of the user-texture slots
+    // (0..3). Pass an empty/null view to clear (slot reverts to the atlas
+    // placeholder). Vertices written with `texture_id = USER_TEX_FLAG | slot`
+    // sample from the bound view; see `Primitives.drawTextureQuad` in JS.
+    //
+    // Surface caching: render a subtree to an OffscreenRenderer, bind the
+    // offscreen's color view to a slot, then draw a textured quad. This
+    // avoids re-emitting the subtree's primitives every frame.
+    //
+    // Backends without GPU sampling support (the null backend) treat this
+    // as a no-op; subsequent draws fall back to the placeholder.
+#if FXE_HAS_WGPU
+    virtual void bind_user_texture(u32 slot, wgpu::TextureView view) {
+      (void)slot;
+      (void)view;
+    }
+#endif
 
     // Capture the previously-presented frame as RGBA8 pixels.
     // Non-blocking staged contract: the first call arms a readback and returns

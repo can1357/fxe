@@ -743,6 +743,69 @@ namespace fxe::js {
       }
     }
 
+    // drawTextureQuad(cb, slot, x, y, w, h, [u0, v0, u1, v1], [tint:Color],
+    //                [depth:number])
+    //
+    // Emits a textured quad sampling from user-texture slot `slot` (0..3),
+    // bound on the renderer via `Renderer.bindUserTexture(slot, view)`.
+    // UV defaults to the full [0,0]..[1,1] rect; tint defaults to white.
+    //
+    // Surface-cache flow:
+    //   const off = new OffscreenRenderer({width:W, height:H});
+    //   /* render subtree into off */
+    //   off.endFrame();
+    //   renderer.bindUserTexture(0, off);
+    //   Primitives.drawTextureQuad(cb, 0, x, y, W, H);
+    void p_drawTextureQuad(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      if (info.Length() < 6) {
+        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
+            iso, "drawTextureQuad: expected (cb, slot, x, y, w, h, [uv], [tint], [depth])")));
+        return;
+      }
+      const u32 slot = static_cast<u32>(info[1]->Uint32Value(ctx).FromMaybe(0));
+      if (slot >= 4) {
+        iso->ThrowException(Exception::RangeError(
+            String::NewFromUtf8Literal(iso, "drawTextureQuad: slot out of range (0..3)")));
+        return;
+      }
+      const float x = static_cast<float>(num(ctx, info[2]));
+      const float y = static_cast<float>(num(ctx, info[3]));
+      const float w = static_cast<float>(num(ctx, info[4]));
+      const float h = static_cast<float>(num(ctx, info[5]));
+      float u0 = 0.0f, v0_ = 0.0f, u1 = 1.0f, v1_ = 1.0f;
+      if (info.Length() >= 7 && info[6]->IsArray()) {
+        auto a = info[6].As<Array>();
+        if (a->Length() >= 4) {
+          Local<Value> e;
+          if (a->Get(ctx, 0).ToLocal(&e) && e->IsNumber())
+            u0 = static_cast<float>(e->NumberValue(ctx).FromMaybe(0.0));
+          if (a->Get(ctx, 1).ToLocal(&e) && e->IsNumber())
+            v0_ = static_cast<float>(e->NumberValue(ctx).FromMaybe(0.0));
+          if (a->Get(ctx, 2).ToLocal(&e) && e->IsNumber())
+            u1 = static_cast<float>(e->NumberValue(ctx).FromMaybe(1.0));
+          if (a->Get(ctx, 3).ToLocal(&e) && e->IsNumber())
+            v1_ = static_cast<float>(e->NumberValue(ctx).FromMaybe(1.0));
+        }
+      }
+      r8g8b8a8 tint{255, 255, 255, 255};
+      if (info.Length() >= 8 && !info[7]->IsUndefined())
+        tint = decode_color(iso, ctx, info[7]);
+      const float depth = info.Length() >= 9 ? static_cast<float>(num(ctx, info[8])) : 0.0f;
+      const texture_id tid = user_tex_flag | (slot & user_tex_slot_mask);
+      // Triangle strip: TL, TR, BL, BR.
+      auto* vp = cb->allocate_strip(4, vertex_topology::triangle);
+      vp[0] = make_vertex({x, y}, depth, {u0, v0_}, tid, tint);
+      vp[1] = make_vertex({x + w, y}, depth, {u1, v0_}, tid, tint);
+      vp[2] = make_vertex({x, y + h}, depth, {u0, v1_}, tid, tint);
+      vp[3] = make_vertex({x + w, y + h}, depth, {u1, v1_}, tid, tint);
+    }
+
     void path_ctor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -1474,6 +1537,7 @@ namespace fxe::js {
     P("drawRectRounded", p_drawRectRounded);
     P("drawText", p_drawText);
     P("drawTextRun", p_drawTextRun);
+    P("drawTextureQuad", p_drawTextureQuad);
     P("calcText", p_calcText);
     P("wrapTextNative", p_wrapTextNative);
     P("xAtGlyphIndexNative", p_xAtGlyphIndexNative);

@@ -34,6 +34,12 @@ declare namespace FXE {
     clear(): void;
     epoch(): number;
     vertexCount(): number;
+    /**
+     * Axis-aligned bounding box over all queued vertex positions.
+     * Returns null when the buffer is empty. Used by surface caching to
+     * size an offscreen target around the cached subtree.
+     */
+    bounds(): { x: number; y: number; width: number; height: number } | null;
     indexCount(topology?: VertexTopology): number;
     transform(matrix: Mat4): void;
     queue(other: CommandBuffer | Renderer, matrix?: Mat4, tint?: Vec4): void;
@@ -83,6 +89,13 @@ declare namespace FXE {
     screen(): [number, number];
     worldToScreen(position: Vec3): [number, number, number, number];
     viewport(): Viewport;
+    /**
+     * Bind an OffscreenRenderer's color attachment to user-texture slot
+     * `slot` (0..3). Pass `null` to clear. Subsequent
+     * `Primitives.drawTextureQuad(cb, slot, ...)` calls sample from this
+     * texture. Used by surface caching to bake stable subtrees.
+     */
+    bindUserTexture(slot: number, source: OffscreenRenderer | null): void;
   }
 
   interface OffscreenRendererOptions {
@@ -91,6 +104,14 @@ declare namespace FXE {
     multisample?: number;
     mipLevels?: number;
     enableDepth?: boolean;
+    /**
+     * Existing Renderer (or OffscreenRenderer) whose GPU device this
+     * offscreen will share. Required when the offscreen's color
+     * attachment will be sampled by another renderer via
+     * `bindUserTexture(...)` — cross-device texture sharing is not
+     * supported in WebGPU/Dawn.
+     */
+    parent?: Renderer;
   }
 
   class OffscreenRenderer extends Renderer {
@@ -780,6 +801,23 @@ declare namespace FXE {
         color?: Color;
         depth?: number;
       }>,
+    ): void;
+    /**
+     * Emit a textured quad sampling from user-texture slot `slot` (0..3),
+     * bound on the renderer via `Renderer.bindUserTexture(slot, source)`.
+     * UV defaults to `[0,0,1,1]`; tint defaults to white. Used by surface
+     * caching to draw a baked subtree as a single quad.
+     */
+    drawTextureQuad(
+      cb: CommandBuffer | Renderer,
+      slot: number,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      uv?: readonly [number, number, number, number],
+      tint?: Color,
+      depth?: number,
     ): void;
     linearGradient(p0: Vec2, p1: Vec2, stops: Float32Array): GradientPaint;
     radialGradient(center: Vec2, radius: number, stops: Float32Array): GradientPaint;

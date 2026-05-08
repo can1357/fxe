@@ -32,6 +32,16 @@ struct Constants {
 // any linear blend between adjacent texels softens otherwise crisp output.
 // Color emoji and sprites stay on `atlas_sampler` for normal filtering.
 @group(0) @binding(7) var mask_sampler: sampler;
+// User texture slots for surface caching / external textures. Cap is 4 in
+// the current bind group layout — bind each slot via
+// `Renderer.bindUserTexture(slot, ...)` then issue draws with
+// `Primitives.drawTextureQuad(cb, slot, ...)`. Vertex tx encodes
+// `USER_TEX_FLAG | slot` so the shader knows to sample here. Unused
+// slots stay bound to a 1×1 placeholder so the bind group stays valid.
+@group(0) @binding(8) var user_tex_0: texture_2d<f32>;
+@group(0) @binding(9) var user_tex_1: texture_2d<f32>;
+@group(0) @binding(10) var user_tex_2: texture_2d<f32>;
+@group(0) @binding(11) var user_tex_3: texture_2d<f32>;
 
 struct VertexIn {
   @location(0) pos:      vec3<f32>,
@@ -67,6 +77,12 @@ fn vs_transform(arg: VertexIn) -> VertexOut {
 const MSPRITE_FLAG:    u32 = 0x100000u;  // sprite atlas alpha mask × color
 const FONT_COLOR_FLAG: u32 = 0x080000u;  // font color emoji (BGRA, no tint)
 const FONT_MASK_FLAG:  u32 = 0x040000u;  // font mask glyph (R8 alpha × color)
+// User texture slot. Lower 2 bits of tx select user_tex_0..3. Vertex
+// color is multiplied in (tint), like generic atlas sampling. Surface
+// caching uses this slot to draw a quad sampling a previously-rendered
+// offscreen texture.
+const USER_TEX_FLAG:   u32 = 0x200000u;
+const USER_TEX_SLOT_MASK: u32 = 0x3u;
 const FRAMEBUFFER_TEXTURE_ID: u32 = 0x7ffffffeu;
 const PAINT_LINEAR_TEXTURE_ID: u32 = 0x7ffffff0u;
 const PAINT_RADIAL_TEXTURE_ID: u32 = 0x7ffffff1u;
@@ -98,6 +114,21 @@ fn shade(arg: VertexOut) -> vec4<f32> {
   if ((arg.tx & FONT_COLOR_FLAG) != 0u) {
     let s = textureSampleLevel(font_color_tex, atlas_sampler, arg.uv, 0.0);
     return vec4<f32>(s.rgb, s.a * arg.color.a);
+  }
+  if ((arg.tx & USER_TEX_FLAG) != 0u) {
+    let slot = arg.tx & USER_TEX_SLOT_MASK;
+    var s: vec4<f32>;
+    // WGSL has no array of texture_2d uniforms, so each slot is a
+    // separate binding and we dispatch via switch. Cap is 4 slots; if you
+    // need more, add bindings + switch arms here, in the bind group
+    // layout, and in the bind group entries.
+    switch (slot) {
+      case 0u:      { s = textureSampleLevel(user_tex_0, atlas_sampler, arg.uv, 0.0); }
+      case 1u:      { s = textureSampleLevel(user_tex_1, atlas_sampler, arg.uv, 0.0); }
+      case 2u:      { s = textureSampleLevel(user_tex_2, atlas_sampler, arg.uv, 0.0); }
+      default:      { s = textureSampleLevel(user_tex_3, atlas_sampler, arg.uv, 0.0); }
+    }
+    return arg.color * s;
   }
   if (arg.tx == FRAMEBUFFER_TEXTURE_ID) {
     return arg.color * sample_framebuffer(arg.pos, arg.uv);

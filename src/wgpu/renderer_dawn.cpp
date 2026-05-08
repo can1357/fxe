@@ -719,6 +719,17 @@ namespace fxe {
         queued_custom_draws_.push_back(std::move(draw));
       }
 
+      // Bind / unbind a user texture slot (0..3). View can be a sampleable
+      // wgpu::TextureView; passing an empty view clears the slot back to
+      // the atlas placeholder. Marks the bind group as needing a rebuild
+      // so the next draw picks up the change.
+      void bind_user_texture(u32 slot, wgpu::TextureView view) override {
+        if (slot >= user_tex_views_.size())
+          return;
+        user_tex_views_[slot] = std::move(view);
+        atlas_dirty_ = true;
+      }
+
     private:
       // Build all device-lifetime resources: pipeline, bind group, buffers.
       void build_resources() {
@@ -749,7 +760,7 @@ namespace fxe {
         //   @binding(4) texture_2d<f32>(font_color_tex)   — font color emoji
         //   @binding(5) sampler        (framebuffer_sampler)
         //   @binding(6) texture_2d<f32>(framebuffer_texture) — captured frame
-        std::array<wgpu::BindGroupLayoutEntry, 8> bgl_entries{};
+        std::array<wgpu::BindGroupLayoutEntry, 12> bgl_entries{};
         bgl_entries[0].binding = 0;
         bgl_entries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
         bgl_entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
@@ -776,6 +787,15 @@ namespace fxe {
         bgl_entries[7].binding = 7;
         bgl_entries[7].visibility = wgpu::ShaderStage::Fragment;
         bgl_entries[7].sampler.type = wgpu::SamplerBindingType::NonFiltering;
+        // Slots 8..11 are user-texture slots used by drawTextureQuad /
+        // surface caching. Default-bound to atlas_view_ as a placeholder
+        // until a binding call swaps them in.
+        for (u32 i = 8; i < 12; ++i) {
+          bgl_entries[i].binding = i;
+          bgl_entries[i].visibility = wgpu::ShaderStage::Fragment;
+          bgl_entries[i].texture.sampleType = wgpu::TextureSampleType::Float;
+          bgl_entries[i].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        }
         wgpu::BindGroupLayoutDescriptor bgl_desc{};
         bgl_desc.label = "fxe-bgl";
         bgl_desc.entryCount = bgl_entries.size();
@@ -884,7 +904,7 @@ namespace fxe {
 
       wgpu::BindGroup create_bind_group(const wgpu::Buffer& ubo, const char* label,
                                         const wgpu::TextureView& framebuffer_view = {}) {
-        std::array<wgpu::BindGroupEntry, 8> entries{};
+        std::array<wgpu::BindGroupEntry, 12> entries{};
         entries[0].binding = 0;
         entries[0].buffer = ubo;
         entries[0].size = kUboBytes;
@@ -904,6 +924,10 @@ namespace fxe {
                                      : (blur_capture_view_ ? blur_capture_view_ : atlas_view_);
         entries[7].binding = 7;
         entries[7].sampler = mask_sampler_;
+        for (u32 i = 0; i < 4; ++i) {
+          entries[8 + i].binding = 8 + i;
+          entries[8 + i].textureView = user_tex_views_[i] ? user_tex_views_[i] : atlas_view_;
+        }
         wgpu::BindGroupDescriptor bg_desc{};
         bg_desc.label = label;
         bg_desc.layout = bgl_;
@@ -1439,6 +1463,10 @@ namespace fxe {
       bool blur_texture_failure_logged_ = false;
       wgpu::Texture atlas_texture_;
       wgpu::TextureView atlas_view_;
+      // User texture slots used by the WGSL `user_tex_0..3` bindings.
+      // Default-empty; falls back to atlas_view_ in the bind group when
+      // unbound. Indexed via `bind_user_texture(slot, view)`.
+      std::array<wgpu::TextureView, 4> user_tex_views_{};
       wgpu::Sampler atlas_sampler_;
       wgpu::Sampler mask_sampler_;
       u32 atlas_w_ = 0;

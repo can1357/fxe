@@ -279,6 +279,31 @@ namespace fxe::js {
           Float32Array::New(ab, 0, vbuf.size() * sizeof(vertex) / sizeof(float)));
     }
 
+    // bounds(): { x, y, width, height } | null
+    //
+    // Axis-aligned bounding box over all queued vertex positions. Returns
+    // null when the buffer has no vertices yet. Used by surface caching to
+    // size the offscreen target before baking.
+    void cb_bounds(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = unwrap_cb(info.This());
+      if (!cb)
+        return;
+      if (cb->vertex_buffer.empty()) {
+        info.GetReturnValue().SetNull();
+        return;
+      }
+      auto [mn, mx] = cb->get_boundaries();
+      auto out = Object::New(iso);
+      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "x"), Number::New(iso, mn.x));
+      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "y"), Number::New(iso, mn.y));
+      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "width"), Number::New(iso, mx.x - mn.x));
+      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "height"), Number::New(iso, mx.y - mn.y));
+      info.GetReturnValue().Set(out);
+    }
+
     void cb_index_buffer(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -432,6 +457,7 @@ namespace fxe::js {
     proto->Set(iso, "epoch", FunctionTemplate::New(iso, cb_epoch));
     proto->Set(iso, "vertexCount", FunctionTemplate::New(iso, cb_vertex_count));
     proto->Set(iso, "indexCount", FunctionTemplate::New(iso, cb_index_count));
+    proto->Set(iso, "bounds", FunctionTemplate::New(iso, cb_bounds));
     proto->Set(iso, "transform", FunctionTemplate::New(iso, cb_transform));
     proto->Set(iso, "queue", FunctionTemplate::New(iso, cb_queue));
     proto->Set(iso, "buffers", FunctionTemplate::New(iso, cb_buffers));

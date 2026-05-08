@@ -248,16 +248,26 @@ namespace fxe {
     public:
       explicit dawn_offscreen_renderer(offscreen_options options)
           : options_(sanitize(options)), window_({options_.width, options_.height}) {
-        wgpu::InstanceDescriptor inst_desc{};
-        static constexpr auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
-        inst_desc.requiredFeatureCount = 1;
-        inst_desc.requiredFeatures = &kTimedWaitAny;
-        instance_ = wgpu::CreateInstance(&inst_desc);
-        if (!instance_)
-          throw std::runtime_error("wgpu::CreateInstance failed");
-        adapter_ = request_adapter(instance_);
-        device_ = request_device(instance_, adapter_);
-        queue_ = device_.GetQueue();
+        if (options_.parent_device) {
+          // Borrow the caller's device + queue. No private instance/adapter
+          // created — texture views from this offscreen will be valid for
+          // the parent's bind groups.
+          device_ = options_.parent_device;
+          queue_ = options_.parent_queue ? options_.parent_queue : device_.GetQueue();
+          if (options_.parent_adapter)
+            adapter_ = options_.parent_adapter;
+        } else {
+          wgpu::InstanceDescriptor inst_desc{};
+          static constexpr auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
+          inst_desc.requiredFeatureCount = 1;
+          inst_desc.requiredFeatures = &kTimedWaitAny;
+          instance_ = wgpu::CreateInstance(&inst_desc);
+          if (!instance_)
+            throw std::runtime_error("wgpu::CreateInstance failed");
+          adapter_ = request_adapter(instance_);
+          device_ = request_device(instance_, adapter_);
+          queue_ = device_.GetQueue();
+        }
         if (!check_multisample_count(options_.multisample)) {
           std::fprintf(stderr,
                        "fxe.offscreen: unsupported multisample count %u; falling back to 1\n",
@@ -413,7 +423,7 @@ namespace fxe {
         wgpu::CommandBuffer cmds = encoder.Finish(&cb_desc);
         queue_.Submit(1, &cmds);
         finish_readback(readback_size);
-        instance_.ProcessEvents();
+        if (instance_) instance_.ProcessEvents();
       }
 
       bool queue_dev(const command_buffer& src, const vshader_cbuf&,
@@ -434,6 +444,10 @@ namespace fxe {
         if (pixels_.size() != pixel_count())
           pixels_.assign(pixel_count(), 0);
         return pixels_;
+      }
+
+      wgpu::TextureView color_texture_view() const override {
+        return color_view_;
       }
 
       window& get_window() override {
@@ -507,7 +521,7 @@ namespace fxe {
         ubo_desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         ubo_ = device_.CreateBuffer(&ubo_desc);
 
-        std::array<wgpu::BindGroupLayoutEntry, 8> bgl_entries{};
+        std::array<wgpu::BindGroupLayoutEntry, 12> bgl_entries{};
         bgl_entries[0].binding = 0;
         bgl_entries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
         bgl_entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
@@ -531,6 +545,14 @@ namespace fxe {
         bgl_entries[7].binding = 7;
         bgl_entries[7].visibility = wgpu::ShaderStage::Fragment;
         bgl_entries[7].sampler.type = wgpu::SamplerBindingType::NonFiltering;
+        // User texture slots (binding 8..11). Mirrors the main renderer
+        // layout so a shared shader compiles unchanged.
+        for (u32 i = 8; i < 12; ++i) {
+          bgl_entries[i].binding = i;
+          bgl_entries[i].visibility = wgpu::ShaderStage::Fragment;
+          bgl_entries[i].texture.sampleType = wgpu::TextureSampleType::Float;
+          bgl_entries[i].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+        }
         wgpu::BindGroupLayoutDescriptor bgl_desc{};
         bgl_desc.label = "fxe-offscreen-bgl";
         bgl_desc.entryCount = bgl_entries.size();
@@ -618,7 +640,7 @@ namespace fxe {
 
       wgpu::BindGroup create_bind_group(const wgpu::Buffer& ubo, const char* label,
                                         const wgpu::TextureView& framebuffer_view = {}) {
-        std::array<wgpu::BindGroupEntry, 8> entries{};
+        std::array<wgpu::BindGroupEntry, 12> entries{};
         entries[0].binding = 0;
         entries[0].buffer = ubo;
         entries[0].size = kUboBytes;
@@ -638,6 +660,13 @@ namespace fxe {
                                      : (blur_capture_view_ ? blur_capture_view_ : atlas_view_);
         entries[7].binding = 7;
         entries[7].sampler = mask_sampler_;
+        // User texture slots; offscreens default them to atlas_view_ since
+        // surface caching usually applies to the main pass. JS can still
+        // bind these via a future API extension if needed.
+        for (u32 i = 0; i < 4; ++i) {
+          entries[8 + i].binding = 8 + i;
+          entries[8 + i].textureView = atlas_view_;
+        }
         wgpu::BindGroupDescriptor bg_desc{};
         bg_desc.label = label;
         bg_desc.layout = bgl_;
@@ -784,8 +813,10 @@ namespace fxe {
         color_desc.dimension = wgpu::TextureDimension::e2D;
         color_desc.size = {options_.width, options_.height, 1};
         color_desc.format = target_format_;
+        // TextureBinding so the rendered color image can be sampled in the
+        // main pass via the user-texture slots (surface caching path).
         color_desc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc |
-                           wgpu::TextureUsage::CopyDst;
+                           wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::TextureBinding;
         color_desc.sampleCount = 1;
         color_texture_ = device_.CreateTexture(&color_desc);
         color_view_ = color_texture_.CreateView();
@@ -1012,10 +1043,10 @@ namespace fxe {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
         while (!done.load(std::memory_order_acquire) &&
                std::chrono::steady_clock::now() < deadline) {
-          instance_.ProcessEvents();
+          if (instance_) instance_.ProcessEvents();
           std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        instance_.ProcessEvents();
+        if (instance_) instance_.ProcessEvents();
         if (!done.load(std::memory_order_acquire) || !ok.load(std::memory_order_acquire))
           return;
         const auto* mapped = static_cast<const u8*>(readback_buf_.GetConstMappedRange(0, needed));

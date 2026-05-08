@@ -40,6 +40,11 @@ namespace fxe {
   // ids returned by `add_sprite`.
   inline constexpr uint32_t font_mask_flag = 0x040000u;
   inline constexpr uint32_t font_color_flag = 0x080000u;
+  // User-texture flag for surface caching. The lower 2 bits select one of
+  // four user texture slots bound via `renderer::bind_user_texture`. Mirrored
+  // in src/wgpu/shaders/main.wgsl as USER_TEX_FLAG / USER_TEX_SLOT_MASK.
+  inline constexpr uint32_t user_tex_flag = 0x200000u;
+  inline constexpr uint32_t user_tex_slot_mask = 0x3u;
   inline constexpr uint32_t null_texture_id = 0;
   inline constexpr uint32_t framebuffer_texture_id = 0x7ffffffeu;
 
