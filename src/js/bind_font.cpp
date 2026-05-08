@@ -11,6 +11,7 @@
 #include <fxe/font.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -97,11 +98,11 @@ namespace fxe::js {
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
         Local<Value> field;
-        if (o->Get(ctx, String::NewFromUtf8Literal(iso, "sizePx")).ToLocal(&field) &&
+        if (o->Get(ctx, "sizePx"_v8(iso)).ToLocal(&field) &&
             field->IsNumber()) {
           size_px = field->NumberValue(ctx).FromMaybe(16.0);
         }
-        if (o->Get(ctx, String::NewFromUtf8Literal(iso, "style")).ToLocal(&field) &&
+        if (o->Get(ctx, "style"_v8(iso)).ToLocal(&field) &&
             field->IsString()) {
           const std::string s = utf8(iso, field);
           if (s == "bold")

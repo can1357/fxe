@@ -3,6 +3,7 @@
 #include "bind_ipc.hpp"
 
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <algorithm>
 #include <array>
@@ -523,17 +524,17 @@ namespace fxe::js {
   MaybeLocal<Module> build_ipc_module(Isolate* iso, Local<Context> /*ctx*/) {
     HandleScope hs(iso);
     std::array<Local<String>, 8> exports{
-        String::NewFromUtf8Literal(iso, "handle"),
-        String::NewFromUtf8Literal(iso, "removeHandler"),
-        String::NewFromUtf8Literal(iso, "invoke"),
-        String::NewFromUtf8Literal(iso, "on"),
-        String::NewFromUtf8Literal(iso, "off"),
-        String::NewFromUtf8Literal(iso, "removeAllListeners"),
-        String::NewFromUtf8Literal(iso, "send"),
-        String::NewFromUtf8Literal(iso, "debug"),
+        "handle"_v8(iso),
+        "removeHandler"_v8(iso),
+        "invoke"_v8(iso),
+        "on"_v8(iso),
+        "off"_v8(iso),
+        "removeAllListeners"_v8(iso),
+        "send"_v8(iso),
+        "debug"_v8(iso),
     };
     MemorySpan<const Local<String>> span(exports.data(), exports.size());
-    auto module_name = String::NewFromUtf8Literal(iso, "fxe:ipc");
+    auto module_name = "fxe:ipc"_v8(iso);
     return Module::CreateSyntheticModule(iso, module_name, span, ipc_module_evaluate);
   }
 } // namespace fxe::js

@@ -12,6 +12,7 @@
 #include <fxe/js_bindings.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 #include <fxe/vertex.hpp>
 
 #include <cstdint>
@@ -113,7 +114,7 @@ namespace fxe::js {
         top = info[0]->Uint32Value(ctx).FromMaybe(0);
       if (top >= static_cast<u32>(vertex_topology::max)) {
         iso->ThrowException(
-            Exception::RangeError(String::NewFromUtf8Literal(iso, "topology out of range")));
+            Exception::RangeError("topology out of range"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(
@@ -174,7 +175,7 @@ namespace fxe::js {
       math::mat4x4 m{1.0f};
       if (info.Length() < 1 || !decode_mat4(iso, ctx, info[0], m)) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "transform: expected Float32Array(16)")));
+            "transform: expected Float32Array(16)"_v8(iso)));
         return;
       }
       cb->transform(m);
@@ -189,20 +190,20 @@ namespace fxe::js {
         return;
       if (info.Length() < 1 || !info[0]->IsObject()) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "queue: expected CommandBuffer")));
+            Exception::TypeError("queue: expected CommandBuffer"_v8(iso)));
         return;
       }
       auto* other = unwrap_cb(info[0].As<Object>());
       if (!other) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "queue: argument is not a CommandBuffer")));
+            "queue: argument is not a CommandBuffer"_v8(iso)));
         return;
       }
       math::mat4x4 m = math::identity();
       if (info.Length() >= 2 && !info[1]->IsUndefined()) {
         if (!decode_mat4(iso, ctx, info[1], m)) {
           iso->ThrowException(Exception::TypeError(
-              String::NewFromUtf8Literal(iso, "queue: mat must be Float32Array(16)")));
+              "queue: mat must be Float32Array(16)"_v8(iso)));
           return;
         }
       }
@@ -211,7 +212,7 @@ namespace fxe::js {
         math::vec4 t{1, 1, 1, 1};
         if (!decode_vec4(iso, info[2], t)) {
           iso->ThrowException(Exception::TypeError(
-              String::NewFromUtf8Literal(iso, "queue: tint must be Float32Array(4)")));
+              "queue: tint must be Float32Array(4)"_v8(iso)));
           return;
         }
         tint = t;
@@ -225,7 +226,7 @@ namespace fxe::js {
     }
 
     void set_buffer_epoch(Isolate* iso, Local<Context> ctx, Local<Object> out, u32 epoch) {
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "epoch"),
+      (void)out->Set(ctx, "epoch"_v8(iso),
                      Integer::NewFromUnsigned(iso, epoch));
     }
 
@@ -237,7 +238,7 @@ namespace fxe::js {
                 : 0;
       if (top >= static_cast<u32>(vertex_topology::max)) {
         iso->ThrowException(
-            Exception::RangeError(String::NewFromUtf8Literal(iso, "topology out of range")));
+            Exception::RangeError("topology out of range"_v8(iso)));
         return false;
       }
       return true;
@@ -259,9 +260,9 @@ namespace fxe::js {
       auto out = Object::New(iso);
       auto vab = array_buffer_view(iso, vbuf.data(), vbuf.size() * sizeof(vertex));
       auto iab = array_buffer_view(iso, ibuf.data(), ibuf.size() * sizeof(u32));
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "verts"),
+      (void)out->Set(ctx, "verts"_v8(iso),
                      Float32Array::New(vab, 0, vbuf.size() * sizeof(vertex) / sizeof(float)));
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "idxs"),
+      (void)out->Set(ctx, "idxs"_v8(iso),
                      Uint32Array::New(iab, 0, ibuf.size()));
       set_buffer_epoch(iso, ctx, out, cb->epoch);
       info.GetReturnValue().Set(out);
@@ -297,10 +298,10 @@ namespace fxe::js {
       }
       auto [mn, mx] = cb->get_boundaries();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "x"), Number::New(iso, mn.x));
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "y"), Number::New(iso, mn.y));
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "width"), Number::New(iso, mx.x - mn.x));
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "height"), Number::New(iso, mx.y - mn.y));
+      (void)out->Set(ctx, "x"_v8(iso), Number::New(iso, mn.x));
+      (void)out->Set(ctx, "y"_v8(iso), Number::New(iso, mn.y));
+      (void)out->Set(ctx, "width"_v8(iso), Number::New(iso, mx.x - mn.x));
+      (void)out->Set(ctx, "height"_v8(iso), Number::New(iso, mx.y - mn.y));
       info.GetReturnValue().Set(out);
     }
 
@@ -360,7 +361,7 @@ namespace fxe::js {
         return;
       if (info.Length() < 3) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "allocate(vtx, idx, top)")));
+            Exception::TypeError("allocate(vtx, idx, top)"_v8(iso)));
         return;
       }
       auto vtx = info[0]->Uint32Value(ctx).FromMaybe(0);
@@ -382,11 +383,11 @@ namespace fxe::js {
       auto idxs = Uint32Array::New(iab, 0, idx);
 
       auto out = Object::New(iso);
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "verts"), verts);
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "idxs"), idxs);
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "base"),
+      (void)out->Set(ctx, "verts"_v8(iso), verts);
+      (void)out->Set(ctx, "idxs"_v8(iso), idxs);
+      (void)out->Set(ctx, "base"_v8(iso),
                      Integer::NewFromUnsigned(iso, base));
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "indexBase"),
+      (void)out->Set(ctx, "indexBase"_v8(iso),
                      Integer::NewFromUnsigned(iso, index_base));
       set_buffer_epoch(iso, ctx, out, cb->epoch);
       info.GetReturnValue().Set(out);
@@ -396,7 +397,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "CommandBuffer must be invoked with new")));
+            "CommandBuffer must be invoked with new"_v8(iso)));
         return;
       }
       auto self = info.This();
@@ -449,7 +450,7 @@ namespace fxe::js {
   void install_command_buffer_template(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, cb_constructor);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "CommandBuffer"));
+    tpl->SetClassName("CommandBuffer"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
 
     auto proto = tpl->PrototypeTemplate();

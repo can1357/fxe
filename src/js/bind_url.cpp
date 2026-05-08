@@ -11,6 +11,7 @@
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cctype>
 #include <cstdint>
@@ -808,30 +809,30 @@ namespace fxe::js {
 
     // URL
     auto utpl = FunctionTemplate::New(iso, url_ctor);
-    utpl->SetClassName(String::NewFromUtf8Literal(iso, "URL"));
+    utpl->SetClassName("URL"_v8(iso));
     utpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto uproto = utpl->PrototypeTemplate();
     auto uinst = utpl->InstanceTemplate();
 
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "href"), url_get_href,
+    uinst->SetNativeDataProperty("href"_v8(iso), url_get_href,
                                  url_set_href);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "protocol"), url_get_protocol,
+    uinst->SetNativeDataProperty("protocol"_v8(iso), url_get_protocol,
                                  url_set_protocol);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "host"), url_get_host);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "hostname"), url_get_hostname,
+    uinst->SetNativeDataProperty("host"_v8(iso), url_get_host);
+    uinst->SetNativeDataProperty("hostname"_v8(iso), url_get_hostname,
                                  url_set_hostname);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "port"), url_get_port,
+    uinst->SetNativeDataProperty("port"_v8(iso), url_get_port,
                                  url_set_port);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "pathname"), url_get_pathname,
+    uinst->SetNativeDataProperty("pathname"_v8(iso), url_get_pathname,
                                  url_set_pathname);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "search"), url_get_search,
+    uinst->SetNativeDataProperty("search"_v8(iso), url_get_search,
                                  url_set_search);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "hash"), url_get_hash,
+    uinst->SetNativeDataProperty("hash"_v8(iso), url_get_hash,
                                  url_set_hash);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "origin"), url_get_origin);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "username"), url_get_username);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "password"), url_get_password);
-    uinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "searchParams"),
+    uinst->SetNativeDataProperty("origin"_v8(iso), url_get_origin);
+    uinst->SetNativeDataProperty("username"_v8(iso), url_get_username);
+    uinst->SetNativeDataProperty("password"_v8(iso), url_get_password);
+    uinst->SetNativeDataProperty("searchParams"_v8(iso),
                                  url_get_search_params, nullptr);
     uproto->Set(iso, "toString", FunctionTemplate::New(iso, url_to_string));
     uproto->Set(iso, "toJSON", FunctionTemplate::New(iso, url_to_string));
@@ -841,7 +842,7 @@ namespace fxe::js {
 
     // URLSearchParams
     auto stpl = FunctionTemplate::New(iso, usp_ctor);
-    stpl->SetClassName(String::NewFromUtf8Literal(iso, "URLSearchParams"));
+    stpl->SetClassName("URLSearchParams"_v8(iso));
     stpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto sproto = stpl->PrototypeTemplate();
     sproto->Set(iso, "get", FunctionTemplate::New(iso, usp_get));

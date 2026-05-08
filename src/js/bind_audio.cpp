@@ -23,6 +23,7 @@
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <atomic>
 #include <cmath>
@@ -209,11 +210,11 @@ namespace fxe::js {
           }
           auto view = make_float32_array(iso, chunk);
           auto info = Object::New(iso);
-          (void)info->Set(ctx, String::NewFromUtf8Literal(iso, "frameCount"),
+          (void)info->Set(ctx, "frameCount"_v8(iso),
                           Number::New(iso, static_cast<double>(chunk.frame_count)));
-          (void)info->Set(ctx, String::NewFromUtf8Literal(iso, "channels"),
+          (void)info->Set(ctx, "channels"_v8(iso),
                           Integer::NewFromUnsigned(iso, chunk.channels));
-          (void)info->Set(ctx, String::NewFromUtf8Literal(iso, "sampleRate"),
+          (void)info->Set(ctx, "sampleRate"_v8(iso),
                           Integer::NewFromUnsigned(iso, chunk.sample_rate));
           Local<Value> argv[] = {view, info};
           TryCatch try_catch(iso);
@@ -280,7 +281,7 @@ namespace fxe::js {
       // Internal-only constructor. JS callers must use Audio.load(...).
       if (!info.IsConstructCall()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "Sound is not user-constructible; use Audio.load")));
+            "Sound is not user-constructible; use Audio.load"_v8(iso)));
         return;
       }
       // Allow construction: make_sound_object calls NewInstance which lands
@@ -290,8 +291,7 @@ namespace fxe::js {
     void capture_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "CaptureSession is not user-constructible; use Audio.startCapture")));
+        iso->ThrowException(Exception::TypeError("CaptureSession is not user-constructible; use Audio.startCapture"_v8(iso)));
         return;
       }
     }
@@ -355,7 +355,7 @@ namespace fxe::js {
       if (!read_positive_u32(iso, ctx, obj, "channels", opts.channels))
         return false;
       Local<Value> device_value;
-      auto device_key = String::NewFromUtf8Literal(iso, "deviceId");
+      auto device_key = "deviceId"_v8(iso);
       if (obj->Get(ctx, device_key).ToLocal(&device_value) && !device_value->IsUndefined()) {
         if (!device_value->IsString())
           return false;
@@ -610,11 +610,11 @@ namespace fxe::js {
       auto arr = Array::New(iso, static_cast<int>(devices.size()));
       for (std::size_t i = 0; i < devices.size(); ++i) {
         auto obj = Object::New(iso);
-        (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "id"),
+        (void)obj->Set(ctx, "id"_v8(iso),
                        js_string(iso, devices[i].id.c_str()));
-        (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "name"),
+        (void)obj->Set(ctx, "name"_v8(iso),
                        js_string(iso, devices[i].name.c_str()));
-        (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "isDefault"),
+        (void)obj->Set(ctx, "isDefault"_v8(iso),
                        Boolean::New(iso, devices[i].is_default));
         (void)arr->Set(ctx, static_cast<uint32_t>(i), obj);
       }
@@ -672,7 +672,7 @@ namespace fxe::js {
 
     // Sound class.
     auto stpl = FunctionTemplate::New(iso, sound_constructor);
-    stpl->SetClassName(String::NewFromUtf8Literal(iso, "Sound"));
+    stpl->SetClassName("Sound"_v8(iso));
     stpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto sproto = stpl->PrototypeTemplate();
     sproto->Set(iso, "play", FunctionTemplate::New(iso, sound_play));
@@ -683,7 +683,7 @@ namespace fxe::js {
 
     // CaptureSession class.
     auto ctpl = FunctionTemplate::New(iso, capture_constructor);
-    ctpl->SetClassName(String::NewFromUtf8Literal(iso, "CaptureSession"));
+    ctpl->SetClassName("CaptureSession"_v8(iso));
     ctpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto cproto = ctpl->PrototypeTemplate();
     cproto->Set(iso, "stop", FunctionTemplate::New(iso, capture_session_stop));

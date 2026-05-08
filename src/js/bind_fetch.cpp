@@ -11,6 +11,7 @@
 #include "runtime/capabilities.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cctype>
 #include <cstdint>
@@ -438,7 +439,7 @@ namespace fxe::js {
       self->SetInternalField(0, External::New(iso, d, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_ABORT + 1));
       // Expose `signal` directly on the instance.
-      self->Set(ctx, String::NewFromUtf8Literal(iso, "signal"), sig_obj).Check();
+      self->Set(ctx, "signal"_v8(iso), sig_obj).Check();
       auto* persistent = new Global<Object>(iso, self);
       persistent->SetWeak(d, abort_ctrl_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(self);
@@ -450,7 +451,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto self = info.This();
       Local<Value> sig_v;
-      if (!self->Get(ctx, String::NewFromUtf8Literal(iso, "signal")).ToLocal(&sig_v))
+      if (!self->Get(ctx, "signal"_v8(iso)).ToLocal(&sig_v))
         return;
       if (!sig_v->IsObject())
         return;
@@ -642,7 +643,7 @@ namespace fxe::js {
       if (!JSON::Parse(ctx, src).ToLocal(&parsed)) {
         resolver
             ->Reject(ctx,
-                     Exception::SyntaxError(String::NewFromUtf8Literal(iso, "JSON parse failed")))
+                     Exception::SyntaxError("JSON parse failed"_v8(iso)))
             .Check();
       } else {
         resolver->Resolve(ctx, parsed).Check();
@@ -669,20 +670,19 @@ namespace fxe::js {
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto init = info[1].As<Object>();
         Local<Value> v;
-        if (init->Get(ctx, String::NewFromUtf8Literal(iso, "status")).ToLocal(&v) &&
+        if (init->Get(ctx, "status"_v8(iso)).ToLocal(&v) &&
             !v->IsUndefined()) {
           auto status = v->Int32Value(ctx).FromMaybe(200);
           if (status < 200 || status > 599) {
-            iso->ThrowException(Exception::RangeError(String::NewFromUtf8Literal(
-                iso, "Response: status must be in the range 200 to 599")));
+            iso->ThrowException(Exception::RangeError("Response: status must be in the range 200 to 599"_v8(iso)));
             return;
           }
           d->status = status;
         }
-        if (init->Get(ctx, String::NewFromUtf8Literal(iso, "statusText")).ToLocal(&v) &&
+        if (init->Get(ctx, "statusText"_v8(iso)).ToLocal(&v) &&
             !v->IsUndefined())
           d->status_text = to_str(iso, v);
-        if (init->Get(ctx, String::NewFromUtf8Literal(iso, "headers")).ToLocal(&v) &&
+        if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) &&
             !v->IsUndefined())
           headers_populate_from_value(iso, ctx, v, *h_data);
       }
@@ -724,16 +724,16 @@ namespace fxe::js {
         return true;
       auto init = init_v.As<Object>();
       Local<Value> v;
-      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "method")).ToLocal(&v) &&
+      if (init->Get(ctx, "method"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined())
         req.method = to_str(iso, v);
-      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "headers")).ToLocal(&v) &&
+      if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined()) {
         auto h_data = std::make_unique<headers_data>();
         headers_populate_from_value(iso, ctx, v, *h_data);
         req.headers_obj.Reset(iso, wrap_headers(iso, ctx, std::move(h_data)));
       }
-      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "body")).ToLocal(&v) &&
+      if (init->Get(ctx, "body"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined() && !v->IsNull()) {
         if (v->IsString()) {
           req.body = to_str(iso, v);
@@ -752,7 +752,7 @@ namespace fxe::js {
           // streaming body, which v0 explicitly does not support.
           auto o = v.As<Object>();
           Local<Value> getter;
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "getReader")).ToLocal(&getter) &&
+          if (o->Get(ctx, "getReader"_v8(iso)).ToLocal(&getter) &&
               getter->IsFunction()) {
             *throw_stream = true;
             return false;
@@ -765,15 +765,15 @@ namespace fxe::js {
         if (body_text_or_null)
           *body_text_or_null = req.body;
       }
-      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "signal")).ToLocal(&v) && v->IsObject())
+      if (init->Get(ctx, "signal"_v8(iso)).ToLocal(&v) && v->IsObject())
         req.signal_obj.Reset(iso, v.As<Object>());
-      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "proxy")).ToLocal(&v) &&
+      if (init->Get(ctx, "proxy"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined() && !v->IsNull())
         req.proxy = to_str(iso, v);
-      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "range")).ToLocal(&v) &&
+      if (init->Get(ctx, "range"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined() && !v->IsNull())
         req.range = to_str(iso, v);
-      if (init->Get(ctx, String::NewFromUtf8Literal(iso, "timeout_ms")).ToLocal(&v) &&
+      if (init->Get(ctx, "timeout_ms"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined() && !v->IsNull())
         req.timeout_ms = v->Int32Value(ctx).FromMaybe(0);
       return true;
@@ -808,8 +808,8 @@ namespace fxe::js {
       auto* persistent = new Global<Object>(iso, self);
       persistent->SetWeak(d, request_finalizer, WeakCallbackType::kParameter);
       // Expose simple props as own properties so JS readers see them.
-      self->Set(ctx, String::NewFromUtf8Literal(iso, "url"), s8(iso, d->url)).Check();
-      self->Set(ctx, String::NewFromUtf8Literal(iso, "method"), s8(iso, d->method)).Check();
+      self->Set(ctx, "url"_v8(iso), s8(iso, d->url)).Check();
+      self->Set(ctx, "method"_v8(iso), s8(iso, d->method)).Check();
       info.GetReturnValue().Set(self);
     }
 
@@ -937,13 +937,13 @@ namespace fxe::js {
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull())
         net::http_client::instance().set_cookie_file_path(to_str(iso, info[0]));
       auto obj = Object::New(iso);
-      obj->Set(ctx, String::NewFromUtf8Literal(iso, "set"),
+      obj->Set(ctx, "set"_v8(iso),
                Function::New(ctx, cookie_jar_set).ToLocalChecked())
           .Check();
-      obj->Set(ctx, String::NewFromUtf8Literal(iso, "get"),
+      obj->Set(ctx, "get"_v8(iso),
                Function::New(ctx, cookie_jar_get).ToLocalChecked())
           .Check();
-      obj->Set(ctx, String::NewFromUtf8Literal(iso, "clear"),
+      obj->Set(ctx, "clear"_v8(iso),
                Function::New(ctx, cookie_jar_clear).ToLocalChecked())
           .Check();
       info.GetReturnValue().Set(obj);
@@ -958,7 +958,7 @@ namespace fxe::js {
       if (info.Length() < 1) {
         resolver
             ->Reject(ctx,
-                     Exception::TypeError(String::NewFromUtf8Literal(iso, "fetch: missing url")))
+                     Exception::TypeError("fetch: missing url"_v8(iso)))
             .Check();
         return;
       }
@@ -997,8 +997,7 @@ namespace fxe::js {
         if (!extract_init(iso, ctx, info[1], scratch, &body_str, &throw_stream)) {
           if (throw_stream) {
             resolver
-                ->Reject(ctx, Exception::TypeError(String::NewFromUtf8Literal(
-                                  iso, "fetch: ReadableStream body is not supported in v0")))
+                ->Reject(ctx, Exception::TypeError("fetch: ReadableStream body is not supported in v0"_v8(iso)))
                 .Check();
             return;
           }
@@ -1027,7 +1026,7 @@ namespace fxe::js {
 
       if (hreq.url.empty()) {
         resolver
-            ->Reject(ctx, Exception::TypeError(String::NewFromUtf8Literal(iso, "fetch: empty url")))
+            ->Reject(ctx, Exception::TypeError("fetch: empty url"_v8(iso)))
             .Check();
         return;
       }
@@ -1113,7 +1112,7 @@ namespace fxe::js {
 
     // Headers
     auto htpl = FunctionTemplate::New(iso, headers_ctor);
-    htpl->SetClassName(String::NewFromUtf8Literal(iso, "Headers"));
+    htpl->SetClassName("Headers"_v8(iso));
     htpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto hproto = htpl->PrototypeTemplate();
     hproto->Set(iso, "get", FunctionTemplate::New(iso, headers_get));
@@ -1127,23 +1126,23 @@ namespace fxe::js {
 
     // Request
     auto rtpl = FunctionTemplate::New(iso, request_ctor);
-    rtpl->SetClassName(String::NewFromUtf8Literal(iso, "Request"));
+    rtpl->SetClassName("Request"_v8(iso));
     rtpl->InstanceTemplate()->SetInternalFieldCount(2);
     global->Set(iso, "Request", rtpl);
     request_tpl_table()[iso].Reset(iso, rtpl);
 
     // Response
     auto rsptpl = FunctionTemplate::New(iso, response_ctor);
-    rsptpl->SetClassName(String::NewFromUtf8Literal(iso, "Response"));
+    rsptpl->SetClassName("Response"_v8(iso));
     rsptpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto rspinst = rsptpl->InstanceTemplate();
-    rspinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "status"), resp_get_status);
-    rspinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "statusText"),
+    rspinst->SetNativeDataProperty("status"_v8(iso), resp_get_status);
+    rspinst->SetNativeDataProperty("statusText"_v8(iso),
                                    resp_get_status_text);
-    rspinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "ok"), resp_get_ok);
-    rspinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "url"), resp_get_url);
-    rspinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "headers"), resp_get_headers);
-    rspinst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "bodyUsed"), resp_get_body_used);
+    rspinst->SetNativeDataProperty("ok"_v8(iso), resp_get_ok);
+    rspinst->SetNativeDataProperty("url"_v8(iso), resp_get_url);
+    rspinst->SetNativeDataProperty("headers"_v8(iso), resp_get_headers);
+    rspinst->SetNativeDataProperty("bodyUsed"_v8(iso), resp_get_body_used);
     auto rspproto = rsptpl->PrototypeTemplate();
     rspproto->Set(iso, "text", FunctionTemplate::New(iso, resp_text));
     rspproto->Set(iso, "arrayBuffer", FunctionTemplate::New(iso, resp_array_buffer));
@@ -1156,12 +1155,12 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       throw_type(iso, "AbortSignal cannot be constructed directly");
     });
-    sigtpl->SetClassName(String::NewFromUtf8Literal(iso, "AbortSignal"));
+    sigtpl->SetClassName("AbortSignal"_v8(iso));
     sigtpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto siginst = sigtpl->InstanceTemplate();
-    siginst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "aborted"),
+    siginst->SetNativeDataProperty("aborted"_v8(iso),
                                    abort_signal_get_aborted);
-    siginst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "reason"),
+    siginst->SetNativeDataProperty("reason"_v8(iso),
                                    abort_signal_get_reason);
     auto sigproto = sigtpl->PrototypeTemplate();
     sigtpl->Set(iso, "abort", FunctionTemplate::New(iso, abort_signal_abort_static));
@@ -1173,7 +1172,7 @@ namespace fxe::js {
 
     // AbortController
     auto ctrltpl = FunctionTemplate::New(iso, abort_ctrl_ctor);
-    ctrltpl->SetClassName(String::NewFromUtf8Literal(iso, "AbortController"));
+    ctrltpl->SetClassName("AbortController"_v8(iso));
     ctrltpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto ctrlproto = ctrltpl->PrototypeTemplate();
     ctrlproto->Set(iso, "abort", FunctionTemplate::New(iso, abort_ctrl_abort));

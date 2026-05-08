@@ -6,6 +6,7 @@
 // open begin is dropped after a once-per-label warning).
 
 #include "bind_performance.hpp"
+#include <fxe/v8_strings.hpp>
 
 #include <chrono>
 #include <cstdio>
@@ -58,7 +59,7 @@ namespace fxe::js {
     void begin_mark_callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
       auto* iso = args.GetIsolate();
       if (args.Length() < 1 || !args[0]->IsString()) {
-        iso->ThrowError(v8::String::NewFromUtf8Literal(iso, "beginMark: name required"));
+        iso->ThrowError("beginMark: name required"_v8(iso));
         return;
       }
       auto name = to_std_string(iso, args[0]);
@@ -71,7 +72,7 @@ namespace fxe::js {
     void end_mark_callback(const v8::FunctionCallbackInfo<v8::Value>& args) {
       auto* iso = args.GetIsolate();
       if (args.Length() < 1 || !args[0]->IsString()) {
-        iso->ThrowError(v8::String::NewFromUtf8Literal(iso, "endMark: name required"));
+        iso->ThrowError("endMark: name required"_v8(iso));
         return;
       }
       auto name = to_std_string(iso, args[0]);
@@ -120,11 +121,11 @@ namespace fxe::js {
     v8::HandleScope hs(iso);
     auto ctx = iso->GetCurrentContext();
     v8::Local<v8::Value> perf_v;
-    if (!global->Get(ctx, v8::String::NewFromUtf8Literal(iso, "performance")).ToLocal(&perf_v) ||
+    if (!global->Get(ctx, "performance"_v8(iso)).ToLocal(&perf_v) ||
         !perf_v->IsObject()) {
       // No existing `performance`; create a stub host-side caller can extend.
       perf_v = v8::Object::New(iso);
-      (void)global->Set(ctx, v8::String::NewFromUtf8Literal(iso, "performance"), perf_v);
+      (void)global->Set(ctx, "performance"_v8(iso), perf_v);
     }
     auto perf = perf_v.As<v8::Object>();
 
@@ -133,10 +134,10 @@ namespace fxe::js {
     auto snap_fn = v8::Function::New(ctx, snapshot_callback).ToLocalChecked();
 
     auto timeline = v8::Object::New(iso);
-    (void)timeline->Set(ctx, v8::String::NewFromUtf8Literal(iso, "beginMark"), begin_fn);
-    (void)timeline->Set(ctx, v8::String::NewFromUtf8Literal(iso, "endMark"), end_fn);
-    (void)timeline->Set(ctx, v8::String::NewFromUtf8Literal(iso, "snapshot"), snap_fn);
-    (void)perf->Set(ctx, v8::String::NewFromUtf8Literal(iso, "timeline"), timeline);
+    (void)timeline->Set(ctx, "beginMark"_v8(iso), begin_fn);
+    (void)timeline->Set(ctx, "endMark"_v8(iso), end_fn);
+    (void)timeline->Set(ctx, "snapshot"_v8(iso), snap_fn);
+    (void)perf->Set(ctx, "timeline"_v8(iso), timeline);
   }
 
   void perf_record_sample(std::string_view name, double ms) noexcept {

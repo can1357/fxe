@@ -1,6 +1,7 @@
 #include "bind_print.hpp"
 
 #include <fxe/command_buffer.hpp>
+#include <fxe/v8_strings.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/print_pdf.hpp>
 #include <fxe/renderer.hpp>
@@ -79,7 +80,7 @@ namespace fxe::js {
           return;
         }
         Local<Value> cb_value;
-        if (!page_obj->Get(ctx, String::NewFromUtf8Literal(iso, "commandBuffer"))
+        if (!page_obj->Get(ctx, "commandBuffer"_v8(iso))
                  .ToLocal(&cb_value)) {
           throw_type(iso, "Print.toPdf: page requires commandBuffer");
           return;

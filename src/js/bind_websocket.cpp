@@ -12,6 +12,7 @@
 #include "../net/websocket_client.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cstdint>
 #include <cstring>
@@ -151,7 +152,7 @@ namespace fxe::js {
       auto self = info.This();
       self->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
       self->SetInternalField(1, Integer::NewFromUnsigned(iso, TAG_WEBSOCKET));
-      self->Set(ctx, String::NewFromUtf8Literal(iso, "url"), s8(iso, url)).Check();
+      self->Set(ctx, "url"_v8(iso), s8(iso, url)).Check();
       h->isolate = iso;
       h->self.Reset(iso, self);
       h->self.SetWeak(h, ws_finalizer, WeakCallbackType::kParameter);
@@ -183,7 +184,7 @@ namespace fxe::js {
     void ws_get_extensions(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       (void)iso;
-      info.GetReturnValue().Set(String::NewFromUtf8Literal(info.GetIsolate(), ""));
+      info.GetReturnValue().Set(""_v8(info.GetIsolate()));
     }
 
     void ws_get_binary_type(Local<Name>, const PropertyCallbackInfo<Value>& info) {
@@ -340,7 +341,7 @@ namespace fxe::js {
 
     Local<Object> make_event_obj(Isolate* iso, Local<Context> ctx, const std::string& type) {
       auto o = Object::New(iso);
-      o->Set(ctx, String::NewFromUtf8Literal(iso, "type"), s8(iso, type)).Check();
+      o->Set(ctx, "type"_v8(iso), s8(iso, type)).Check();
       return o;
     }
 
@@ -385,18 +386,18 @@ namespace fxe::js {
   void install_websocket_global(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, ws_ctor);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "WebSocket"));
+    tpl->SetClassName("WebSocket"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto inst = tpl->InstanceTemplate();
-    inst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "readyState"), ws_get_ready_state,
+    inst->SetNativeDataProperty("readyState"_v8(iso), ws_get_ready_state,
                                 nullptr);
-    inst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "bufferedAmount"),
+    inst->SetNativeDataProperty("bufferedAmount"_v8(iso),
                                 ws_get_buffered_amount, nullptr);
-    inst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "protocol"), ws_get_protocol,
+    inst->SetNativeDataProperty("protocol"_v8(iso), ws_get_protocol,
                                 nullptr);
-    inst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "extensions"), ws_get_extensions,
+    inst->SetNativeDataProperty("extensions"_v8(iso), ws_get_extensions,
                                 nullptr);
-    inst->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "binaryType"), ws_get_binary_type,
+    inst->SetNativeDataProperty("binaryType"_v8(iso), ws_get_binary_type,
                                 ws_set_binary_type);
     // Handler properties via NativeAccessor on Name
     auto add_handler = [&](const char* name) {
@@ -460,14 +461,14 @@ namespace fxe::js::bind_websocket {
         } break;
         case fxe::net::ws_event_kind::message_text: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("message"));
-          eo->Set(ctx, String::NewFromUtf8Literal(iso, "data"), fxe::js::s8(iso, ev.text)).Check();
+          eo->Set(ctx, "data"_v8(iso), fxe::js::s8(iso, ev.text)).Check();
           fxe::js::dispatch(iso, ctx, h, "message", eo);
         } break;
         case fxe::net::ws_event_kind::message_binary: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("message"));
           if (h->binary_type == "blob") {
             auto bytes = std::make_shared<std::vector<std::uint8_t>>(std::move(ev.binary));
-            eo->Set(ctx, String::NewFromUtf8Literal(iso, "data"),
+            eo->Set(ctx, "data"_v8(iso),
                     fxe::js::make_blob_object(iso, ctx, std::move(bytes)))
                 .Check();
           } else {
@@ -475,22 +476,22 @@ namespace fxe::js::bind_websocket {
             if (!ev.binary.empty())
               std::memcpy(store->Data(), ev.binary.data(), ev.binary.size());
             auto ab = ArrayBuffer::New(iso, std::move(store));
-            eo->Set(ctx, String::NewFromUtf8Literal(iso, "data"), ab).Check();
+            eo->Set(ctx, "data"_v8(iso), ab).Check();
           }
           fxe::js::dispatch(iso, ctx, h, "message", eo);
         } break;
         case fxe::net::ws_event_kind::error_: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("error"));
-          eo->Set(ctx, String::NewFromUtf8Literal(iso, "message"), fxe::js::s8(iso, ev.text))
+          eo->Set(ctx, "message"_v8(iso), fxe::js::s8(iso, ev.text))
               .Check();
           fxe::js::dispatch(iso, ctx, h, "error", eo);
         } break;
         case fxe::net::ws_event_kind::close: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("close"));
-          eo->Set(ctx, String::NewFromUtf8Literal(iso, "code"), Integer::New(iso, ev.code)).Check();
-          eo->Set(ctx, String::NewFromUtf8Literal(iso, "reason"), fxe::js::s8(iso, ev.reason))
+          eo->Set(ctx, "code"_v8(iso), Integer::New(iso, ev.code)).Check();
+          eo->Set(ctx, "reason"_v8(iso), fxe::js::s8(iso, ev.reason))
               .Check();
-          eo->Set(ctx, String::NewFromUtf8Literal(iso, "wasClean"),
+          eo->Set(ctx, "wasClean"_v8(iso),
                   v8::Boolean::New(iso, ev.was_clean))
               .Check();
           fxe::js::dispatch(iso, ctx, h, "close", eo);

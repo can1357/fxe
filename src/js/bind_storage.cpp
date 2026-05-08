@@ -3,6 +3,7 @@
 #include "bind_storage.hpp"
 
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "../os/os.hpp"
 
@@ -504,7 +505,7 @@ namespace fxe::js {
       t->Set(iso, "removeItem", FunctionTemplate::New(iso, storage_remove_item, data));
       t->Set(iso, "clear", FunctionTemplate::New(iso, storage_clear, data));
       t->Set(iso, "key", FunctionTemplate::New(iso, storage_key, data));
-      t->SetAccessorProperty(String::NewFromUtf8Literal(iso, "length"),
+      t->SetAccessorProperty("length"_v8(iso),
                              FunctionTemplate::New(iso, storage_length, data));
       return t;
     }

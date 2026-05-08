@@ -8,6 +8,7 @@
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -256,7 +257,7 @@ namespace fxe::js {
   void install_spritesheet_global(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, s_constructor);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "Spritesheet"));
+    tpl->SetClassName("Spritesheet"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
 
     auto proto = tpl->PrototypeTemplate();

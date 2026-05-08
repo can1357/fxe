@@ -22,6 +22,7 @@
 #include "bind_sqlite.hpp"
 
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -679,7 +680,7 @@ namespace fxe::js {
       if (slot.IsEmpty()) {
         HandleScope hs(iso);
         auto tpl = FunctionTemplate::New(iso);
-        tpl->SetClassName(String::NewFromUtf8Literal(iso, "SqliteStatementIterator"));
+        tpl->SetClassName("SqliteStatementIterator"_v8(iso));
         tpl->InstanceTemplate()->SetInternalFieldCount(1);
         auto proto = tpl->PrototypeTemplate();
         proto->Set(iso, "next", FunctionTemplate::New(iso, iterator_next));
@@ -1309,7 +1310,7 @@ namespace fxe::js {
 
     Local<FunctionTemplate> build_statement_template(Isolate* iso) {
       auto tpl = FunctionTemplate::New(iso, stmt_constructor);
-      tpl->SetClassName(String::NewFromUtf8Literal(iso, "Statement"));
+      tpl->SetClassName("Statement"_v8(iso));
       tpl->InstanceTemplate()->SetInternalFieldCount(2);
       auto proto = tpl->PrototypeTemplate();
       proto->Set(iso, "all", FunctionTemplate::New(iso, stmt_all));
@@ -1320,11 +1321,11 @@ namespace fxe::js {
       proto->Set(iso, "finalize", FunctionTemplate::New(iso, stmt_finalize));
       proto->Set(iso, "toString", FunctionTemplate::New(iso, stmt_to_string));
       proto->Set(iso, "as", FunctionTemplate::New(iso, stmt_as));
-      proto->SetAccessorProperty(String::NewFromUtf8Literal(iso, "columnNames"),
+      proto->SetAccessorProperty("columnNames"_v8(iso),
                                  FunctionTemplate::New(iso, stmt_get_column_names));
-      proto->SetAccessorProperty(String::NewFromUtf8Literal(iso, "paramsCount"),
+      proto->SetAccessorProperty("paramsCount"_v8(iso),
                                  FunctionTemplate::New(iso, stmt_get_params_count));
-      proto->SetAccessorProperty(String::NewFromUtf8Literal(iso, "native"),
+      proto->SetAccessorProperty("native"_v8(iso),
                                  FunctionTemplate::New(iso, stmt_get_native));
       proto->Set(Symbol::GetIterator(iso), FunctionTemplate::New(iso, stmt_iterate));
       proto->Set(Symbol::GetDispose(iso), FunctionTemplate::New(iso, stmt_finalize));
@@ -1333,7 +1334,7 @@ namespace fxe::js {
 
     Local<FunctionTemplate> build_database_template(Isolate* iso) {
       auto tpl = FunctionTemplate::New(iso, db_constructor);
-      tpl->SetClassName(String::NewFromUtf8Literal(iso, "Database"));
+      tpl->SetClassName("Database"_v8(iso));
       tpl->InstanceTemplate()->SetInternalFieldCount(2);
       auto proto = tpl->PrototypeTemplate();
       proto->Set(iso, "query", FunctionTemplate::New(iso, db_query));
@@ -1346,11 +1347,11 @@ namespace fxe::js {
       proto->Set(iso, "loadExtension", FunctionTemplate::New(iso, db_load_extension));
       proto->Set(iso, "fileControl", FunctionTemplate::New(iso, db_file_control));
       proto->Set(Symbol::GetDispose(iso), FunctionTemplate::New(iso, db_close));
-      proto->SetAccessorProperty(String::NewFromUtf8Literal(iso, "inTransaction"),
+      proto->SetAccessorProperty("inTransaction"_v8(iso),
                                  FunctionTemplate::New(iso, db_in_transaction));
-      proto->SetAccessorProperty(String::NewFromUtf8Literal(iso, "filename"),
+      proto->SetAccessorProperty("filename"_v8(iso),
                                  FunctionTemplate::New(iso, db_get_filename));
-      proto->SetAccessorProperty(String::NewFromUtf8Literal(iso, "handle"),
+      proto->SetAccessorProperty("handle"_v8(iso),
                                  FunctionTemplate::New(iso, db_get_handle));
       tpl->Set(iso, "deserialize", FunctionTemplate::New(iso, db_static_deserialize));
       tpl->Set(iso, "setCustomSQLite", FunctionTemplate::New(iso, db_static_set_custom_sqlite));
@@ -1435,12 +1436,12 @@ namespace fxe::js {
   MaybeLocal<Module> build_sqlite_module(Isolate* iso, Local<Context> /*ctx*/) {
     HandleScope hs(iso);
     std::array<Local<String>, 5> exports{
-        String::NewFromUtf8Literal(iso, "Database"),  String::NewFromUtf8Literal(iso, "Statement"),
-        String::NewFromUtf8Literal(iso, "constants"), String::NewFromUtf8Literal(iso, "version"),
-        String::NewFromUtf8Literal(iso, "default"),
+        "Database"_v8(iso),  "Statement"_v8(iso),
+        "constants"_v8(iso), "version"_v8(iso),
+        "default"_v8(iso),
     };
     MemorySpan<const Local<String>> span(exports.data(), exports.size());
-    auto module_name = String::NewFromUtf8Literal(iso, "fxe:sqlite");
+    auto module_name = "fxe:sqlite"_v8(iso);
     return Module::CreateSyntheticModule(iso, module_name, span, sqlite_module_evaluate);
   }
 } // namespace fxe::js

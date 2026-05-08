@@ -1,6 +1,7 @@
 #include "bind_offscreen.hpp"
 
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/renderer.hpp>
@@ -67,24 +68,24 @@ namespace fxe::js {
         return;
       auto o = value.As<Object>();
       Local<Value> v;
-      if (o->Get(ctx, String::NewFromUtf8Literal(iso, "width")).ToLocal(&v))
+      if (o->Get(ctx, "width"_v8(iso)).ToLocal(&v))
         opts.width = v->Uint32Value(ctx).FromMaybe(0);
-      if (o->Get(ctx, String::NewFromUtf8Literal(iso, "height")).ToLocal(&v))
+      if (o->Get(ctx, "height"_v8(iso)).ToLocal(&v))
         opts.height = v->Uint32Value(ctx).FromMaybe(0);
-      if (o->Get(ctx, String::NewFromUtf8Literal(iso, "multisample")).ToLocal(&v) &&
+      if (o->Get(ctx, "multisample"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined())
         opts.multisample = v->Uint32Value(ctx).FromMaybe(opts.multisample);
-      if (o->Get(ctx, String::NewFromUtf8Literal(iso, "mipLevels")).ToLocal(&v) &&
+      if (o->Get(ctx, "mipLevels"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined())
         opts.mip_levels = v->Uint32Value(ctx).FromMaybe(opts.mip_levels);
-      if (o->Get(ctx, String::NewFromUtf8Literal(iso, "enableDepth")).ToLocal(&v) &&
+      if (o->Get(ctx, "enableDepth"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined())
         opts.enable_depth = v->BooleanValue(iso);
       // `parent`: existing Renderer/OffscreenRenderer whose device this
       // offscreen will share. Required for cross-renderer sampling, e.g.
       // when the offscreen's color attachment will be bound on the main
       // window renderer via `bindUserTexture(...)`.
-      if (o->Get(ctx, String::NewFromUtf8Literal(iso, "parent")).ToLocal(&v) &&
+      if (o->Get(ctx, "parent"_v8(iso)).ToLocal(&v) &&
           !v->IsUndefined() && !v->IsNull() && v->IsObject()) {
 #if FXE_HAS_WGPU
         auto* parent_r = static_cast<renderer*>(unwrap(v.As<Object>(), TAG_RENDERER));
@@ -124,7 +125,7 @@ namespace fxe::js {
       }
       if (!r) {
         iso->ThrowException(
-            Exception::Error(String::NewFromUtf8Literal(iso, "offscreen create failed")));
+            Exception::Error("offscreen create failed"_v8(iso)));
         return;
       }
 
@@ -228,7 +229,7 @@ namespace fxe::js {
   void install_offscreen_template(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, offscreen_constructor);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "OffscreenRenderer"));
+    tpl->SetClassName("OffscreenRenderer"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
     tpl->Inherit(get_command_buffer_template(iso));
 

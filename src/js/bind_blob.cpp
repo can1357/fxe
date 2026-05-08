@@ -2,6 +2,7 @@
 
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -260,7 +261,7 @@ namespace fxe::js {
         return {};
       Local<Value> type_value;
       if (!options.As<Object>()
-               ->Get(ctx, String::NewFromUtf8Literal(iso, "type"))
+               ->Get(ctx, "type"_v8(iso))
                .ToLocal(&type_value) ||
           type_value->IsUndefined())
         return {};
@@ -461,14 +462,14 @@ namespace fxe::js {
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       auto result = Object::New(iso);
       if (h->consumed) {
-        result->Set(ctx, String::NewFromUtf8Literal(iso, "done"), Boolean::New(iso, true)).Check();
+        result->Set(ctx, "done"_v8(iso), Boolean::New(iso, true)).Check();
       } else {
         h->consumed = true;
         const auto* data = h->length == 0 ? nullptr : h->bytes->data() + h->offset;
         auto ab = copy_array_buffer(iso, data, h->length);
-        result->Set(ctx, String::NewFromUtf8Literal(iso, "done"), Boolean::New(iso, false)).Check();
+        result->Set(ctx, "done"_v8(iso), Boolean::New(iso, false)).Check();
         result
-            ->Set(ctx, String::NewFromUtf8Literal(iso, "value"), Uint8Array::New(ab, 0, h->length))
+            ->Set(ctx, "value"_v8(iso), Uint8Array::New(ab, 0, h->length))
             .Check();
       }
       resolver->Resolve(ctx, result).Check();
@@ -493,11 +494,11 @@ namespace fxe::js {
     HandleScope hs(iso);
 
     auto blob_tpl = FunctionTemplate::New(iso, blob_ctor);
-    blob_tpl->SetClassName(String::NewFromUtf8Literal(iso, "Blob"));
+    blob_tpl->SetClassName("Blob"_v8(iso));
     blob_tpl->InstanceTemplate()->SetInternalFieldCount(2);
-    blob_tpl->InstanceTemplate()->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "size"),
+    blob_tpl->InstanceTemplate()->SetNativeDataProperty("size"_v8(iso),
                                                         blob_get_size, nullptr);
-    blob_tpl->InstanceTemplate()->SetNativeDataProperty(String::NewFromUtf8Literal(iso, "type"),
+    blob_tpl->InstanceTemplate()->SetNativeDataProperty("type"_v8(iso),
                                                         blob_get_type, nullptr);
     auto blob_proto = blob_tpl->PrototypeTemplate();
     blob_proto->Set(iso, "slice", FunctionTemplate::New(iso, blob_slice));
@@ -506,13 +507,13 @@ namespace fxe::js {
     blob_proto->Set(iso, "stream", FunctionTemplate::New(iso, blob_stream));
 
     auto stream_tpl = FunctionTemplate::New(iso, stream_ctor);
-    stream_tpl->SetClassName(String::NewFromUtf8Literal(iso, "ReadableStream"));
+    stream_tpl->SetClassName("ReadableStream"_v8(iso));
     stream_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     stream_tpl->PrototypeTemplate()->Set(iso, "getReader",
                                          FunctionTemplate::New(iso, stream_get_reader));
 
     auto reader_tpl = FunctionTemplate::New(iso);
-    reader_tpl->SetClassName(String::NewFromUtf8Literal(iso, "ReadableStreamDefaultReader"));
+    reader_tpl->SetClassName("ReadableStreamDefaultReader"_v8(iso));
     reader_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     reader_tpl->PrototypeTemplate()->Set(iso, "read", FunctionTemplate::New(iso, reader_read));
 

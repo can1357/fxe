@@ -10,6 +10,7 @@
 #include <fxe/js_bindings.hpp>
 #include <fxe/primitives.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <algorithm>
 #include <array>
@@ -108,20 +109,20 @@ namespace fxe::js {
       if (v->IsObject() && !v->IsArray() && !v->IsFloat32Array() && !v->IsNumber()) {
         auto obj = v.As<Object>();
         Local<Value> marker;
-        if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "__fxePaint")).ToLocal(&marker) &&
+        if (obj->Get(ctx, "__fxePaint"_v8(iso)).ToLocal(&marker) &&
             marker->Uint32Value(ctx).FromMaybe(0) == PAINT_KIND_PROP) {
           primitives::paint_value paint;
           Local<Value> kind_v;
-          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "kind")).ToLocal(&kind_v))
+          if (obj->Get(ctx, "kind"_v8(iso)).ToLocal(&kind_v))
             paint.kind = static_cast<primitives::paint_kind>(kind_v->Uint32Value(ctx).FromMaybe(0));
           Local<Value> p0_v;
-          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "p0")).ToLocal(&p0_v))
+          if (obj->Get(ctx, "p0"_v8(iso)).ToLocal(&p0_v))
             (void)decode_vec4(p0_v, paint.p0);
           Local<Value> p1_v;
-          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "p1")).ToLocal(&p1_v))
+          if (obj->Get(ctx, "p1"_v8(iso)).ToLocal(&p1_v))
             (void)decode_vec4(p1_v, paint.p1);
           Local<Value> stops_v;
-          if (obj->Get(ctx, String::NewFromUtf8Literal(iso, "stops")).ToLocal(&stops_v) &&
+          if (obj->Get(ctx, "stops"_v8(iso)).ToLocal(&stops_v) &&
               stops_v->IsFloat32Array()) {
             auto stops = stops_v.As<Float32Array>();
             std::vector<float> raw(stops->Length());
@@ -224,13 +225,13 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "missing CommandBuffer")));
+            Exception::TypeError("missing CommandBuffer"_v8(iso)));
         return nullptr;
       }
       auto* cb = unwrap_any_cb(info[0]);
       if (!cb) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "first arg must be CommandBuffer")));
+            "first arg must be CommandBuffer"_v8(iso)));
         return nullptr;
       }
       return cb;
@@ -250,7 +251,7 @@ namespace fxe::js {
       math::vec4 src{}, dst{};
       if (info.Length() < 3 || !decode_vec4(info[1], src) || !decode_vec4(info[2], dst)) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "drawLine: src/dst must be Float32Array(4)")));
+            "drawLine: src/dst must be Float32Array(4)"_v8(iso)));
         return;
       }
       auto color = info.Length() >= 4 ? decode_color(iso, ctx, info[3]) : white;
@@ -269,7 +270,7 @@ namespace fxe::js {
       if (info.Length() < 4 || !decode_vec4(info[1], a) || !decode_vec4(info[2], b) ||
           !decode_vec4(info[3], c)) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "fillTriangle: a/b/c must be Float32Array(4)")));
+            "fillTriangle: a/b/c must be Float32Array(4)"_v8(iso)));
         return;
       }
       auto color = info.Length() >= 5 ? decode_color(iso, ctx, info[4]) : white;
@@ -294,8 +295,7 @@ namespace fxe::js {
         sz.y = float(num(ctx, info[4]));
         next = 5;
       } else if (info.Length() < 3 || !decode_vec2(info[1], at) || !decode_vec2(info[2], sz)) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "fillRect: expected (cb, [x,y], [w,h], …) or (cb, x, y, w, h, …)")));
+        iso->ThrowException(Exception::TypeError("fillRect: expected (cb, [x,y], [w,h], …) or (cb, x, y, w, h, …)"_v8(iso)));
         return;
       } else {
         next = 3;
@@ -324,8 +324,7 @@ namespace fxe::js {
         sz.y = float(num(ctx, info[4]));
         next = 5;
       } else if (info.Length() < 3 || !decode_vec2(info[1], at) || !decode_vec2(info[2], sz)) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "drawRect: expected (cb, [x,y], [w,h], …) or (cb, x, y, w, h, …)")));
+        iso->ThrowException(Exception::TypeError("drawRect: expected (cb, [x,y], [w,h], …) or (cb, x, y, w, h, …)"_v8(iso)));
         return;
       } else {
         next = 3;
@@ -347,7 +346,7 @@ namespace fxe::js {
       math::mat4x4 m;
       if (info.Length() < 2 || !decode_mat4(info[1], m)) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "expected mat4 Float32Array(16) at arg 2")));
+            "expected mat4 Float32Array(16) at arg 2"_v8(iso)));
         return;
       }
       auto color = info.Length() >= 3 ? decode_color(iso, ctx, info[2]) : white;
@@ -580,8 +579,8 @@ namespace fxe::js {
         next = 3;
       } else if (info.Length() < 4 || !decode_vec2(info[1], at)) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "drawText: expected (cb, [x,y], depth, text, opts?) or "
-                                            "(cb, x, y, depth, text, size?, color?)")));
+            "drawText: expected (cb, [x,y], depth, text, opts?) or "
+            "(cb, x, y, depth, text, size?, color?)"_v8(iso)));
         return;
       } else {
         next = 2;
@@ -596,23 +595,23 @@ namespace fxe::js {
         if (v->IsObject() && !v->IsNumber()) {
           auto o = v.As<Object>();
           Local<Value> field;
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "color")).ToLocal(&field))
+          if (o->Get(ctx, "color"_v8(iso)).ToLocal(&field))
             style.color = decode_color(iso, ctx, field);
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "size")).ToLocal(&field) &&
+          if (o->Get(ctx, "size"_v8(iso)).ToLocal(&field) &&
               field->IsNumber())
             style.pt = float(field->NumberValue(ctx).FromMaybe(16.0));
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "pt")).ToLocal(&field) &&
+          if (o->Get(ctx, "pt"_v8(iso)).ToLocal(&field) &&
               field->IsNumber())
             style.pt = static_cast<float>(
                 field->NumberValue(ctx).FromMaybe(static_cast<double>(style.pt)));
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "fontId")).ToLocal(&field) &&
+          if (o->Get(ctx, "fontId"_v8(iso)).ToLocal(&field) &&
               field->IsNumber())
             font_id = static_cast<u32>(field->NumberValue(ctx).FromMaybe(0.0));
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "lineHeight")).ToLocal(&field) &&
+          if (o->Get(ctx, "lineHeight"_v8(iso)).ToLocal(&field) &&
               field->IsNumber())
             style.line_height = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
           // features: ["liga", "calt"] or [["ss01", 1], ...]
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "features")).ToLocal(&field) &&
+          if (o->Get(ctx, "features"_v8(iso)).ToLocal(&field) &&
               field->IsArray()) {
             auto a = field.As<Array>();
             const u32 n = a->Length();
@@ -643,7 +642,7 @@ namespace fxe::js {
             }
           }
           // variations: { wght: 600, wdth: 110 }
-          if (o->Get(ctx, String::NewFromUtf8Literal(iso, "variations")).ToLocal(&field) &&
+          if (o->Get(ctx, "variations"_v8(iso)).ToLocal(&field) &&
               field->IsObject() && !field->IsArray()) {
             auto vobj = field.As<Object>();
             Local<Array> keys;
@@ -703,19 +702,19 @@ namespace fxe::js {
         return;
       if (info.Length() < 2 || !info[1]->IsArray()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "drawTextRun: expected (cb, runs[])")));
+            "drawTextRun: expected (cb, runs[])"_v8(iso)));
         return;
       }
       auto runs = info[1].As<Array>();
       const u32 n = runs->Length();
       const auto& default_font = get_font_info();
       // Reused property keys.
-      auto k_x = String::NewFromUtf8Literal(iso, "x");
-      auto k_y = String::NewFromUtf8Literal(iso, "y");
-      auto k_text = String::NewFromUtf8Literal(iso, "text");
-      auto k_size = String::NewFromUtf8Literal(iso, "size");
-      auto k_color = String::NewFromUtf8Literal(iso, "color");
-      auto k_depth = String::NewFromUtf8Literal(iso, "depth");
+      auto k_x = "x"_v8(iso);
+      auto k_y = "y"_v8(iso);
+      auto k_text = "text"_v8(iso);
+      auto k_size = "size"_v8(iso);
+      auto k_color = "color"_v8(iso);
+      auto k_depth = "depth"_v8(iso);
       for (u32 i = 0; i < n; ++i) {
         Local<Value> ev;
         if (!runs->Get(ctx, i).ToLocal(&ev) || !ev->IsObject())
@@ -764,14 +763,13 @@ namespace fxe::js {
       if (!cb)
         return;
       if (info.Length() < 6) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "drawTextureQuad: expected (cb, slot, x, y, w, h, [uv], [tint], [depth])")));
+        iso->ThrowException(Exception::TypeError("drawTextureQuad: expected (cb, slot, x, y, w, h, [uv], [tint], [depth])"_v8(iso)));
         return;
       }
       const u32 slot = static_cast<u32>(info[1]->Uint32Value(ctx).FromMaybe(0));
       if (slot >= 4) {
         iso->ThrowException(Exception::RangeError(
-            String::NewFromUtf8Literal(iso, "drawTextureQuad: slot out of range (0..3)")));
+            "drawTextureQuad: slot out of range (0..3)"_v8(iso)));
         return;
       }
       const float x = static_cast<float>(num(ctx, info[2]));
@@ -810,7 +808,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (!info.IsConstructCall()) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(iso, "Path: use new")));
+        iso->ThrowException(Exception::TypeError("Path: use new"_v8(iso)));
         return;
       }
       auto* h = new path_holder();
@@ -826,7 +824,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = static_cast<path_holder*>(unwrap(info.This(), TAG_PATH));
       if (!h) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(iso, "invalid Path")));
+        iso->ThrowException(Exception::TypeError("invalid Path"_v8(iso)));
         return;
       }
       fn(h->path, ctx);
@@ -872,9 +870,9 @@ namespace fxe::js {
     Local<Object> make_paint(Isolate* iso, Local<Context> ctx, primitives::paint_kind kind,
                              math::vec4 p0, math::vec4 p1, Local<Value> stops_v) {
       auto o = Object::New(iso);
-      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "__fxePaint"),
+      (void)o->Set(ctx, "__fxePaint"_v8(iso),
                    Integer::NewFromUnsigned(iso, PAINT_KIND_PROP));
-      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "kind"),
+      (void)o->Set(ctx, "kind"_v8(iso),
                    Integer::NewFromUnsigned(iso, static_cast<u32>(kind)));
       auto a0 = Array::New(iso, 4);
       auto a1 = Array::New(iso, 4);
@@ -882,9 +880,9 @@ namespace fxe::js {
         (void)a0->Set(ctx, static_cast<uint32_t>(i), Number::New(iso, static_cast<double>(p0[i])));
         (void)a1->Set(ctx, static_cast<uint32_t>(i), Number::New(iso, static_cast<double>(p1[i])));
       }
-      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "p0"), a0);
-      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "p1"), a1);
-      (void)o->Set(ctx, String::NewFromUtf8Literal(iso, "stops"), stops_v);
+      (void)o->Set(ctx, "p0"_v8(iso), a0);
+      (void)o->Set(ctx, "p1"_v8(iso), a1);
+      (void)o->Set(ctx, "stops"_v8(iso), stops_v);
       return o;
     }
 
@@ -895,7 +893,7 @@ namespace fxe::js {
       if (info.Length() < 3 || !decode_vec2(info[0], a) || !decode_vec2(info[1], b) ||
           !info[2]->IsFloat32Array()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "linearGradient: expected (p0, p1, stops)")));
+            "linearGradient: expected (p0, p1, stops)"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(make_paint(iso, ctx, primitives::paint_kind::linear,
@@ -907,7 +905,7 @@ namespace fxe::js {
       math::vec2 c{};
       if (info.Length() < 3 || !decode_vec2(info[0], c) || !info[2]->IsFloat32Array()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "radialGradient: expected (center, radius, stops)")));
+            "radialGradient: expected (center, radius, stops)"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(make_paint(iso, ctx, primitives::paint_kind::radial,
@@ -920,7 +918,7 @@ namespace fxe::js {
       math::vec2 c{};
       if (info.Length() < 3 || !decode_vec2(info[0], c) || !info[2]->IsFloat32Array()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "conicGradient: expected (center, angle, stops)")));
+            "conicGradient: expected (center, angle, stops)"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(make_paint(iso, ctx, primitives::paint_kind::conic,
@@ -936,8 +934,7 @@ namespace fxe::js {
         return;
       auto* p = info.Length() >= 2 ? unwrap_path(info[1]) : nullptr;
       if (!p) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "fillPath: expected (CommandBuffer, Path, paint?, fillRule?, depth?)")));
+        iso->ThrowException(Exception::TypeError("fillPath: expected (CommandBuffer, Path, paint?, fillRule?, depth?)"_v8(iso)));
         return;
       }
       auto paint = info.Length() >= 3 ? decode_paint(iso, ctx, info[2])
@@ -959,8 +956,8 @@ namespace fxe::js {
       auto* p = info.Length() >= 2 ? unwrap_path(info[1]) : nullptr;
       if (!p) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "strokePath: expected (CommandBuffer, Path, paint?, "
-                                            "lineWidth?, join?, cap?, depth?)")));
+            "strokePath: expected (CommandBuffer, Path, paint?, "
+            "lineWidth?, join?, cap?, depth?)"_v8(iso)));
         return;
       }
       auto paint = info.Length() >= 3 ? decode_paint(iso, ctx, info[2])
@@ -1119,14 +1116,14 @@ namespace fxe::js {
         (void)starts->Set(ctx, static_cast<u32>(i),
                           Integer::NewFromUnsigned(iso, wrapped.starts[i]));
       }
-      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "lines"), lines);
-      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "width"),
+      (void)obj->Set(ctx, "lines"_v8(iso), lines);
+      (void)obj->Set(ctx, "width"_v8(iso),
                      Number::New(iso, static_cast<double>(wrapped.width)));
-      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "height"),
+      (void)obj->Set(ctx, "height"_v8(iso),
                      Number::New(iso, static_cast<double>(wrapped.height)));
-      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "lineHeight"),
+      (void)obj->Set(ctx, "lineHeight"_v8(iso),
                      Number::New(iso, static_cast<double>(wrapped.line_height)));
-      (void)obj->Set(ctx, String::NewFromUtf8Literal(iso, "lineStartIndices"), starts);
+      (void)obj->Set(ctx, "lineStartIndices"_v8(iso), starts);
       return obj;
     }
 
@@ -1225,19 +1222,17 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 3) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "drain(cmdBuffer, opcodes Uint32Array, params Float32Array)")));
+        iso->ThrowException(Exception::TypeError("drain(cmdBuffer, opcodes Uint32Array, params Float32Array)"_v8(iso)));
         return;
       }
       auto* cb = unwrap_any_cb(info[0]);
       if (!cb) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "drain: first arg must be CommandBuffer")));
+            "drain: first arg must be CommandBuffer"_v8(iso)));
         return;
       }
       if (!info[1]->IsUint32Array() || !info[2]->IsFloat32Array()) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "drain: expected Uint32Array opcodes and Float32Array params")));
+        iso->ThrowException(Exception::TypeError("drain: expected Uint32Array opcodes and Float32Array params"_v8(iso)));
         return;
       }
 
@@ -1307,8 +1302,7 @@ namespace fxe::js {
           for (u32 n = 0; n < char_count; ++n) {
             auto c = static_cast<unsigned>(p[pos + n]);
             if (c > 0x7f) {
-              iso->ThrowException(Exception::RangeError(String::NewFromUtf8Literal(
-                  iso, "Primitives.drain drawText supports ASCII codepoints only")));
+              iso->ThrowException(Exception::RangeError("Primitives.drain drawText supports ASCII codepoints only"_v8(iso)));
               return;
             }
             text.push_back(static_cast<char>(c));
@@ -1369,7 +1363,7 @@ namespace fxe::js {
               break;
             default:
               iso->ThrowException(Exception::RangeError(
-                  String::NewFromUtf8Literal(iso, "Primitives.drain: invalid path command")));
+                  "Primitives.drain: invalid path command"_v8(iso)));
               return;
             }
           }
@@ -1389,7 +1383,7 @@ namespace fxe::js {
       }
       if (pos != p.size()) {
         iso->ThrowException(Exception::RangeError(
-            String::NewFromUtf8Literal(iso, "Primitives.drain: unused params")));
+            "Primitives.drain: unused params"_v8(iso)));
         return;
       }
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, executed));
@@ -1486,8 +1480,7 @@ namespace fxe::js {
       if (!cb)
         return;
       if (info.Length() < 6) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "drawSprite(cb, spriteId, x, y, w, h, depth?, tint?)")));
+        iso->ThrowException(Exception::TypeError("drawSprite(cb, spriteId, x, y, w, h, depth?, tint?)"_v8(iso)));
         return;
       }
       (void)info[1]->Uint32Value(ctx).FromMaybe(0u); // spriteId reserved for future routing
@@ -1502,7 +1495,7 @@ namespace fxe::js {
   void install_primitives_namespace(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto path_tpl = FunctionTemplate::New(iso, path_ctor);
-    path_tpl->SetClassName(String::NewFromUtf8Literal(iso, "Path"));
+    path_tpl->SetClassName("Path"_v8(iso));
     path_tpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto path_proto = path_tpl->PrototypeTemplate();
     path_proto->Set(iso, "moveTo", FunctionTemplate::New(iso, path_moveTo));

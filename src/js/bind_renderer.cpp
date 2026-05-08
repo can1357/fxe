@@ -9,6 +9,7 @@
 #include <fxe/offscreen.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 #include <fxe/window.hpp>
 
 #include <memory>
@@ -63,29 +64,29 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "Renderer must be invoked with new")));
+            "Renderer must be invoked with new"_v8(iso)));
         return;
       }
       if (info.Length() < 1 || !info[0]->IsObject()) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "Renderer(window, options)")));
+            Exception::TypeError("Renderer(window, options)"_v8(iso)));
         return;
       }
       auto* win = static_cast<window*>(unwrap(info[0].As<Object>(), TAG_WINDOW));
       if (!win) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "Renderer: first arg must be Window")));
+            "Renderer: first arg must be Window"_v8(iso)));
         return;
       }
       renderer_options opts;
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
         Local<Value> v;
-        if (o->Get(ctx, String::NewFromUtf8Literal(iso, "multisampleCount")).ToLocal(&v))
+        if (o->Get(ctx, "multisampleCount"_v8(iso)).ToLocal(&v))
           opts.multisample_count = v->Uint32Value(ctx).FromMaybe(opts.multisample_count);
-        if (o->Get(ctx, String::NewFromUtf8Literal(iso, "enableBloom")).ToLocal(&v))
+        if (o->Get(ctx, "enableBloom"_v8(iso)).ToLocal(&v))
           opts.enable_bloom = v->BooleanValue(iso);
-        if (o->Get(ctx, String::NewFromUtf8Literal(iso, "vsync")).ToLocal(&v))
+        if (o->Get(ctx, "vsync"_v8(iso)).ToLocal(&v))
           opts.vsync = v->BooleanValue(iso);
       }
       const auto& runner_overrides = get_runner_render_overrides();
@@ -98,7 +99,7 @@ namespace fxe::js {
       auto r = create_renderer(*win, opts);
       if (!r) {
         iso->ThrowException(
-            Exception::Error(String::NewFromUtf8Literal(iso, "create_renderer failed")));
+            Exception::Error("create_renderer failed"_v8(iso)));
         return;
       }
       // Lazily initialise the default font (system TTF or procedural fallback)
@@ -159,8 +160,7 @@ namespace fxe::js {
       if (!r)
         return;
       if (info.Length() < 2) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "bindUserTexture(slot, offscreenOrNull)")));
+        iso->ThrowException(Exception::TypeError("bindUserTexture(slot, offscreenOrNull)"_v8(iso)));
         return;
       }
       auto ctx = iso->GetCurrentContext();
@@ -172,28 +172,25 @@ namespace fxe::js {
         return;
       }
       if (!info[1]->IsObject()) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "bindUserTexture: source must be an OffscreenRenderer or null")));
+        iso->ThrowException(Exception::TypeError("bindUserTexture: source must be an OffscreenRenderer or null"_v8(iso)));
         return;
       }
       auto* inner_r = static_cast<renderer*>(unwrap(info[1].As<Object>(), TAG_RENDERER));
       auto* off = inner_r ? dynamic_cast<offscreen_renderer*>(inner_r) : nullptr;
       if (!off) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "bindUserTexture: source must be an OffscreenRenderer")));
+        iso->ThrowException(Exception::TypeError("bindUserTexture: source must be an OffscreenRenderer"_v8(iso)));
         return;
       }
       auto view = off->color_texture_view();
       if (!view) {
-        iso->ThrowException(Exception::Error(String::NewFromUtf8Literal(
-            iso, "bindUserTexture: source has no sampleable color attachment")));
+        iso->ThrowException(Exception::Error("bindUserTexture: source has no sampleable color attachment"_v8(iso)));
         return;
       }
       r->bind_user_texture(slot, std::move(view));
 #else
       (void)slot;
       iso->ThrowException(Exception::Error(
-          String::NewFromUtf8Literal(iso, "bindUserTexture: WGPU backend not enabled")));
+          "bindUserTexture: WGPU backend not enabled"_v8(iso)));
 #endif
     }
 
@@ -243,8 +240,8 @@ namespace fxe::js {
       auto sz = Array::New(iso, 2);
       (void)sz->Set(ctx, 0, Number::New(iso, static_cast<double>(vp.size.x)));
       (void)sz->Set(ctx, 1, Number::New(iso, static_cast<double>(vp.size.y)));
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "at"), at);
-      (void)out->Set(ctx, String::NewFromUtf8Literal(iso, "size"), sz);
+      (void)out->Set(ctx, "at"_v8(iso), at);
+      (void)out->Set(ctx, "size"_v8(iso), sz);
       info.GetReturnValue().Set(out);
     }
     void rend_begin_frame(const FunctionCallbackInfo<Value>& info) {
@@ -325,7 +322,7 @@ namespace fxe::js {
   void install_renderer_template(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, rend_constructor);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "Renderer"));
+    tpl->SetClassName("Renderer"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
     // Inherit allocate/clear/queue/transform/epoch/etc. from CommandBuffer.
     tpl->Inherit(get_command_buffer_template(iso));

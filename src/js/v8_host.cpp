@@ -10,6 +10,7 @@
 #include <fxe/types.hpp>
 #include <fxe/typescript.hpp>
 #include <fxe/v8_host.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "../runtime/bundle_loader.hpp"
 #include "../runtime/uv_loop.hpp"
@@ -139,7 +140,7 @@ namespace fxe::js {
 
       v8::Local<v8::Object> error = value.As<v8::Object>();
       v8::Local<v8::Value> stack;
-      if (error->Get(ctx, v8::String::NewFromUtf8Literal(iso, "stack")).ToLocal(&stack) &&
+      if (error->Get(ctx, "stack"_v8(iso)).ToLocal(&stack) &&
           stack->IsString()) {
         auto rendered = to_std_string(iso, stack);
         if (!rendered.empty())
@@ -517,7 +518,7 @@ namespace fxe::js {
     v8::TryCatch tc(iso);
 
     auto src = str(iso, expression);
-    auto org = v8::String::NewFromUtf8Literal(iso, "<debug.evaluate>");
+    auto org = "<debug.evaluate>"_v8(iso);
     v8::ScriptOrigin sorigin(org);
     v8::Local<v8::Script> script;
     if (!v8::Script::Compile(ctx, src, &sorigin).ToLocal(&script)) {
@@ -567,13 +568,13 @@ namespace fxe::js {
     v8::TryCatch tc(iso);
     auto global = ctx->Global();
     v8::Local<v8::Value> hmr_value;
-    if (!global->Get(ctx, v8::String::NewFromUtf8Literal(iso, "__fxe_hmr")).ToLocal(&hmr_value) ||
+    if (!global->Get(ctx, "__fxe_hmr"_v8(iso)).ToLocal(&hmr_value) ||
         !hmr_value->IsObject()) {
       return {false, "__fxe_hmr is not an object"};
     }
     auto hmr = hmr_value.As<v8::Object>();
     v8::Local<v8::Value> fire_value;
-    if (!hmr->Get(ctx, v8::String::NewFromUtf8Literal(iso, "fire")).ToLocal(&fire_value) ||
+    if (!hmr->Get(ctx, "fire"_v8(iso)).ToLocal(&fire_value) ||
         !fire_value->IsFunction()) {
       return {false, "__fxe_hmr.fire is not a function"};
     }
@@ -777,7 +778,7 @@ namespace fxe::js {
     auto ctx = p_->context.Get(iso);
     v8::Context::Scope cs(ctx);
     auto obj = make_window_object(iso, ctx, &win);
-    (void)ctx->Global()->Set(ctx, v8::String::NewFromUtf8Literal(iso, "window"), obj);
+    (void)ctx->Global()->Set(ctx, "window"_v8(iso), obj);
   }
 
   void host::install_renderer_global(renderer& r) {
@@ -787,7 +788,7 @@ namespace fxe::js {
     auto ctx = p_->context.Get(iso);
     v8::Context::Scope cs(ctx);
     auto obj = make_renderer_object(iso, ctx, &r);
-    (void)ctx->Global()->Set(ctx, v8::String::NewFromUtf8Literal(iso, "renderer"), obj);
+    (void)ctx->Global()->Set(ctx, "renderer"_v8(iso), obj);
   }
 
   namespace {
@@ -1113,13 +1114,13 @@ namespace fxe::js {
       std::string dirname = normalize_slashes(fp.parent_path().string());
       std::string filename = normalize_slashes(fp.string());
       bool is_main = p && !p->entry_path.empty() && p->entry_path == path;
-      (void)meta->CreateDataProperty(ctx, v8::String::NewFromUtf8Literal(iso, "url"),
+      (void)meta->CreateDataProperty(ctx, "url"_v8(iso),
                                      str(iso, url));
-      (void)meta->CreateDataProperty(ctx, v8::String::NewFromUtf8Literal(iso, "dirname"),
+      (void)meta->CreateDataProperty(ctx, "dirname"_v8(iso),
                                      str(iso, dirname));
-      (void)meta->CreateDataProperty(ctx, v8::String::NewFromUtf8Literal(iso, "filename"),
+      (void)meta->CreateDataProperty(ctx, "filename"_v8(iso),
                                      str(iso, filename));
-      (void)meta->CreateDataProperty(ctx, v8::String::NewFromUtf8Literal(iso, "main"),
+      (void)meta->CreateDataProperty(ctx, "main"_v8(iso),
                                      v8::Boolean::New(iso, is_main));
     }
 
@@ -1252,7 +1253,7 @@ Error.prepareStackTrace = function(err, frames) {
     bool install_fxe_hmr_runtime(v8::Isolate* iso, v8::Local<v8::Context> ctx,
                                  std::string* error = nullptr) {
       v8::TryCatch tc(iso);
-      v8::ScriptOrigin origin(v8::String::NewFromUtf8Literal(iso, "<fxe-hmr-runtime>"));
+      v8::ScriptOrigin origin("<fxe-hmr-runtime>"_v8(iso));
       v8::Local<v8::Script> script;
       if (!v8::Script::Compile(ctx, str(iso, k_fxe_hmr_runtime_js), &origin).ToLocal(&script)) {
         if (error)
@@ -1286,7 +1287,7 @@ Error.prepareStackTrace = function(err, frames) {
       }
       (void)parsed; // synthetic module re-parses on evaluation
       std::array<v8::Local<v8::String>, 1> exports{
-          v8::String::NewFromUtf8Literal(iso, "default"),
+          "default"_v8(iso),
       };
       v8::MemorySpan<const v8::Local<v8::String>> exports_span(exports.data(), exports.size());
       auto mod = v8::Module::CreateSyntheticModule(
@@ -1303,7 +1304,7 @@ Error.prepareStackTrace = function(err, frames) {
             v8::Local<v8::Value> v;
             if (!v8::JSON::Parse(ctx2, str(iso2, text)).ToLocal(&v))
               return v8::MaybeLocal<v8::Value>();
-            auto key = v8::String::NewFromUtf8Literal(iso2, "default");
+            auto key = "default"_v8(iso2);
             auto ok = m->SetSyntheticModuleExport(iso2, key, v);
             if (ok.IsNothing())
               return v8::MaybeLocal<v8::Value>();
@@ -1809,6 +1810,10 @@ Error.prepareStackTrace = function(err, frames) {
     v8::Isolate::Scope iscope(isolate);
     v8::HandleScope hscope(isolate);
 
+    // Per-isolate `_v8` literal cache. Must run before any binding installer
+    // (below) materialises a `_v8` literal.
+    fxe::js::install_string_cache(isolate);
+
     v8::Local<v8::ObjectTemplate> global = v8::ObjectTemplate::New(isolate);
     const bool worker_mode = mode == host::bootstrap_mode::worker_thread;
 
@@ -1862,28 +1867,28 @@ Error.prepareStackTrace = function(err, frames) {
       fxe::runtime::install_node_compat(isolate, ctx);
       auto fn = v8::Function::New(ctx, console_log_callback).ToLocalChecked();
       auto console_obj = v8::Object::New(isolate);
-      (void)console_obj->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "log"), fn);
+      (void)console_obj->Set(ctx, "log"_v8(isolate), fn);
       auto fn_warn = v8::Function::New(ctx, console_warn_callback).ToLocalChecked();
       auto fn_err = v8::Function::New(ctx, console_error_callback).ToLocalChecked();
-      (void)console_obj->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "warn"), fn_warn);
-      (void)console_obj->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "error"), fn_err);
-      (void)console_obj->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "info"), fn);
-      (void)console_obj->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "debug"), fn);
-      (void)ctx->Global()->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "console"),
+      (void)console_obj->Set(ctx, "warn"_v8(isolate), fn_warn);
+      (void)console_obj->Set(ctx, "error"_v8(isolate), fn_err);
+      (void)console_obj->Set(ctx, "info"_v8(isolate), fn);
+      (void)console_obj->Set(ctx, "debug"_v8(isolate), fn);
+      (void)ctx->Global()->Set(ctx, "console"_v8(isolate),
                                console_obj);
 
       // performance.now() — monotonic ms since the host's first init.
       auto perf_now = v8::Function::New(ctx, performance_now_callback).ToLocalChecked();
       auto performance_obj = v8::Object::New(isolate);
-      (void)performance_obj->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "now"), perf_now);
-      (void)ctx->Global()->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "performance"),
+      (void)performance_obj->Set(ctx, "now"_v8(isolate), perf_now);
+      (void)ctx->Global()->Set(ctx, "performance"_v8(isolate),
                                performance_obj);
 
       if (!worker_mode) {
         // App extras (OS shims layered onto the existing App global).
         v8::Local<v8::Value> appv;
         if (ctx->Global()
-                ->Get(ctx, v8::String::NewFromUtf8Literal(isolate, "App"))
+                ->Get(ctx, "App"_v8(isolate))
                 .ToLocal(&appv) &&
             appv->IsObject()) {
           install_app_extras_to(isolate, ctx, appv.As<v8::Object>());
@@ -1895,18 +1900,18 @@ Error.prepareStackTrace = function(err, frames) {
       }
 
       auto hmr_reload = v8::Function::New(ctx, hmr_reload_callback).ToLocalChecked();
-      (void)ctx->Global()->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "__fxe_hmr_reload"),
+      (void)ctx->Global()->Set(ctx, "__fxe_hmr_reload"_v8(isolate),
                                hmr_reload);
       // HMR registry plus polling watch bridge. When a fired path is present in
       // the module cache, __fxe_hmr reloads that module before user handlers run.
       (void)install_fxe_hmr_runtime(isolate, ctx);
 
       auto vertex_topology = v8::Object::New(isolate);
-      (void)vertex_topology->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "Triangle"),
+      (void)vertex_topology->Set(ctx, "Triangle"_v8(isolate),
                                  v8::Integer::New(isolate, 0));
-      (void)vertex_topology->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "Line"),
+      (void)vertex_topology->Set(ctx, "Line"_v8(isolate),
                                  v8::Integer::New(isolate, 1));
-      (void)ctx->Global()->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "VertexTopology"),
+      (void)ctx->Global()->Set(ctx, "VertexTopology"_v8(isolate),
                                vertex_topology);
 
       if (!worker_mode) {
@@ -1914,18 +1919,18 @@ Error.prepareStackTrace = function(err, frames) {
         // entry is looked up on the global object at evaluation time so we never
         // duplicate constructor templates.
         std::array<v8::Local<v8::String>, 9> exports{
-            v8::String::NewFromUtf8Literal(isolate, "Window"),
-            v8::String::NewFromUtf8Literal(isolate, "Renderer"),
-            v8::String::NewFromUtf8Literal(isolate, "OffscreenRenderer"),
-            v8::String::NewFromUtf8Literal(isolate, "Primitives"),
-            v8::String::NewFromUtf8Literal(isolate, "CommandBuffer"),
-            v8::String::NewFromUtf8Literal(isolate, "Monitors"),
-            v8::String::NewFromUtf8Literal(isolate, "App"),
-            v8::String::NewFromUtf8Literal(isolate, "Print"),
-            v8::String::NewFromUtf8Literal(isolate, "VertexTopology"),
+            "Window"_v8(isolate),
+            "Renderer"_v8(isolate),
+            "OffscreenRenderer"_v8(isolate),
+            "Primitives"_v8(isolate),
+            "CommandBuffer"_v8(isolate),
+            "Monitors"_v8(isolate),
+            "App"_v8(isolate),
+            "Print"_v8(isolate),
+            "VertexTopology"_v8(isolate),
         };
         v8::MemorySpan<const v8::Local<v8::String>> exports_span(exports.data(), exports.size());
-        auto module_name = v8::String::NewFromUtf8Literal(isolate, "fxe");
+        auto module_name = "fxe"_v8(isolate);
         auto mod = v8::Module::CreateSyntheticModule(
             isolate, module_name, exports_span,
             +[](v8::Local<v8::Context> ctx,
@@ -1969,11 +1974,11 @@ Error.prepareStackTrace = function(err, frames) {
 
       // Install __fxe_remap_frame native + Error.prepareStackTrace JS.
       auto remap_fn = v8::Function::New(ctx, remap_frame_callback).ToLocalChecked();
-      (void)ctx->Global()->Set(ctx, v8::String::NewFromUtf8Literal(isolate, "__fxe_remap_frame"),
+      (void)ctx->Global()->Set(ctx, "__fxe_remap_frame"_v8(isolate),
                                remap_fn);
       v8::TryCatch tc(isolate);
       v8::ScriptOrigin pst_origin(
-          v8::String::NewFromUtf8Literal(isolate, "<fxe-prepare-stack-trace>"));
+          "<fxe-prepare-stack-trace>"_v8(isolate));
       v8::Local<v8::Script> pst_script;
       if (v8::Script::Compile(ctx, str(isolate, k_prepare_stack_trace_js), &pst_origin)
               .ToLocal(&pst_script)) {
@@ -2041,6 +2046,9 @@ Error.prepareStackTrace = function(err, frames) {
         v8::Isolate::Scope is(isolate);
         v8::HandleScope hs(isolate);
         run_template_resetters(isolate);
+        // Drop the `_v8` literal cache while the isolate + a HandleScope are
+        // still alive; Eternal handles cannot outlive the isolate.
+        fxe::js::uninstall_string_cache(isolate);
       }
       isolate->Dispose();
       isolate = nullptr;

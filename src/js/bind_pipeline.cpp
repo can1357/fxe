@@ -7,6 +7,7 @@
 #include "bind_image.hpp"
 
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 #include <fxe/pipeline.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/spritesheet.hpp>
@@ -317,7 +318,7 @@ namespace fxe::js {
   void install_pipeline_template(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, pipeline_constructor);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "Pipeline"));
+    tpl->SetClassName("Pipeline"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
 
     auto proto = tpl->PrototypeTemplate();

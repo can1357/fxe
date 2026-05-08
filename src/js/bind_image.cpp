@@ -8,6 +8,7 @@
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include <cstdint>
 #include <cstring>
@@ -218,7 +219,7 @@ namespace fxe::js {
   void install_image_global(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "ImageHandle"));
+    tpl->SetClassName("ImageHandle"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
 
     auto proto = tpl->PrototypeTemplate();

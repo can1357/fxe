@@ -8,6 +8,7 @@
 #include "../runtime/v8/fxe_native.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_strings.hpp>
 #include <fxe/v8_host.hpp>
 #include <fxe/window.hpp>
 
@@ -220,7 +221,7 @@ namespace fxe::js {
         return true;
       if (!value->IsObject()) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "permissions must be an object")));
+            Exception::TypeError("permissions must be an object"_v8(iso)));
         return false;
       }
       auto perms = value.As<Object>();
@@ -284,7 +285,7 @@ namespace fxe::js {
       auto* h = host_for_isolate(iso);
       if (!h) {
         iso->ThrowException(
-            Exception::Error(String::NewFromUtf8Literal(iso, "Window preload has no V8 host")));
+            Exception::Error("Window preload has no V8 host"_v8(iso)));
         return false;
       }
       auto result = h->run_preload_file(path, preload_is_module(path));
@@ -528,8 +529,7 @@ namespace fxe::js {
         for (usize i = 0; i < ev.message_args_serialised.size(); ++i) {
           Local<Value> value;
           if (!deserialize_window_value(iso, ctx, ev.message_args_serialised[i]).ToLocal(&value)) {
-            iso->ThrowException(Exception::Error(String::NewFromUtf8Literal(
-                iso, "Window message payload could not be deserialized")));
+            iso->ThrowException(Exception::Error("Window message payload could not be deserialized"_v8(iso)));
             return o;
           }
           (void)arr->Set(ctx, static_cast<u32>(i), value);
@@ -598,7 +598,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "Window must be invoked with new")));
+            "Window must be invoked with new"_v8(iso)));
         return;
       }
       window_desc desc;
@@ -651,7 +651,7 @@ namespace fxe::js {
           if (!v->IsString()) {
             delete h;
             iso->ThrowException(Exception::TypeError(
-                String::NewFromUtf8Literal(iso, "WindowOptions.preload must be a string")));
+                "WindowOptions.preload must be a string"_v8(iso)));
             return;
           }
           preload = utf8(iso, v);
@@ -665,7 +665,7 @@ namespace fxe::js {
       if (!w) {
         delete h;
         iso->ThrowException(
-            Exception::Error(String::NewFromUtf8Literal(iso, "create_window failed")));
+            Exception::Error("create_window failed"_v8(iso)));
         return;
       }
       h->owned = std::move(w);
@@ -756,19 +756,18 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (fxe::runtime::current_worker_bootstrap() != nullptr) {
-        iso->ThrowException(Exception::Error(String::NewFromUtf8Literal(
-            iso, "Window.send is not yet supported across worker isolates")));
+        iso->ThrowException(Exception::Error("Window.send is not yet supported across worker isolates"_v8(iso)));
         return;
       }
       auto* w = unwrap_win(info.This());
       if (!w) {
         iso->ThrowException(
-            Exception::Error(String::NewFromUtf8Literal(iso, "send: no native window")));
+            Exception::Error("send: no native window"_v8(iso)));
         return;
       }
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "send(channel, ...args)")));
+            Exception::TypeError("send(channel, ...args)"_v8(iso)));
         return;
       }
       std::vector<std::vector<std::uint8_t>> args;
@@ -970,7 +969,7 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "setTitleBarStyle: expected style string")));
+            "setTitleBarStyle: expected style string"_v8(iso)));
         return;
       }
       auto name = utf8(iso, info[0]);
@@ -1026,8 +1025,7 @@ namespace fxe::js {
         return;
       }
       if (!info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "setVibrancy: expected 'sidebar', 'titlebar', 'menu', or null")));
+        iso->ThrowException(Exception::TypeError("setVibrancy: expected 'sidebar', 'titlebar', 'menu', or null"_v8(iso)));
         return;
       }
       auto name = utf8(iso, info[0]);
@@ -1069,18 +1067,17 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 3) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "setIcon(rgba, w, h)")));
+            Exception::TypeError("setIcon(rgba, w, h)"_v8(iso)));
         return;
       }
       if (!info[0]->IsTypedArray()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "setIcon: rgba must be a typed array")));
+            "setIcon: rgba must be a typed array"_v8(iso)));
         return;
       }
       auto ta = info[0].As<TypedArray>();
       if (!info[0]->IsUint8Array() && !info[0]->IsUint8ClampedArray()) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "setIcon: rgba must be Uint8Array or Uint8ClampedArray")));
+        iso->ThrowException(Exception::TypeError("setIcon: rgba must be Uint8Array or Uint8ClampedArray"_v8(iso)));
         return;
       }
       auto buf = ta->Buffer();
@@ -1091,7 +1088,7 @@ namespace fxe::js {
       if (wd <= 0 || ht <= 0 ||
           ta->ByteLength() < static_cast<usize>(wd) * static_cast<usize>(ht) * 4u) {
         iso->ThrowException(Exception::RangeError(
-            String::NewFromUtf8Literal(iso, "setIcon: rgba length too small for w*h*4")));
+            "setIcon: rgba length too small for w*h*4"_v8(iso)));
         return;
       }
       try {
@@ -1161,7 +1158,7 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "setCursor: expected string")));
+            Exception::TypeError("setCursor: expected string"_v8(iso)));
         return;
       }
       auto name = utf8(iso, info[0]);
@@ -1263,7 +1260,7 @@ namespace fxe::js {
       }
       if (info.Length() < 1 || !info[0]->IsObject()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "writeClipboardImage({ width, height, data })")));
+            "writeClipboardImage({ width, height, data })"_v8(iso)));
         return;
       }
 
@@ -1275,8 +1272,7 @@ namespace fxe::js {
           !object->Get(ctx, str(iso, "height")).ToLocal(&height_value) ||
           !object->Get(ctx, str(iso, "data")).ToLocal(&data_value) || !data_value->IsTypedArray() ||
           (!data_value->IsUint8Array() && !data_value->IsUint8ClampedArray())) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "writeClipboardImage: data must be Uint8Array or Uint8ClampedArray")));
+        iso->ThrowException(Exception::TypeError("writeClipboardImage: data must be Uint8Array or Uint8ClampedArray"_v8(iso)));
         return;
       }
 
@@ -1287,8 +1283,7 @@ namespace fxe::js {
           static_cast<usize>(width) >
               std::numeric_limits<usize>::max() / static_cast<usize>(height) / 4u ||
           data->ByteLength() < static_cast<usize>(width) * static_cast<usize>(height) * 4u) {
-        iso->ThrowException(Exception::RangeError(String::NewFromUtf8Literal(
-            iso, "writeClipboardImage: data length too small for width*height*4")));
+        iso->ThrowException(Exception::RangeError("writeClipboardImage: data length too small for width*height*4"_v8(iso)));
         return;
       }
 
@@ -1378,8 +1373,7 @@ namespace fxe::js {
       }
       if (!info[1]->IsTypedArray() ||
           (!info[1]->IsUint8Array() && !info[1]->IsUint8ClampedArray())) {
-        iso->ThrowException(Exception::TypeError(String::NewFromUtf8Literal(
-            iso, "setClipboardMime(mime, bytes): bytes must be Uint8Array or Uint8ClampedArray")));
+        iso->ThrowException(Exception::TypeError("setClipboardMime(mime, bytes): bytes must be Uint8Array or Uint8ClampedArray"_v8(iso)));
         return;
       }
       auto data = info[1].As<TypedArray>();
@@ -1448,7 +1442,7 @@ namespace fxe::js {
       }
       if (info.Length() < 1 || !info[0]->IsObject()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "startDrag({ files, text?, html?, image?, icon? })")));
+            "startDrag({ files, text?, html?, image?, icon? })"_v8(iso)));
         return;
       }
 
@@ -1536,18 +1530,18 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto data = info.Data().As<Object>();
       Local<Value> v;
-      if (!data->Get(ctx, String::NewFromUtf8Literal(iso, "win")).ToLocal(&v) || !v->IsExternal())
+      if (!data->Get(ctx, "win"_v8(iso)).ToLocal(&v) || !v->IsExternal())
         return;
       auto* w = static_cast<window*>(v.As<External>()->Value(v8::kExternalPointerTypeTagDefault));
       auto* h = lookup_holder(w);
       if (!h)
         return;
       Local<Value> ev_v;
-      if (!data->Get(ctx, String::NewFromUtf8Literal(iso, "event")).ToLocal(&ev_v))
+      if (!data->Get(ctx, "event"_v8(iso)).ToLocal(&ev_v))
         return;
       auto event = utf8(iso, ev_v);
       Local<Value> tok_v;
-      if (!data->Get(ctx, String::NewFromUtf8Literal(iso, "token")).ToLocal(&tok_v))
+      if (!data->Get(ctx, "token"_v8(iso)).ToLocal(&tok_v))
         return;
       double tok_d = tok_v->NumberValue(ctx).FromMaybe(0.0);
       u64 token = static_cast<u64>(tok_d);
@@ -1571,12 +1565,12 @@ namespace fxe::js {
       auto* h = lookup_holder(w);
       if (!h) {
         iso->ThrowException(
-            Exception::Error(String::NewFromUtf8Literal(iso, "on: no native window")));
+            Exception::Error("on: no native window"_v8(iso)));
         return;
       }
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "on(event, handler)")));
+            Exception::TypeError("on(event, handler)"_v8(iso)));
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -1590,10 +1584,10 @@ namespace fxe::js {
 
       // Build disposer.
       auto data = Object::New(iso);
-      (void)data->Set(ctx, String::NewFromUtf8Literal(iso, "win"),
+      (void)data->Set(ctx, "win"_v8(iso),
                       External::New(iso, w, v8::kExternalPointerTypeTagDefault));
-      (void)data->Set(ctx, String::NewFromUtf8Literal(iso, "event"), str(iso, event));
-      (void)data->Set(ctx, String::NewFromUtf8Literal(iso, "token"),
+      (void)data->Set(ctx, "event"_v8(iso), str(iso, event));
+      (void)data->Set(ctx, "token"_v8(iso),
                       Number::New(iso, static_cast<double>(token)));
       auto disp = Function::New(ctx, listener_disposer, data).ToLocalChecked();
       info.GetReturnValue().Set(disp);
@@ -1607,7 +1601,7 @@ namespace fxe::js {
         return;
       if (info.Length() < 1 || !info[0]->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(String::NewFromUtf8Literal(iso, "off(event[, handler])")));
+            Exception::TypeError("off(event[, handler])"_v8(iso)));
         return;
       }
       auto event = utf8(iso, info[0]);
@@ -1675,10 +1669,10 @@ namespace fxe::js {
       auto opts = v.As<Object>();
       Local<Value> x;
       double fps = 0.0;
-      if (opts->Get(ctx, String::NewFromUtf8Literal(iso, "fps")).ToLocal(&x) && x->IsNumber()) {
+      if (opts->Get(ctx, "fps"_v8(iso)).ToLocal(&x) && x->IsNumber()) {
         fps = x->NumberValue(ctx).FromMaybe(0.0);
       }
-      if (fps <= 0.0 && opts->Get(ctx, String::NewFromUtf8Literal(iso, "animate")).ToLocal(&x) &&
+      if (fps <= 0.0 && opts->Get(ctx, "animate"_v8(iso)).ToLocal(&x) &&
           x->BooleanValue(iso)) {
         fps = 60.0;
       }
@@ -1924,7 +1918,7 @@ namespace fxe::js {
         return;
       if (info.Length() < 1 || !info[0]->IsFunction()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "run: expected callback function")));
+            "run: expected callback function"_v8(iso)));
         return;
       }
       run_opts opts;
@@ -1961,7 +1955,7 @@ namespace fxe::js {
       }
       if (!info[0]->IsFunction()) {
         iso->ThrowException(Exception::TypeError(
-            String::NewFromUtf8Literal(iso, "setFrameCallback: expected function or null")));
+            "setFrameCallback: expected function or null"_v8(iso)));
         return;
       }
       hh->on_frame.Reset(iso, info[0].As<Function>());
@@ -2051,7 +2045,7 @@ namespace fxe::js {
   void install_window_template(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto tpl = FunctionTemplate::New(iso, win_constructor);
-    tpl->SetClassName(String::NewFromUtf8Literal(iso, "Window"));
+    tpl->SetClassName("Window"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
 
     auto proto = tpl->PrototypeTemplate();

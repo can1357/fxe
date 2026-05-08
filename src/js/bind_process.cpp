@@ -1,4 +1,5 @@
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_strings.hpp>
 
 #include "bind_process.hpp"
 
@@ -327,7 +328,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto fn = info[0].As<Function>();
       Local<Value> bind_value;
-      if (!fn->Get(ctx, String::NewFromUtf8Literal(iso, "bind")).ToLocal(&bind_value) ||
+      if (!fn->Get(ctx, "bind"_v8(iso)).ToLocal(&bind_value) ||
           !bind_value->IsFunction()) {
         iso->ThrowException(Exception::TypeError(str(iso, "nextTick(fn, ...args)")));
         return;
@@ -890,9 +891,9 @@ namespace fxe::js {
     auto hrtime = FunctionTemplate::New(iso, process_hrtime);
     hrtime->Set(iso, "bigint", FunctionTemplate::New(iso, process_hrtime_bigint));
     proc->Set(iso, "hrtime", hrtime);
-    proc->SetAccessorProperty(String::NewFromUtf8Literal(iso, "platform"),
+    proc->SetAccessorProperty("platform"_v8(iso),
                               FunctionTemplate::New(iso, process_platform_getter));
-    proc->SetAccessorProperty(String::NewFromUtf8Literal(iso, "arch"),
+    proc->SetAccessorProperty("arch"_v8(iso),
                               FunctionTemplate::New(iso, process_arch_getter));
     proc->Set(iso, "pid", Integer::New(iso, static_cast<int32_t>(fxe_getpid())));
 
@@ -903,7 +904,7 @@ namespace fxe::js {
     proc->Set(iso, "versions", versions);
 
     auto release = ObjectTemplate::New(iso);
-    release->Set(iso, "name", String::NewFromUtf8Literal(iso, "fxe"));
+    release->Set(iso, "name", "fxe"_v8(iso));
     proc->Set(iso, "release", release);
 
     auto sout = ObjectTemplate::New(iso);
@@ -936,7 +937,7 @@ namespace fxe::js {
       // use a property accessor that materialises the current argv lazily.
     }
     proc->SetAccessorProperty(
-        String::NewFromUtf8Literal(iso, "argv"),
+        "argv"_v8(iso),
         FunctionTemplate::New(iso, [](const FunctionCallbackInfo<Value>& info) {
           auto* iso = info.GetIsolate();
           HandleScope hs(iso);
@@ -955,7 +956,7 @@ namespace fxe::js {
     // env is a per-instance object; install via accessor that builds it once
     // per context. The handler-based template provides Proxy-like semantics.
     proc->SetAccessorProperty(
-        String::NewFromUtf8Literal(iso, "env"),
+        "env"_v8(iso),
         FunctionTemplate::New(iso, [](const FunctionCallbackInfo<Value>& info) {
           auto* iso = info.GetIsolate();
           HandleScope hs(iso);
