@@ -1922,7 +1922,13 @@ namespace fxe::os {
         post_main_thread_dispatch([cb = std::move(on_select)]() mutable { cb(std::string{}); });
       return;
     }
-    UINT cmd = TrackPopupMenu(popup.menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, x, y, 0, owner, nullptr);
+    // TrackPopupMenu wants screen coordinates; (x, y) arrive in window-client
+    // coordinates (top-left origin, same as Win32 client space — matches GLFW
+    // cursor-pos reporting on Windows). Convert through the owner HWND.
+    POINT pt{static_cast<LONG>(x), static_cast<LONG>(y)};
+    ClientToScreen(owner, &pt);
+    UINT cmd = TrackPopupMenu(popup.menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, owner,
+                              nullptr);
     std::string id;
     auto it = popup.command_ids.find(cmd);
     if (it != popup.command_ids.end())
