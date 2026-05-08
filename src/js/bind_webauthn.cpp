@@ -7,6 +7,7 @@
 #include <fxe/types.hpp>
 #include <fxe/v8_host.hpp>
 #include <fxe/v8_strings.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/webauthn.hpp>
 
 #include <algorithm>
@@ -347,8 +348,7 @@ namespace fxe::js {
     void public_key_credential_ctor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.IsConstructCall() && info.Length() == 1 && info[0]->IsExternal() &&
-          info[0].As<External>()->Value() == public_key_credential_ctor_token()) {
-        info.This()->SetAlignedPointerInInternalField(0, nullptr);
+          external_ptr<void>(info[0]) == public_key_credential_ctor_token()) {
         return;
       }
       iso->ThrowException(
@@ -365,7 +365,7 @@ namespace fxe::js {
                                              std::string_view attachment, Local<Object> response) {
       auto tpl = public_key_credential_tpl_table()[iso].Get(iso);
       auto fn = tpl->GetFunction(ctx).ToLocalChecked();
-      Local<Value> argv[] = {External::New(iso, public_key_credential_ctor_token())};
+      Local<Value> argv[] = {make_external(iso, public_key_credential_ctor_token())};
       auto obj = fn->NewInstance(ctx, 1, argv).ToLocalChecked();
       (void)obj->Set(ctx, "id"_v8(iso), s8(iso, id));
       (void)obj->Set(ctx, "rawId"_v8(iso), make_array_buffer(iso, raw_id));
@@ -1088,23 +1088,23 @@ namespace fxe::js {
   void install_webauthn_globals(Isolate* iso, Local<ObjectTemplate> global) {
     auto navigator_tpl = ObjectTemplate::New(iso);
     auto credentials_tpl = ObjectTemplate::New(iso);
-    credentials_tpl->Set(iso, "create"_v8(iso), FunctionTemplate::New(iso, credentials_create));
-    credentials_tpl->Set(iso, "get"_v8(iso), FunctionTemplate::New(iso, credentials_get));
-    navigator_tpl->Set(iso, "credentials"_v8(iso), credentials_tpl);
-    global->Set(iso, "navigator"_v8(iso), navigator_tpl);
+    credentials_tpl->Set(iso, "create", FunctionTemplate::New(iso, credentials_create));
+    credentials_tpl->Set(iso, "get", FunctionTemplate::New(iso, credentials_get));
+    navigator_tpl->Set(iso, "credentials", credentials_tpl);
+    global->Set(iso, "navigator", navigator_tpl);
 
     auto tpl = FunctionTemplate::New(iso, public_key_credential_ctor);
     tpl->SetClassName("PublicKeyCredential"_v8(iso));
-    tpl->Set(iso, "isUserVerifyingPlatformAuthenticatorAvailable"_v8(iso),
+    tpl->Set(iso, "isUserVerifyingPlatformAuthenticatorAvailable",
              FunctionTemplate::New(iso, is_user_verifying_platform_available));
-    tpl->Set(iso, "isConditionalMediationAvailable"_v8(iso),
+    tpl->Set(iso, "isConditionalMediationAvailable",
              FunctionTemplate::New(iso, static_false_promise));
     tpl->InstanceTemplate()->SetInternalFieldCount(1);
     tpl->PrototypeTemplate()->Set(
-        iso, "getClientExtensionResults"_v8(iso),
+        iso, "getClientExtensionResults",
         FunctionTemplate::New(iso, public_key_credential_get_client_extension_results));
     public_key_credential_tpl_table()[iso].Reset(iso, tpl);
-    global->Set(iso, "PublicKeyCredential"_v8(iso), tpl);
+    global->Set(iso, "PublicKeyCredential", tpl);
   }
 } // namespace fxe::js
 #endif

@@ -1,7 +1,7 @@
 include(FetchContent)
-# Lightweight dependencies are resolved with installed CMake packages first, then
-# FetchContent when FXE_FETCH_DEPS=ON. A checked-in vcpkg manifest is also
-# supported for developers who configure CMake with a vcpkg toolchain file.
+# Lightweight dependencies: find_package first, then FetchContent when
+# FXE_FETCH_DEPS=ON. With a vcpkg toolchain, vcpkg.json supplies binaries;
+# product targets live under cmake/targets/.
 
 add_library(fxe_deps INTERFACE)
 
@@ -120,6 +120,34 @@ if(NOT EXISTS "${FXE_MINIAUDIO_INCLUDE_DIR}/miniaudio.h")
         FATAL_ERROR
         "miniaudio.h not found under FXE_MINIAUDIO_INCLUDE_DIR=${FXE_MINIAUDIO_INCLUDE_DIR}"
     )
+endif()
+
+# md4c — fast Markdown parser (CommonMark + GFM extensions). Used by the
+# fxe_markdown library to power the Markdown JS API and the markdown UI
+# component. Always fetched when FXE_FETCH_DEPS is on; otherwise expects a
+# preinstalled `md4c` CMake target.
+find_package(md4c QUIET CONFIG)
+if(NOT TARGET md4c::md4c AND NOT TARGET md4c)
+    if(FXE_FETCH_DEPS)
+        set(BUILD_MD2HTML_EXECUTABLE OFF CACHE BOOL "" FORCE)
+        set(BUILD_SHARED_LIBS_SAVED ${BUILD_SHARED_LIBS})
+        set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            md4c
+            GIT_REPOSITORY https://github.com/mity/md4c.git
+            GIT_TAG release-0.5.2
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(md4c)
+        if(DEFINED BUILD_SHARED_LIBS_SAVED)
+            set(BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS_SAVED} CACHE BOOL "" FORCE)
+        endif()
+    else()
+        message(
+            FATAL_ERROR
+            "md4c was not found. Re-run with -DFXE_FETCH_DEPS=ON or install md4c."
+        )
+    endif()
 endif()
 
 if(_FXE_STB_WIRED)
