@@ -46,6 +46,14 @@
 #include <spawn.h>
 #include <unistd.h>
 #endif
+// Platform-specific environ access. Must be at file scope for correct linkage.
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#define FXE_ENVIRON_PTR (*_NSGetEnviron())
+#else
+extern "C" char** environ;
+#define FXE_ENVIRON_PTR environ
+#endif
 
 namespace fxe::js {
   using namespace v8;
@@ -211,9 +219,8 @@ namespace fxe::js {
     }
 #else
     std::vector<std::string> build_child_environment_storage() {
-      extern char** environ;
       std::vector<std::string> env;
-      for (char** entry = environ; entry && *entry; ++entry) {
+      for (char** entry = FXE_ENVIRON_PTR; entry && *entry; ++entry) {
         std::string_view var(*entry);
         if (var.rfind("FXE_DEBUG_PORT=", 0) == 0)
           continue;

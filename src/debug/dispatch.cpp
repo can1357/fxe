@@ -29,6 +29,7 @@
 #include <sodium.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -59,16 +60,23 @@ namespace fxe::debug {
       return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
     }
 
+    std::string network_ascii_lower(std::string s) {
+      std::transform(s.begin(), s.end(), s.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      return s;
+    }
+
     json network_headers_to_json(const std::vector<std::pair<std::string, std::string>>& headers) {
       json out{json::object()};
       for (const auto& [name, value] : headers) {
         if (name.empty())
           continue;
-        auto it = out.find(name);
-        if (it != out.end() && it->is_string() && name == "set-cookie")
+        const std::string key = network_ascii_lower(name);
+        auto it = out.find(key);
+        if (it != out.end() && it->is_string() && key == "set-cookie")
           *it = it->get_ref<const std::string&>() + "\n" + value;
         else
-          out[name] = value;
+          out[key] = value;
       }
       return out;
     }
@@ -1039,6 +1047,8 @@ namespace fxe::debug {
                                    const std::vector<std::pair<std::string, std::string>>& headers,
                                    std::optional<std::string_view> post_data,
                                    std::string_view type) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1062,6 +1072,8 @@ namespace fxe::debug {
                                 const std::vector<std::pair<std::string, std::string>>& headers,
                                 std::string_view mime_type, std::string_view type,
                                 i64 encoded_length) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1078,6 +1090,8 @@ namespace fxe::debug {
     }
 
     void emit_loading_finished(std::string_view req_id, i64 encoded_length) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1087,6 +1101,8 @@ namespace fxe::debug {
 
     void emit_loading_failed(std::string_view req_id, std::string_view type,
                              std::string_view error_text, bool canceled) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1098,6 +1114,8 @@ namespace fxe::debug {
     }
 
     void emit_ws_created(std::string_view req_id, std::string_view url) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["url"] = std::string(url);
@@ -1108,6 +1126,8 @@ namespace fxe::debug {
     void
     emit_ws_handshake_request(std::string_view req_id,
                               const std::vector<std::pair<std::string, std::string>>& headers) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1119,6 +1139,8 @@ namespace fxe::debug {
     void
     emit_ws_handshake_response(std::string_view req_id, int status, std::string_view status_text,
                                const std::vector<std::pair<std::string, std::string>>& headers) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1131,6 +1153,8 @@ namespace fxe::debug {
     }
 
     void emit_ws_frame_sent(std::string_view req_id, int opcode, std::string_view payload_b64) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1140,6 +1164,8 @@ namespace fxe::debug {
     }
 
     void emit_ws_frame_received(std::string_view req_id, int opcode, std::string_view payload_b64) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();
@@ -1152,6 +1178,8 @@ namespace fxe::debug {
     }
 
     void emit_ws_closed(std::string_view req_id) {
+      if (!enabled())
+        return;
       json params{json::object()};
       params["requestId"] = std::string(req_id);
       params["timestamp"] = network_timestamp_now();

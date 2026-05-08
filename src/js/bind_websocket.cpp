@@ -136,10 +136,10 @@ namespace fxe::js {
           authority, end == std::string_view::npos ? url.size() - authority : end - authority));
     }
 
-    net::header_list ws_handshake_request_headers(std::string_view url,
-                                                  const std::vector<std::string>& protocols,
-                                                  bool compress) {
-      net::header_list headers;
+    std::vector<std::pair<std::string, std::string>>
+    ws_handshake_request_headers(std::string_view url, const std::vector<std::string>& protocols,
+                                 bool compress) {
+      std::vector<std::pair<std::string, std::string>> headers;
       if (const std::string authority = ws_authority_from_url(url); !authority.empty())
         headers.emplace_back("Host", authority);
       headers.emplace_back("Upgrade", "websocket");
@@ -162,8 +162,9 @@ namespace fxe::js {
       return headers;
     }
 
-    net::header_list ws_handshake_response_headers(const ws_holder& h) {
-      net::header_list headers{
+    std::vector<std::pair<std::string, std::string>>
+    ws_handshake_response_headers(const ws_holder& h) {
+      std::vector<std::pair<std::string, std::string>> headers{
           {"Connection", "Upgrade"},
           {"Upgrade", "websocket"},
       };
