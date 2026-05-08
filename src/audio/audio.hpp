@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <fxe/types.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -40,13 +41,13 @@ namespace fxe::audio {
   };
 
   struct capture_options {
-    std::optional<uint32_t> sample_rate;
-    std::optional<uint32_t> channels;
+    std::optional<u32> sample_rate;
+    std::optional<u32> channels;
     std::optional<std::string> device_id;
   };
 
-  using captured_audio_callback = std::function<void(const float* samples, std::size_t frame_count,
-                                                     uint32_t channels, uint32_t sample_rate)>;
+  using captured_audio_callback =
+      std::function<void(const float* samples, usize frame_count, u32 channels, u32 sample_rate)>;
 
   enum class audio_error {
     ok,
@@ -74,7 +75,7 @@ namespace fxe::audio {
   // Decode and load a sound from an in-memory buffer. The buffer is copied
   // internally; callers may free `data` immediately after the call. Returns an
   // invalid handle on failure; call last_error() for the structured reason.
-  sound_handle load_from_bytes(const uint8_t* data, std::size_t size);
+  sound_handle load_from_bytes(const u8* data, usize size);
 
   // Start playback. `volume` is linear gain, `rate` is a pitch/speed
   // multiplier (1.0 = native rate). Calling play on an already-playing sound

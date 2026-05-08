@@ -45,6 +45,7 @@
 #include <utility>
 #include <vector>
 
+#include <fxe/types.hpp>
 #include <sqlite3.h>
 #include <v8.h>
 
@@ -73,7 +74,7 @@ namespace fxe::js {
       if (v.IsEmpty() || !v->IsString())
         return {};
       String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, static_cast<size_t>(u.length())) : std::string{};
+      return *u ? std::string(*u, static_cast<usize>(u.length())) : std::string{};
     }
 
     void set_prop(Local<Context> ctx, Local<Object> obj, const char* key, Local<Value> v) {
@@ -83,7 +84,7 @@ namespace fxe::js {
     void set_str(Local<Context> ctx, Local<Object> obj, const char* key, std::string_view v) {
       set_prop(ctx, obj, key, s(Isolate::GetCurrent(), v));
     }
-    void set_int(Local<Context> ctx, Local<Object> obj, const char* key, int64_t v) {
+    void set_int(Local<Context> ctx, Local<Object> obj, const char* key, i64 v) {
       set_prop(ctx, obj, key, Number::New(Isolate::GetCurrent(), static_cast<double>(v)));
     }
     void throw_msg(Isolate* iso, std::string_view msg, const char* name = "Error") {
@@ -108,32 +109,32 @@ namespace fxe::js {
     // String/binary: UTF-8 / raw bytes with 0x00 escaped to 0x00 0x01,
     //   terminated by 0x00 0x00. (BLOB compare is bytewise; this preserves order.)
 
-    void encode_double_bytes(double d, uint8_t out[8]) {
-      uint64_t u;
+    void encode_double_bytes(double d, u8 out[8]) {
+      u64 u;
       std::memcpy(&u, &d, sizeof(u));
-      if (u & (uint64_t{1} << 63)) {
+      if (u & (u64{1} << 63)) {
         u = ~u; // negative: flip all bits
       } else {
-        u ^= (uint64_t{1} << 63); // positive: flip sign bit
+        u ^= (u64{1} << 63); // positive: flip sign bit
       }
       for (int i = 0; i < 8; ++i)
-        out[7 - i] = static_cast<uint8_t>(u >> (i * 8));
+        out[7 - i] = static_cast<u8>(u >> (i * 8));
     }
 
-    bool decode_double_bytes(const uint8_t in[8], double& out) {
-      uint64_t u = 0;
+    bool decode_double_bytes(const u8 in[8], double& out) {
+      u64 u = 0;
       for (int i = 0; i < 8; ++i)
         u = (u << 8) | in[i];
-      if (u & (uint64_t{1} << 63))
-        u ^= (uint64_t{1} << 63);
+      if (u & (u64{1} << 63))
+        u ^= (u64{1} << 63);
       else
         u = ~u;
       std::memcpy(&out, &u, sizeof(out));
       return true;
     }
 
-    void encode_byte_run(const uint8_t* data, size_t len, std::vector<uint8_t>& out) {
-      for (size_t i = 0; i < len; ++i) {
+    void encode_byte_run(const u8* data, usize len, std::vector<u8>& out) {
+      for (usize i = 0; i < len; ++i) {
         out.push_back(data[i]);
         if (data[i] == 0x00)
           out.push_back(0x01); // escape NUL → 0x00 0x01
@@ -142,14 +143,13 @@ namespace fxe::js {
       out.push_back(0x00); // terminator
     }
 
-    bool decode_byte_run(const uint8_t* data, size_t len, size_t& pos,
-                         std::vector<uint8_t>& bytes_out) {
+    bool decode_byte_run(const u8* data, usize len, usize& pos, std::vector<u8>& bytes_out) {
       while (pos < len) {
-        uint8_t b = data[pos++];
+        u8 b = data[pos++];
         if (b == 0x00) {
           if (pos >= len)
             return false;
-          uint8_t b2 = data[pos++];
+          u8 b2 = data[pos++];
           if (b2 == 0x00)
             return true; // terminator
           if (b2 == 0x01) {
@@ -166,7 +166,7 @@ namespace fxe::js {
 
     // Returns true on successful encode. Throws JS TypeError + returns false on
     // unsupported key (NaN, array, object, etc).
-    bool encode_key(Isolate* iso, Local<Value> v, std::vector<uint8_t>& out) {
+    bool encode_key(Isolate* iso, Local<Value> v, std::vector<u8>& out) {
       auto ctx = iso->GetCurrentContext();
       if (v.IsEmpty() || v->IsUndefined() || v->IsNull()) {
         throw_msg(iso, "IndexedDB key is required", "DataError");
@@ -179,7 +179,7 @@ namespace fxe::js {
           return false;
         }
         out.push_back(0x10);
-        uint8_t buf[8];
+        u8 buf[8];
         encode_double_bytes(d, buf);
         out.insert(out.end(), buf, buf + 8);
         return true;
@@ -191,7 +191,7 @@ namespace fxe::js {
           return false;
         }
         out.push_back(0x20);
-        uint8_t buf[8];
+        u8 buf[8];
         encode_double_bytes(d, buf);
         out.insert(out.end(), buf, buf + 8);
         return true;
@@ -204,7 +204,7 @@ namespace fxe::js {
           out.push_back(0x00);
           return true;
         }
-        encode_byte_run(reinterpret_cast<const uint8_t*>(*u), static_cast<size_t>(u.length()), out);
+        encode_byte_run(reinterpret_cast<const u8*>(*u), static_cast<usize>(u.length()), out);
         return true;
       }
       if (v->IsArrayBuffer() || v->IsArrayBufferView()) {
@@ -212,11 +212,11 @@ namespace fxe::js {
         if (v->IsArrayBuffer()) {
           auto buf = v.As<ArrayBuffer>();
           auto store = buf->GetBackingStore();
-          encode_byte_run(static_cast<const uint8_t*>(store->Data()), store->ByteLength(), out);
+          encode_byte_run(static_cast<const u8*>(store->Data()), store->ByteLength(), out);
         } else {
           auto view = v.As<ArrayBufferView>();
           auto store = view->Buffer()->GetBackingStore();
-          encode_byte_run(static_cast<const uint8_t*>(store->Data()) + view->ByteOffset(),
+          encode_byte_run(static_cast<const u8*>(store->Data()) + view->ByteOffset(),
                           view->ByteLength(), out);
         }
         return true;
@@ -226,12 +226,12 @@ namespace fxe::js {
       return false;
     }
 
-    Local<Value> decode_key(Isolate* iso, const uint8_t* data, size_t len) {
+    Local<Value> decode_key(Isolate* iso, const u8* data, usize len) {
       auto ctx = iso->GetCurrentContext();
       if (len == 0)
         return Undefined(iso);
-      uint8_t tag = data[0];
-      size_t pos = 1;
+      u8 tag = data[0];
+      usize pos = 1;
       if ((tag == 0x10 || tag == 0x20) && len >= 9) {
         double d = 0;
         decode_double_bytes(data + 1, d);
@@ -240,7 +240,7 @@ namespace fxe::js {
         return Number::New(iso, d);
       }
       if (tag == 0x30) {
-        std::vector<uint8_t> bytes;
+        std::vector<u8> bytes;
         if (!decode_byte_run(data, len, pos, bytes))
           return Undefined(iso);
         return String::NewFromUtf8(iso, reinterpret_cast<const char*>(bytes.data()),
@@ -248,7 +248,7 @@ namespace fxe::js {
             .ToLocalChecked();
       }
       if (tag == 0x40) {
-        std::vector<uint8_t> bytes;
+        std::vector<u8> bytes;
         if (!decode_byte_run(data, len, pos, bytes))
           return Undefined(iso);
         auto store = ArrayBuffer::NewBackingStore(iso, bytes.size());
@@ -259,8 +259,8 @@ namespace fxe::js {
       return Undefined(iso);
     }
 
-    int compare_blobs(const uint8_t* a, size_t alen, const uint8_t* b, size_t blen) {
-      size_t n = std::min(alen, blen);
+    int compare_blobs(const u8* a, usize alen, const u8* b, usize blen) {
+      usize n = std::min(alen, blen);
       int c = std::memcmp(a, b, n);
       if (c != 0)
         return c < 0 ? -1 : 1;
@@ -286,9 +286,9 @@ namespace fxe::js {
       if (path.empty())
         return root;
       Local<Value> cur = root;
-      size_t start = 0;
+      usize start = 0;
       while (start <= path.size()) {
-        size_t dot = path.find('.', start);
+        usize dot = path.find('.', start);
         std::string_view seg = path.substr(
             start, dot == std::string_view::npos ? std::string_view::npos : dot - start);
         cur = resolve_key_path_segment(iso, cur, seg);
@@ -308,10 +308,10 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (path.empty())
         return false;
-      size_t start = 0;
+      usize start = 0;
       Local<Object> cur = obj;
       while (true) {
-        size_t dot = path.find('.', start);
+        usize dot = path.find('.', start);
         std::string_view seg = path.substr(
             start, dot == std::string_view::npos ? std::string_view::npos : dot - start);
         if (dot == std::string_view::npos) {
@@ -332,8 +332,8 @@ namespace fxe::js {
 
     // ============================== Value serialization ==============================
 
-    bool serialize_value(Isolate* iso, Local<Context> ctx, Local<Value> v,
-                         std::vector<uint8_t>& out, std::string& err) {
+    bool serialize_value(Isolate* iso, Local<Context> ctx, Local<Value> v, std::vector<u8>& out,
+                         std::string& err) {
       ValueSerializer set(iso);
       set.WriteHeader();
       if (!set.WriteValue(ctx, v).FromMaybe(false)) {
@@ -346,8 +346,8 @@ namespace fxe::js {
       return true;
     }
 
-    MaybeLocal<Value> deserialize_value(Isolate* iso, Local<Context> ctx, const uint8_t* data,
-                                        size_t len) {
+    MaybeLocal<Value> deserialize_value(Isolate* iso, Local<Context> ctx, const u8* data,
+                                        usize len) {
       ValueDeserializer deser(iso, data, len);
       if (!deser.ReadHeader(ctx).FromMaybe(false))
         return MaybeLocal<Value>();
@@ -366,7 +366,7 @@ namespace fxe::js {
       std::string name;
       std::optional<std::string> key_path;
       bool auto_increment = false;
-      int64_t auto_seq = 0;
+      i64 auto_seq = 0;
       std::unordered_map<std::string, index_meta> indexes;
     };
 
@@ -374,7 +374,7 @@ namespace fxe::js {
       std::string name;
       std::string filename;
       sqlite3* db = nullptr;
-      int64_t version = 0;
+      i64 version = 0;
       bool closed = false;
       int open_connections = 0;
       std::unordered_map<std::string, store_meta> stores;
@@ -411,7 +411,7 @@ namespace fxe::js {
       }
     };
 
-    void bind_blob(sqlite3_stmt* stmt, int i, const std::vector<uint8_t>& blob) {
+    void bind_blob(sqlite3_stmt* stmt, int i, const std::vector<u8>& blob) {
       if (blob.empty())
         sqlite3_bind_zeroblob(stmt, i, 0);
       else
@@ -587,10 +587,10 @@ namespace fxe::js {
     struct key_range : weak_holder<key_range> {
       bool has_lower = false;
       bool lower_open = false;
-      std::vector<uint8_t> lower;
+      std::vector<u8> lower;
       bool has_upper = false;
       bool upper_open = false;
-      std::vector<uint8_t> upper;
+      std::vector<u8> upper;
     };
 
     Local<Object> wrap_key_range(Isolate* iso, Local<Context> ctx, key_range range) {
@@ -697,7 +697,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(false);
         return;
       }
-      std::vector<uint8_t> k;
+      std::vector<u8> k;
       if (!encode_key(iso, info[0], k))
         return;
       bool ok = true;
@@ -734,7 +734,7 @@ namespace fxe::js {
         }
       }
       // Treat as a single key; key range = only(value).
-      std::vector<uint8_t> k;
+      std::vector<u8> k;
       if (!encode_key(iso, v, k))
         return false;
       out.has_lower = true;
@@ -984,8 +984,8 @@ namespace fxe::js {
       st->self.SetWeak(st, tx_finalizer, WeakCallbackType::kParameter);
       set_native(iso, inst, st, TAG_IDB_TRANSACTION);
       auto names = Array::New(iso, static_cast<int>(store_names.size()));
-      for (size_t i = 0; i < store_names.size(); ++i)
-        (void)names->Set(ctx, static_cast<uint32_t>(i), s(iso, store_names[i]));
+      for (usize i = 0; i < store_names.size(); ++i)
+        (void)names->Set(ctx, static_cast<u32>(i), s(iso, store_names[i]));
       (void)inst->Set(ctx, "objectStoreNames"_v8(iso), names);
       (void)inst->Set(ctx, "mode"_v8(iso), s(iso, mode));
       (void)inst->Set(ctx, "oncomplete"_v8(iso), Null(iso));
@@ -1038,7 +1038,7 @@ namespace fxe::js {
                       meta.key_path ? s(iso, *meta.key_path).As<Value>() : Local<Value>(Null(iso)));
       (void)inst->Set(ctx, "autoIncrement"_v8(iso), Boolean::New(iso, meta.auto_increment));
       auto idx_names = Array::New(iso, static_cast<int>(meta.indexes.size()));
-      uint32_t k = 0;
+      u32 k = 0;
       for (auto& [iname, _] : meta.indexes)
         (void)idx_names->Set(ctx, k++, s(iso, iname));
       (void)inst->Set(ctx, "indexNames"_v8(iso), idx_names);
@@ -1071,7 +1071,7 @@ namespace fxe::js {
     }
 
     // SQL utility: extract the next-key from an auto-increment store.
-    int64_t next_auto_key(database_state* db, store_meta& meta) {
+    i64 next_auto_key(database_state* db, store_meta& meta) {
       meta.auto_seq += 1;
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(db->db, "UPDATE __stores SET auto_seq=?1 WHERE name=?2", -1, &stmt,
@@ -1085,9 +1085,8 @@ namespace fxe::js {
     }
 
     // Index population on put. Builds index rows for any indexes on the store.
-    void update_indexes_for_put(database_state* db, store_meta& meta,
-                                const std::vector<uint8_t>& pk, Local<Value> value, Isolate* iso,
-                                std::string& err) {
+    void update_indexes_for_put(database_state* db, store_meta& meta, const std::vector<u8>& pk,
+                                Local<Value> value, Isolate* iso, std::string& err) {
       // Delete any existing index rows for this primary key first.
       for (auto& [_, imeta] : meta.indexes) {
         std::string del = "DELETE FROM idx_" + meta.name + "_" + imeta.name + " WHERE pk=?1";
@@ -1109,7 +1108,7 @@ namespace fxe::js {
         Local<Value> ikv = resolve_key_path(iso, value, imeta.key_path);
         if (ikv.IsEmpty() || ikv->IsUndefined())
           continue; // no value at index path → skip
-        std::vector<uint8_t> ikey;
+        std::vector<u8> ikey;
         if (!encode_key(iso, ikv, ikey))
           return; // key encoding threw
         std::string sql =
@@ -1137,7 +1136,7 @@ namespace fxe::js {
       }
     }
 
-    void delete_indexes_for_pk(database_state* db, store_meta& meta, const std::vector<uint8_t>& pk,
+    void delete_indexes_for_pk(database_state* db, store_meta& meta, const std::vector<u8>& pk,
                                std::string& err) {
       for (auto& [_, imeta] : meta.indexes) {
         std::string del = "DELETE FROM idx_" + meta.name + "_" + imeta.name + " WHERE pk=?1";
@@ -1200,7 +1199,7 @@ namespace fxe::js {
       Local<Value> value = info[0];
       auto& meta = h->db->stores.at(h->name);
 
-      std::vector<uint8_t> pk;
+      std::vector<u8> pk;
       Local<Value> derived_key;
       bool key_from_arg = false;
 
@@ -1220,7 +1219,7 @@ namespace fxe::js {
             throw_msg(iso, "DataError: keyPath did not resolve to a key", "DataError");
             return;
           }
-          int64_t auto_k = next_auto_key(h->db.get(), meta);
+          i64 auto_k = next_auto_key(h->db.get(), meta);
           derived_key = Number::New(iso, static_cast<double>(auto_k));
           if (!encode_key(iso, derived_key, pk))
             return;
@@ -1232,7 +1231,7 @@ namespace fxe::js {
           derived_key = k;
         }
       } else if (meta.auto_increment) {
-        int64_t auto_k = next_auto_key(h->db.get(), meta);
+        i64 auto_k = next_auto_key(h->db.get(), meta);
         derived_key = Number::New(iso, static_cast<double>(auto_k));
         if (!encode_key(iso, derived_key, pk))
           return;
@@ -1243,7 +1242,7 @@ namespace fxe::js {
       (void)key_from_arg;
 
       // Serialize value.
-      std::vector<uint8_t> blob;
+      std::vector<u8> blob;
       std::string sderr;
       if (!serialize_value(iso, ctx, value, blob, sderr)) {
         throw_msg(iso, "DataCloneError: " + sderr, "DataCloneError");
@@ -1353,8 +1352,8 @@ namespace fxe::js {
       auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
       int rc = sqlite3_step(stmt);
       if (rc == SQLITE_ROW) {
-        const auto* data = static_cast<const uint8_t*>(sqlite3_column_blob(stmt, 0));
-        size_t len = static_cast<size_t>(sqlite3_column_bytes(stmt, 0));
+        const auto* data = static_cast<const u8*>(sqlite3_column_blob(stmt, 0));
+        usize len = static_cast<usize>(sqlite3_column_bytes(stmt, 0));
         Local<Value> val;
         if (deserialize_value(iso, ctx, data, len).ToLocal(&val))
           schedule_resolve(iso, req, val);
@@ -1419,8 +1418,8 @@ namespace fxe::js {
       auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
       int rc = sqlite3_step(stmt);
       if (rc == SQLITE_ROW) {
-        const auto* data = static_cast<const uint8_t*>(sqlite3_column_blob(stmt, 0));
-        size_t len = static_cast<size_t>(sqlite3_column_bytes(stmt, 0));
+        const auto* data = static_cast<const u8*>(sqlite3_column_blob(stmt, 0));
+        usize len = static_cast<usize>(sqlite3_column_bytes(stmt, 0));
         schedule_resolve(iso, req, decode_key(iso, data, len));
       } else if (rc == SQLITE_DONE) {
         schedule_resolve(iso, req, Undefined(iso));
@@ -1443,9 +1442,9 @@ namespace fxe::js {
         if (!decode_query(iso, info[0], range, true))
           return;
       }
-      int64_t limit = -1;
+      i64 limit = -1;
       if (info.Length() >= 2 && info[1]->IsNumber())
-        limit = std::max<int64_t>(0, info[1]->IntegerValue(ctx).FromMaybe(-1));
+        limit = std::max<i64>(0, info[1]->IntegerValue(ctx).FromMaybe(-1));
 
       std::string sql;
       std::string col = h->is_index ? "ik" : "k";
@@ -1488,11 +1487,11 @@ namespace fxe::js {
         bind_blob(stmt, 2, range.upper);
       auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
       auto arr = Array::New(iso);
-      uint32_t i = 0;
+      u32 i = 0;
       int rc;
       while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        const auto* data = static_cast<const uint8_t*>(sqlite3_column_blob(stmt, 0));
-        size_t len = static_cast<size_t>(sqlite3_column_bytes(stmt, 0));
+        const auto* data = static_cast<const u8*>(sqlite3_column_blob(stmt, 0));
+        usize len = static_cast<usize>(sqlite3_column_bytes(stmt, 0));
         Local<Value> v;
         if (keys_only)
           v = decode_key(iso, data, len);
@@ -1557,7 +1556,7 @@ namespace fxe::js {
       auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
       int rc = sqlite3_step(stmt);
       if (rc == SQLITE_ROW) {
-        int64_t n = sqlite3_column_int64(stmt, 0);
+        i64 n = sqlite3_column_int64(stmt, 0);
         schedule_resolve(iso, req, Number::New(iso, static_cast<double>(n)));
       } else {
         schedule_reject(iso, req, make_dom_error(iso, "UnknownError", sqlite3_errmsg(h->db->db)));
@@ -1599,11 +1598,11 @@ namespace fxe::js {
         bind_blob(stmt, 1, range.lower);
       if (range.has_upper)
         bind_blob(stmt, 2, range.upper);
-      std::vector<std::vector<uint8_t>> pks;
+      std::vector<std::vector<u8>> pks;
       int rc;
       while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
-        const auto* data = static_cast<const uint8_t*>(sqlite3_column_blob(stmt, 0));
-        size_t len = static_cast<size_t>(sqlite3_column_bytes(stmt, 0));
+        const auto* data = static_cast<const u8*>(sqlite3_column_blob(stmt, 0));
+        usize len = static_cast<usize>(sqlite3_column_bytes(stmt, 0));
         pks.emplace_back(data, data + len);
       }
       auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
@@ -1746,24 +1745,24 @@ namespace fxe::js {
             "INSERT INTO idx_" + h->name + "_" + name + " (ik, pk) VALUES (?1, ?2)";
         int rc;
         while ((rc = sqlite3_step(sel)) == SQLITE_ROW) {
-          const auto* pkdata = static_cast<const uint8_t*>(sqlite3_column_blob(sel, 0));
-          size_t pklen = static_cast<size_t>(sqlite3_column_bytes(sel, 0));
-          const auto* vdata = static_cast<const uint8_t*>(sqlite3_column_blob(sel, 1));
-          size_t vlen = static_cast<size_t>(sqlite3_column_bytes(sel, 1));
+          const auto* pkdata = static_cast<const u8*>(sqlite3_column_blob(sel, 0));
+          usize pklen = static_cast<usize>(sqlite3_column_bytes(sel, 0));
+          const auto* vdata = static_cast<const u8*>(sqlite3_column_blob(sel, 1));
+          usize vlen = static_cast<usize>(sqlite3_column_bytes(sel, 1));
           Local<Value> val;
           if (!deserialize_value(iso, ctx, vdata, vlen).ToLocal(&val))
             continue;
           Local<Value> ikv = resolve_key_path(iso, val, key_path);
           if (ikv.IsEmpty() || ikv->IsUndefined())
             continue;
-          std::vector<uint8_t> ikey;
+          std::vector<u8> ikey;
           if (!encode_key(iso, ikv, ikey))
             return;
           sqlite3_stmt* idx_ins = nullptr;
           if (sqlite3_prepare_v2(h->db->db, ins_sql.c_str(), -1, &idx_ins, nullptr) != SQLITE_OK)
             continue;
           bind_blob(idx_ins, 1, ikey);
-          std::vector<uint8_t> pk_vec(pkdata, pkdata + pklen);
+          std::vector<u8> pk_vec(pkdata, pkdata + pklen);
           bind_blob(idx_ins, 2, pk_vec);
           int irc = sqlite3_step(idx_ins);
           sqlite3_finalize(idx_ins);
@@ -1863,8 +1862,8 @@ namespace fxe::js {
       bool is_index = false;
       std::string store_name;
       std::string index_name;
-      std::vector<uint8_t> last_pk; // for update/delete
-      std::vector<uint8_t> last_ik; // for index cursors
+      std::vector<u8> last_pk; // for update/delete
+      std::vector<u8> last_ik; // for index cursors
 
       void on_finalize(Isolate*) {
         if (stmt)
@@ -1890,19 +1889,19 @@ namespace fxe::js {
       int rc = sqlite3_step(st->stmt);
       auto req = st->request.Get(iso);
       if (rc == SQLITE_ROW) {
-        const auto* col0 = static_cast<const uint8_t*>(sqlite3_column_blob(st->stmt, 0));
-        size_t col0_len = static_cast<size_t>(sqlite3_column_bytes(st->stmt, 0));
+        const auto* col0 = static_cast<const u8*>(sqlite3_column_blob(st->stmt, 0));
+        usize col0_len = static_cast<usize>(sqlite3_column_bytes(st->stmt, 0));
         if (st->is_index) {
           // columns: ik, pk, v
-          const auto* col1 = static_cast<const uint8_t*>(sqlite3_column_blob(st->stmt, 1));
-          size_t col1_len = static_cast<size_t>(sqlite3_column_bytes(st->stmt, 1));
+          const auto* col1 = static_cast<const u8*>(sqlite3_column_blob(st->stmt, 1));
+          usize col1_len = static_cast<usize>(sqlite3_column_bytes(st->stmt, 1));
           st->last_ik.assign(col0, col0 + col0_len);
           st->last_pk.assign(col1, col1 + col1_len);
           (void)cursor_obj->Set(ctx, "key"_v8(iso), decode_key(iso, col0, col0_len));
           (void)cursor_obj->Set(ctx, "primaryKey"_v8(iso), decode_key(iso, col1, col1_len));
           if (st->has_value) {
-            const auto* vdata = static_cast<const uint8_t*>(sqlite3_column_blob(st->stmt, 2));
-            size_t vlen = static_cast<size_t>(sqlite3_column_bytes(st->stmt, 2));
+            const auto* vdata = static_cast<const u8*>(sqlite3_column_blob(st->stmt, 2));
+            usize vlen = static_cast<usize>(sqlite3_column_bytes(st->stmt, 2));
             Local<Value> v;
             if (!deserialize_value(iso, ctx, vdata, vlen).ToLocal(&v))
               v = Undefined(iso);
@@ -1914,8 +1913,8 @@ namespace fxe::js {
           (void)cursor_obj->Set(ctx, "key"_v8(iso), decode_key(iso, col0, col0_len));
           (void)cursor_obj->Set(ctx, "primaryKey"_v8(iso), decode_key(iso, col0, col0_len));
           if (st->has_value) {
-            const auto* vdata = static_cast<const uint8_t*>(sqlite3_column_blob(st->stmt, 1));
-            size_t vlen = static_cast<size_t>(sqlite3_column_bytes(st->stmt, 1));
+            const auto* vdata = static_cast<const u8*>(sqlite3_column_blob(st->stmt, 1));
+            usize vlen = static_cast<usize>(sqlite3_column_bytes(st->stmt, 1));
             Local<Value> v;
             if (!deserialize_value(iso, ctx, vdata, vlen).ToLocal(&v))
               v = Undefined(iso);
@@ -1994,7 +1993,7 @@ namespace fxe::js {
       // Re-derive key from keyPath if set; must match cursor's primaryKey.
       if (meta.key_path) {
         Local<Value> derived = resolve_key_path(iso, value, *meta.key_path);
-        std::vector<uint8_t> dk;
+        std::vector<u8> dk;
         if (derived.IsEmpty() || derived->IsUndefined() || !encode_key(iso, derived, dk) ||
             dk != st->last_pk) {
           throw_msg(iso, "DataError: cursor.update value's key must match current primaryKey",
@@ -2002,7 +2001,7 @@ namespace fxe::js {
           return;
         }
       }
-      std::vector<uint8_t> blob;
+      std::vector<u8> blob;
       std::string sderr;
       if (!serialize_value(iso, ctx, value, blob, sderr)) {
         throw_msg(iso, "DataCloneError: " + sderr, "DataCloneError");
@@ -2251,7 +2250,7 @@ namespace fxe::js {
       (void)inst->Set(ctx, "name"_v8(iso), s(iso, db->name));
       (void)inst->Set(ctx, "version"_v8(iso), Number::New(iso, static_cast<double>(db->version)));
       auto names = Array::New(iso);
-      uint32_t i = 0;
+      u32 i = 0;
       for (auto& [k, _] : db->stores)
         (void)names->Set(ctx, i++, s(iso, k));
       (void)inst->Set(ctx, "objectStoreNames"_v8(iso), names);
@@ -2337,7 +2336,7 @@ namespace fxe::js {
 
       // Update objectStoreNames on the database instance.
       auto names = Array::New(iso);
-      uint32_t i = 0;
+      u32 i = 0;
       for (auto& [k, _] : h->db->stores)
         (void)names->Set(ctx, i++, s(iso, k));
       (void)info.This()->Set(ctx, "objectStoreNames"_v8(iso), names);
@@ -2393,7 +2392,7 @@ namespace fxe::js {
       sqlite3_finalize(del2);
       h->db->stores.erase(name);
       auto names = Array::New(iso);
-      uint32_t i = 0;
+      u32 i = 0;
       for (auto& [k, _] : h->db->stores)
         (void)names->Set(ctx, i++, s(iso, k));
       (void)info.This()->Set(ctx, "objectStoreNames"_v8(iso), names);
@@ -2420,7 +2419,7 @@ namespace fxe::js {
         store_names.push_back(utf8(iso, info[0]));
       } else if (info[0]->IsArray()) {
         auto arr = info[0].As<Array>();
-        for (uint32_t i = 0; i < arr->Length(); ++i) {
+        for (u32 i = 0; i < arr->Length(); ++i) {
           Local<Value> v;
           if (arr->Get(ctx, i).ToLocal(&v) && v->IsString())
             store_names.push_back(utf8(iso, v));
@@ -2491,7 +2490,7 @@ namespace fxe::js {
     struct open_completion {
       Global<Object> req;
       std::shared_ptr<database_state> db;
-      int64_t requested_version = 0;
+      i64 requested_version = 0;
       bool needs_upgrade = false;
     };
 
@@ -2518,7 +2517,7 @@ namespace fxe::js {
         sqlite3_bind_int64(upd, 1, p->requested_version);
         sqlite3_step(upd);
         sqlite3_finalize(upd);
-        int64_t old_version = p->db->version;
+        i64 old_version = p->db->version;
         p->db->version = p->requested_version;
         (void)db_obj->Set(ctx, "version"_v8(iso),
                           Number::New(iso, static_cast<double>(p->requested_version)));
@@ -2556,7 +2555,7 @@ namespace fxe::js {
     }
 
     void schedule_open(Isolate* iso, Local<Object> req, std::shared_ptr<database_state> db,
-                       int64_t requested_version, bool needs_upgrade) {
+                       i64 requested_version, bool needs_upgrade) {
       auto* p = new open_completion();
       p->req.Reset(iso, req);
       p->db = std::move(db);
@@ -2573,7 +2572,7 @@ namespace fxe::js {
         return;
       }
       std::string name = utf8(iso, info[0]);
-      int64_t requested_version = -1;
+      i64 requested_version = -1;
       if (info.Length() >= 2 && info[1]->IsNumber()) {
         requested_version = info[1]->IntegerValue(ctx).FromMaybe(0);
         if (requested_version <= 0) {
@@ -2590,7 +2589,7 @@ namespace fxe::js {
         return;
       }
       if (requested_version < 0)
-        requested_version = std::max<int64_t>(db->version, 1);
+        requested_version = std::max<i64>(db->version, 1);
       if (requested_version < db->version) {
         schedule_reject(
             iso, req,
@@ -2640,7 +2639,7 @@ namespace fxe::js {
       info.GetReturnValue().Set(resolver->GetPromise());
       auto user_data = fxe::os::get_path("userData");
       auto arr = Array::New(iso);
-      uint32_t i = 0;
+      u32 i = 0;
       if (!user_data.empty()) {
         auto idb_dir = std::filesystem::path(user_data) / "idb";
         std::error_code ec;
@@ -2653,7 +2652,7 @@ namespace fxe::js {
               // version unknown without opening — report 0 unless cached
               auto& reg = registry_table()[iso];
               auto it = reg.by_name.find(stem);
-              int64_t v = it != reg.by_name.end() ? it->second->version : 0;
+              i64 v = it != reg.by_name.end() ? it->second->version : 0;
               set_int(ctx, rec, "version", v);
               (void)arr->Set(ctx, i++, rec);
             }
@@ -2669,7 +2668,7 @@ namespace fxe::js {
         throw_msg(iso, "indexedDB.cmp(a, b)", "TypeError");
         return;
       }
-      std::vector<uint8_t> a, b;
+      std::vector<u8> a, b;
       if (!encode_key(iso, info[0], a) || !encode_key(iso, info[1], b))
         return;
       info.GetReturnValue().Set(compare_blobs(a.data(), a.size(), b.data(), b.size()));

@@ -1,5 +1,6 @@
 #include "websocket_client.hpp"
 #include "runtime/uv_loop.hpp"
+#include <fxe/types.hpp>
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
 #include "tls_client.hpp"
 #endif
@@ -66,15 +67,15 @@ namespace fxe::net {
 #endif
 
     // Tiny base64 encoder for the Sec-WebSocket-Key nonce.
-    std::string b64_encode(const std::uint8_t* data, std::size_t n) {
+    std::string b64_encode(const u8* data, usize n) {
       static const char* tab = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
       std::string out;
       out.reserve(((n + 2) / 3) * 4);
-      for (std::size_t i = 0; i < n; i += 3) {
-        std::uint32_t a = data[i];
-        std::uint32_t b = i + 1 < n ? data[i + 1] : 0;
-        std::uint32_t c = i + 2 < n ? data[i + 2] : 0;
-        std::uint32_t v = (a << 16) | (b << 8) | c;
+      for (usize i = 0; i < n; i += 3) {
+        u32 a = data[i];
+        u32 b = i + 1 < n ? data[i + 1] : 0;
+        u32 c = i + 2 < n ? data[i + 2] : 0;
+        u32 v = (a << 16) | (b << 8) | c;
         out.push_back(tab[(v >> 18) & 0x3F]);
         out.push_back(tab[(v >> 12) & 0x3F]);
         out.push_back(i + 1 < n ? tab[(v >> 6) & 0x3F] : '=');
@@ -87,7 +88,7 @@ namespace fxe::net {
                       std::string& path, bool& secure) {
       const std::string ws = "ws://";
       const std::string wss = "wss://";
-      std::size_t off = 0;
+      usize off = 0;
       if (url.rfind(ws, 0) == 0) {
         secure = false;
         off = ws.size();
@@ -112,36 +113,34 @@ namespace fxe::net {
       return !host.empty();
     }
 
-    bool send_all(socket_handle s, const std::uint8_t* data, std::size_t n) {
-      std::size_t off = 0;
+    bool send_all(socket_handle s, const u8* data, usize n) {
+      usize off = 0;
       while (off < n) {
 #ifdef _WIN32
-        const std::size_t chunk =
-            std::min(n - off, static_cast<std::size_t>(std::numeric_limits<int>::max()));
+        const usize chunk = std::min(n - off, static_cast<usize>(std::numeric_limits<int>::max()));
         int r = ::send(s, reinterpret_cast<const char*>(data + off), static_cast<int>(chunk), 0);
 #else
         ssize_t r = ::send(s, data + off, n - off, 0);
 #endif
         if (r <= 0)
           return false;
-        off += static_cast<std::size_t>(r);
+        off += static_cast<usize>(r);
       }
       return true;
     }
 
-    bool recv_n(socket_handle s, std::uint8_t* buf, std::size_t n) {
-      std::size_t off = 0;
+    bool recv_n(socket_handle s, u8* buf, usize n) {
+      usize off = 0;
       while (off < n) {
 #ifdef _WIN32
-        const std::size_t chunk =
-            std::min(n - off, static_cast<std::size_t>(std::numeric_limits<int>::max()));
+        const usize chunk = std::min(n - off, static_cast<usize>(std::numeric_limits<int>::max()));
         int r = ::recv(s, reinterpret_cast<char*>(buf + off), static_cast<int>(chunk), 0);
 #else
         ssize_t r = ::recv(s, buf + off, n - off, 0);
 #endif
         if (r <= 0)
           return false;
-        off += static_cast<std::size_t>(r);
+        off += static_cast<usize>(r);
       }
       return true;
     }
@@ -154,10 +153,10 @@ namespace fxe::net {
 
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
     std::string trim(std::string_view v) {
-      std::size_t begin = 0;
+      usize begin = 0;
       while (begin < v.size() && (v[begin] == ' ' || v[begin] == '\t'))
         ++begin;
-      std::size_t end = v.size();
+      usize end = v.size();
       while (end > begin && (v[end - 1] == ' ' || v[end - 1] == '\t'))
         --end;
       return std::string(v.substr(begin, end - begin));
@@ -165,9 +164,9 @@ namespace fxe::net {
 
     std::vector<std::string> split_http_list(std::string_view v, char sep) {
       std::vector<std::string> out;
-      std::size_t start = 0;
+      usize start = 0;
       bool quoted = false;
-      for (std::size_t i = 0; i < v.size(); ++i) {
+      for (usize i = 0; i < v.size(); ++i) {
         if (v[i] == '"') {
           quoted = !quoted;
         } else if (!quoted && v[i] == sep) {
@@ -181,12 +180,12 @@ namespace fxe::net {
 
     std::vector<std::string> header_values(const std::string& headers, std::string name_lower) {
       std::vector<std::string> out;
-      std::size_t line = 0;
+      usize line = 0;
       while (line < headers.size()) {
-        std::size_t eol = headers.find("\r\n", line);
+        usize eol = headers.find("\r\n", line);
         if (eol == std::string::npos)
           break;
-        std::size_t colon = headers.find(':', line);
+        usize colon = headers.find(':', line);
         if (colon != std::string::npos && colon < eol) {
           std::string name = ascii_lower(headers.substr(line, colon - line));
           if (name == name_lower)
@@ -237,13 +236,13 @@ namespace fxe::net {
 #endif
   };
 
-  std::int64_t monotonic_ms() {
+  i64 monotonic_ms() {
     using clock = std::chrono::steady_clock;
     return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch())
         .count();
   }
 
-  bool parse_u16_port(const std::string& port, std::uint16_t& out) {
+  bool parse_u16_port(const std::string& port, u16& out) {
     if (port.empty())
       return false;
     unsigned long value = 0;
@@ -256,7 +255,7 @@ namespace fxe::net {
     }
     if (value == 0)
       return false;
-    out = static_cast<std::uint16_t>(value);
+    out = static_cast<u16>(value);
     return true;
   }
 
@@ -273,7 +272,7 @@ namespace fxe::net {
 
         auto state = std::make_unique<ws_deflate_state>();
         state->negotiated = true;
-        for (std::size_t i = 1; i < parts.size(); ++i) {
+        for (usize i = 1; i < parts.size(); ++i) {
           if (parts[i].empty())
             continue;
           auto eq = parts[i].find('=');
@@ -336,8 +335,7 @@ namespace fxe::net {
     return true;
   }
 
-  bool websocket_client::deflate_message(const std::uint8_t* data, std::size_t n,
-                                         std::vector<std::uint8_t>& out) {
+  bool websocket_client::deflate_message(const u8* data, usize n, std::vector<u8>& out) {
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
     if (!deflate_ || !deflate_->negotiated)
       return false;
@@ -345,14 +343,14 @@ namespace fxe::net {
     z_stream& stream = deflate_->deflater;
     stream.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(data));
     stream.avail_in = static_cast<uInt>(n);
-    std::uint8_t buf[8192];
+    u8 buf[8192];
     do {
       stream.next_out = reinterpret_cast<Bytef*>(buf);
       stream.avail_out = sizeof(buf);
       int ret = ::deflate(&stream, Z_SYNC_FLUSH);
       if (ret != Z_OK)
         return false;
-      const std::size_t produced = sizeof(buf) - stream.avail_out;
+      const usize produced = sizeof(buf) - stream.avail_out;
       out.insert(out.end(), buf, buf + produced);
     } while (stream.avail_in != 0 || stream.avail_out == 0);
     if (out.size() < 4 || out[out.size() - 4] != 0x00 || out[out.size() - 3] != 0x00 ||
@@ -370,26 +368,26 @@ namespace fxe::net {
 #endif
   }
 
-  bool websocket_client::inflate_message(const std::vector<std::uint8_t>& data,
-                                         std::vector<std::uint8_t>& out, bool& too_big) {
+  bool websocket_client::inflate_message(const std::vector<u8>& data, std::vector<u8>& out,
+                                         bool& too_big) {
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
     too_big = false;
     if (!deflate_ || !deflate_->negotiated)
       return false;
-    std::vector<std::uint8_t> input = data;
+    std::vector<u8> input = data;
     input.insert(input.end(), {0x00, 0x00, 0xff, 0xff});
     z_stream& stream = deflate_->inflater;
     stream.next_in = reinterpret_cast<Bytef*>(input.data());
     stream.avail_in = static_cast<uInt>(input.size());
     out.clear();
-    std::uint8_t buf[8192];
+    u8 buf[8192];
     do {
       stream.next_out = reinterpret_cast<Bytef*>(buf);
       stream.avail_out = sizeof(buf);
       int ret = ::inflate(&stream, Z_SYNC_FLUSH);
       if (ret != Z_OK && ret != Z_STREAM_END)
         return false;
-      const std::size_t produced = sizeof(buf) - stream.avail_out;
+      const usize produced = sizeof(buf) - stream.avail_out;
       if (produced > options_.max_message_bytes ||
           out.size() > options_.max_message_bytes - produced) {
         too_big = true;
@@ -465,7 +463,7 @@ namespace fxe::net {
     return out;
   }
 
-  std::uint16_t websocket_client::close_code() const {
+  u16 websocket_client::close_code() const {
     std::lock_guard<std::mutex> lk(close_mu_);
     return close_code_;
   }
@@ -482,7 +480,7 @@ namespace fxe::net {
     }
   }
 
-  void websocket_client::send_text(std::string s, std::size_t max_fragment_bytes) {
+  void websocket_client::send_text(std::string s, usize max_fragment_bytes) {
     if (state_.load() != ws_ready_state::open)
       return;
     out_msg m;
@@ -497,8 +495,7 @@ namespace fxe::net {
     out_cv_.notify_one();
   }
 
-  void websocket_client::send_binary(std::vector<std::uint8_t> data,
-                                     std::size_t max_fragment_bytes) {
+  void websocket_client::send_binary(std::vector<u8> data, usize max_fragment_bytes) {
     if (state_.load() != ws_ready_state::open)
       return;
     out_msg m;
@@ -513,7 +510,7 @@ namespace fxe::net {
     out_cv_.notify_one();
   }
 
-  void websocket_client::close(std::uint16_t code, std::string reason) {
+  void websocket_client::close(u16 code, std::string reason) {
     auto cur = state_.load();
     if (cur == ws_ready_state::closed || cur == ws_ready_state::closing)
       return;
@@ -543,7 +540,7 @@ namespace fxe::net {
 
     if (secure) {
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
-      std::uint16_t tls_port = 0;
+      u16 tls_port = 0;
       if (!parse_u16_port(port, tls_port)) {
         handshake_error_ = "invalid wss port";
         return false;
@@ -596,10 +593,10 @@ namespace fxe::net {
     }
 
     // Random 16-byte nonce -> base64
-    std::uint8_t nonce[16];
+    u8 nonce[16];
     std::random_device rd;
     for (auto& b : nonce)
-      b = static_cast<std::uint8_t>(rd());
+      b = static_cast<u8>(rd());
     std::string key = b64_encode(nonce, sizeof(nonce));
 
     std::ostringstream req;
@@ -614,7 +611,7 @@ namespace fxe::net {
         << "Sec-WebSocket-Version: 13\r\n";
     if (!protocols_.empty()) {
       req << "Sec-WebSocket-Protocol: ";
-      for (std::size_t i = 0; i < protocols_.size(); ++i) {
+      for (usize i = 0; i < protocols_.size(); ++i) {
         if (i)
           req << ", ";
         req << protocols_[i];
@@ -629,7 +626,7 @@ namespace fxe::net {
 #endif
     req << "User-Agent: fxe/0\r\n\r\n";
     std::string r = req.str();
-    if (!transport_send_all(reinterpret_cast<const std::uint8_t*>(r.data()), r.size()))
+    if (!transport_send_all(reinterpret_cast<const u8*>(r.data()), r.size()))
       return false;
     if (stop_.load())
       return false;
@@ -649,7 +646,7 @@ namespace fxe::net {
       auto colon = headers.find(':', p);
       if (eol != std::string::npos && colon != std::string::npos && colon < eol) {
         std::string v = headers.substr(colon + 1, eol - colon - 1);
-        std::size_t i = 0;
+        usize i = 0;
         while (i < v.size() && (v[i] == ' ' || v[i] == '\t'))
           ++i;
         selected_protocol_ = v.substr(i);
@@ -660,15 +657,15 @@ namespace fxe::net {
     return true;
   }
 
-  bool websocket_client::transport_send_all(const std::uint8_t* data, std::size_t n) {
+  bool websocket_client::transport_send_all(const u8* data, usize n) {
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
     if (tls_) {
-      std::size_t off = 0;
+      usize off = 0;
       while (off < n) {
         ssize_t written = tls_->write(data + off, n - off);
         if (written <= 0)
           return false;
-        off += static_cast<std::size_t>(written);
+        off += static_cast<usize>(written);
       }
       return true;
     }
@@ -678,15 +675,15 @@ namespace fxe::net {
            send_all(static_cast<socket_handle>(sock), data, n);
   }
 
-  bool websocket_client::transport_recv_n(std::uint8_t* buf, std::size_t n) {
+  bool websocket_client::transport_recv_n(u8* buf, usize n) {
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
     if (tls_) {
-      std::size_t off = 0;
+      usize off = 0;
       while (off < n) {
         ssize_t got = tls_->read(buf + off, n - off);
         if (got <= 0)
           return false;
-        off += static_cast<std::size_t>(got);
+        off += static_cast<usize>(got);
       }
       return true;
     }
@@ -698,9 +695,9 @@ namespace fxe::net {
 
   bool websocket_client::transport_recv_http_headers(std::string& out) {
     out.clear();
-    const std::size_t cap = 16 * 1024;
+    const usize cap = 16 * 1024;
     while (out.size() < cap) {
-      std::uint8_t c = 0;
+      u8 c = 0;
       if (!transport_recv_n(&c, 1))
         return false;
       out.push_back(static_cast<char>(c));
@@ -710,17 +707,17 @@ namespace fxe::net {
     return false;
   }
 
-  bool websocket_client::send_message(std::uint8_t opcode, const std::uint8_t* data, std::size_t n,
-                                      std::size_t max_fragment_bytes, bool compressed) {
-    std::size_t limit = max_fragment_bytes == 0 ? options_.max_fragment_bytes : max_fragment_bytes;
+  bool websocket_client::send_message(u8 opcode, const u8* data, usize n, usize max_fragment_bytes,
+                                      bool compressed) {
+    usize limit = max_fragment_bytes == 0 ? options_.max_fragment_bytes : max_fragment_bytes;
     if (limit == 0 || n <= limit)
       return send_frame(opcode, data, n, true, compressed);
-    std::size_t off = 0;
+    usize off = 0;
     bool first = true;
     while (off < n) {
-      const std::size_t chunk = std::min(limit, n - off);
+      const usize chunk = std::min(limit, n - off);
       const bool fin = off + chunk == n;
-      const std::uint8_t frame_opcode = first ? opcode : 0x0;
+      const u8 frame_opcode = first ? opcode : 0x0;
       if (!send_frame(frame_opcode, data + off, chunk, fin, first && compressed))
         return false;
       first = false;
@@ -729,40 +726,38 @@ namespace fxe::net {
     return true;
   }
 
-  bool websocket_client::send_frame(std::uint8_t opcode, const std::uint8_t* data, std::size_t n,
-                                    bool fin, bool rsv1) {
+  bool websocket_client::send_frame(u8 opcode, const u8* data, usize n, bool fin, bool rsv1) {
     std::lock_guard<std::mutex> lk(send_mu_);
-    std::vector<std::uint8_t> hdr;
+    std::vector<u8> hdr;
     hdr.reserve(14);
-    hdr.push_back(
-        static_cast<std::uint8_t>((fin ? 0x80 : 0x00) | (rsv1 ? 0x40 : 0x00) | (opcode & 0x0F)));
-    std::uint8_t mask_bit = 0x80;
+    hdr.push_back(static_cast<u8>((fin ? 0x80 : 0x00) | (rsv1 ? 0x40 : 0x00) | (opcode & 0x0F)));
+    u8 mask_bit = 0x80;
     if (n < 126) {
-      hdr.push_back(static_cast<std::uint8_t>(mask_bit | n));
+      hdr.push_back(static_cast<u8>(mask_bit | n));
     } else if (n <= 0xFFFF) {
-      hdr.push_back(static_cast<std::uint8_t>(mask_bit | 126));
-      hdr.push_back(static_cast<std::uint8_t>((n >> 8) & 0xFF));
-      hdr.push_back(static_cast<std::uint8_t>(n & 0xFF));
+      hdr.push_back(static_cast<u8>(mask_bit | 126));
+      hdr.push_back(static_cast<u8>((n >> 8) & 0xFF));
+      hdr.push_back(static_cast<u8>(n & 0xFF));
     } else {
-      hdr.push_back(static_cast<std::uint8_t>(mask_bit | 127));
+      hdr.push_back(static_cast<u8>(mask_bit | 127));
       for (int i = 7; i >= 0; --i)
-        hdr.push_back(static_cast<std::uint8_t>((n >> (i * 8)) & 0xFF));
+        hdr.push_back(static_cast<u8>((n >> (i * 8)) & 0xFF));
     }
-    std::uint8_t mask[4];
+    u8 mask[4];
     std::random_device rd;
     for (auto& b : mask)
-      b = static_cast<std::uint8_t>(rd());
+      b = static_cast<u8>(rd());
     hdr.insert(hdr.end(), mask, mask + 4);
     if (!transport_send_all(hdr.data(), hdr.size()))
       return false;
-    std::uint8_t buf[4096];
-    std::size_t off = 0;
+    u8 buf[4096];
+    usize off = 0;
     while (off < n) {
-      std::size_t chunk = n - off;
+      usize chunk = n - off;
       if (chunk > sizeof(buf))
         chunk = sizeof(buf);
-      for (std::size_t i = 0; i < chunk; ++i)
-        buf[i] = static_cast<std::uint8_t>(data[off + i] ^ mask[(off + i) & 3]);
+      for (usize i = 0; i < chunk; ++i)
+        buf[i] = static_cast<u8>(data[off + i] ^ mask[(off + i) & 3]);
       if (!transport_send_all(buf, chunk))
         return false;
       off += chunk;
@@ -770,21 +765,21 @@ namespace fxe::net {
     return true;
   }
 
-  bool websocket_client::send_close_frame(std::uint16_t code, const std::string& reason) {
-    std::vector<std::uint8_t> body;
-    body.push_back(static_cast<std::uint8_t>((code >> 8) & 0xFF));
-    body.push_back(static_cast<std::uint8_t>(code & 0xFF));
+  bool websocket_client::send_close_frame(u16 code, const std::string& reason) {
+    std::vector<u8> body;
+    body.push_back(static_cast<u8>((code >> 8) & 0xFF));
+    body.push_back(static_cast<u8>(code & 0xFF));
     body.insert(body.end(), reason.begin(), reason.end());
     return send_frame(0x8, body.data(), body.size());
   }
 
-  void websocket_client::record_close(std::uint16_t code, std::string reason) {
+  void websocket_client::record_close(u16 code, std::string reason) {
     std::lock_guard<std::mutex> lk(close_mu_);
     close_code_ = code;
     close_reason_ = std::move(reason);
   }
 
-  void websocket_client::emit_local_close(std::uint16_t code, std::string reason) {
+  void websocket_client::emit_local_close(u16 code, std::string reason) {
     ws_event ev;
     ev.kind = ws_event_kind::close;
     ev.code = code;
@@ -822,16 +817,16 @@ namespace fxe::net {
 
     // Reader thread for inbound; this thread becomes the writer.
     std::thread reader([this] {
-      std::vector<std::uint8_t> assembled;
-      std::uint8_t cont_opcode = 0;
+      std::vector<u8> assembled;
+      u8 cont_opcode = 0;
       bool compressed_message = false;
       while (!stop_.load()) {
-        std::uint8_t hdr[2];
+        u8 hdr[2];
         if (!transport_recv_n(hdr, 2))
           break;
         last_frame_ms_.store(monotonic_ms());
         bool fin = (hdr[0] & 0x80) != 0;
-        std::uint8_t op = static_cast<std::uint8_t>(hdr[0] & 0x0F);
+        u8 op = static_cast<u8>(hdr[0] & 0x0F);
         bool masked = (hdr[1] & 0x80) != 0;
         bool rsv1 = (hdr[0] & 0x40) != 0;
         bool rsv_other = (hdr[0] & 0x30) != 0;
@@ -841,21 +836,21 @@ namespace fxe::net {
           emit_local_close(1002, "Protocol Error");
           return;
         }
-        std::uint64_t plen = static_cast<std::uint64_t>(hdr[1] & 0x7F);
+        u64 plen = static_cast<u64>(hdr[1] & 0x7F);
         if (plen == 126) {
-          std::uint8_t ext[2];
+          u8 ext[2];
           if (!transport_recv_n(ext, 2))
             break;
-          plen = (static_cast<std::uint64_t>(ext[0]) << 8) | static_cast<std::uint64_t>(ext[1]);
+          plen = (static_cast<u64>(ext[0]) << 8) | static_cast<u64>(ext[1]);
         } else if (plen == 127) {
-          std::uint8_t ext[8];
+          u8 ext[8];
           if (!transport_recv_n(ext, 8))
             break;
           plen = 0;
           for (int i = 0; i < 8; ++i)
-            plen = (plen << 8) | static_cast<std::uint64_t>(ext[i]);
+            plen = (plen << 8) | static_cast<u64>(ext[i]);
         }
-        std::uint8_t mask[4] = {0, 0, 0, 0};
+        u8 mask[4] = {0, 0, 0, 0};
         if (masked && !transport_recv_n(mask, 4))
           break;
         const bool is_data = op == 0x1 || op == 0x2 || op == 0x0;
@@ -865,27 +860,27 @@ namespace fxe::net {
           return;
         }
         if (is_data) {
-          const std::uint64_t base = op == 0x0 ? assembled.size() : 0;
-          if (plen > static_cast<std::uint64_t>(options_.max_message_bytes) ||
-              base > static_cast<std::uint64_t>(options_.max_message_bytes) - plen) {
+          const u64 base = op == 0x0 ? assembled.size() : 0;
+          if (plen > static_cast<u64>(options_.max_message_bytes) ||
+              base > static_cast<u64>(options_.max_message_bytes) - plen) {
             send_close_frame(1009, "Message Too Big");
             emit_local_close(1009, "Message Too Big");
             return;
           }
         }
-        if (plen > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
+        if (plen > static_cast<u64>(std::numeric_limits<usize>::max())) {
           send_close_frame(1009, "Message Too Big");
           emit_local_close(1009, "Message Too Big");
           return;
         }
-        std::vector<std::uint8_t> payload;
+        std::vector<u8> payload;
         if (plen > 0) {
-          payload.resize(static_cast<std::size_t>(plen));
+          payload.resize(static_cast<usize>(plen));
           if (!transport_recv_n(payload.data(), payload.size()))
             break;
           if (masked)
-            for (std::size_t i = 0; i < payload.size(); ++i)
-              payload[i] = static_cast<std::uint8_t>(payload[i] ^ mask[i & 3]);
+            for (usize i = 0; i < payload.size(); ++i)
+              payload[i] = static_cast<u8>(payload[i] ^ mask[i & 3]);
         }
         // Control frames must not be fragmented.
         if (op >= 0x8 && (!fin || payload.size() > 125)) {
@@ -899,11 +894,11 @@ namespace fxe::net {
           } else if (op == 0xA) {
             awaiting_pong_.store(false);
           } else if (op == 0x8) {
-            std::uint16_t code = 1005;
+            u16 code = 1005;
             std::string reason;
             if (payload.size() >= 2) {
-              code = static_cast<std::uint16_t>((static_cast<std::uint16_t>(payload[0]) << 8) |
-                                                static_cast<std::uint16_t>(payload[1]));
+              code = static_cast<u16>((static_cast<u16>(payload[0]) << 8) |
+                                      static_cast<u16>(payload[1]));
               reason.assign(payload.begin() + 2, payload.end());
             }
             record_close(code, reason);
@@ -943,11 +938,11 @@ namespace fxe::net {
           assembled.insert(assembled.end(), payload.begin(), payload.end());
         }
         if (fin) {
-          std::vector<std::uint8_t> message;
+          std::vector<u8> message;
           if (compressed_message) {
             bool too_big = false;
             if (!inflate_message(assembled, message, too_big)) {
-              const std::uint16_t code = too_big ? 1009 : 1002;
+              const u16 code = too_big ? 1009 : 1002;
               const char* reason = too_big ? "Message Too Big" : "Bad Compressed Data";
               send_close_frame(code, reason);
               emit_local_close(code, reason);
@@ -976,16 +971,16 @@ namespace fxe::net {
     auto check_idle = [this]() {
       if (options_.idle_timeout_ms == 0)
         return true;
-      const std::int64_t now = monotonic_ms();
+      const i64 now = monotonic_ms();
       if (awaiting_pong_.load()) {
-        if (now - ping_sent_ms_.load() >= static_cast<std::int64_t>(options_.pong_timeout_ms)) {
+        if (now - ping_sent_ms_.load() >= static_cast<i64>(options_.pong_timeout_ms)) {
           send_close_frame(1011, "pong timeout");
           emit_local_close(1011, "pong timeout");
           return false;
         }
         return true;
       }
-      if (now - last_frame_ms_.load() >= static_cast<std::int64_t>(options_.idle_timeout_ms)) {
+      if (now - last_frame_ms_.load() >= static_cast<i64>(options_.idle_timeout_ms)) {
         if (!send_frame(0x9, nullptr, 0)) {
           stop_.store(true);
           close_socket_now(true);
@@ -1013,11 +1008,11 @@ namespace fxe::net {
         switch (m.op) {
         case out_op::text:
         case out_op::binary: {
-          const std::uint8_t opcode = m.op == out_op::text ? 0x1 : 0x2;
+          const u8 opcode = m.op == out_op::text ? 0x1 : 0x2;
           bool compressed = false;
-          std::vector<std::uint8_t> wire;
-          const std::uint8_t* data = m.bytes.data();
-          std::size_t size = m.bytes.size();
+          std::vector<u8> wire;
+          const u8* data = m.bytes.data();
+          usize size = m.bytes.size();
           if (deflate_ && deflate_->negotiated) {
             if (!deflate_message(m.bytes.data(), m.bytes.size(), wire)) {
               send_close_frame(1011, "compression failed");

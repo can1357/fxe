@@ -781,7 +781,7 @@ int main(int argc, char** argv) {
       if (status == 0 && !opts.cpu_prof_js_only) {
         // Size the ring for ~ hz * 120s of headroom; capped to keep the
         // resident set bounded.
-        std::size_t cap = static_cast<std::size_t>(opts.cpu_prof_hz) * 120u;
+        usize cap = static_cast<usize>(opts.cpu_prof_hz) * 120u;
         if (cap < 4096)
           cap = 4096;
         if (cap > (1u << 20))

@@ -12,6 +12,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <string>
 #include <thread>
 #include <vector>
@@ -164,28 +165,28 @@ namespace {
     return out;
   }
 
-  bool write_all(fxe::net::tls_client& client, const char* data, size_t len, std::string& err) {
-    size_t off = 0;
+  bool write_all(fxe::net::tls_client& client, const char* data, usize len, std::string& err) {
+    usize off = 0;
     while (off < len) {
       ssize_t n = client.write(data + off, len - off);
       if (n <= 0) {
         err = "TLS write failed with return " + std::to_string(n);
         return false;
       }
-      off += static_cast<size_t>(n);
+      off += static_cast<usize>(n);
     }
     return true;
   }
 
-  bool read_exact(fxe::net::tls_client& client, char* data, size_t len, std::string& err) {
-    size_t off = 0;
+  bool read_exact(fxe::net::tls_client& client, char* data, usize len, std::string& err) {
+    usize off = 0;
     while (off < len) {
       ssize_t n = client.read(data + off, len - off);
       if (n <= 0) {
         err = "TLS read failed with return " + std::to_string(n);
         return false;
       }
-      off += static_cast<size_t>(n);
+      off += static_cast<usize>(n);
     }
     return true;
   }
@@ -217,7 +218,7 @@ namespace {
       return result;
     }
 
-    const uint16_t port = server->local_port();
+    const u16 port = server->local_port();
     if (port == 0) {
       result.err = "server reported local port 0";
       server->close();

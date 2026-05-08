@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <fxe/types.hpp>
 #include <ios>
 #include <iterator>
 
@@ -12,7 +13,7 @@ namespace fxe::bundle {
 
   namespace {
 
-    void put_u32(std::string& out, std::uint32_t v) {
+    void put_u32(std::string& out, u32 v) {
       char b[4];
       b[0] = static_cast<char>(v & 0xff);
       b[1] = static_cast<char>((v >> 8) & 0xff);
@@ -21,32 +22,32 @@ namespace fxe::bundle {
       out.append(b, 4);
     }
 
-    void put_u64(std::string& out, std::uint64_t v) {
+    void put_u64(std::string& out, u64 v) {
       for (int i = 0; i < 8; ++i)
         out.push_back(static_cast<char>((v >> (i * 8)) & 0xff));
     }
 
-    std::uint32_t read_u32(const char* p) {
-      return (static_cast<std::uint32_t>(static_cast<unsigned char>(p[0]))) |
-             (static_cast<std::uint32_t>(static_cast<unsigned char>(p[1])) << 8) |
-             (static_cast<std::uint32_t>(static_cast<unsigned char>(p[2])) << 16) |
-             (static_cast<std::uint32_t>(static_cast<unsigned char>(p[3])) << 24);
+    u32 read_u32(const char* p) {
+      return (static_cast<u32>(static_cast<unsigned char>(p[0]))) |
+             (static_cast<u32>(static_cast<unsigned char>(p[1])) << 8) |
+             (static_cast<u32>(static_cast<unsigned char>(p[2])) << 16) |
+             (static_cast<u32>(static_cast<unsigned char>(p[3])) << 24);
     }
 
-    std::uint64_t read_u64(const char* p) {
-      std::uint64_t v = 0;
+    u64 read_u64(const char* p) {
+      u64 v = 0;
       for (int i = 0; i < 8; ++i)
-        v |= static_cast<std::uint64_t>(static_cast<unsigned char>(p[i])) << (i * 8);
+        v |= static_cast<u64>(static_cast<unsigned char>(p[i])) << (i * 8);
       return v;
     }
 
     class Sha256 {
     public:
       void update(std::string_view data) {
-        const auto* p = reinterpret_cast<const std::uint8_t*>(data.data());
-        bit_len_ += static_cast<std::uint64_t>(data.size()) * 8;
+        const auto* p = reinterpret_cast<const u8*>(data.data());
+        bit_len_ += static_cast<u64>(data.size()) * 8;
         while (!data.empty()) {
-          const std::size_t n = std::min<std::size_t>(data.size(), 64 - buffer_len_);
+          const usize n = std::min<usize>(data.size(), 64 - buffer_len_);
           std::memcpy(buffer_.data() + buffer_len_, p, n);
           buffer_len_ += n;
           p += n;
@@ -69,16 +70,16 @@ namespace fxe::bundle {
         while (buffer_len_ < 56)
           buffer_[buffer_len_++] = 0;
         for (int i = 7; i >= 0; --i) {
-          buffer_[buffer_len_++] = static_cast<std::uint8_t>((bit_len_ >> (i * 8)) & 0xff);
+          buffer_[buffer_len_++] = static_cast<u8>((bit_len_ >> (i * 8)) & 0xff);
         }
         transform(buffer_.data());
 
         static constexpr char k_hex[] = "0123456789abcdef";
         std::string out;
         out.reserve(64);
-        for (std::uint32_t word : state_) {
+        for (u32 word : state_) {
           for (int i = 3; i >= 0; --i) {
-            const std::uint8_t byte = static_cast<std::uint8_t>((word >> (i * 8)) & 0xff);
+            const u8 byte = static_cast<u8>((word >> (i * 8)) & 0xff);
             out.push_back(k_hex[byte >> 4]);
             out.push_back(k_hex[byte & 0x0f]);
           }
@@ -87,12 +88,12 @@ namespace fxe::bundle {
       }
 
     private:
-      static std::uint32_t rotr(std::uint32_t x, std::uint32_t n) {
+      static u32 rotr(u32 x, u32 n) {
         return (x >> n) | (x << (32 - n));
       }
 
-      void transform(const std::uint8_t* chunk) {
-        static constexpr std::uint32_t k[64] = {
+      void transform(const u8* chunk) {
+        static constexpr u32 k[64] = {
             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
             0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
             0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
@@ -103,28 +104,27 @@ namespace fxe::bundle {
             0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
             0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
             0xc67178f2};
-        std::uint32_t w[64];
+        u32 w[64];
         for (int i = 0; i < 16; ++i) {
-          w[i] = (static_cast<std::uint32_t>(chunk[i * 4]) << 24) |
-                 (static_cast<std::uint32_t>(chunk[i * 4 + 1]) << 16) |
-                 (static_cast<std::uint32_t>(chunk[i * 4 + 2]) << 8) |
-                 static_cast<std::uint32_t>(chunk[i * 4 + 3]);
+          w[i] = (static_cast<u32>(chunk[i * 4]) << 24) |
+                 (static_cast<u32>(chunk[i * 4 + 1]) << 16) |
+                 (static_cast<u32>(chunk[i * 4 + 2]) << 8) | static_cast<u32>(chunk[i * 4 + 3]);
         }
         for (int i = 16; i < 64; ++i) {
-          const std::uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
-          const std::uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+          const u32 s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+          const u32 s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
           w[i] = w[i - 16] + s0 + w[i - 7] + s1;
         }
 
-        std::uint32_t a = state_[0], b = state_[1], c = state_[2], d = state_[3];
-        std::uint32_t e = state_[4], f = state_[5], g = state_[6], h = state_[7];
+        u32 a = state_[0], b = state_[1], c = state_[2], d = state_[3];
+        u32 e = state_[4], f = state_[5], g = state_[6], h = state_[7];
         for (int i = 0; i < 64; ++i) {
-          const std::uint32_t s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
-          const std::uint32_t ch = (e & f) ^ (~e & g);
-          const std::uint32_t temp1 = h + s1 + ch + k[i] + w[i];
-          const std::uint32_t s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
-          const std::uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-          const std::uint32_t temp2 = s0 + maj;
+          const u32 s1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+          const u32 ch = (e & f) ^ (~e & g);
+          const u32 temp1 = h + s1 + ch + k[i] + w[i];
+          const u32 s0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+          const u32 maj = (a & b) ^ (a & c) ^ (b & c);
+          const u32 temp2 = s0 + maj;
           h = g;
           g = f;
           f = e;
@@ -144,11 +144,11 @@ namespace fxe::bundle {
         state_[7] += h;
       }
 
-      std::array<std::uint8_t, 64> buffer_{};
-      std::size_t buffer_len_ = 0;
-      std::uint64_t bit_len_ = 0;
-      std::array<std::uint32_t, 8> state_{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                                          0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+      std::array<u8, 64> buffer_{};
+      usize buffer_len_ = 0;
+      u64 bit_len_ = 0;
+      std::array<u32, 8> state_{0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
     };
 
     std::string json_escape(std::string_view s) {
@@ -182,8 +182,8 @@ namespace fxe::bundle {
           if (c < 0x20) {
             static constexpr char k_hex[] = "0123456789abcdef";
             out += "\\u00";
-            out.push_back(k_hex[static_cast<std::size_t>(c >> 4)]);
-            out.push_back(k_hex[static_cast<std::size_t>(c & 0x0f)]);
+            out.push_back(k_hex[static_cast<usize>(c >> 4)]);
+            out.push_back(k_hex[static_cast<usize>(c & 0x0f)]);
           } else {
             out.push_back(static_cast<char>(c));
           }
@@ -245,11 +245,11 @@ namespace fxe::bundle {
         *error = "cannot open " + binary_path + " for append";
       return false;
     }
-    const std::uint64_t index_offset = static_cast<std::uint64_t>(f.tellp());
+    const u64 index_offset = static_cast<u64>(f.tellp());
     std::string buf;
     buf.reserve(entries.size() * 32);
     for (const auto& [name, e] : entries) {
-      put_u32(buf, static_cast<std::uint32_t>(name.size()));
+      put_u32(buf, static_cast<u32>(name.size()));
       buf.append(name);
       put_u64(buf, e.offset);
       put_u64(buf, e.size);
@@ -260,7 +260,7 @@ namespace fxe::bundle {
     trailer.reserve(k_trailer_size);
     trailer.append(k_magic, 8);
     put_u32(trailer, k_version);
-    put_u32(trailer, static_cast<std::uint32_t>(entries.size()));
+    put_u32(trailer, static_cast<u32>(entries.size()));
     put_u64(trailer, index_offset);
     put_u64(trailer, /*payload_offset placeholder*/ 0);
     f.write(trailer.data(), static_cast<std::streamsize>(trailer.size()));
@@ -290,7 +290,7 @@ namespace fxe::bundle {
         if (!read_all(disk_path, body, error))
           return false;
         payload_hash.update(body);
-        const std::uint64_t off = static_cast<std::uint64_t>(f.tellp());
+        const u64 off = static_cast<u64>(f.tellp());
         f.write(body.data(), static_cast<std::streamsize>(body.size()));
         if (!f.good()) {
           if (error)
@@ -301,7 +301,7 @@ namespace fxe::bundle {
       }
       if (metadata) {
         std::string manifest = make_manifest(*metadata, payload_hash.hex_digest());
-        const std::uint64_t off = static_cast<std::uint64_t>(f.tellp());
+        const u64 off = static_cast<u64>(f.tellp());
         f.write(manifest.data(), static_cast<std::streamsize>(manifest.size()));
         if (!f.good()) {
           if (error)
@@ -329,19 +329,19 @@ namespace fxe::bundle {
       return;
     if (std::memcmp(trailer, k_magic, 8) != 0)
       return;
-    const std::uint32_t version = read_u32(trailer + 8);
+    const u32 version = read_u32(trailer + 8);
     if (version != k_version)
       return;
-    const std::uint32_t count = read_u32(trailer + 12);
-    const std::uint64_t index_offset = read_u64(trailer + 16);
+    const u32 count = read_u32(trailer + 12);
+    const u64 index_offset = read_u64(trailer + 16);
 
     f.seekg(static_cast<std::streamoff>(index_offset));
-    for (std::uint32_t i = 0; i < count; ++i) {
+    for (u32 i = 0; i < count; ++i) {
       char hdr[4];
       f.read(hdr, 4);
       if (!f)
         return;
-      std::uint32_t name_len = read_u32(hdr);
+      u32 name_len = read_u32(hdr);
       std::string name(name_len, '\0');
       f.read(name.data(), name_len);
       char tail[16];

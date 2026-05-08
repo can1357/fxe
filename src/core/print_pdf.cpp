@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <fxe/types.hpp>
 #include <iomanip>
 #include <ios>
 #include <sstream>

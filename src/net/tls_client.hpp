@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -18,7 +19,7 @@ namespace fxe::net {
 
   struct tls_options {
     std::string host;
-    uint16_t port = 443;
+    u16 port = 443;
     std::string ca_pem;
     bool reject_unauthorized = true;
     std::vector<std::string> alpn;
@@ -33,8 +34,8 @@ namespace fxe::net {
     static std::unique_ptr<tls_client> connect(const tls_options&, std::string& err);
     virtual ~tls_client();
 
-    virtual ssize_t read(void* buf, size_t cap) = 0;
-    virtual ssize_t write(const void* buf, size_t len) = 0;
+    virtual ssize_t read(void* buf, usize cap) = 0;
+    virtual ssize_t write(const void* buf, usize len) = 0;
     virtual std::string negotiated_alpn() const = 0;
     virtual std::optional<std::string> peer_cert_subject() const = 0;
     virtual std::string last_error() const = 0;

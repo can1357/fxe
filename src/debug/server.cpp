@@ -187,8 +187,8 @@ namespace fxe::debug {
     return cdp_ws::http_response(200, "OK", "application/json; charset=utf-8", payload);
   }
 
-  constexpr uint32_t event_channel_bit(event_channel c) {
-    return uint32_t(1) << static_cast<int>(c);
+  constexpr u32 event_channel_bit(event_channel c) {
+    return u32(1) << static_cast<int>(c);
   }
 
   std::optional<event_channel> channel_for_event_method(std::string_view method) {
@@ -224,7 +224,7 @@ namespace fxe::debug {
     std::condition_variable outbox_cv;
     std::deque<outgoing_message> outbox;
 
-    std::atomic<uint32_t> channel_mask{0};
+    std::atomic<u32> channel_mask{0};
     std::atomic<bool> socket_closed{false};
     std::atomic<bool> console_enabled{false};
     std::atomic<bool> alive{true};
@@ -419,14 +419,14 @@ namespace fxe::debug {
     }
 
     void set_session_channel_enabled(session_id id, event_channel channel, bool enabled) {
-      uint32_t mask = 0;
+      u32 mask = 0;
       {
         std::lock_guard<std::mutex> g(mu);
         auto it = sessions_.find(id);
         if (it == sessions_.end())
           return;
         auto& sess = *it->second;
-        const uint32_t bit = event_channel_bit(channel);
+        const u32 bit = event_channel_bit(channel);
         if (enabled)
           sess.channel_mask.fetch_or(bit, std::memory_order_acq_rel);
         else
@@ -436,14 +436,14 @@ namespace fxe::debug {
       update_global_channel_mask(mask);
     }
 
-    uint32_t aggregate_channel_mask_locked() const {
-      uint32_t mask = 0;
+    u32 aggregate_channel_mask_locked() const {
+      u32 mask = 0;
       for (const auto& [_, sess] : sessions_)
         mask |= sess->channel_mask.load(std::memory_order_acquire);
       return mask;
     }
 
-    void update_global_channel_mask(uint32_t mask) {
+    void update_global_channel_mask(u32 mask) {
       set_channel_enabled(event_channel::window,
                           (mask & event_channel_bit(event_channel::window)) != 0);
       set_channel_enabled(event_channel::fetch,
@@ -628,7 +628,7 @@ namespace fxe::debug {
       sess->outbox_cv.notify_all();
       abort_pending_calls(sess->id);
 
-      uint32_t mask = 0;
+      u32 mask = 0;
       bool removed = false;
       {
         std::lock_guard<std::mutex> g(mu);
@@ -867,9 +867,9 @@ namespace fxe::debug {
   // (start() leaves the prior pointer in place if one is already attached).
   namespace {
     std::atomic<server*> g_active_server{nullptr};
-    std::atomic<uint32_t> g_channel_mask{0}; // bit i = channel i enabled
+    std::atomic<u32> g_channel_mask{0}; // bit i = channel i enabled
 
-    constexpr uint32_t channel_bit(event_channel c) {
+    constexpr u32 channel_bit(event_channel c) {
       return event_channel_bit(c);
     }
   } // namespace
@@ -983,12 +983,11 @@ namespace fxe::debug {
     p_->set_all_console_enabled(on);
   }
 
-  void server::_internal_set_session_console_enabled(std::uint64_t id, bool on) noexcept {
+  void server::_internal_set_session_console_enabled(u64 id, bool on) noexcept {
     p_->set_session_console_enabled(static_cast<session_id>(id), on);
   }
 
-  void server::_internal_set_session_channel_enabled(std::uint64_t id, int channel,
-                                                     bool on) noexcept {
+  void server::_internal_set_session_channel_enabled(u64 id, int channel, bool on) noexcept {
     if (channel < static_cast<int>(event_channel::window) ||
         channel > static_cast<int>(event_channel::perf))
       return;

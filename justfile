@@ -262,7 +262,6 @@ ts name='ui_demo' *ARGS: (build 'dev')
         echo "./build/dev/fxe_run {{ ARGS }} $script"; \
         './build/dev/fxe_run' {{ ARGS }} "$script"
 
-
 [doc('Run a JS/TS example through the release V8/WebGPU fxe_run. Extra args go through to fxe_run BEFORE the script path: just js-release login_form --show-fps')]
 [group('examples')]
 js-release name='ui_demo' *ARGS: (build 'release')

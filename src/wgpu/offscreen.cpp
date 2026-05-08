@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -470,7 +471,7 @@ namespace fxe {
       wgpu::TextureFormat depth_format() const override {
         return options_.enable_depth ? depth_format_ : wgpu::TextureFormat::Undefined;
       }
-      uint32_t sample_count() const override {
+      u32 sample_count() const override {
         return multisample_count_;
       }
       pipeline_cache& cache() override {

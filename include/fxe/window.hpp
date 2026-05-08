@@ -130,16 +130,16 @@ namespace fxe {
     int key = 0;    // GLFW key code (or ASCII for letters)
     int scancode = 0;
     int modifiers = 0;
-    unsigned codepoint = 0;                                    // for key_char
-    int width = 0, height = 0;                                 // for window_resize
-    int pos_x = 0, pos_y = 0;                                  // for window_move
-    float scale_x = 0.0f, scale_y = 0.0f;                      // for window_scale
-    std::vector<std::string> paths;                            // for drop_files and drag enter/over
-    std::string message_channel;                               // for message
-    std::vector<std::vector<uint8_t>> message_args_serialised; // for message
-    std::string preedit;                                       // for compose
-    int cursor = 0;                                            // for compose
-    std::string committed;                                     // for compose
+    unsigned codepoint = 0;                               // for key_char
+    int width = 0, height = 0;                            // for window_resize
+    int pos_x = 0, pos_y = 0;                             // for window_move
+    float scale_x = 0.0f, scale_y = 0.0f;                 // for window_scale
+    std::vector<std::string> paths;                       // for drop_files and drag enter/over
+    std::string message_channel;                          // for message
+    std::vector<std::vector<u8>> message_args_serialised; // for message
+    std::string preedit;                                  // for compose
+    int cursor = 0;                                       // for compose
+    std::string committed;                                // for compose
   };
 
   class window {
@@ -321,11 +321,10 @@ namespace fxe {
     virtual bool set_clipboard_rtf(std::string_view) {
       return false;
     }
-    [[nodiscard]] virtual std::optional<std::vector<uint8_t>>
-    clipboard_mime(std::string_view) const {
+    [[nodiscard]] virtual std::optional<std::vector<u8>> clipboard_mime(std::string_view) const {
       return std::nullopt;
     }
-    virtual bool set_clipboard_mime(std::string_view, const std::vector<uint8_t>&) {
+    virtual bool set_clipboard_mime(std::string_view, const std::vector<u8>&) {
       return false;
     }
 
@@ -341,7 +340,7 @@ namespace fxe {
       return false;
     }
 
-    virtual void post_message(std::string channel, std::vector<std::vector<uint8_t>> args) {
+    virtual void post_message(std::string channel, std::vector<std::vector<u8>> args) {
       input_event ev{};
       ev.kind = input_event::kind_t::message;
       ev.message_channel = std::move(channel);

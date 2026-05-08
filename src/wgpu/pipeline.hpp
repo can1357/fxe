@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fxe/pipeline.hpp>
+#include <fxe/types.hpp>
 
 #if FXE_HAS_WGPU
 #include <webgpu/webgpu_cpp.h>
@@ -19,9 +20,9 @@ namespace fxe {
     wgpu::Buffer index_buffer;
     wgpu::BindGroup renderer_bind_group;
     wgpu::BindGroup user_bind_group;
-    uint64_t vertex_bytes = 0;
-    uint32_t vertex_count = 0;
-    uint32_t index_count = 0;
+    u64 vertex_bytes = 0;
+    u32 vertex_count = 0;
+    u32 index_count = 0;
     bool uses_renderer_bind_group = false;
     bool uses_user_bind_group = false;
   };
@@ -32,7 +33,7 @@ namespace fxe {
     virtual wgpu::Queue& queue() = 0;
     virtual wgpu::TextureFormat color_format() const = 0;
     virtual wgpu::TextureFormat depth_format() const = 0;
-    virtual uint32_t sample_count() const = 0;
+    virtual u32 sample_count() const = 0;
     virtual pipeline_cache& cache() = 0;
     virtual wgpu::BindGroupLayout renderer_bind_group_layout() const = 0;
     virtual wgpu::BindGroup renderer_bind_group() const = 0;
@@ -60,13 +61,13 @@ namespace fxe {
   };
 
   struct pipeline_key_hash {
-    [[nodiscard]] size_t operator()(const pipeline_key& key) const noexcept;
+    [[nodiscard]] usize operator()(const pipeline_key& key) const noexcept;
   };
 
   struct custom_pipeline_key {
-    uint64_t wgsl_hash = 0;
-    uint64_t layout_hash = 0;
-    uint32_t vertex_stride = 0;
+    u64 wgsl_hash = 0;
+    u64 layout_hash = 0;
+    u32 vertex_stride = 0;
     wgpu::TextureFormat color_format = wgpu::TextureFormat::Undefined;
     wgpu::TextureFormat depth_format = wgpu::TextureFormat::Undefined;
     blend_mode blend = blend_mode::alpha;
@@ -82,7 +83,7 @@ namespace fxe {
   };
 
   struct custom_pipeline_key_hash {
-    [[nodiscard]] size_t operator()(const custom_pipeline_key& key) const noexcept;
+    [[nodiscard]] usize operator()(const custom_pipeline_key& key) const noexcept;
   };
 
   class pipeline_cache {
@@ -94,13 +95,13 @@ namespace fxe {
     acquire_custom(const custom_pipeline_key& key, wgpu::Device device, wgpu::PipelineLayout layout,
                    wgpu::ShaderModule shader, const std::string& vs_entry,
                    const std::string& fs_entry, const std::vector<wgpu::VertexAttribute>& attrs,
-                   uint64_t vertex_stride);
+                   u64 vertex_stride);
     void clear() noexcept {
       pipelines_.clear();
       custom_pipelines_.clear();
       miss_count_ = 0;
     }
-    [[nodiscard]] size_t miss_count() const noexcept {
+    [[nodiscard]] usize miss_count() const noexcept {
       return miss_count_;
     }
 
@@ -108,7 +109,7 @@ namespace fxe {
     std::unordered_map<pipeline_key, wgpu::RenderPipeline, pipeline_key_hash> pipelines_;
     std::unordered_map<custom_pipeline_key, wgpu::RenderPipeline, custom_pipeline_key_hash>
         custom_pipelines_;
-    size_t miss_count_ = 0;
+    usize miss_count_ = 0;
   };
 } // namespace fxe
 #endif

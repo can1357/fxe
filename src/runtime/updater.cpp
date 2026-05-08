@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <fxe/types.hpp>
 #include <mutex>
 #include <sodium.h>
 #include <sstream>
@@ -42,12 +43,12 @@ namespace fxe::runtime {
       });
     }
 
-    std::optional<std::vector<std::uint8_t>> base64_decode(std::string_view input) {
+    std::optional<std::vector<u8>> base64_decode(std::string_view input) {
       ensure_sodium_initialized();
-      std::vector<std::uint8_t> out;
+      std::vector<u8> out;
       // Worst-case 3 raw bytes per 4 b64 chars; over-allocate then shrink.
       out.resize(input.size());
-      std::size_t out_len = 0;
+      usize out_len = 0;
       const char* end = nullptr;
       if (sodium_base642bin(out.data(), out.size(), input.data(), input.size(),
                             " \t\n\r", // ignore whitespace
@@ -72,9 +73,9 @@ namespace fxe::runtime {
     }
 
     std::string filename_from_url(std::string_view url) {
-      const std::size_t q = url.find_first_of("?#");
+      const usize q = url.find_first_of("?#");
       const std::string_view clean = q == std::string_view::npos ? url : url.substr(0, q);
-      const std::size_t slash = clean.find_last_of("/\\");
+      const usize slash = clean.find_last_of("/\\");
       std::string name =
           std::string(slash == std::string_view::npos ? clean : clean.substr(slash + 1));
       if (name.empty())
@@ -86,7 +87,7 @@ namespace fxe::runtime {
       return name;
     }
 
-    bool write_all(const std::filesystem::path& path, std::span<const std::uint8_t> bytes,
+    bool write_all(const std::filesystem::path& path, std::span<const u8> bytes,
                    std::string& error_out) {
       std::ofstream f(path, std::ios::binary | std::ios::trunc);
       if (!f) {
@@ -251,8 +252,8 @@ namespace fxe::runtime {
       return channel;
     }
 
-    std::uint64_t fnv1a64(std::string_view value) {
-      std::uint64_t hash = 1469598103934665603ull;
+    u64 fnv1a64(std::string_view value) {
+      u64 hash = 1469598103934665603ull;
       for (char ch : value) {
         hash ^= static_cast<unsigned char>(ch);
         hash *= 1099511628211ull;
@@ -269,7 +270,7 @@ namespace fxe::runtime {
       static constexpr char k_hex[] = "0123456789abcdef";
       std::string out;
       out.reserve(36);
-      for (std::size_t i = 0; i < bytes.size(); ++i) {
+      for (usize i = 0; i < bytes.size(); ++i) {
         if (i == 4 || i == 6 || i == 8 || i == 10)
           out.push_back('-');
         out.push_back(k_hex[bytes[i] >> 4]);
@@ -358,20 +359,20 @@ namespace fxe::runtime {
 #endif
     }
 
-    std::vector<std::uint8_t> hex_bytes(std::string_view hex) {
-      auto hex_value = [](char c) -> std::uint8_t {
+    std::vector<u8> hex_bytes(std::string_view hex) {
+      auto hex_value = [](char c) -> u8 {
         if (c >= '0' && c <= '9')
-          return static_cast<std::uint8_t>(c - '0');
+          return static_cast<u8>(c - '0');
         if (c >= 'a' && c <= 'f')
-          return static_cast<std::uint8_t>(c - 'a' + 10);
+          return static_cast<u8>(c - 'a' + 10);
         if (c >= 'A' && c <= 'F')
-          return static_cast<std::uint8_t>(c - 'A' + 10);
+          return static_cast<u8>(c - 'A' + 10);
         return 0;
       };
-      std::vector<std::uint8_t> out;
+      std::vector<u8> out;
       out.reserve(hex.size() / 2);
-      for (std::size_t i = 0; i + 1 < hex.size(); i += 2)
-        out.push_back(static_cast<std::uint8_t>((hex_value(hex[i]) << 4) | hex_value(hex[i + 1])));
+      for (usize i = 0; i + 1 < hex.size(); i += 2)
+        out.push_back(static_cast<u8>((hex_value(hex[i]) << 4) | hex_value(hex[i + 1])));
       return out;
     }
 
@@ -382,7 +383,7 @@ namespace fxe::runtime {
         const auto sig =
             hex_bytes("e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
                       "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b");
-        const std::array<std::uint8_t, 0> msg{};
+        const std::array<u8, 0> msg{};
         if (!ed25519_verify(sig, msg, pk))
           std::abort();
       }
@@ -392,8 +393,8 @@ namespace fxe::runtime {
 
   } // namespace
 
-  bool ed25519_verify(std::span<const std::uint8_t> sig, std::span<const std::uint8_t> message,
-                      std::span<const std::uint8_t> public_key) {
+  bool ed25519_verify(std::span<const u8> sig, std::span<const u8> message,
+                      std::span<const u8> public_key) {
     if (sig.size() != 64 || public_key.size() != 32)
       return false;
     ensure_sodium_initialized();
@@ -414,8 +415,8 @@ namespace fxe::runtime {
       error_out = "signature verification failed";
       return false;
     }
-    const auto* msg = reinterpret_cast<const std::uint8_t*>(canonical_manifest.data());
-    if (!ed25519_verify(*sig, std::span<const std::uint8_t>(msg, canonical_manifest.size()), *pk)) {
+    const auto* msg = reinterpret_cast<const u8*>(canonical_manifest.data());
+    if (!ed25519_verify(*sig, std::span<const u8>(msg, canonical_manifest.size()), *pk)) {
       error_out = "signature verification failed";
       return false;
     }
@@ -454,12 +455,12 @@ namespace fxe::runtime {
     }
 
     ensure_sodium_initialized();
-    std::array<std::uint8_t, crypto_hash_sha256_BYTES> digest{};
+    std::array<u8, crypto_hash_sha256_BYTES> digest{};
     crypto_hash_sha256(digest.data(), d.artifact.data(), d.artifact.size());
     static constexpr char k_hex[] = "0123456789abcdef";
     std::string actual_hex;
     actual_hex.reserve(digest.size() * 2);
-    for (std::uint8_t byte : digest) {
+    for (u8 byte : digest) {
       actual_hex.push_back(k_hex[byte >> 4]);
       actual_hex.push_back(k_hex[byte & 0x0f]);
     }
@@ -557,7 +558,7 @@ namespace fxe::runtime {
     next.reserve(3);
     next.push_back(previous);
     next.push_back(current);
-    for (std::size_t i = 2; i < versions.size() && next.size() < 3; ++i) {
+    for (usize i = 2; i < versions.size() && next.size() < 3; ++i) {
       if (versions[i] != previous && versions[i] != current)
         next.push_back(versions[i]);
     }
@@ -612,7 +613,7 @@ namespace fxe::runtime {
   std::string updater::substitute_channel(std::string_view feed_url) {
     std::string out(feed_url);
     const std::string name = channel_name(channel());
-    std::size_t pos = 0;
+    usize pos = 0;
     while ((pos = out.find("{channel}", pos)) != std::string::npos) {
       out.replace(pos, std::strlen("{channel}"), name);
       pos += name.size();

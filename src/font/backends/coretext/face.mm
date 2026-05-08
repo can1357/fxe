@@ -25,10 +25,11 @@
 #include <span>
 #include <string>
 #include <vector>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
   namespace {
-    std::atomic<std::uint64_t> g_face_id{1};
+    std::atomic<u64> g_face_id{1};
 
     Style style_from_traits(CTFontSymbolicTraits t) noexcept {
       const bool b = (t & kCTFontTraitBold) != 0;
@@ -65,7 +66,7 @@ namespace fxe::font {
         if (font_) CFRelease(font_);
       }
 
-      [[nodiscard]] std::uint64_t id() const noexcept override { return id_; }
+      [[nodiscard]] u64 id() const noexcept override { return id_; }
 
       [[nodiscard]] std::string family_name() const override {
         CFStringRef cf = CTFontCopyFamilyName(font_);
@@ -73,7 +74,7 @@ namespace fxe::font {
         std::string out;
         const CFIndex len = CFStringGetLength(cf);
         const CFIndex max = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8) + 1;
-        out.resize(static_cast<std::size_t>(max));
+        out.resize(static_cast<usize>(max));
         if (CFStringGetCString(cf, out.data(), max, kCFStringEncodingUTF8)) {
           out.resize(std::strlen(out.c_str()));
         } else {
@@ -102,11 +103,11 @@ namespace fxe::font {
         return (traits_ & kCTFontTraitColorGlyphs) != 0;
       }
 
-      [[nodiscard]] std::uint32_t glyph_index(char32_t cp) const noexcept override {
+      [[nodiscard]] u32 glyph_index(char32_t cp) const noexcept override {
         // Convert codepoint to UTF-16 surrogate pair if needed.
         UniChar units[2] = {0, 0};
         CGGlyph glyphs[2] = {0, 0};
-        std::uint32_t count = 1;
+        u32 count = 1;
         if (cp < 0x10000) {
           units[0] = static_cast<UniChar>(cp);
         } else {
@@ -124,7 +125,7 @@ namespace fxe::font {
         CFMutableDictionaryRef axes = CFDictionaryCreateMutable(
             nullptr, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         for (const auto& v : vs) {
-          const std::uint32_t tag = v.tag.packed();
+          const u32 tag = v.tag.packed();
           CFNumberRef key = CFNumberCreate(nullptr, kCFNumberSInt32Type, &tag);
           const double dv = static_cast<double>(v.value);
           CFNumberRef val = CFNumberCreate(nullptr, kCFNumberDoubleType, &dv);
@@ -149,7 +150,7 @@ namespace fxe::font {
         }
       }
 
-      [[nodiscard]] Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color,
+      [[nodiscard]] Glyph render_glyph(u32 glyph_id, Atlas& mask, Atlas& color,
                                        Hint /*hint*/, float subpixel_x = 0.0f) override {
         Glyph g{};
         if (glyph_id == 0) return g;
@@ -176,8 +177,8 @@ namespace fxe::font {
         const int x1 = static_cast<int>(std::ceil(bbox.origin.x + bbox.size.width)) + pad
                        + (subpixel_x > 0.0f ? 1 : 0);
         const int y1 = static_cast<int>(std::ceil(bbox.origin.y + bbox.size.height)) + pad;
-        const std::uint32_t w = static_cast<std::uint32_t>(std::max(1, x1 - x0));
-        const std::uint32_t h = static_cast<std::uint32_t>(std::max(1, y1 - y0));
+        const u32 w = static_cast<u32>(std::max(1, x1 - x0));
+        const u32 h = static_cast<u32>(std::max(1, y1 - y0));
 
         const bool color_glyph = has_color();
         const Format fmt = color_glyph ? Format::bgra : Format::grayscale;
@@ -185,17 +186,17 @@ namespace fxe::font {
         // Allocate a CGBitmapContext sized to the glyph and render. For mask
         // glyphs we use a single-component grayscale context, which is what
         // Ghostty does too.
-        std::vector<std::uint8_t> buffer;
+        std::vector<u8> buffer;
         CGContextRef ctx = nullptr;
         if (color_glyph) {
-          buffer.assign(static_cast<std::size_t>(w) * h * 4, 0);
+          buffer.assign(static_cast<usize>(w) * h * 4, 0);
           CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
           ctx = CGBitmapContextCreate(buffer.data(), w, h, 8, w * 4, cs,
                                       static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedFirst)
                                           | kCGBitmapByteOrder32Little);
           CGColorSpaceRelease(cs);
         } else {
-          buffer.assign(static_cast<std::size_t>(w) * h, 0);
+          buffer.assign(static_cast<usize>(w) * h, 0);
           CGColorSpaceRef cs = CGColorSpaceCreateDeviceGray();
           ctx = CGBitmapContextCreate(buffer.data(), w, h, 8, w, cs, kCGImageAlphaNone);
           CGColorSpaceRelease(cs);
@@ -264,7 +265,7 @@ namespace fxe::font {
     private:
       CTFontRef font_ = nullptr;
       float pixel_size_ = 0.0f;
-      std::uint64_t id_ = 0;
+      u64 id_ = 0;
       CTFontSymbolicTraits traits_ = 0;
       float ascent_ = 0.0f;
       float descent_ = 0.0f;
@@ -276,7 +277,7 @@ namespace fxe::font {
 
   } // namespace
 
-  std::unique_ptr<Face> load_face_coretext(std::span<const std::uint8_t> bytes, float pixel_size) {
+  std::unique_ptr<Face> load_face_coretext(std::span<const u8> bytes, float pixel_size) {
     if (bytes.empty()) return nullptr;
     CFDataRef data = CFDataCreate(nullptr, bytes.data(), static_cast<CFIndex>(bytes.size()));
     if (!data) return nullptr;

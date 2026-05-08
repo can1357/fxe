@@ -162,10 +162,10 @@ namespace fxe::js {
         return false;
       }
       auto array = value.As<Array>();
-      const std::uint32_t length = array->Length();
+      const u32 length = array->Length();
       out.clear();
       out.reserve(length);
-      for (std::uint32_t i = 0; i < length; ++i) {
+      for (u32 i = 0; i < length; ++i) {
         Local<Value> item;
         if (!array->Get(ctx, i).ToLocal(&item) || !item->IsString()) {
           (void)throw_type_error(iso,
@@ -232,7 +232,7 @@ namespace fxe::js {
     std::string current_script_origin(Isolate* iso) {
       auto stack = StackTrace::CurrentStackTrace(iso, 8, StackTrace::kScriptNameOrSourceURL);
       for (int i = 0; i < stack->GetFrameCount(); ++i) {
-        auto frame = stack->GetFrame(iso, static_cast<uint32_t>(i));
+        auto frame = stack->GetFrame(iso, static_cast<u32>(i));
         Local<String> name = frame->GetScriptNameOrSourceURL();
         if (name.IsEmpty())
           continue;
@@ -294,7 +294,7 @@ namespace fxe::js {
     }
 
     bool serialize_window_value(Isolate* iso, Local<Context> ctx, Local<Value> value,
-                                std::vector<std::uint8_t>& out, std::string& error) {
+                                std::vector<u8>& out, std::string& error) {
       ValueSerializer serializer(iso);
       serializer.WriteHeader();
       if (!serializer.WriteValue(ctx, value).FromMaybe(false)) {
@@ -308,7 +308,7 @@ namespace fxe::js {
     }
 
     MaybeLocal<Value> deserialize_window_value(Isolate* iso, Local<Context> ctx,
-                                               const std::vector<std::uint8_t>& bytes) {
+                                               const std::vector<u8>& bytes) {
       ValueDeserializer deserializer(iso, bytes.data(), bytes.size());
       if (!deserializer.ReadHeader(ctx).FromMaybe(false))
         return MaybeLocal<Value>();
@@ -759,10 +759,10 @@ namespace fxe::js {
         (void)throw_type_error(iso, "send(channel, ...args)");
         return;
       }
-      std::vector<std::vector<std::uint8_t>> args;
-      args.reserve(info.Length() > 1 ? static_cast<std::size_t>(info.Length() - 1) : 0);
+      std::vector<std::vector<u8>> args;
+      args.reserve(info.Length() > 1 ? static_cast<usize>(info.Length() - 1) : 0);
       for (int i = 1; i < info.Length(); ++i) {
-        std::vector<std::uint8_t> bytes;
+        std::vector<u8> bytes;
         std::string error;
         if (!serialize_window_value(iso, ctx, info[i], bytes, error)) {
           (void)throw_error(iso, error);
@@ -1360,7 +1360,7 @@ namespace fxe::js {
         return;
       }
       auto data = info[1].As<TypedArray>();
-      std::vector<uint8_t> bytes(data->ByteLength());
+      std::vector<u8> bytes(data->ByteLength());
       if (!bytes.empty())
         data->CopyContents(bytes.data(), bytes.size());
       info.GetReturnValue().Set(w->set_clipboard_mime(utf8(iso, info[0]), bytes));

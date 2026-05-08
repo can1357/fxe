@@ -18,6 +18,7 @@
 #import <dispatch/dispatch.h>
 
 #include <netinet/in.h>
+#include <fxe/types.hpp>
 
 namespace fxe::os {
   namespace {
@@ -31,8 +32,8 @@ namespace fxe::os {
     std::atomic<bool> g_last_network_online{true};
     nw_path_monitor_t g_monitor = nullptr;
     std::mutex g_inhibit_mu;
-    std::unordered_map<std::uint64_t, IOPMAssertionID> g_sleep_inhibits;
-    std::atomic<std::uint64_t> g_next_inhibit_id{1};
+    std::unordered_map<u64, IOPMAssertionID> g_sleep_inhibits;
+    std::atomic<u64> g_next_inhibit_id{1};
 
     void emit_power(power_event event) {
       std::function<void(power_event)> cb;
@@ -155,7 +156,7 @@ namespace fxe::os {
     power_inhibit_handle create_power_assertion(std::string_view reason, sleep_inhibit_kind what) {
       const char* fallback = "fxe requested sleep inhibit";
       const char* reason_data = reason.empty() ? fallback : reason.data();
-      const size_t reason_size = reason.empty() ? std::strlen(fallback) : reason.size();
+      const usize reason_size = reason.empty() ? std::strlen(fallback) : reason.size();
       CFStringRef cf_reason = CFStringCreateWithBytes(
           nullptr, reinterpret_cast<const UInt8*>(reason_data), static_cast<CFIndex>(reason_size),
           kCFStringEncodingUTF8, false);
@@ -172,7 +173,7 @@ namespace fxe::os {
       if (rc != kIOReturnSuccess || assertion == kIOPMNullAssertionID)
         return {};
 
-      const std::uint64_t id = g_next_inhibit_id.fetch_add(1);
+      const u64 id = g_next_inhibit_id.fetch_add(1);
       {
         std::lock_guard<std::mutex> lock(g_inhibit_mu);
         g_sleep_inhibits.emplace(id, assertion);

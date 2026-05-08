@@ -17,6 +17,7 @@
 #include <fxe/font/feature.hpp>
 #include <fxe/font/glyph.hpp>
 #include <fxe/math.hpp>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
 
@@ -35,7 +36,7 @@ namespace fxe::font {
   };
 
   // Style flags. Used by `Collection` to key face slots.
-  enum class Style : std::uint8_t {
+  enum class Style : u8 {
     regular = 0,
     bold = 1,
     italic = 2,
@@ -43,7 +44,7 @@ namespace fxe::font {
   };
 
   // Hinting strategy. Maps to FT load flags / CT options.
-  enum class Hint : std::uint8_t {
+  enum class Hint : u8 {
     none = 0,
     light = 1,
     full = 2,
@@ -55,7 +56,7 @@ namespace fxe::font {
 
     // Stable id derived from the underlying font data + size. Used as the
     // face component of the glyph cache key.
-    [[nodiscard]] virtual std::uint64_t id() const noexcept = 0;
+    [[nodiscard]] virtual u64 id() const noexcept = 0;
 
     [[nodiscard]] virtual std::string family_name() const = 0;
     [[nodiscard]] virtual Style style() const noexcept = 0;
@@ -69,7 +70,7 @@ namespace fxe::font {
 
     // Maps a Unicode codepoint to a glyph id, or 0 if the face does not
     // cover the codepoint.
-    [[nodiscard]] virtual std::uint32_t glyph_index(char32_t cp) const noexcept = 0;
+    [[nodiscard]] virtual u32 glyph_index(char32_t cp) const noexcept = 0;
 
     // Sets active OpenType variation axes (variable fonts). No-op on faces
     // without variations or on backends that don't support them.
@@ -87,7 +88,7 @@ namespace fxe::font {
     // Backends that ignore it produce identical output regardless and
     // simply waste one cache slot per bin — still correct, just less
     // crisp during shaped text with fractional advances (kerning, etc.).
-    [[nodiscard]] virtual Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color,
+    [[nodiscard]] virtual Glyph render_glyph(u32 glyph_id, Atlas& mask, Atlas& color,
                                              Hint hint = Hint::full, float subpixel_x = 0.0f) = 0;
 
     // Backend handle. For FT-backed faces this is `FT_Face`; for CT it's
@@ -97,21 +98,19 @@ namespace fxe::font {
 
   // Factory: construct a Face from raw font bytes. The bytes are copied
   // into the face. `face_index` selects a face inside .ttc collections.
-  [[nodiscard]] std::unique_ptr<Face> load_face_from_bytes(std::span<const std::uint8_t> bytes,
-                                                           float pixel_size,
-                                                           std::uint32_t face_index = 0);
+  [[nodiscard]] std::unique_ptr<Face> load_face_from_bytes(std::span<const u8> bytes,
+                                                           float pixel_size, u32 face_index = 0);
 
   // Factory: construct a Face from a file path.
   [[nodiscard]] std::unique_ptr<Face> load_face_from_file(std::string_view path, float pixel_size,
-                                                          std::uint32_t face_index = 0);
+                                                          u32 face_index = 0);
 
   // Backend-specific factories. The CoreText one is only available when
   // `FXE_FONT_HAS_CORETEXT`; calling it from a non-CT build returns nullptr.
   // The FreeType one is similarly only available with `FXE_FONT_HAS_FREETYPE`.
-  [[nodiscard]] std::unique_ptr<Face> load_face_freetype(std::span<const std::uint8_t> bytes,
-                                                         float pixel_size,
-                                                         std::uint32_t face_index = 0);
-  [[nodiscard]] std::unique_ptr<Face> load_face_coretext(std::span<const std::uint8_t> bytes,
+  [[nodiscard]] std::unique_ptr<Face> load_face_freetype(std::span<const u8> bytes,
+                                                         float pixel_size, u32 face_index = 0);
+  [[nodiscard]] std::unique_ptr<Face> load_face_coretext(std::span<const u8> bytes,
                                                          float pixel_size);
   [[nodiscard]] std::unique_ptr<Face> load_face_coretext_name(std::string_view family,
                                                               float pixel_size, Style style);

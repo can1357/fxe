@@ -41,6 +41,7 @@
 #endif
 #endif
 
+#include <fxe/types.hpp>
 #include <mutex>
 #include <queue>
 #include <unordered_set>
@@ -87,11 +88,11 @@ namespace fxe::os {
 
     struct subprocess_result {
       int status = 127;
-      std::vector<uint8_t> output;
+      std::vector<u8> output;
     };
 
     subprocess_result run_subprocess(const std::vector<std::string>& args,
-                                     const std::vector<uint8_t>* input, bool capture_stdout) {
+                                     const std::vector<u8>* input, bool capture_stdout) {
       subprocess_result result;
       if (args.empty())
         return result;
@@ -146,7 +147,7 @@ namespace fxe::os {
 
       if (input) {
         ::close(in_pipe[0]);
-        size_t written = 0;
+        usize written = 0;
         while (written < input->size()) {
           ssize_t n = ::write(in_pipe[1], input->data() + written, input->size() - written);
           if (n < 0) {
@@ -156,13 +157,13 @@ namespace fxe::os {
           }
           if (n == 0)
             break;
-          written += static_cast<size_t>(n);
+          written += static_cast<usize>(n);
         }
         ::close(in_pipe[1]);
       }
       if (capture_stdout) {
         ::close(out_pipe[1]);
-        uint8_t buffer[4096];
+        u8 buffer[4096];
         for (;;) {
           ssize_t n = ::read(out_pipe[0], buffer, sizeof(buffer));
           if (n < 0) {
@@ -187,7 +188,7 @@ namespace fxe::os {
       return WIFEXITED(result.status) && WEXITSTATUS(result.status) == 0;
     }
 
-    bool set_clipboard_target(std::string_view target, const std::vector<uint8_t>& bytes) {
+    bool set_clipboard_target(std::string_view target, const std::vector<u8>& bytes) {
       std::string target_string(target);
       if (target_string.empty())
         return false;
@@ -205,7 +206,7 @@ namespace fxe::os {
       return false;
     }
 
-    std::optional<std::vector<uint8_t>> get_clipboard_target(std::string_view target) {
+    std::optional<std::vector<u8>> get_clipboard_target(std::string_view target) {
       std::string target_string(target);
       if (target_string.empty())
         return std::nullopt;
@@ -316,7 +317,7 @@ namespace fxe::os {
       for (;;) {
         ssize_t n = ::read(pipefd[0], buffer, sizeof(buffer));
         if (n > 0) {
-          result.stdout_text.append(buffer, static_cast<size_t>(n));
+          result.stdout_text.append(buffer, static_cast<usize>(n));
           continue;
         }
         if (n == 0)
@@ -365,7 +366,7 @@ namespace fxe::os {
 
     std::string expand_user_dir_value(std::string value, const std::string& home) {
       constexpr std::string_view home_var = "$HOME";
-      size_t pos = value.find(home_var);
+      usize pos = value.find(home_var);
       if (pos != std::string::npos)
         value.replace(pos, home_var.size(), home);
       if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
@@ -451,7 +452,7 @@ namespace fxe::os {
       static constexpr entity entities[] = {
           {"&quot;", "\""}, {"&apos;", "'"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&amp;", "&"}};
       for (const auto& e : entities) {
-        size_t pos = 0;
+        usize pos = 0;
         while ((pos = value.find(e.escaped, pos)) != std::string::npos) {
           value.replace(pos, std::strlen(e.escaped), e.plain);
           pos += std::strlen(e.plain);
@@ -477,7 +478,7 @@ namespace fxe::os {
       std::string encoded = uri.substr(prefix.size());
       std::string out;
       out.reserve(encoded.size());
-      for (size_t i = 0; i < encoded.size(); ++i) {
+      for (usize i = 0; i < encoded.size(); ++i) {
         if (encoded[i] == '%' && i + 2 < encoded.size()) {
           int hi = hex_value(encoded[i + 1]);
           int lo = hex_value(encoded[i + 2]);
@@ -572,15 +573,15 @@ namespace fxe::os {
         content = empty_recent_xbel();
 
       const std::string escaped_uri = xml_escape(uri);
-      size_t href = content.find("href=\"" + escaped_uri + "\"");
+      usize href = content.find("href=\"" + escaped_uri + "\"");
       if (href != std::string::npos) {
-        size_t begin = content.rfind("<bookmark", href);
-        size_t end = content.find("</bookmark>", href);
+        usize begin = content.rfind("<bookmark", href);
+        usize end = content.find("</bookmark>", href);
         if (begin != std::string::npos && end != std::string::npos)
           content.erase(begin, end + std::strlen("</bookmark>") - begin);
       }
 
-      size_t insert = content.rfind("</xbel>");
+      usize insert = content.rfind("</xbel>");
       if (insert == std::string::npos) {
         content = empty_recent_xbel();
         insert = content.rfind("</xbel>");
@@ -650,7 +651,7 @@ namespace fxe::os {
       if (::ftruncate(fd, 0) != 0 || ::lseek(fd, 0, SEEK_SET) < 0)
         return false;
       const char* data = payload.data();
-      size_t left = payload.size();
+      usize left = payload.size();
       while (left > 0) {
         ssize_t n = ::write(fd, data, left);
         if (n < 0) {
@@ -659,7 +660,7 @@ namespace fxe::os {
           return false;
         }
         data += n;
-        left -= static_cast<size_t>(n);
+        left -= static_cast<usize>(n);
       }
       return true;
     }
@@ -675,7 +676,7 @@ namespace fxe::os {
       for (;;) {
         ssize_t n = ::read(fd, buffer, sizeof(buffer));
         if (n > 0) {
-          data.append(buffer, static_cast<size_t>(n));
+          data.append(buffer, static_cast<usize>(n));
           continue;
         }
         if (n == 0)
@@ -687,9 +688,9 @@ namespace fxe::os {
       }
       ::close(fd);
 
-      size_t start = 0;
+      usize start = 0;
       while (start < data.size()) {
-        size_t end = data.find('\0', start);
+        usize end = data.find('\0', start);
         if (end == std::string::npos)
           end = data.size();
         if (end > start)
@@ -760,10 +761,10 @@ namespace fxe::os {
     }
 
     std::string trim_copy(std::string_view raw) {
-      size_t first = 0;
+      usize first = 0;
       while (first < raw.size() && std::isspace(static_cast<unsigned char>(raw[first])) != 0)
         ++first;
-      size_t last = raw.size();
+      usize last = raw.size();
       while (last > first && std::isspace(static_cast<unsigned char>(raw[last - 1])) != 0)
         --last;
       return std::string(raw.substr(first, last - first));
@@ -782,9 +783,9 @@ namespace fxe::os {
     std::string normalize_accelerator_for_portal_impl(std::string_view accelerator) {
       std::vector<std::string> modifiers;
       std::string key;
-      size_t start = 0;
+      usize start = 0;
       while (start <= accelerator.size()) {
-        size_t end = accelerator.find('+', start);
+        usize end = accelerator.find('+', start);
         if (end == std::string_view::npos)
           end = accelerator.size();
         std::string token = trim_copy(accelerator.substr(start, end - start));
@@ -963,7 +964,7 @@ namespace fxe::os {
       std::mutex mu;
       std::condition_variable cv;
       bool done = false;
-      uint32_t response = UINT32_MAX;
+      u32 response = UINT32_MAX;
       std::string session_handle;
     };
 
@@ -979,7 +980,7 @@ namespace fxe::os {
 
     dbus_state g_dbus_state;
     std::mutex g_notif_mu;
-    std::unordered_map<uint32_t, notification_entry> g_notifications;
+    std::unordered_map<u32, notification_entry> g_notifications;
     std::mutex g_tray_mu;
     std::unordered_map<int, tray_entry> g_trays;
     std::atomic<int> g_tray_id{1};
@@ -993,9 +994,9 @@ namespace fxe::os {
     std::mutex g_menu_mu;
     std::vector<menu_export_node> g_app_menu;
     std::unordered_map<std::string, int> g_app_menu_item_ids;
-    uint32_t g_menu_revision = 1;
+    u32 g_menu_revision = 1;
     std::vector<menu_export_node> g_context_menu;
-    uint32_t g_context_menu_revision = 1;
+    u32 g_context_menu_revision = 1;
 
     void dbus_shutdown();
     DBusHandlerResult dbus_filter(DBusConnection*, DBusMessage*, void*);
@@ -1042,14 +1043,14 @@ namespace fxe::os {
       dbus_message_iter_close_container(iter, &variant);
     }
 
-    void append_variant_int32(DBusMessageIter* iter, int32_t value) {
+    void append_variant_int32(DBusMessageIter* iter, i32 value) {
       DBusMessageIter variant;
       dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "i", &variant);
       dbus_message_iter_append_basic(&variant, DBUS_TYPE_INT32, &value);
       dbus_message_iter_close_container(iter, &variant);
     }
 
-    void append_variant_int64(DBusMessageIter* iter, int64_t value) {
+    void append_variant_int64(DBusMessageIter* iter, i64 value) {
       DBusMessageIter variant;
       dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "x", &variant);
       dbus_message_iter_append_basic(&variant, DBUS_TYPE_INT64, &value);
@@ -1061,9 +1062,9 @@ namespace fxe::os {
       if (normalized.empty())
         return {};
       std::vector<std::string> tokens;
-      size_t start = 0;
+      usize start = 0;
       while (start <= normalized.size()) {
-        size_t end = normalized.find('+', start);
+        usize end = normalized.find('+', start);
         std::string token =
             normalized.substr(start, end == std::string::npos ? std::string::npos : end - start);
         if (token == "Ctrl")
@@ -1107,7 +1108,7 @@ namespace fxe::os {
       dbus_message_iter_close_container(dict, &entry);
     }
 
-    void append_dict_int32(DBusMessageIter* dict, const char* key, int32_t value) {
+    void append_dict_int32(DBusMessageIter* dict, const char* key, i32 value) {
       DBusMessageIter entry;
       dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
       dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
@@ -1115,7 +1116,7 @@ namespace fxe::os {
       dbus_message_iter_close_container(dict, &entry);
     }
 
-    void append_dict_int64(DBusMessageIter* dict, const char* key, int64_t value) {
+    void append_dict_int64(DBusMessageIter* dict, const char* key, i64 value) {
       DBusMessageIter entry;
       dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, nullptr, &entry);
       dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
@@ -1416,13 +1417,13 @@ namespace fxe::os {
       dbus_connection_flush(conn);
     }
 
-    void emit_dbus_menu_layout_updated(DBusConnection* conn, const char* path, uint32_t revision) {
+    void emit_dbus_menu_layout_updated(DBusConnection* conn, const char* path, u32 revision) {
       if (!conn || !path)
         return;
       DBusMessage* signal = dbus_message_new_signal(path, kDbusMenuIface, "LayoutUpdated");
       if (!signal)
         return;
-      int32_t parent = 0;
+      i32 parent = 0;
       dbus_message_append_args(signal, DBUS_TYPE_UINT32, &revision, DBUS_TYPE_INT32, &parent,
                                DBUS_TYPE_INVALID);
       dbus_connection_send(conn, signal, nullptr);
@@ -1469,7 +1470,7 @@ namespace fxe::os {
       DBusMessageIter node_struct;
       DBusMessageIter props;
       DBusMessageIter children;
-      int32_t id = static_cast<int32_t>(node.id);
+      i32 id = static_cast<i32>(node.id);
       dbus_message_iter_open_container(iter, DBUS_TYPE_STRUCT, nullptr, &node_struct);
       dbus_message_iter_append_basic(&node_struct, DBUS_TYPE_INT32, &id);
       dbus_message_iter_open_container(&node_struct, DBUS_TYPE_ARRAY, "{sv}", &props);
@@ -1498,7 +1499,7 @@ namespace fxe::os {
       dbus_message_iter_close_container(iter, &node_struct);
     }
 
-    std::string find_action_id(const std::vector<menu_export_node>& nodes, int32_t id) {
+    std::string find_action_id(const std::vector<menu_export_node>& nodes, i32 id) {
       for (const auto& node : nodes) {
         if (node.id == id)
           return node.action_id;
@@ -1512,7 +1513,7 @@ namespace fxe::os {
     DBusHandlerResult handle_dbus_menu(DBusConnection* conn, DBusMessage* msg) {
       if (dbus_message_is_method_call(msg, kDbusMenuIface, "GetLayout")) {
         std::vector<menu_export_node> menu;
-        uint32_t revision = 0;
+        u32 revision = 0;
         const char* path = dbus_message_get_path(msg);
         if (path && std::strcmp(path, kTrayMenuPath) == 0) {
           std::lock_guard<std::mutex> lock(g_tray_mu);
@@ -1535,7 +1536,7 @@ namespace fxe::os {
         DBusMessageIter root;
         DBusMessageIter props;
         DBusMessageIter children;
-        int32_t root_id = 0;
+        i32 root_id = 0;
         dbus_message_iter_init_append(reply, &iter);
         dbus_message_iter_append_basic(&iter, DBUS_TYPE_UINT32, &revision);
         dbus_message_iter_open_container(&iter, DBUS_TYPE_STRUCT, nullptr, &root);
@@ -1558,7 +1559,7 @@ namespace fxe::os {
       }
 
       if (dbus_message_is_method_call(msg, kDbusMenuIface, "Event")) {
-        int32_t id = 0;
+        i32 id = 0;
         const char* event_id = nullptr;
         DBusError error;
         dbus_error_init(&error);
@@ -1704,7 +1705,7 @@ namespace fxe::os {
 
     DBusHandlerResult dbus_filter(DBusConnection*, DBusMessage* msg, void*) {
       if (dbus_message_is_signal(msg, kNotificationsIface, "ActionInvoked")) {
-        uint32_t id = 0;
+        u32 id = 0;
         const char* action = nullptr;
         DBusError error;
         dbus_error_init(&error);
@@ -1738,8 +1739,8 @@ namespace fxe::os {
       }
 
       if (dbus_message_is_signal(msg, kNotificationsIface, "NotificationClosed")) {
-        uint32_t id = 0;
-        uint32_t reason = 0;
+        u32 id = 0;
+        u32 reason = 0;
         DBusError error;
         dbus_error_init(&error);
         dbus_message_get_args(msg, &error, DBUS_TYPE_UINT32, &id, DBUS_TYPE_UINT32, &reason,
@@ -1754,7 +1755,7 @@ namespace fxe::os {
       if (dbus_message_is_signal(msg, kPortalShortcutsIface, "Activated")) {
         const char* session = nullptr;
         const char* shortcut_id = nullptr;
-        uint32_t timestamp = 0;
+        u32 timestamp = 0;
         DBusError error;
         dbus_error_init(&error);
         dbus_message_get_args(msg, &error, DBUS_TYPE_OBJECT_PATH, &session, DBUS_TYPE_STRING,
@@ -1788,7 +1789,7 @@ namespace fxe::os {
         if (!waiter)
           return DBUS_HANDLER_RESULT_HANDLED;
 
-        uint32_t response = UINT32_MAX;
+        u32 response = UINT32_MAX;
         std::string session_handle;
         DBusMessageIter iter;
         if (dbus_message_iter_init(msg, &iter) &&
@@ -1841,7 +1842,7 @@ namespace fxe::os {
                                                       kAppMenuRegistrarIface, "RegisterWindow");
       if (!msg)
         return false;
-      uint32_t window_id = 0;
+      u32 window_id = 0;
       const char* menu_path = kDbusMenuPath;
       dbus_message_append_args(msg, DBUS_TYPE_UINT32, &window_id, DBUS_TYPE_OBJECT_PATH, &menu_path,
                                DBUS_TYPE_INVALID);
@@ -1863,7 +1864,7 @@ namespace fxe::os {
                                                       kAppMenuRegistrarIface, "UnregisterWindow");
       if (!msg)
         return false;
-      uint32_t window_id = 0;
+      u32 window_id = 0;
       dbus_message_append_args(msg, DBUS_TYPE_UINT32, &window_id, DBUS_TYPE_INVALID);
       DBusError error;
       dbus_error_init(&error);
@@ -1907,7 +1908,7 @@ namespace fxe::os {
       std::unique_lock<std::mutex> lock(waiter->mu);
       bool signaled =
           waiter->cv.wait_for(lock, std::chrono::seconds(3), [&]() { return waiter->done; });
-      uint32_t response = waiter->response;
+      u32 response = waiter->response;
       std::string session = waiter->session_handle;
       lock.unlock();
       {
@@ -1976,7 +1977,7 @@ namespace fxe::os {
       std::unique_lock<std::mutex> wait_lock(waiter->mu);
       bool signaled =
           waiter->cv.wait_for(wait_lock, std::chrono::seconds(3), [&]() { return waiter->done; });
-      uint32_t response = waiter->response;
+      u32 response = waiter->response;
       std::string session = waiter->session_handle;
       wait_lock.unlock();
       {
@@ -2170,7 +2171,7 @@ namespace fxe::os {
     append_basic_string(&iter, app_uri);
     dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}", &props);
     append_dict_bool(&props, "count-visible", n > 0);
-    append_dict_int64(&props, "count", static_cast<int64_t>(n));
+    append_dict_int64(&props, "count", static_cast<i64>(n));
     dbus_message_iter_close_container(&iter, &props);
     dbus_connection_send(conn, msg, nullptr);
     dbus_connection_flush(conn);
@@ -2208,15 +2209,15 @@ namespace fxe::os {
       if (xbel_path.empty())
         return out;
       std::string content = read_text_file(xbel_path);
-      size_t pos = 0;
+      usize pos = 0;
       while ((pos = content.find("<bookmark", pos)) != std::string::npos) {
-        size_t tag_end = content.find('>', pos);
+        usize tag_end = content.find('>', pos);
         if (tag_end == std::string::npos)
           break;
-        size_t href = content.find("href=\"", pos);
+        usize href = content.find("href=\"", pos);
         if (href != std::string::npos && href < tag_end) {
           href += std::strlen("href=\"");
-          size_t end = content.find('"', href);
+          usize end = content.find('"', href);
           if (end != std::string::npos && end <= tag_end) {
             std::string path = path_from_file_uri(xml_unescape(content.substr(href, end - href)));
             if (!path.empty())
@@ -2359,7 +2360,7 @@ namespace fxe::os {
     std::vector<std::string> lines = split_lines(result.stdout_text);
     if (lines.empty())
       return -1;
-    for (size_t i = 0; i < buttons.size(); ++i) {
+    for (usize i = 0; i < buttons.size(); ++i) {
       if (buttons[i] == lines.front())
         return static_cast<int>(i);
     }
@@ -2381,11 +2382,11 @@ namespace fxe::os {
       return 0;
 
     std::string app_name = "fxe";
-    uint32_t replaces_id = 0;
+    u32 replaces_id = 0;
     std::string app_icon = options.icon_path;
     std::string summary = options.title.empty() ? std::string("fxe") : options.title;
     std::string body = options.body;
-    int32_t expire_timeout = -1;
+    i32 expire_timeout = -1;
     DBusMessageIter iter;
     DBusMessageIter actions;
     DBusMessageIter hints;
@@ -2419,7 +2420,7 @@ namespace fxe::os {
       free_error(error);
       return 0;
     }
-    uint32_t id = 0;
+    u32 id = 0;
     dbus_message_get_args(reply, &error, DBUS_TYPE_UINT32, &id, DBUS_TYPE_INVALID);
     dbus_message_unref(reply);
     free_error(error);
@@ -2446,7 +2447,7 @@ namespace fxe::os {
     if (id <= 0 || !cb)
       return;
     std::lock_guard<std::mutex> lock(g_notif_mu);
-    g_notifications[static_cast<uint32_t>(id)].click_callback = std::move(cb);
+    g_notifications[static_cast<u32>(id)].click_callback = std::move(cb);
 #else
     (void)id;
     (void)cb;
@@ -2461,7 +2462,7 @@ namespace fxe::os {
     if (id <= 0 || !cb)
       return;
     std::lock_guard<std::mutex> lock(g_notif_mu);
-    g_notifications[static_cast<uint32_t>(id)].action_callback = std::move(cb);
+    g_notifications[static_cast<u32>(id)].action_callback = std::move(cb);
 #else
     (void)id;
     (void)cb;
@@ -2546,7 +2547,7 @@ namespace fxe::os {
         on_select(std::string{});
       return;
     }
-    uint32_t revision = 0;
+    u32 revision = 0;
     {
       std::lock_guard<std::mutex> lock(g_menu_mu);
       g_context_menu = build_menu_export_tree(items);
@@ -2845,7 +2846,7 @@ namespace fxe::os {
   }
 
   bool clipboard_set_html(std::string_view utf8) {
-    std::vector<uint8_t> bytes(utf8.begin(), utf8.end());
+    std::vector<u8> bytes(utf8.begin(), utf8.end());
     return set_clipboard_target("text/html", bytes);
   }
 
@@ -2857,7 +2858,7 @@ namespace fxe::os {
   }
 
   bool clipboard_set_rtf(std::string_view rtf) {
-    std::vector<uint8_t> bytes(rtf.begin(), rtf.end());
+    std::vector<u8> bytes(rtf.begin(), rtf.end());
     return set_clipboard_target("text/rtf", bytes);
   }
 
@@ -2868,11 +2869,11 @@ namespace fxe::os {
     return std::string(reinterpret_cast<const char*>(bytes->data()), bytes->size());
   }
 
-  bool clipboard_set_mime(std::string_view mime, const std::vector<uint8_t>& bytes) {
+  bool clipboard_set_mime(std::string_view mime, const std::vector<u8>& bytes) {
     return set_clipboard_target(mime, bytes);
   }
 
-  std::optional<std::vector<uint8_t>> clipboard_get_mime(std::string_view mime) {
+  std::optional<std::vector<u8>> clipboard_get_mime(std::string_view mime) {
     return get_clipboard_target(mime);
   }
 
@@ -2945,7 +2946,7 @@ namespace fxe::os {
         return false;
       addr = {};
       addr.sun_family = AF_UNIX;
-      for (size_t i = 0; i < path.size(); ++i)
+      for (usize i = 0; i < path.size(); ++i)
         addr.sun_path[i] = path[i];
       addr.sun_path[path.size()] = '\0';
       return true;
@@ -2953,7 +2954,7 @@ namespace fxe::os {
 
     bool write_all_socket(int fd, const std::string& payload) {
       const char* data = payload.data();
-      size_t left = payload.size();
+      usize left = payload.size();
       while (left > 0) {
         ssize_t n = ::write(fd, data, left);
         if (n < 0) {
@@ -2962,7 +2963,7 @@ namespace fxe::os {
           return false;
         }
         data += n;
-        left -= static_cast<size_t>(n);
+        left -= static_cast<usize>(n);
       }
       return true;
     }
@@ -2986,7 +2987,7 @@ namespace fxe::os {
       for (;;) {
         ssize_t n = ::read(client, buffer, sizeof(buffer));
         if (n > 0) {
-          payload.append(buffer, static_cast<size_t>(n));
+          payload.append(buffer, static_cast<usize>(n));
           continue;
         }
         if (n < 0 && errno == EINTR)

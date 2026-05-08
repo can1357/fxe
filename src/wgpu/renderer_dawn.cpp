@@ -1,3 +1,4 @@
+#include <fxe/types.hpp>
 // =============================================================================
 // renderer_dawn.cpp — v1 Dawn/WebGPU backend for fxe::renderer.
 //
@@ -17,7 +18,6 @@
 
 #else
 
-#include <fxe/types.hpp>
 #include <webgpu/webgpu_cpp.h>
 
 #include <fxe/font.hpp>
@@ -252,7 +252,7 @@ namespace fxe {
         alpha_mode_ = wgpu::CompositeAlphaMode::Auto;
         if (w.is_transparent()) {
           bool found = false;
-          for (size_t i = 0; i < caps.alphaModeCount; ++i) {
+          for (usize i = 0; i < caps.alphaModeCount; ++i) {
             if (caps.alphaModes[i] == wgpu::CompositeAlphaMode::Premultiplied) {
               alpha_mode_ = wgpu::CompositeAlphaMode::Premultiplied;
               found = true;
@@ -695,7 +695,7 @@ namespace fxe {
       wgpu::TextureFormat depth_format() const override {
         return depth_format_;
       }
-      uint32_t sample_count() const override {
+      u32 sample_count() const override {
         return multisample_count_;
       }
       pipeline_cache& cache() override {
@@ -1361,7 +1361,7 @@ namespace fxe {
       static wgpu::PresentMode choose_present_mode(const wgpu::SurfaceCapabilities& caps,
                                                    bool vsync) noexcept {
         auto supports = [&](wgpu::PresentMode mode) noexcept {
-          for (size_t i = 0; i < caps.presentModeCount; ++i) {
+          for (usize i = 0; i < caps.presentModeCount; ++i) {
             if (caps.presentModes[i] == mode)
               return true;
           }

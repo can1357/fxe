@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <fxe/types.hpp>
 
 namespace fxe {
   // Per-thread cumulative counters for the JS reactive reconciler and the
@@ -8,13 +9,13 @@ namespace fxe {
   // / cache_misses / frames itself; queue_calls and the *_submitted counters
   // are bumped by command_buffer::queue.
   struct render_stats {
-    std::uint64_t vertices_submitted = 0;
-    std::uint64_t indices_submitted = 0;
-    std::uint64_t queue_calls = 0;
-    std::uint64_t cache_hits = 0;
-    std::uint64_t cache_misses = 0;
-    std::uint64_t rebuilds = 0;
-    std::uint64_t frames = 0;
+    u64 vertices_submitted = 0;
+    u64 indices_submitted = 0;
+    u64 queue_calls = 0;
+    u64 cache_hits = 0;
+    u64 cache_misses = 0;
+    u64 rebuilds = 0;
+    u64 frames = 0;
     void reset() noexcept;
   };
 

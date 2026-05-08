@@ -5,6 +5,7 @@
 #include "bind_notification.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <memory>
@@ -108,9 +109,9 @@ namespace fxe::js {
           h->on_action.Reset(iso, v.As<Function>());
         if (get_prop(iso, ctx, obj, "actions", &v) && v->IsArray()) {
           auto arr = v.As<Array>();
-          uint32_t len = arr->Length();
+          u32 len = arr->Length();
           h->opts.actions.reserve(len);
-          for (uint32_t i = 0; i < len; ++i) {
+          for (u32 i = 0; i < len; ++i) {
             Local<Value> item_value;
             if (!arr->Get(ctx, i).ToLocal(&item_value) || !item_value->IsObject())
               continue;

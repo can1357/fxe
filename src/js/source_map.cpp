@@ -6,6 +6,7 @@
 #include <system_error>
 #include <utility>
 
+#include <fxe/types.hpp>
 #include <nlohmann/json.hpp>
 
 namespace fxe::js {
@@ -24,7 +25,7 @@ namespace fxe::js {
       return -1;
     }
 
-    bool decode_vlq(std::string_view mappings, std::size_t& index, int& out) {
+    bool decode_vlq(std::string_view mappings, usize& index, int& out) {
       int shift = 0;
       int value = 0;
       bool saw_digit = false;
@@ -166,7 +167,7 @@ namespace fxe::js {
     int generated_column = 0;
     std::vector<segment> current_line;
 
-    for (std::size_t i = 0; i <= mappings.size();) {
+    for (usize i = 0; i <= mappings.size();) {
       if (i == mappings.size() || mappings[i] == ';' || mappings[i] == ',') {
         const char separator = i < mappings.size() ? mappings[i] : ';';
         if (separator == ';') {
@@ -218,7 +219,7 @@ namespace fxe::js {
     const int zero_based_line = generated_line - 1 - generated_line_offset_;
     if (zero_based_line < 0)
       return std::nullopt;
-    const auto line_index = static_cast<std::size_t>(zero_based_line);
+    const auto line_index = static_cast<usize>(zero_based_line);
     if (line_index >= mappings_.size())
       return std::nullopt;
 
@@ -239,7 +240,7 @@ namespace fxe::js {
       best = &segments.front();
     if (best->source_index < 0 || best->source_line < 0 || best->source_column < 0)
       return std::nullopt;
-    const auto source_index = static_cast<std::size_t>(best->source_index);
+    const auto source_index = static_cast<usize>(best->source_index);
     if (source_index >= sources_.size())
       return std::nullopt;
 
@@ -248,7 +249,7 @@ namespace fxe::js {
     pos.line = best->source_line + 1;
     pos.column = best->source_column + 1;
     if (best->name_index >= 0) {
-      const auto name_index = static_cast<std::size_t>(best->name_index);
+      const auto name_index = static_cast<usize>(best->name_index);
       if (name_index < names_.size())
         pos.name = names_[name_index];
     }
@@ -259,8 +260,7 @@ namespace fxe::js {
     return mappings_.empty() || sources_.empty();
   }
 
-  source_map_cache::source_map_cache(std::size_t capacity)
-      : capacity_(capacity == 0 ? 1 : capacity) {}
+  source_map_cache::source_map_cache(usize capacity) : capacity_(capacity == 0 ? 1 : capacity) {}
 
   void source_map_cache::put(std::string_view module_url, source_map_decoder decoder) {
     const std::string key = normalize_source_map_url(module_url);
@@ -302,7 +302,7 @@ namespace fxe::js {
     return std::nullopt;
   }
 
-  std::size_t source_map_cache::size() const noexcept {
+  usize source_map_cache::size() const noexcept {
     return entries_.size();
   }
 

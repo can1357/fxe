@@ -42,14 +42,14 @@ int main() {
     const std::vector<u8> pixels = renderer->read_rgba8();
     CHECK(pixels.size() == 8u * 4u * 4u);
     const auto px = [&](u32 x, u32 y, u32 c) -> unsigned {
-      return pixels[(static_cast<std::size_t>(y) * opts.width + x) * 4u + c];
+      return pixels[(static_cast<usize>(y) * opts.width + x) * 4u + c];
     };
     CHECK(px(3, 2, 0) > 20);
     CHECK(px(3, 2, 2) > 20);
     CHECK(px(4, 2, 0) > 20);
     CHECK(px(4, 2, 2) > 20);
     CHECK(px(1, 2, 0) != px(6, 2, 0));
-    for (std::size_t i = 0; i + 3 < pixels.size(); i += 4)
+    for (usize i = 0; i + 3 < pixels.size(); i += 4)
       CHECK(pixels[i + 3] >= 240);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "wgpu blur smoke skipped: %s\n", e.what());

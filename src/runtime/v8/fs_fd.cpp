@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <limits>
 #include <memory>
 #include <string>
@@ -64,7 +65,7 @@ namespace fxe::runtime {
           MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
       if (needed <= 0)
         return {};
-      std::wstring out(static_cast<std::size_t>(needed), L'\0');
+      std::wstring out(static_cast<usize>(needed), L'\0');
       (void)MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
                                 out.data(), needed);
       return out;
@@ -252,14 +253,13 @@ namespace fxe::runtime {
 #endif
     }
 
-    std::int64_t read_fd(int fd, std::uint8_t* data, std::size_t length, std::int64_t position,
-                         int& err) {
+    i64 read_fd(int fd, u8* data, usize length, i64 position, int& err) {
       if (length == 0) {
         err = 0;
         return 0;
       }
 #if defined(_WIN32)
-      if (length > static_cast<std::size_t>(std::numeric_limits<unsigned int>::max())) {
+      if (length > static_cast<usize>(std::numeric_limits<unsigned int>::max())) {
         err = EINVAL;
         return -1;
       }
@@ -277,17 +277,16 @@ namespace fxe::runtime {
         return -1;
       }
       err = 0;
-      return static_cast<std::int64_t>(n);
+      return static_cast<i64>(n);
     }
 
-    std::int64_t write_fd(int fd, const std::uint8_t* data, std::size_t length,
-                          std::int64_t position, int& err) {
+    i64 write_fd(int fd, const u8* data, usize length, i64 position, int& err) {
       if (length == 0) {
         err = 0;
         return 0;
       }
 #if defined(_WIN32)
-      if (length > static_cast<std::size_t>(std::numeric_limits<unsigned int>::max())) {
+      if (length > static_cast<usize>(std::numeric_limits<unsigned int>::max())) {
         err = EINVAL;
         return -1;
       }
@@ -305,10 +304,10 @@ namespace fxe::runtime {
         return -1;
       }
       err = 0;
-      return static_cast<std::int64_t>(n);
+      return static_cast<i64>(n);
     }
 
-    bool truncate_fd(int fd, std::int64_t len, int& err) {
+    bool truncate_fd(int fd, i64 len, int& err) {
       if (len < 0) {
         err = EINVAL;
         return false;
@@ -350,7 +349,7 @@ namespace fxe::runtime {
     }
 
     struct stat_result {
-      std::uint64_t size = 0;
+      u64 size = 0;
       bool is_file = false;
       bool is_directory = false;
       double atime_ms = 0;
@@ -376,7 +375,7 @@ namespace fxe::runtime {
       out.is_file = S_ISREG(st.st_mode);
       out.is_directory = S_ISDIR(st.st_mode);
 #endif
-      out.size = static_cast<std::uint64_t>(st.st_size);
+      out.size = static_cast<u64>(st.st_size);
       out.atime_ms = static_cast<double>(st.st_atime) * 1000.0;
       out.mtime_ms = static_cast<double>(st.st_mtime) * 1000.0;
       out.ctime_ms = static_cast<double>(st.st_ctime) * 1000.0;
@@ -390,13 +389,13 @@ namespace fxe::runtime {
       return out;
     }
 
-    Local<Object> bytes_read_object(Isolate* iso, Local<Context> ctx, std::int64_t n) {
+    Local<Object> bytes_read_object(Isolate* iso, Local<Context> ctx, i64 n) {
       auto out = Object::New(iso);
       set_number(ctx, out, "bytesRead", static_cast<double>(n));
       return out;
     }
 
-    Local<Object> bytes_written_object(Isolate* iso, Local<Context> ctx, std::int64_t n) {
+    Local<Object> bytes_written_object(Isolate* iso, Local<Context> ctx, i64 n) {
       auto out = Object::New(iso);
       set_number(ctx, out, "bytesWritten", static_cast<double>(n));
       return out;
@@ -414,9 +413,8 @@ namespace fxe::runtime {
     }
 
     bool parse_buffer_args(Isolate* iso, Local<Context> ctx,
-                           const FunctionCallbackInfo<Value>& info, bool write, std::uint8_t*& data,
-                           std::size_t& length, std::int64_t& position,
-                           std::size_t* view_offset = nullptr) {
+                           const FunctionCallbackInfo<Value>& info, bool write, u8*& data,
+                           usize& length, i64& position, usize* view_offset = nullptr) {
       if (info.Length() < 2 || !info[0]->IsNumber() || !info[1]->IsArrayBufferView()) {
         iso->ThrowException(Exception::TypeError(
             str(iso, write ? "fs_fd.write(fd, buffer, offset, length, position)"
@@ -424,7 +422,7 @@ namespace fxe::runtime {
         return false;
       }
       auto view = info[1].As<ArrayBufferView>();
-      const auto view_length = static_cast<std::int64_t>(view->ByteLength());
+      const auto view_length = static_cast<i64>(view->ByteLength());
       const auto offset_value = info.Length() > 2 && !info[2]->IsNullOrUndefined()
                                     ? info[2]->IntegerValue(ctx).FromMaybe(-1)
                                     : 0;
@@ -436,14 +434,14 @@ namespace fxe::runtime {
         iso->ThrowException(Exception::RangeError("buffer offset/length out of range"_v8(iso)));
         return false;
       }
-      const std::size_t offset = static_cast<std::size_t>(offset_value);
-      length = static_cast<std::size_t>(length_value);
+      const usize offset = static_cast<usize>(offset_value);
+      length = static_cast<usize>(length_value);
       position = -1;
       if (info.Length() > 4 && !info[4]->IsNullOrUndefined())
         position = info[4]->IntegerValue(ctx).FromMaybe(-1);
       auto backing = view->Buffer()->GetBackingStore();
-      const std::size_t absolute_offset = view->ByteOffset() + offset;
-      data = static_cast<std::uint8_t*>(backing->Data()) + absolute_offset;
+      const usize absolute_offset = view->ByteOffset() + offset;
+      data = static_cast<u8*>(backing->Data()) + absolute_offset;
       if (view_offset)
         *view_offset = absolute_offset;
       return true;
@@ -480,9 +478,9 @@ namespace fxe::runtime {
     void read_sync(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      std::uint8_t* data = nullptr;
-      std::size_t length = 0;
-      std::int64_t position = -1;
+      u8* data = nullptr;
+      usize length = 0;
+      i64 position = -1;
       if (!parse_buffer_args(iso, ctx, info, false, data, length, position))
         return;
       int err = 0;
@@ -497,9 +495,9 @@ namespace fxe::runtime {
     void write_sync(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      std::uint8_t* data = nullptr;
-      std::size_t length = 0;
-      std::int64_t position = -1;
+      u8* data = nullptr;
+      usize length = 0;
+      i64 position = -1;
       if (!parse_buffer_args(iso, ctx, info, true, data, length, position))
         return;
       int err = 0;
@@ -538,9 +536,9 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       const int fd = info.Length() > 0 ? info[0]->Int32Value(ctx).FromMaybe(-1) : -1;
-      const std::int64_t len = info.Length() > 1 && !info[1]->IsNullOrUndefined()
-                                   ? info[1]->IntegerValue(ctx).FromMaybe(0)
-                                   : 0;
+      const i64 len = info.Length() > 1 && !info[1]->IsNullOrUndefined()
+                          ? info[1]->IntegerValue(ctx).FromMaybe(0)
+                          : 0;
       int err = 0;
       if (!truncate_fd(fd, len, err)) {
         throw_errno_error(iso, ctx, err, "ftruncate");
@@ -575,13 +573,13 @@ namespace fxe::runtime {
       int flags = 0;
       int mode = 0666;
       int fd = -1;
-      std::vector<std::uint8_t> bytes;
-      std::vector<std::uint8_t> read_bytes;
+      std::vector<u8> bytes;
+      std::vector<u8> read_bytes;
       Global<ArrayBuffer> buffer;
-      std::size_t buffer_offset = 0;
-      std::size_t length = 0;
-      std::int64_t position = -1;
-      std::int64_t count = 0;
+      usize buffer_offset = 0;
+      usize length = 0;
+      i64 position = -1;
+      i64 count = 0;
       stat_result stat;
       int err = 0;
       int uv_status = 0;
@@ -596,7 +594,7 @@ namespace fxe::runtime {
         job->read_bytes.resize(job->length);
         job->count = read_fd(job->fd, job->read_bytes.data(), job->length, job->position, job->err);
         if (job->count >= 0)
-          job->read_bytes.resize(static_cast<std::size_t>(job->count));
+          job->read_bytes.resize(static_cast<usize>(job->count));
         break;
       case async_kind::write:
         job->count =
@@ -665,7 +663,7 @@ namespace fxe::runtime {
         auto buffer = job->buffer.Get(iso);
         auto backing = buffer->GetBackingStore();
         if (!job->read_bytes.empty()) {
-          std::memcpy(static_cast<std::uint8_t*>(backing->Data()) + job->buffer_offset,
+          std::memcpy(static_cast<u8*>(backing->Data()) + job->buffer_offset,
                       job->read_bytes.data(), job->read_bytes.size());
         }
         value = bytes_read_object(iso, ctx, job->count);
@@ -726,7 +724,7 @@ namespace fxe::runtime {
 
     bool prepare_buffer_job(Isolate* iso, Local<Context> ctx,
                             const FunctionCallbackInfo<Value>& info, bool write, async_job& job) {
-      std::uint8_t* data = nullptr;
+      u8* data = nullptr;
       if (!parse_buffer_args(iso, ctx, info, write, data, job.length, job.position,
                              write ? nullptr : &job.buffer_offset))
         return false;

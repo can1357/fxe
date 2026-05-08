@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <fxe/types.hpp>
 #include <list>
 #include <optional>
 #include <string>
@@ -46,7 +47,7 @@ namespace fxe::js {
 
   class source_map_cache {
   public:
-    explicit source_map_cache(std::size_t capacity = 64);
+    explicit source_map_cache(usize capacity = 64);
 
     void put(std::string_view module_url, source_map_decoder decoder);
     void put_json(std::string_view module_url, std::string_view source_map_json,
@@ -57,10 +58,10 @@ namespace fxe::js {
     [[nodiscard]] std::optional<source_mapped_position>
     original_position(std::string_view module_url, int generated_line, int generated_column);
 
-    [[nodiscard]] std::size_t capacity() const noexcept {
+    [[nodiscard]] usize capacity() const noexcept {
       return capacity_;
     }
-    [[nodiscard]] std::size_t size() const noexcept;
+    [[nodiscard]] usize size() const noexcept;
 
   private:
     struct entry {
@@ -68,7 +69,7 @@ namespace fxe::js {
       source_map_decoder decoder;
     };
 
-    std::size_t capacity_ = 64;
+    usize capacity_ = 64;
     std::list<entry> entries_;
   };
 

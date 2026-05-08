@@ -153,7 +153,7 @@ namespace fxe::js {
           return false;
         auto ctx = iso->GetCurrentContext();
         float tmp[4];
-        for (uint32_t i = 0; i < 4; ++i) {
+        for (u32 i = 0; i < 4; ++i) {
           Local<Value> elt;
           if (!arr->Get(ctx, i).ToLocal(&elt))
             return false;

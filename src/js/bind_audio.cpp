@@ -90,9 +90,9 @@ namespace fxe::js {
 
     struct capture_chunk {
       std::vector<float> samples;
-      std::size_t frame_count = 0;
-      uint32_t channels = 0;
-      uint32_t sample_rate = 0;
+      usize frame_count = 0;
+      u32 channels = 0;
+      u32 sample_rate = 0;
     };
 
     struct capture_holder {
@@ -163,7 +163,7 @@ namespace fxe::js {
     }
 
     Local<Float32Array> make_float32_array(Isolate* iso, capture_chunk& chunk) {
-      const std::size_t byte_len = chunk.samples.size() * sizeof(float);
+      const usize byte_len = chunk.samples.size() * sizeof(float);
       if (byte_len == 0) {
         auto store = ArrayBuffer::NewBackingStore(iso, 0);
         auto ab = ArrayBuffer::New(iso, std::move(store));
@@ -172,8 +172,7 @@ namespace fxe::js {
       auto* samples = new std::vector<float>(std::move(chunk.samples));
       auto store = ArrayBuffer::NewBackingStore(
           samples->data(), byte_len,
-          [](void*, std::size_t, void* data) { delete static_cast<std::vector<float>*>(data); },
-          samples);
+          [](void*, usize, void* data) { delete static_cast<std::vector<float>*>(data); }, samples);
       auto ab = ArrayBuffer::New(iso, std::move(store));
       return Float32Array::New(ab, 0, samples->size());
     }
@@ -241,14 +240,14 @@ namespace fxe::js {
     }
 
     void enqueue_capture_samples(const std::shared_ptr<capture_holder>& holder,
-                                 const float* samples, std::size_t frame_count, uint32_t channels,
-                                 uint32_t sample_rate) {
+                                 const float* samples, usize frame_count, u32 channels,
+                                 u32 sample_rate) {
       if (!holder || holder->stopped.load() || samples == nullptr || frame_count == 0 ||
           channels == 0)
         return;
-      if (frame_count > std::numeric_limits<std::size_t>::max() / channels)
+      if (frame_count > std::numeric_limits<usize>::max() / channels)
         return;
-      const std::size_t sample_count = frame_count * channels;
+      const usize sample_count = frame_count * channels;
       capture_chunk chunk;
       try {
         chunk.samples.assign(samples, samples + sample_count);
@@ -326,19 +325,19 @@ namespace fxe::js {
       String::Utf8Value s(iso, v);
       if (!*s)
         return false;
-      out.assign(*s, static_cast<std::size_t>(s.length()));
+      out.assign(*s, static_cast<usize>(s.length()));
       return true;
     }
 
     bool read_positive_u32(Local<Context> ctx, Local<Object> opts, Local<String> key,
-                           std::optional<uint32_t>& out) {
+                           std::optional<u32>& out) {
       double value = 0.0;
       if (!read_number(ctx, opts, key, value))
         return true;
       if (!std::isfinite(value) || value <= 0.0 ||
-          value > static_cast<double>(std::numeric_limits<uint32_t>::max()))
+          value > static_cast<double>(std::numeric_limits<u32>::max()))
         return false;
-      out = static_cast<uint32_t>(value);
+      out = static_cast<u32>(value);
       return true;
     }
 
@@ -546,12 +545,12 @@ namespace fxe::js {
         info.GetReturnValue().Set(make_rejected(iso, ctx, make_audio_error(iso, ctx, init_err)));
         return;
       }
-      auto u8 = info[0].As<Uint8Array>();
-      auto buf = u8->Buffer();
+      auto u8_arr = info[0].As<Uint8Array>();
+      auto buf = u8_arr->Buffer();
       auto bs = buf->GetBackingStore();
-      const uint8_t* base = static_cast<const uint8_t*>(bs->Data());
-      const uint8_t* data = base + u8->ByteOffset();
-      size_t size = u8->ByteLength();
+      const u8* base = static_cast<const u8*>(bs->Data());
+      const u8* data = base + u8_arr->ByteOffset();
+      usize size = u8_arr->ByteLength();
       auto handle = audio::load_from_bytes(data, size);
       if (!handle.valid()) {
         info.GetReturnValue().Set(
@@ -589,7 +588,7 @@ namespace fxe::js {
         return;
       }
       String::Utf8Value kind_s(iso, info[0]);
-      std::string kind(*kind_s ? *kind_s : "", static_cast<std::size_t>(kind_s.length()));
+      std::string kind(*kind_s ? *kind_s : "", static_cast<usize>(kind_s.length()));
       audio::device_kind kind_value;
       if (kind == "input") {
         kind_value = audio::device_kind::input;
@@ -607,12 +606,12 @@ namespace fxe::js {
         return;
       }
       auto arr = Array::New(iso, static_cast<int>(devices.size()));
-      for (std::size_t i = 0; i < devices.size(); ++i) {
+      for (usize i = 0; i < devices.size(); ++i) {
         auto obj = Object::New(iso);
         (void)obj->Set(ctx, "id"_v8(iso), js_string(iso, devices[i].id.c_str()));
         (void)obj->Set(ctx, "name"_v8(iso), js_string(iso, devices[i].name.c_str()));
         (void)obj->Set(ctx, "isDefault"_v8(iso), Boolean::New(iso, devices[i].is_default));
-        (void)arr->Set(ctx, static_cast<uint32_t>(i), obj);
+        (void)arr->Set(ctx, static_cast<u32>(i), obj);
       }
       info.GetReturnValue().Set(arr);
     }
@@ -645,8 +644,7 @@ namespace fxe::js {
       holder->context.Reset(iso, ctx);
       std::weak_ptr<capture_holder> weak(holder);
       auto handle = audio::start_capture(
-          [weak](const float* samples, std::size_t frame_count, uint32_t channels,
-                 uint32_t sample_rate) {
+          [weak](const float* samples, usize frame_count, u32 channels, u32 sample_rate) {
             if (auto holder = weak.lock())
               enqueue_capture_samples(holder, samples, frame_count, channels, sample_rate);
           },

@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <fxe/types.hpp>
 #include <limits>
 #include <mutex>
 #include <string>
@@ -36,8 +37,8 @@ namespace fxe::os {
     std::atomic<bool> g_last_network_online{true};
     std::atomic<bool> g_last_on_battery{false};
     std::mutex g_inhibit_mu;
-    std::unordered_map<std::uint64_t, int> g_sleep_inhibits;
-    std::atomic<std::uint64_t> g_next_inhibit_id{1};
+    std::unordered_map<u64, int> g_sleep_inhibits;
+    std::atomic<u64> g_next_inhibit_id{1};
 
     [[maybe_unused]] void emit_power(power_event event) {
       std::function<void(power_event)> cb;
@@ -173,7 +174,7 @@ namespace fxe::os {
       if (fd < 0)
         return {};
 
-      const std::uint64_t id = g_next_inhibit_id.fetch_add(1);
+      const u64 id = g_next_inhibit_id.fetch_add(1);
       {
         std::lock_guard<std::mutex> lock(g_inhibit_mu);
         g_sleep_inhibits.emplace(id, fd);
@@ -238,7 +239,7 @@ namespace fxe::os {
           if (path && std::string(path).find("/org/freedesktop/UPower") == 0)
             emit_battery_if_changed();
         } else if (dbus_message_is_signal(msg, "org.freedesktop.NetworkManager", "StateChanged")) {
-          uint32_t state = 0;
+          u32 state = 0;
           if (dbus_message_get_args(msg, nullptr, DBUS_TYPE_UINT32, &state, DBUS_TYPE_INVALID))
             emit_network_if_changed(state >= 50 && state <= 70);
         }

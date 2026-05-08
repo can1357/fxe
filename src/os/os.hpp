@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <fxe/types.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -171,7 +172,7 @@ namespace fxe::os {
   std::optional<std::string> clipboard_get_html();
   bool clipboard_set_rtf(std::string_view rtf);
   std::optional<std::string> clipboard_get_rtf();
-  bool clipboard_set_mime(std::string_view mime, const std::vector<uint8_t>& bytes);
-  std::optional<std::vector<uint8_t>> clipboard_get_mime(std::string_view mime);
+  bool clipboard_set_mime(std::string_view mime, const std::vector<u8>& bytes);
+  std::optional<std::vector<u8>> clipboard_get_mime(std::string_view mime);
 
 } // namespace fxe::os

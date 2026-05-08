@@ -148,7 +148,7 @@ namespace {
     const unsigned char sig[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
     if (bytes.size() < 24 || std::memcmp(bytes.data(), sig, sizeof(sig)) != 0)
       return false;
-    auto be32 = [&](std::size_t off) {
+    auto be32 = [&](usize off) {
       return (unsigned(bytes[off]) << 24u) | (unsigned(bytes[off + 1]) << 16u) |
              (unsigned(bytes[off + 2]) << 8u) | unsigned(bytes[off + 3]);
     };
@@ -465,7 +465,7 @@ namespace {
 
   bool send_all(socket_t s, std::string_view data) {
     const char* p = data.data();
-    std::size_t left = data.size();
+    usize left = data.size();
     while (left > 0) {
 #if defined(_WIN32)
       int n = ::send(s, p, static_cast<int>(left), 0);
@@ -475,7 +475,7 @@ namespace {
       if (n <= 0)
         return false;
       p += n;
-      left -= static_cast<std::size_t>(n);
+      left -= static_cast<usize>(n);
     }
     return true;
   }
@@ -501,7 +501,7 @@ namespace {
 #endif
       if (n <= 0)
         return false;
-      buf.append(chunk, static_cast<std::size_t>(n));
+      buf.append(chunk, static_cast<usize>(n));
     }
   }
 
@@ -949,8 +949,8 @@ namespace {
     }
     for (int i = 0; i < static_cast<int>(clients.size()); ++i) {
       json frame{json::object()};
-      CHECK(pump_until_id(srv, clients[static_cast<std::size_t>(i)],
-                          bufs[static_cast<std::size_t>(i)], i + 1, frame));
+      CHECK(pump_until_id(srv, clients[static_cast<usize>(i)], bufs[static_cast<usize>(i)], i + 1,
+                          frame));
     }
 
     socket_t overflow = connect_loopback(srv.bound_port());
@@ -987,7 +987,7 @@ namespace {
       }
     }
 
-    for (std::size_t i = clients.size() == 8 ? 1u : 0u; i < clients.size(); ++i)
+    for (usize i = clients.size() == 8 ? 1u : 0u; i < clients.size(); ++i)
       close_socket(clients[i]);
     srv.stop();
   }

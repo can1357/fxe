@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <fxe/types.hpp>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -34,13 +35,13 @@ namespace {
 
   void send_all(int fd, const std::string& bytes) {
     const char* p = bytes.data();
-    std::size_t left = bytes.size();
+    usize left = bytes.size();
     while (left > 0) {
       ssize_t n = ::send(fd, p, left, 0);
       if (n <= 0)
         return;
       p += n;
-      left -= static_cast<std::size_t>(n);
+      left -= static_cast<usize>(n);
     }
   }
 
@@ -51,7 +52,7 @@ namespace {
       ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
       if (n <= 0)
         break;
-      out.append(buf, static_cast<std::size_t>(n));
+      out.append(buf, static_cast<usize>(n));
     }
     return out;
   }

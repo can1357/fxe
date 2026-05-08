@@ -9,7 +9,7 @@ add_executable(fxe-pack
   bundle.cpp
 )
 target_compile_features(fxe-pack PRIVATE cxx_std_20)
-target_include_directories(fxe-pack PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(fxe-pack PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_SOURCE_DIR}/include")
 
 if(APPLE)
   target_link_libraries(fxe-pack PRIVATE "-framework CoreFoundation")

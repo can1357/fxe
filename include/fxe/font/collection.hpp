@@ -13,6 +13,7 @@
 
 #include <fxe/font/descriptor.hpp>
 #include <fxe/font/face.hpp>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
 
@@ -26,7 +27,7 @@ namespace fxe::font {
 
   class Collection {
   public:
-    static constexpr std::size_t kStyleCount = 4;
+    static constexpr usize kStyleCount = 4;
 
     Collection() = default;
 

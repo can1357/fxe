@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,16 +20,16 @@ namespace fxe::font {
 
     constexpr Tag() = default;
     constexpr Tag(std::string_view sv) noexcept {
-      for (std::size_t i = 0; i < 4; ++i)
+      for (usize i = 0; i < 4; ++i)
         chars[i] = i < sv.size() ? sv[i] : ' ';
     }
     constexpr Tag(const char* s) noexcept : Tag(std::string_view{s}) {}
 
-    [[nodiscard]] constexpr std::uint32_t packed() const noexcept {
-      return (static_cast<std::uint32_t>(static_cast<unsigned char>(chars[0])) << 24) |
-             (static_cast<std::uint32_t>(static_cast<unsigned char>(chars[1])) << 16) |
-             (static_cast<std::uint32_t>(static_cast<unsigned char>(chars[2])) << 8) |
-             (static_cast<std::uint32_t>(static_cast<unsigned char>(chars[3])));
+    [[nodiscard]] constexpr u32 packed() const noexcept {
+      return (static_cast<u32>(static_cast<unsigned char>(chars[0])) << 24) |
+             (static_cast<u32>(static_cast<unsigned char>(chars[1])) << 16) |
+             (static_cast<u32>(static_cast<unsigned char>(chars[2])) << 8) |
+             (static_cast<u32>(static_cast<unsigned char>(chars[3])));
     }
 
     [[nodiscard]] std::string str() const {
@@ -42,9 +43,9 @@ namespace fxe::font {
   // ranged features such as `cv01=2`).
   struct Feature {
     Tag tag;
-    std::uint32_t value = 1;
-    std::uint32_t start = 0;                            // run-relative byte offset, 0 = whole run
-    std::uint32_t end = static_cast<std::uint32_t>(-1); // -1 = end-of-run
+    u32 value = 1;
+    u32 start = 0;                  // run-relative byte offset, 0 = whole run
+    u32 end = static_cast<u32>(-1); // -1 = end-of-run
   };
 
   // A variation axis setting: tag + value (e.g. `wght=600`). Used by

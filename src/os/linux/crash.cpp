@@ -12,6 +12,7 @@
 
 #include <dirent.h>
 #include <dlfcn.h>
+#include <fxe/types.hpp>
 #include <signal.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -28,19 +29,19 @@ namespace fxe::os::crash_detail {
 
     struct lite_header {
       char magic[8];
-      std::uint32_t version;
-      std::uint32_t signal_number;
-      std::uint64_t pid;
-      std::uint64_t crashing_tid;
-      std::uint64_t fault_address;
+      u32 version;
+      u32 signal_number;
+      u64 pid;
+      u64 crashing_tid;
+      u64 fault_address;
     };
 
     struct record_header {
-      std::uint32_t type;
-      std::uint32_t size;
+      u32 type;
+      u32 size;
     };
 
-    enum record_type : std::uint32_t {
+    enum record_type : u32 {
       record_thread = 1,
       record_maps = 2,
       record_frame = 3,
@@ -48,41 +49,41 @@ namespace fxe::os::crash_detail {
     };
 
     struct thread_record {
-      std::int64_t tid;
-      std::uint64_t pc;
-      std::uint64_t sp;
-      std::uint64_t fp;
-      std::uint32_t flags;
+      i64 tid;
+      u64 pc;
+      u64 sp;
+      u64 fp;
+      u32 flags;
     };
 
     struct frame_record {
-      std::int64_t tid;
-      std::uint64_t pc;
-      std::uint64_t image_base;
-      std::uint64_t symbol_address;
+      i64 tid;
+      u64 pc;
+      u64 image_base;
+      u64 symbol_address;
       char image[192];
       char symbol[192];
     };
 
-    void write_exact(int fd, const void* data, std::size_t size) noexcept {
+    void write_exact(int fd, const void* data, usize size) noexcept {
       const auto* bytes = static_cast<const char*>(data);
       while (size > 0) {
         ssize_t written = write(fd, bytes, size);
         if (written <= 0)
           return;
         bytes += written;
-        size -= static_cast<std::size_t>(written);
+        size -= static_cast<usize>(written);
       }
     }
 
-    void write_record(int fd, record_type type, const void* data, std::uint32_t size) noexcept {
-      record_header header{static_cast<std::uint32_t>(type), size};
+    void write_record(int fd, record_type type, const void* data, u32 size) noexcept {
+      record_header header{static_cast<u32>(type), size};
       write_exact(fd, &header, sizeof(header));
       if (size > 0)
         write_exact(fd, data, size);
     }
 
-    void copy_cstr(char* dst, std::size_t dst_size, const char* src) noexcept {
+    void copy_cstr(char* dst, usize dst_size, const char* src) noexcept {
       if (!dst || dst_size == 0)
         return;
       if (!src) {
@@ -96,8 +97,7 @@ namespace fxe::os::crash_detail {
       return static_cast<pid_t>(syscall(SYS_gettid));
     }
 
-    void registers_from_context(void* raw_context, std::uint64_t& pc, std::uint64_t& sp,
-                                std::uint64_t& fp) noexcept {
+    void registers_from_context(void* raw_context, u64& pc, u64& sp, u64& fp) noexcept {
       pc = 0;
       sp = 0;
       fp = 0;
@@ -105,20 +105,19 @@ namespace fxe::os::crash_detail {
       if (!context)
         return;
 #if defined(__x86_64__)
-      pc = static_cast<std::uint64_t>(context->uc_mcontext.gregs[REG_RIP]);
-      sp = static_cast<std::uint64_t>(context->uc_mcontext.gregs[REG_RSP]);
-      fp = static_cast<std::uint64_t>(context->uc_mcontext.gregs[REG_RBP]);
+      pc = static_cast<u64>(context->uc_mcontext.gregs[REG_RIP]);
+      sp = static_cast<u64>(context->uc_mcontext.gregs[REG_RSP]);
+      fp = static_cast<u64>(context->uc_mcontext.gregs[REG_RBP]);
 #elif defined(__aarch64__)
-      pc = static_cast<std::uint64_t>(context->uc_mcontext.pc);
-      sp = static_cast<std::uint64_t>(context->uc_mcontext.sp);
-      fp = static_cast<std::uint64_t>(context->uc_mcontext.regs[29]);
+      pc = static_cast<u64>(context->uc_mcontext.pc);
+      sp = static_cast<u64>(context->uc_mcontext.sp);
+      fp = static_cast<u64>(context->uc_mcontext.regs[29]);
 #else
       (void)context;
 #endif
     }
 
-    void write_thread_records(int fd, pid_t crashing_tid, std::uint64_t pc, std::uint64_t sp,
-                              std::uint64_t fp) noexcept {
+    void write_thread_records(int fd, pid_t crashing_tid, u64 pc, u64 sp, u64 fp) noexcept {
       DIR* dir = opendir("/proc/self/task");
       if (!dir)
         return;
@@ -149,25 +148,25 @@ namespace fxe::os::crash_detail {
       char buffer[16384];
       ssize_t n = read(maps, buffer, sizeof(buffer));
       if (n > 0)
-        write_record(fd, record_maps, buffer, static_cast<std::uint32_t>(n));
+        write_record(fd, record_maps, buffer, static_cast<u32>(n));
       close(maps);
     }
 
     void write_frame_record(int fd, pid_t tid, void* address) noexcept {
       frame_record record{};
       record.tid = tid;
-      record.pc = reinterpret_cast<std::uint64_t>(address);
+      record.pc = reinterpret_cast<u64>(address);
       Dl_info info{};
       if (dladdr(address, &info) != 0) {
-        record.image_base = reinterpret_cast<std::uint64_t>(info.dli_fbase);
-        record.symbol_address = reinterpret_cast<std::uint64_t>(info.dli_saddr);
+        record.image_base = reinterpret_cast<u64>(info.dli_fbase);
+        record.symbol_address = reinterpret_cast<u64>(info.dli_saddr);
         copy_cstr(record.image, sizeof(record.image), info.dli_fname);
         copy_cstr(record.symbol, sizeof(record.symbol), info.dli_sname);
       }
       write_record(fd, record_frame, &record, sizeof(record));
     }
 
-    void write_current_backtrace(int fd, pid_t tid, std::uint64_t pc) noexcept {
+    void write_current_backtrace(int fd, pid_t tid, u64 pc) noexcept {
       if (pc != 0)
         write_frame_record(fd, tid, reinterpret_cast<void*>(pc));
       void* frames[64] = {};
@@ -178,17 +177,17 @@ namespace fxe::os::crash_detail {
 
     void write_linux_lite_dump(int fd, int signal_number, siginfo_t* info, void* context) noexcept {
       pid_t tid = current_tid();
-      std::uint64_t pc = 0;
-      std::uint64_t sp = 0;
-      std::uint64_t fp = 0;
+      u64 pc = 0;
+      u64 sp = 0;
+      u64 fp = 0;
       registers_from_context(context, pc, sp, fp);
 
       lite_header header{{'F', 'X', 'E', 'L', 'M', 'D', 'P', '1'},
                          1,
-                         static_cast<std::uint32_t>(signal_number),
-                         static_cast<std::uint64_t>(getpid()),
-                         static_cast<std::uint64_t>(tid),
-                         reinterpret_cast<std::uint64_t>(info ? info->si_addr : nullptr)};
+                         static_cast<u32>(signal_number),
+                         static_cast<u64>(getpid()),
+                         static_cast<u64>(tid),
+                         reinterpret_cast<u64>(info ? info->si_addr : nullptr)};
       write_exact(fd, &header, sizeof(header));
       const char note[] = "format=linux-minidump-lite; records are typed little-endian payloads";
       write_record(fd, record_note, note, sizeof(note));

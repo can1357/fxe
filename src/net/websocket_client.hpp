@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -37,11 +38,11 @@ namespace fxe::net {
 
   struct ws_event {
     ws_event_kind kind;
-    std::string text;                 // text for message_text, error reason for error_
-    std::vector<std::uint8_t> binary; // for message_binary
-    std::uint16_t code = 0;           // close code
-    std::string reason;               // close reason / error message
-    bool was_clean = false;           // close cleanliness
+    std::string text;       // text for message_text, error reason for error_
+    std::vector<u8> binary; // for message_binary
+    u16 code = 0;           // close code
+    std::string reason;     // close reason / error message
+    bool was_clean = false; // close cleanliness
   };
 
   enum class ws_ready_state : int {
@@ -52,10 +53,10 @@ namespace fxe::net {
   };
 
   struct ws_client_options {
-    std::size_t max_message_bytes = 64ull * 1024ull * 1024ull;
-    std::uint32_t idle_timeout_ms = 0;
-    std::uint32_t pong_timeout_ms = 30000;
-    std::size_t max_fragment_bytes = 1024ull * 1024ull;
+    usize max_message_bytes = 64ull * 1024ull * 1024ull;
+    u32 idle_timeout_ms = 0;
+    u32 pong_timeout_ms = 30000;
+    usize max_fragment_bytes = 1024ull * 1024ull;
     bool compress = true;
   };
 
@@ -69,9 +70,9 @@ namespace fxe::net {
     // thread; success/failure is reported as ws_event::open / ws_event::error_.
     bool connect(std::string url, std::vector<std::string> protocols);
 
-    void send_text(std::string s, std::size_t max_fragment_bytes = 0);
-    void send_binary(std::vector<std::uint8_t> data, std::size_t max_fragment_bytes = 0);
-    void close(std::uint16_t code, std::string reason);
+    void send_text(std::string s, usize max_fragment_bytes = 0);
+    void send_binary(std::vector<u8> data, usize max_fragment_bytes = 0);
+    void close(u16 code, std::string reason);
 
     // Move events out for processing on the V8 thread. Cheap: short critical
     // section, swap the inner queue.
@@ -80,7 +81,7 @@ namespace fxe::net {
     ws_ready_state ready_state() const {
       return state_.load();
     }
-    std::size_t buffered_amount() const {
+    usize buffered_amount() const {
       return buffered_.load();
     }
     const std::string& selected_protocol() const {
@@ -92,7 +93,7 @@ namespace fxe::net {
     const std::string& negotiated_extensions() const {
       return negotiated_extensions_;
     }
-    std::uint16_t close_code() const;
+    u16 close_code() const;
     std::string close_reason() const;
 
     websocket_client(const websocket_client&) = delete;
@@ -106,32 +107,30 @@ namespace fxe::net {
     };
     struct out_msg {
       out_op op;
-      std::vector<std::uint8_t> bytes;
-      std::uint16_t code = 0;
-      std::size_t max_fragment_bytes = 0;
+      std::vector<u8> bytes;
+      u16 code = 0;
+      usize max_fragment_bytes = 0;
     };
 
     void worker_main();
     bool do_handshake();
-    bool transport_send_all(const std::uint8_t* data, std::size_t n);
-    bool transport_recv_n(std::uint8_t* buf, std::size_t n);
+    bool transport_send_all(const u8* data, usize n);
+    bool transport_recv_n(u8* buf, usize n);
     bool transport_recv_http_headers(std::string& out);
-    bool send_message(std::uint8_t opcode, const std::uint8_t* data, std::size_t n,
-                      std::size_t max_fragment_bytes, bool compressed = false);
-    bool send_frame(std::uint8_t opcode, const std::uint8_t* data, std::size_t n, bool fin = true,
-                    bool rsv1 = false);
-    bool send_close_frame(std::uint16_t code, const std::string& reason);
-    void record_close(std::uint16_t code, std::string reason);
-    void emit_local_close(std::uint16_t code, std::string reason);
+    bool send_message(u8 opcode, const u8* data, usize n, usize max_fragment_bytes,
+                      bool compressed = false);
+    bool send_frame(u8 opcode, const u8* data, usize n, bool fin = true, bool rsv1 = false);
+    bool send_close_frame(u16 code, const std::string& reason);
+    void record_close(u16 code, std::string reason);
+    void emit_local_close(u16 code, std::string reason);
     void push_event(ws_event ev);
     void close_socket_now(bool shutdown_first);
     void runtime_pump() noexcept;
 
     struct ws_deflate_state;
     bool negotiate_permessage_deflate(const std::string& headers);
-    bool deflate_message(const std::uint8_t* data, std::size_t n, std::vector<std::uint8_t>& out);
-    bool inflate_message(const std::vector<std::uint8_t>& data, std::vector<std::uint8_t>& out,
-                         bool& too_big);
+    bool deflate_message(const u8* data, usize n, std::vector<u8>& out);
+    bool inflate_message(const std::vector<u8>& data, std::vector<u8>& out, bool& too_big);
     std::string url_;
     ws_client_options options_;
     std::vector<std::string> protocols_;
@@ -140,11 +139,11 @@ namespace fxe::net {
     std::string negotiated_extensions_;
 
     std::atomic<ws_ready_state> state_{ws_ready_state::connecting};
-    std::atomic<std::size_t> buffered_{0};
+    std::atomic<usize> buffered_{0};
     std::atomic<bool> stop_{false};
-    std::atomic<std::int64_t> last_frame_ms_{0};
+    std::atomic<i64> last_frame_ms_{0};
     std::atomic<bool> awaiting_pong_{false};
-    std::atomic<std::int64_t> ping_sent_ms_{0};
+    std::atomic<i64> ping_sent_ms_{0};
 
     std::atomic<int> sock_{-1};
 #if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
@@ -159,12 +158,12 @@ namespace fxe::net {
     std::mutex send_mu_;
 
     mutable std::mutex close_mu_;
-    std::uint16_t close_code_ = 0;
+    u16 close_code_ = 0;
     std::string close_reason_;
 
     std::mutex in_mu_;
     std::vector<ws_event> in_q_;
-    std::size_t uv_pump_callback_id_ = 0;
+    usize uv_pump_callback_id_ = 0;
     std::unique_ptr<ws_deflate_state> deflate_;
   };
 

@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
   namespace {
@@ -18,7 +19,7 @@ namespace fxe::font {
       if (!s) return {};
       const CFIndex len = CFStringGetLength(s);
       const CFIndex max = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8) + 1;
-      std::string out(static_cast<std::size_t>(max), '\0');
+      std::string out(static_cast<usize>(max), '\0');
       if (CFStringGetCString(s, out.data(), max, kCFStringEncodingUTF8)) {
         out.resize(std::strlen(out.c_str()));
       } else {
@@ -88,7 +89,7 @@ namespace fxe::font {
         if (!matches) return out;
 
         const CFIndex n = CFArrayGetCount(matches);
-        out.reserve(static_cast<std::size_t>(n));
+        out.reserve(static_cast<usize>(n));
         for (CFIndex i = 0; i < n; ++i) {
           CTFontDescriptorRef match =
               static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(matches, i));

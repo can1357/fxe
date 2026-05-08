@@ -4,6 +4,7 @@
 
 #include <fxe/font/face.hpp>
 #include <fxe/font/shaper.hpp>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
   namespace {
@@ -46,7 +47,7 @@ namespace fxe::font {
         const char* it = utf8.data();
         const char* end = it + utf8.size();
         while (it < end) {
-          const auto byte_offset = static_cast<std::uint32_t>(it - utf8.data());
+          const auto byte_offset = static_cast<u32>(it - utf8.data());
           const char32_t cp = decode_utf8(it, end);
           if (cp == 0)
             break;

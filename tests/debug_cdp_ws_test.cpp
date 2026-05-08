@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <string>
 #include <thread>
 #include <vector>
@@ -105,7 +106,7 @@ namespace {
 #endif
       if (n <= 0)
         break;
-      out.append(buf, static_cast<std::size_t>(n));
+      out.append(buf, static_cast<usize>(n));
     }
     return out;
   }
@@ -121,7 +122,7 @@ namespace {
 #endif
       if (n <= 0)
         break;
-      out.append(buf, static_cast<std::size_t>(n));
+      out.append(buf, static_cast<usize>(n));
     }
     return out;
   }
@@ -153,7 +154,7 @@ namespace {
 #endif
       if (n <= 0)
         return false;
-      buf.append(chunk, static_cast<std::size_t>(n));
+      buf.append(chunk, static_cast<usize>(n));
     }
   }
 
@@ -262,7 +263,7 @@ namespace {
     std::string buf;
     buf.push_back(static_cast<char>(0x81u));
     buf.push_back(static_cast<char>(0x80u | 127u));
-    const std::uint64_t len = static_cast<std::uint64_t>(max_ws_frame_bytes) + 1u;
+    const u64 len = static_cast<u64>(max_ws_frame_bytes) + 1u;
     for (int i = 7; i >= 0; --i)
       buf.push_back(static_cast<char>((len >> (i * 8)) & 0xffu));
     buf.append("\0\0\0\0", 4);

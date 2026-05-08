@@ -323,7 +323,7 @@ namespace fxe::js {
       v8::Global<v8::Context> context;
     };
     std::shared_ptr<uv_microtask_checkpoint_state> uv_microtask_checkpoint;
-    std::size_t uv_microtask_checkpoint_id = 0;
+    usize uv_microtask_checkpoint_id = 0;
     explicit impl(host::bootstrap_mode mode);
     void record_import(std::string_view importer, std::string_view dependency);
     void clear_import_edges(std::string_view importer);
@@ -387,7 +387,7 @@ namespace fxe::js {
       out.push_back(kv.second);
     return out;
   }
-  fxe::window* host::window_at(std::size_t index) const noexcept {
+  fxe::window* host::window_at(usize index) const noexcept {
     return index < p_->windows.size() ? p_->windows[index] : nullptr;
   }
   fxe::renderer* host::renderer_for(fxe::window* w) const noexcept {
@@ -398,11 +398,11 @@ namespace fxe::js {
         return kv.second;
     return nullptr;
   }
-  std::size_t host::window_index(fxe::window* w) const noexcept {
-    for (std::size_t i = 0; i < p_->windows.size(); ++i)
+  usize host::window_index(fxe::window* w) const noexcept {
+    for (usize i = 0; i < p_->windows.size(); ++i)
       if (p_->windows[i] == w)
         return i;
-    return static_cast<std::size_t>(-1);
+    return static_cast<usize>(-1);
   }
 
   void host::register_window(fxe::window* w) noexcept {
@@ -650,7 +650,7 @@ namespace fxe::js {
         if (size <= 0)
           return kContinue;
         if (sink_)
-          sink_(std::string_view(data, static_cast<std::size_t>(size)));
+          sink_(std::string_view(data, static_cast<usize>(size)));
         return kContinue;
       }
 
@@ -670,7 +670,7 @@ namespace fxe::js {
 
       WriteResult WriteAsciiChunk(char* data, int size) override {
         if (size > 0)
-          out_.append(data, static_cast<std::size_t>(size));
+          out_.append(data, static_cast<usize>(size));
         return kContinue;
       }
 
@@ -1670,7 +1670,7 @@ Error.prepareStackTrace = function(err, frames) {
     std::vector<std::string> queue{root};
     std::unordered_set<std::string> seen;
     std::vector<std::string> ordered;
-    for (std::size_t i = 0; i < queue.size(); ++i) {
+    for (usize i = 0; i < queue.size(); ++i) {
       const std::string current = queue[i];
       if (!seen.insert(current).second)
         continue;

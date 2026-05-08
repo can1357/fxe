@@ -29,6 +29,7 @@
 #include <string>
 #include <utility>
 
+#include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <v8.h>
@@ -219,18 +220,18 @@ namespace fxe::js {
         return;
       }
       Local<Value> v = info[0];
-      const uint8_t* data = nullptr;
-      size_t size = 0;
+      const u8* data = nullptr;
+      usize size = 0;
       std::shared_ptr<BackingStore> bs;
       if (v->IsArrayBuffer()) {
         auto ab = v.As<ArrayBuffer>();
         bs = ab->GetBackingStore();
-        data = static_cast<const uint8_t*>(bs->Data());
+        data = static_cast<const u8*>(bs->Data());
         size = bs->ByteLength();
       } else if (v->IsArrayBufferView()) {
         auto view = v.As<ArrayBufferView>();
         bs = view->Buffer()->GetBackingStore();
-        data = static_cast<const uint8_t*>(bs->Data()) + view->ByteOffset();
+        data = static_cast<const u8*>(bs->Data()) + view->ByteOffset();
         size = view->ByteLength();
       } else {
         st->streaming->Abort(type_error(

@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -28,7 +29,7 @@
 
 namespace fxe::font {
   namespace {
-    std::atomic<std::uint64_t> g_face_id{1};
+    std::atomic<u64> g_face_id{1};
 
     Style style_from_ft(FT_Face f) noexcept {
       const bool b = (f->style_flags & FT_STYLE_FLAG_BOLD) != 0;
@@ -56,7 +57,7 @@ namespace fxe::font {
 
     class FreeTypeFace final : public Face {
     public:
-      FreeTypeFace(FT_Face face, std::vector<std::uint8_t> bytes, float pixel_size)
+      FreeTypeFace(FT_Face face, std::vector<u8> bytes, float pixel_size)
           : face_(face), bytes_(std::move(bytes)), pixel_size_(pixel_size),
             id_(g_face_id.fetch_add(1)) {
         // Set pixel size up-front. FT requires pixel sizes in 26.6 fixed-point
@@ -82,7 +83,7 @@ namespace fxe::font {
         }
       }
 
-      [[nodiscard]] std::uint64_t id() const noexcept override {
+      [[nodiscard]] u64 id() const noexcept override {
         return id_;
       }
 
@@ -120,7 +121,7 @@ namespace fxe::font {
         return (face_->face_flags & FT_FACE_FLAG_COLOR) != 0;
       }
 
-      [[nodiscard]] std::uint32_t glyph_index(char32_t cp) const noexcept override {
+      [[nodiscard]] u32 glyph_index(char32_t cp) const noexcept override {
         return FT_Get_Char_Index(face_, static_cast<FT_ULong>(cp));
       }
 
@@ -132,14 +133,14 @@ namespace fxe::font {
         FT_MM_Var* var = nullptr;
         if (FT_Get_MM_Var(face_, &var) != 0 || !var)
           return;
-        std::vector<FT_Fixed> coords(static_cast<std::size_t>(var->num_axis), 0);
+        std::vector<FT_Fixed> coords(static_cast<usize>(var->num_axis), 0);
         // Default axis values are stored as 16.16 fixed point.
         for (FT_UInt i = 0; i < var->num_axis; ++i) {
           coords[i] = var->axis[i].def;
         }
         for (const auto& v : vs) {
           for (FT_UInt i = 0; i < var->num_axis; ++i) {
-            const std::uint32_t want = v.tag.packed();
+            const u32 want = v.tag.packed();
             if (var->axis[i].tag == want) {
               coords[i] = static_cast<FT_Fixed>(v.value * 65536.0f);
               break;
@@ -150,7 +151,7 @@ namespace fxe::font {
         FT_Done_MM_Var(face_->glyph->library, var);
       }
 
-      [[nodiscard]] Glyph render_glyph(std::uint32_t glyph_id, Atlas& mask, Atlas& color, Hint hint,
+      [[nodiscard]] Glyph render_glyph(u32 glyph_id, Atlas& mask, Atlas& color, Hint hint,
                                        float subpixel_x = 0.0f) override {
         Glyph out{};
         if (glyph_id == 0)
@@ -195,13 +196,13 @@ namespace fxe::font {
         } else if (bm.pixel_mode == FT_PIXEL_MODE_GRAY) {
           out.format = Format::grayscale;
           // FT may pad rows; copy row-by-row if pitch != width.
-          if (static_cast<std::uint32_t>(std::abs(bm.pitch)) == bm.width && bm.pitch >= 0) {
+          if (static_cast<u32>(std::abs(bm.pitch)) == bm.width && bm.pitch >= 0) {
             region = mask.pack(bm.width, bm.rows, bm.buffer);
           } else {
-            std::vector<std::uint8_t> tight(static_cast<std::size_t>(bm.width) * bm.rows, 0);
+            std::vector<u8> tight(static_cast<usize>(bm.width) * bm.rows, 0);
             for (unsigned y = 0; y < bm.rows; ++y) {
-              std::memcpy(tight.data() + static_cast<std::size_t>(y) * bm.width,
-                          bm.buffer + static_cast<std::ptrdiff_t>(y) * bm.pitch, bm.width);
+              std::memcpy(tight.data() + static_cast<usize>(y) * bm.width,
+                          bm.buffer + static_cast<isize>(y) * bm.pitch, bm.width);
             }
             region = mask.pack(bm.width, bm.rows, tight.data());
           }
@@ -230,9 +231,9 @@ namespace fxe::font {
 
     private:
       FT_Face face_ = nullptr;
-      std::vector<std::uint8_t> bytes_;
+      std::vector<u8> bytes_;
       float pixel_size_ = 0.0f;
-      std::uint64_t id_ = 0;
+      u64 id_ = 0;
 #if FXE_FONT_HAS_HARFBUZZ
       hb_font_t* hb_font_ = nullptr;
 #endif
@@ -249,12 +250,12 @@ namespace fxe::font {
   }
 #endif
 
-  std::unique_ptr<Face> load_face_freetype(std::span<const std::uint8_t> bytes, float pixel_size,
-                                           std::uint32_t face_index) {
+  std::unique_ptr<Face> load_face_freetype(std::span<const u8> bytes, float pixel_size,
+                                           u32 face_index) {
     if (bytes.empty())
       return nullptr;
     FT_Face face = nullptr;
-    std::vector<std::uint8_t> owned(bytes.begin(), bytes.end());
+    std::vector<u8> owned(bytes.begin(), bytes.end());
     {
       auto& lib = shared_library();
       auto guard = lib.lock();

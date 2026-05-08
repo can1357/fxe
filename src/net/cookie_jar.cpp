@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <fxe/types.hpp>
 #include <iomanip>
 #include <mutex>
 #include <sstream>
@@ -34,7 +35,7 @@ namespace fxe::net {
     bool ascii_ieq(std::string_view a, std::string_view b) {
       if (a.size() != b.size())
         return false;
-      for (std::size_t i = 0; i < a.size(); ++i) {
+      for (usize i = 0; i < a.size(); ++i) {
         if (std::tolower(static_cast<unsigned char>(a[i])) !=
             std::tolower(static_cast<unsigned char>(b[i])))
           return false;
@@ -54,7 +55,7 @@ namespace fxe::net {
     parsed_url parse_url(std::string_view url) {
       parsed_url out;
       auto scheme_end = url.find("://");
-      std::size_t authority = 0;
+      usize authority = 0;
       if (scheme_end != std::string_view::npos) {
         out.scheme = ascii_lower_copy(std::string(url.substr(0, scheme_end)));
         authority = scheme_end + 3;
@@ -62,7 +63,7 @@ namespace fxe::net {
       auto path_pos = url.find('/', authority);
       auto query_pos = url.find('?', authority);
       auto frag_pos = url.find('#', authority);
-      std::size_t path_start = path_pos;
+      usize path_start = path_pos;
       if (path_start == std::string_view::npos ||
           (query_pos != std::string_view::npos && query_pos < path_start) ||
           (frag_pos != std::string_view::npos && frag_pos < path_start)) {
@@ -71,9 +72,8 @@ namespace fxe::net {
       }
       std::string host_port(url.substr(authority, path_start - authority));
       if (path_pos != std::string_view::npos) {
-        std::size_t path_end =
-            std::min(query_pos == std::string_view::npos ? url.size() : query_pos,
-                     frag_pos == std::string_view::npos ? url.size() : frag_pos);
+        usize path_end = std::min(query_pos == std::string_view::npos ? url.size() : query_pos,
+                                  frag_pos == std::string_view::npos ? url.size() : frag_pos);
         out.path = std::string(url.substr(path_pos, path_end - path_pos));
         if (out.path.empty())
           out.path = "/";
@@ -101,14 +101,14 @@ namespace fxe::net {
       return request_path.substr(0, last);
     }
 
-    std::int64_t now_unix_seconds() {
+    i64 now_unix_seconds() {
       using namespace std::chrono;
       return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     }
 
-    bool parse_int64(std::string_view value, std::int64_t& out) {
+    bool parse_int64(std::string_view value, i64& out) {
       try {
-        std::size_t consumed = 0;
+        usize consumed = 0;
         auto parsed = std::stoll(std::string(trim_copy(value)), &consumed, 10);
         if (consumed == trim_copy(value).size()) {
           out = parsed;
@@ -119,15 +119,15 @@ namespace fxe::net {
       return false;
     }
 
-    std::int64_t portable_timegm(std::tm* tm) {
+    i64 portable_timegm(std::tm* tm) {
 #if defined(_WIN32)
-      return static_cast<std::int64_t>(_mkgmtime(tm));
+      return static_cast<i64>(_mkgmtime(tm));
 #else
-      return static_cast<std::int64_t>(timegm(tm));
+      return static_cast<i64>(timegm(tm));
 #endif
     }
 
-    bool parse_http_date(std::string_view value, std::int64_t& out) {
+    bool parse_http_date(std::string_view value, i64& out) {
       std::string s = trim_copy(value);
       static constexpr std::array<const char*, 3> formats{
           "%a, %d %b %Y %H:%M:%S GMT",
@@ -278,11 +278,11 @@ namespace fxe::net {
       } else if (key == "path") {
         out.path = !val.empty() && val.front() == '/' ? std::move(val) : "/";
       } else if (key == "expires") {
-        std::int64_t expires = 0;
+        i64 expires = 0;
         if (!saw_max_age && parse_http_date(val, expires))
           out.expires = expires;
       } else if (key == "max-age") {
-        std::int64_t delta = 0;
+        i64 delta = 0;
         if (parse_int64(val, delta)) {
           saw_max_age = true;
           out.expires = delta <= 0 ? 1 : now_unix_seconds() + delta;
@@ -316,7 +316,7 @@ namespace fxe::net {
   }
 
   void cookie_jar::set(std::string domain, std::string name, std::string value, std::string path,
-                       std::int64_t expires, bool secure, bool http_only) {
+                       i64 expires, bool secure, bool http_only) {
     cookie c;
     c.domain = std::move(domain);
     c.name = std::move(name);
@@ -459,7 +459,7 @@ namespace fxe::net {
     schedule_save_locked();
   }
 
-  void cookie_jar::purge_expired_locked(std::int64_t now) {
+  void cookie_jar::purge_expired_locked(i64 now) {
     cookies_.erase(
         std::remove_if(cookies_.begin(), cookies_.end(),
                        [&](const cookie& c) { return c.expires > 0 && c.expires <= now; }),

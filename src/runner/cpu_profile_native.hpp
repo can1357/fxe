@@ -18,6 +18,7 @@
 #include <pthread.h>
 
 #include <atomic>
+#include <fxe/types.hpp>
 #include <string>
 #include <thread>
 
@@ -34,7 +35,7 @@ namespace fxe::runner {
     // Start sampling the *calling* thread at `hz` samples/second. Returns
     // false on failure (err filled). max_samples bounds the in-memory ring;
     // overflow samples are dropped (counted in profile_data::dropped_samples).
-    bool start(int hz, std::size_t max_samples, std::string& err);
+    bool start(int hz, usize max_samples, std::string& err);
 
     // Stop the sampler thread and return a structured profile. Symbol
     // resolution (dladdr + cxa demangle) happens here.

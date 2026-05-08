@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdio>
 #include <functional>
+#include <fxe/types.hpp>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -87,7 +88,7 @@ namespace {
   void test_registered_pump_callback_routes_through_public_pump() {
     auto& runtime = fxe::runtime::uv_loop_runtime::instance();
     std::atomic<int> calls{0};
-    const std::size_t id =
+    const usize id =
         runtime.register_pump_callback([&] { calls.fetch_add(1, std::memory_order_relaxed); });
     CHECK(id != 0);
 
@@ -109,7 +110,7 @@ namespace {
     CHECK(has_error_containing(errors, "posted", "boom"));
     CHECK(runtime.drain_errors().empty());
 
-    const std::size_t id =
+    const usize id =
         runtime.register_microtask_checkpoint([] { throw std::runtime_error("micro-boom"); });
     CHECK(id != 0);
     (void)runtime.pump_nowait();

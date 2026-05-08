@@ -1,6 +1,7 @@
 #include "bind_menu.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
 #include <memory>
 #include <string>
@@ -22,7 +23,7 @@ namespace fxe::js {
     if (arr_v.IsEmpty() || !arr_v->IsArray())
       return;
     auto arr = arr_v.As<Array>();
-    for (uint32_t i = 0; i < arr->Length(); ++i) {
+    for (u32 i = 0; i < arr->Length(); ++i) {
       Local<Value> el;
       if (!arr->Get(ctx, i).ToLocal(&el) || !el->IsObject())
         continue;

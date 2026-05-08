@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include <exception>
+#include <fxe/types.hpp>
 #include <memory>
 #include <unordered_map>
 #include <v8.h>

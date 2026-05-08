@@ -59,7 +59,7 @@ namespace fxe::primitives {
     text_italic = 1u << 7,
     text_rjust = 1u << 8,
   };
-  inline constexpr uint32_t wrap_after_disabled = 0xffffffffu;
+  inline constexpr u32 wrap_after_disabled = 0xffffffffu;
 
   struct text_style {
     r8g8b8a8 color = white;

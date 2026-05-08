@@ -22,6 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <fxe/types.hpp>
 #include <v8.h>
 
 namespace fxe::js {
@@ -54,7 +55,7 @@ namespace fxe::js {
 
     struct pipeline_holder : weak_holder<pipeline_holder> {
       std::unique_ptr<pipeline> owned;
-      uint32_t vertex_stride = 0;
+      u32 vertex_stride = 0;
     };
 
     [[nodiscard]] std::string utf8(Isolate* iso, Local<Value> value) {
@@ -110,7 +111,7 @@ namespace fxe::js {
         out = utf8(iso, value);
     }
 
-    bool get_required_u32(Local<Context> ctx, Local<Object> obj, Local<String> key, uint32_t& out) {
+    bool get_required_u32(Local<Context> ctx, Local<Object> obj, Local<String> key, u32& out) {
       Local<Value> value;
       if (!get_value(ctx, obj, key, value) || !value->IsNumber())
         return false;
@@ -161,7 +162,7 @@ namespace fxe::js {
       auto attrs = attrs_value.As<Array>();
       desc.attrs.clear();
       desc.attrs.reserve(attrs->Length());
-      for (uint32_t i = 0; i < attrs->Length(); ++i) {
+      for (u32 i = 0; i < attrs->Length(); ++i) {
         Local<Value> attr_value;
         if (!attrs->Get(ctx, i).ToLocal(&attr_value) || !attr_value->IsObject())
           return false;
@@ -228,7 +229,7 @@ namespace fxe::js {
         return;
       }
       auto view = info[0].As<ArrayBufferView>();
-      std::vector<uint8_t> bytes(view->ByteLength());
+      std::vector<u8> bytes(view->ByteLength());
       if (!bytes.empty())
         view->CopyContents(bytes.data(), bytes.size());
       h->owned->update_uniforms(bytes.data(), bytes.size());
@@ -245,7 +246,7 @@ namespace fxe::js {
         throw_type(iso, "Pipeline.bindTexture(binding, imageOrTextureId)");
         return;
       }
-      const uint32_t binding = info[0]->Uint32Value(ctx).FromMaybe(0);
+      const u32 binding = info[0]->Uint32Value(ctx).FromMaybe(0);
       texture_id tex = null_texture;
       if (info[1]->IsNumber()) {
         tex = info[1]->Uint32Value(ctx).FromMaybe(null_texture);
@@ -294,12 +295,12 @@ namespace fxe::js {
       std::vector<float> vertex_data(vertices->Length());
       if (!vertex_data.empty())
         vertices->CopyContents(vertex_data.data(), vertex_data.size() * sizeof(float));
-      std::vector<uint32_t> index_data(indices->Length());
+      std::vector<u32> index_data(indices->Length());
       if (!index_data.empty())
-        indices->CopyContents(index_data.data(), index_data.size() * sizeof(uint32_t));
+        indices->CopyContents(index_data.data(), index_data.size() * sizeof(u32));
       float mat[16]{};
       matrix->CopyContents(mat, sizeof(mat));
-      const size_t vertex_count = vertices->ByteLength() / h->vertex_stride;
+      const usize vertex_count = vertices->ByteLength() / h->vertex_stride;
       h->owned->draw(*cb, vertex_data.data(), vertex_count, index_data.data(), index_data.size(),
                      mat);
     }

@@ -12,19 +12,20 @@
 
 #include <fxe/font/face.hpp>
 #include <fxe/font/feature.hpp>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
 
   struct ShapedGlyph {
-    std::uint32_t glyph_id = 0;
+    u32 glyph_id = 0;
     float x_advance = 0.0f;
     float y_advance = 0.0f;
     float x_offset = 0.0f;
     float y_offset = 0.0f;
-    std::uint32_t cluster = 0; // byte offset in input UTF-8
+    u32 cluster = 0; // byte offset in input UTF-8
   };
 
-  enum class Direction : std::uint8_t {
+  enum class Direction : u8 {
     ltr = 0,
     rtl = 1,
   };

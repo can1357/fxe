@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <string>
@@ -71,8 +72,8 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       std::vector<std::string> dumps = fxe::os::crash_detail::list_dump_paths();
       auto arr = Array::New(iso, static_cast<int>(dumps.size()));
-      for (std::size_t i = 0; i < dumps.size(); ++i) {
-        (void)arr->Set(ctx, static_cast<uint32_t>(i), s(iso, dumps[i].c_str()));
+      for (usize i = 0; i < dumps.size(); ++i) {
+        (void)arr->Set(ctx, static_cast<u32>(i), s(iso, dumps[i].c_str()));
       }
       info.GetReturnValue().Set(arr);
     }

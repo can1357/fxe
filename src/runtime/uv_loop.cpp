@@ -1,5 +1,6 @@
 #include "runtime/uv_loop.hpp"
 #include <exception>
+#include <fxe/types.hpp>
 #include <string>
 #include <utility>
 
@@ -120,17 +121,17 @@ namespace fxe::runtime {
 #endif
   }
 
-  std::size_t uv_loop_runtime::register_pump_callback(pump_callback cb) {
+  usize uv_loop_runtime::register_pump_callback(pump_callback cb) {
     if (!cb || !available()) {
       return 0;
     }
     std::lock_guard<std::mutex> lk(callbacks_mu_);
-    const std::size_t id = next_callback_id_++;
+    const usize id = next_callback_id_++;
     callbacks_.emplace_back(id, std::move(cb));
     return id;
   }
 
-  void uv_loop_runtime::unregister_pump_callback(std::size_t id) noexcept {
+  void uv_loop_runtime::unregister_pump_callback(usize id) noexcept {
     if (id == 0) {
       return;
     }
@@ -163,17 +164,17 @@ namespace fxe::runtime {
     }
   }
 
-  std::size_t uv_loop_runtime::register_microtask_checkpoint(microtask_checkpoint cb) {
+  usize uv_loop_runtime::register_microtask_checkpoint(microtask_checkpoint cb) {
     if (!cb) {
       return 0;
     }
     std::lock_guard<std::mutex> lk(microtask_mu_);
-    const std::size_t id = next_microtask_checkpoint_id_++;
+    const usize id = next_microtask_checkpoint_id_++;
     microtask_checkpoints_.emplace_back(id, std::move(cb));
     return id;
   }
 
-  void uv_loop_runtime::unregister_microtask_checkpoint(std::size_t id) noexcept {
+  void uv_loop_runtime::unregister_microtask_checkpoint(usize id) noexcept {
     if (id == 0) {
       return;
     }

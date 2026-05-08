@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <fxe/types.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -148,9 +149,9 @@ namespace fxe::js {
 
     [[nodiscard]] std::vector<window*> windows() const;
     [[nodiscard]] std::vector<renderer*> renderers() const;
-    [[nodiscard]] window* window_at(std::size_t index) const noexcept;
+    [[nodiscard]] window* window_at(usize index) const noexcept;
     [[nodiscard]] renderer* renderer_for(window* w) const noexcept;
-    [[nodiscard]] std::size_t window_index(window* w) const noexcept;
+    [[nodiscard]] usize window_index(window* w) const noexcept;
 
     void register_window(window* w) noexcept;
     void unregister_window(window* w) noexcept;

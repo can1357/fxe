@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <fxe/font/face.hpp>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
 
@@ -22,7 +23,7 @@ namespace fxe::font {
     // pixel size; discovery returns a Descriptor with size carried through.
     std::optional<float> size_pt;
     // Optional weight in [1, 1000]; default 400 (regular), 700 (bold).
-    std::optional<std::uint16_t> weight;
+    std::optional<u16> weight;
     // Optional codepoints the face MUST cover. Discovery uses this to pick
     // a fallback for color-emoji or scripts the primary doesn't cover.
     std::vector<char32_t> required_codepoints;
@@ -32,7 +33,7 @@ namespace fxe::font {
     // Resolved on-disk path if a discovery backend already knows it. Lets
     // the descriptor double as a load handle.
     std::optional<std::string> path;
-    std::uint32_t face_index = 0;
+    u32 face_index = 0;
 
     // Returns true if the descriptor encodes enough to load a face directly
     // (path is set), false if it needs a discovery pass.

@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
 #include <memory>
 #include <mutex>
@@ -80,7 +81,7 @@ namespace fxe::runtime {
       if (value->IsArray()) {
         auto arr = value.As<Array>();
         std::string out;
-        for (uint32_t i = 0; i < arr->Length(); ++i) {
+        for (u32 i = 0; i < arr->Length(); ++i) {
           Local<Value> item;
           if (!arr->Get(ctx, i).ToLocal(&item))
             continue;
@@ -94,7 +95,7 @@ namespace fxe::runtime {
         return out;
       }
       String::Utf8Value utf8(iso, value);
-      return *utf8 ? std::string(*utf8, static_cast<std::size_t>(utf8.length())) : std::string{};
+      return *utf8 ? std::string(*utf8, static_cast<usize>(utf8.length())) : std::string{};
     }
 
     std::string string_option(Isolate* iso, Local<Context> ctx, Local<Object> obj,
@@ -113,14 +114,14 @@ namespace fxe::runtime {
       return value->BooleanValue(iso);
     }
 
-    uint16_t port_option(Isolate* iso, Local<Context> ctx, Local<Object> obj) {
+    u16 port_option(Isolate* iso, Local<Context> ctx, Local<Object> obj) {
       Local<Value> value;
       if (!get_property(iso, ctx, obj, "port", value))
         return 443;
       const int port = value->Int32Value(ctx).FromMaybe(443);
       if (port <= 0 || port > 65535)
         return 443;
-      return static_cast<uint16_t>(port);
+      return static_cast<u16>(port);
     }
 
     std::vector<std::string> string_list_option(Isolate* iso, Local<Context> ctx, Local<Object> obj,
@@ -137,7 +138,7 @@ namespace fxe::runtime {
       auto arr = value.As<Array>();
       std::vector<std::string> out;
       out.reserve(arr->Length());
-      for (uint32_t i = 0; i < arr->Length(); ++i) {
+      for (u32 i = 0; i < arr->Length(); ++i) {
         Local<Value> item;
         if (!arr->Get(ctx, i).ToLocal(&item))
           continue;
@@ -258,7 +259,7 @@ namespace fxe::runtime {
       });
     }
 
-    void dispatch_data(const std::shared_ptr<tls_socket_state>& state, std::vector<uint8_t> data) {
+    void dispatch_data(const std::shared_ptr<tls_socket_state>& state, std::vector<u8> data) {
       fxe::os::post_main_thread_dispatch([state, data = std::move(data)] {
         if (state->closed.load())
           return;
@@ -278,7 +279,7 @@ namespace fxe::runtime {
     }
 
     void read_loop(std::shared_ptr<tls_socket_state> state) {
-      std::vector<uint8_t> buf(16 * 1024);
+      std::vector<u8> buf(16 * 1024);
       while (!state->closed.load()) {
         std::shared_ptr<fxe::net::tls_client> client;
         {
@@ -296,7 +297,7 @@ namespace fxe::runtime {
           return;
         }
         if (n > 0) {
-          dispatch_data(state, std::vector<uint8_t>(buf.begin(), buf.begin() + n));
+          dispatch_data(state, std::vector<u8>(buf.begin(), buf.begin() + n));
           continue;
         }
         if (n < 0)
@@ -307,18 +308,17 @@ namespace fxe::runtime {
       }
     }
 
-    bool copy_bytes(Isolate* iso, Local<Context> ctx, Local<Value> value,
-                    std::vector<uint8_t>& out) {
+    bool copy_bytes(Isolate* iso, Local<Context> ctx, Local<Value> value, std::vector<u8>& out) {
       if (value->IsArrayBufferView()) {
         auto view = value.As<ArrayBufferView>();
         auto backing = view->Buffer()->GetBackingStore();
-        const auto* bytes = static_cast<const uint8_t*>(backing->Data()) + view->ByteOffset();
+        const auto* bytes = static_cast<const u8*>(backing->Data()) + view->ByteOffset();
         out.assign(bytes, bytes + view->ByteLength());
         return true;
       }
       if (value->IsArrayBuffer()) {
         auto backing = value.As<ArrayBuffer>()->GetBackingStore();
-        const auto* bytes = static_cast<const uint8_t*>(backing->Data());
+        const auto* bytes = static_cast<const u8*>(backing->Data());
         out.assign(bytes, bytes + backing->ByteLength());
         return true;
       }
@@ -392,7 +392,7 @@ namespace fxe::runtime {
             Exception::TypeError("__fxe_native.tls.write(handle, data) required"_v8(iso)));
         return;
       }
-      std::vector<uint8_t> bytes;
+      std::vector<u8> bytes;
       if (!copy_bytes(iso, ctx, info[1], bytes)) {
         iso->ThrowException(
             Exception::TypeError("__fxe_native.tls.write data must be bytes"_v8(iso)));

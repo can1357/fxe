@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <fxe/types.hpp>
 #include <sqlite3.h>
 #include <v8.h>
 
@@ -80,7 +81,7 @@ namespace fxe::js {
       String::Utf8Value utf8(iso, str_value);
       if (!*utf8)
         return Just(std::string{});
-      return Just(std::string(*utf8, static_cast<std::size_t>(utf8.length())));
+      return Just(std::string(*utf8, static_cast<usize>(utf8.length())));
     }
 
     Maybe<std::string> name_to_string(Isolate* iso, Local<Name> name) {
@@ -89,7 +90,7 @@ namespace fxe::js {
       String::Utf8Value utf8(iso, name.As<String>());
       if (!*utf8)
         return Just(std::string{});
-      return Just(std::string(*utf8, static_cast<std::size_t>(utf8.length())));
+      return Just(std::string(*utf8, static_cast<usize>(utf8.length())));
     }
 
     storage_area* area_from_data(Local<Value> data) {
@@ -189,7 +190,7 @@ namespace fxe::js {
       if (rc == SQLITE_ROW) {
         const auto* text = sqlite3_column_text(stmt, 0);
         const int bytes = sqlite3_column_bytes(stmt, 0);
-        out.assign(reinterpret_cast<const char*>(text), static_cast<std::size_t>(bytes));
+        out.assign(reinterpret_cast<const char*>(text), static_cast<usize>(bytes));
         found = true;
       } else if (rc != SQLITE_DONE) {
         sqlite3_finalize(stmt);
@@ -223,7 +224,7 @@ namespace fxe::js {
       return exec_sql(iso, area.db, "DELETE FROM kv");
     }
 
-    bool count_values(Isolate* iso, storage_area& area, std::uint32_t& out) {
+    bool count_values(Isolate* iso, storage_area& area, u32& out) {
       out = 0;
       if (!ensure_db(iso, area))
         return false;
@@ -233,9 +234,8 @@ namespace fxe::js {
       const int rc = sqlite3_step(stmt);
       if (rc == SQLITE_ROW) {
         const auto n = sqlite3_column_int64(stmt, 0);
-        out = n > std::numeric_limits<std::uint32_t>::max()
-                  ? std::numeric_limits<std::uint32_t>::max()
-                  : static_cast<std::uint32_t>(n);
+        out = n > std::numeric_limits<u32>::max() ? std::numeric_limits<u32>::max()
+                                                  : static_cast<u32>(n);
       } else if (rc != SQLITE_DONE) {
         sqlite3_finalize(stmt);
         return throw_sqlite(iso, area.db);
@@ -245,8 +245,7 @@ namespace fxe::js {
       return true;
     }
 
-    bool key_at(Isolate* iso, storage_area& area, std::uint32_t index, std::string& out,
-                bool& found) {
+    bool key_at(Isolate* iso, storage_area& area, u32 index, std::string& out, bool& found) {
       found = false;
       if (!ensure_db(iso, area))
         return false;
@@ -259,7 +258,7 @@ namespace fxe::js {
       if (rc == SQLITE_ROW) {
         const auto* text = sqlite3_column_text(stmt, 0);
         const int bytes = sqlite3_column_bytes(stmt, 0);
-        out.assign(reinterpret_cast<const char*>(text), static_cast<std::size_t>(bytes));
+        out.assign(reinterpret_cast<const char*>(text), static_cast<usize>(bytes));
         found = true;
       } else if (rc != SQLITE_DONE) {
         sqlite3_finalize(stmt);
@@ -282,7 +281,7 @@ namespace fxe::js {
         if (rc == SQLITE_ROW) {
           const auto* text = sqlite3_column_text(stmt, 0);
           const int bytes = sqlite3_column_bytes(stmt, 0);
-          out.emplace_back(reinterpret_cast<const char*>(text), static_cast<std::size_t>(bytes));
+          out.emplace_back(reinterpret_cast<const char*>(text), static_cast<usize>(bytes));
           continue;
         }
         if (rc == SQLITE_DONE)
@@ -381,7 +380,7 @@ namespace fxe::js {
       if (area && !all_keys(iso, *area, keys))
         return;
       auto arr = Array::New(iso, static_cast<int>(keys.size()));
-      for (uint32_t i = 0; i < keys.size(); ++i)
+      for (u32 i = 0; i < keys.size(); ++i)
         (void)arr->Set(ctx, i, s(iso, keys[i]));
       info.GetReturnValue().Set(arr);
     }
@@ -445,9 +444,9 @@ namespace fxe::js {
     void storage_key(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      uint32_t index = 0;
+      u32 index = 0;
       if (info.Length() > 0) {
-        Maybe<uint32_t> maybe_index = info[0]->Uint32Value(ctx);
+        Maybe<u32> maybe_index = info[0]->Uint32Value(ctx);
         if (maybe_index.IsNothing())
           return;
         index = maybe_index.FromJust();
@@ -466,7 +465,7 @@ namespace fxe::js {
     void storage_length(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* area = area_from_data(info.Data());
-      std::uint32_t count = 0;
+      u32 count = 0;
       if (!area || !count_values(iso, *area, count))
         return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, count));

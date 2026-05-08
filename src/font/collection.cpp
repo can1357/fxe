@@ -6,27 +6,28 @@
 #include <fxe/font/collection.hpp>
 #include <fxe/font/face.hpp>
 
+#include <fxe/types.hpp>
 #include <utility>
 
 namespace fxe::font {
 
   void Collection::add_primary(Style style, std::shared_ptr<Face> face) {
-    auto& bucket = by_style_[static_cast<std::size_t>(style)];
+    auto& bucket = by_style_[static_cast<usize>(style)];
     bucket.insert(bucket.begin(), CollectionEntry{std::move(face), Descriptor{}, false});
   }
 
   void Collection::add_primary(Style style, Descriptor d) {
-    auto& bucket = by_style_[static_cast<std::size_t>(style)];
+    auto& bucket = by_style_[static_cast<usize>(style)];
     bucket.insert(bucket.begin(), CollectionEntry{nullptr, std::move(d), false});
   }
 
   void Collection::add_fallback(Style style, std::shared_ptr<Face> face) {
-    auto& bucket = by_style_[static_cast<std::size_t>(style)];
+    auto& bucket = by_style_[static_cast<usize>(style)];
     bucket.push_back(CollectionEntry{std::move(face), Descriptor{}, true});
   }
 
   void Collection::add_fallback(Style style, Descriptor d) {
-    auto& bucket = by_style_[static_cast<std::size_t>(style)];
+    auto& bucket = by_style_[static_cast<usize>(style)];
     bucket.push_back(CollectionEntry{nullptr, std::move(d), true});
   }
 
@@ -44,7 +45,7 @@ namespace fxe::font {
   }
 
   std::shared_ptr<Face> Collection::resolve(Style style, char32_t cp) {
-    auto& bucket = by_style_[static_cast<std::size_t>(style)];
+    auto& bucket = by_style_[static_cast<usize>(style)];
     for (auto& entry : bucket) {
       auto face = load_entry_(entry);
       if (!face)
@@ -56,7 +57,7 @@ namespace fxe::font {
   }
 
   std::shared_ptr<Face> Collection::primary(Style style) {
-    auto& bucket = by_style_[static_cast<std::size_t>(style)];
+    auto& bucket = by_style_[static_cast<usize>(style)];
     for (auto& entry : bucket) {
       auto face = load_entry_(entry);
       if (face)
@@ -66,7 +67,7 @@ namespace fxe::font {
   }
 
   std::span<const CollectionEntry> Collection::entries(Style style) const noexcept {
-    return std::span<const CollectionEntry>{by_style_[static_cast<std::size_t>(style)]};
+    return std::span<const CollectionEntry>{by_style_[static_cast<usize>(style)]};
   }
 
 } // namespace fxe::font

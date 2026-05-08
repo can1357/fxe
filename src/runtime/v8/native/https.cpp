@@ -10,6 +10,7 @@
 #include <charconv>
 #include <cstdint>
 #include <deque>
+#include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
 #include <map>
 #include <memory>
@@ -51,7 +52,7 @@ namespace fxe::runtime {
       std::deque<server_event> events;
       std::unordered_map<int, std::unique_ptr<fxe::net::tls_client>> pending;
       std::atomic<bool> closing{false};
-      std::uint16_t port = 0;
+      u16 port = 0;
       int next_request_id = 1;
     };
 
@@ -95,7 +96,7 @@ namespace fxe::runtime {
 
     std::string string_arg(Isolate* iso, Local<Value> value) {
       String::Utf8Value utf8(iso, value);
-      return *utf8 ? std::string(*utf8, static_cast<std::size_t>(utf8.length())) : std::string{};
+      return *utf8 ? std::string(*utf8, static_cast<usize>(utf8.length())) : std::string{};
     }
 
     std::optional<Local<Value>> get_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj,
@@ -137,10 +138,10 @@ namespace fxe::runtime {
     }
 
     std::string trim_ascii(std::string_view value) {
-      std::size_t first = 0;
+      usize first = 0;
       while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first])))
         ++first;
-      std::size_t last = value.size();
+      usize last = value.size();
       while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
         --last;
       return std::string(value.substr(first, last - first));
@@ -153,7 +154,7 @@ namespace fxe::runtime {
         auto arr = value.As<Array>();
         std::string out;
         const auto length = arr->Length();
-        for (std::uint32_t i = 0; i < length; ++i) {
+        for (u32 i = 0; i < length; ++i) {
           Local<Value> item;
           if (!arr->Get(ctx, i).ToLocal(&item) || item->IsNullOrUndefined())
             continue;
@@ -175,7 +176,7 @@ namespace fxe::runtime {
       Local<Array> names;
       if (!obj->GetOwnPropertyNames(ctx).ToLocal(&names))
         return headers;
-      for (std::uint32_t i = 0; i < names->Length(); ++i) {
+      for (u32 i = 0; i < names->Length(); ++i) {
         Local<Value> key_value;
         if (!names->Get(ctx, i).ToLocal(&key_value))
           continue;
@@ -225,10 +226,10 @@ namespace fxe::runtime {
       state->events.push_back(std::move(event));
     }
 
-    bool write_all(fxe::net::tls_client& client, const void* data, std::size_t size,
+    bool write_all(fxe::net::tls_client& client, const void* data, usize size,
                    std::string* error = nullptr) {
       const auto* bytes = static_cast<const char*>(data);
-      std::size_t written = 0;
+      usize written = 0;
       while (written < size) {
         const auto n = client.write(bytes + written, size - written);
         if (n <= 0) {
@@ -236,7 +237,7 @@ namespace fxe::runtime {
             *error = client.last_error().empty() ? "TLS write failed" : client.last_error();
           return false;
         }
-        written += static_cast<std::size_t>(n);
+        written += static_cast<usize>(n);
       }
       return true;
     }
@@ -246,12 +247,11 @@ namespace fxe::runtime {
       return write_all(client, data.data(), data.size(), error);
     }
 
-    std::optional<std::size_t>
-    parse_content_length(const std::map<std::string, std::string>& headers) {
+    std::optional<usize> parse_content_length(const std::map<std::string, std::string>& headers) {
       auto it = headers.find("content-length");
       if (it == headers.end())
         return 0;
-      std::size_t value = 0;
+      usize value = 0;
       auto first = it->second.data();
       auto last = first + it->second.size();
       auto [ptr, ec] = std::from_chars(first, last, value);
@@ -268,7 +268,7 @@ namespace fxe::runtime {
       }
 
       std::string_view header_block(buffer.data(), header_end);
-      std::size_t line_start = 0;
+      usize line_start = 0;
       auto line_end = header_block.find("\r\n");
       auto request_line = header_block.substr(
           0, line_end == std::string_view::npos ? header_block.size() : line_end);
@@ -320,7 +320,7 @@ namespace fxe::runtime {
                                                         std::string& error) {
       std::string buffer;
       std::array<char, 4096> chunk{};
-      std::optional<std::size_t> needed;
+      std::optional<usize> needed;
       for (;;) {
         const auto header_end = buffer.find("\r\n\r\n");
         if (header_end != std::string::npos) {
@@ -338,7 +338,7 @@ namespace fxe::runtime {
             auto bodyless = parse_http_request(header_part, parse_error);
             (void)bodyless;
             auto header_block = std::string_view(buffer.data(), header_end);
-            std::size_t line_start = 0;
+            usize line_start = 0;
             while (line_start < header_block.size()) {
               auto line_end = header_block.find("\r\n", line_start);
               if (line_end == std::string_view::npos)
@@ -371,7 +371,7 @@ namespace fxe::runtime {
                       : "TLS client closed before complete HTTP request";
           return std::nullopt;
         }
-        buffer.append(chunk.data(), static_cast<std::size_t>(n));
+        buffer.append(chunk.data(), static_cast<usize>(n));
       }
     }
 
@@ -427,7 +427,7 @@ namespace fxe::runtime {
 
     struct parsed_url {
       std::string host;
-      std::uint16_t port = 443;
+      u16 port = 443;
       std::string path = "/";
     };
 
@@ -453,7 +453,7 @@ namespace fxe::runtime {
           error = "invalid HTTPS URL port";
           return std::nullopt;
         }
-        out.port = static_cast<std::uint16_t>(port);
+        out.port = static_cast<u16>(port);
       } else {
         out.host = std::string(authority);
       }
@@ -476,7 +476,7 @@ namespace fxe::runtime {
           error = client.last_error().empty() ? "TLS read failed" : client.last_error();
           return std::nullopt;
         }
-        out.append(chunk.data(), static_cast<std::size_t>(n));
+        out.append(chunk.data(), static_cast<usize>(n));
         if (out.size() > 32 * 1024 * 1024) {
           error = "HTTP response too large";
           return std::nullopt;
@@ -539,8 +539,8 @@ namespace fxe::runtime {
       fxe::net::tls_server_options tls_options;
       tls_options.cert_pem = state->cert_pem;
       tls_options.key_pem = state->key_pem;
-      tls_options.port = static_cast<std::uint16_t>(
-          std::clamp(object_int_prop(iso, ctx, options, "port", 0), 0, 65535));
+      tls_options.port =
+          static_cast<u16>(std::clamp(object_int_prop(iso, ctx, options, "port", 0), 0, 65535));
       tls_options.alpn = {"http/1.1"};
       std::string err;
       auto server = fxe::net::tls_server::listen(tls_options, err);
@@ -593,7 +593,7 @@ namespace fxe::runtime {
         events.swap(state->events);
       }
       auto arr = Array::New(iso, static_cast<int>(events.size()));
-      for (std::uint32_t i = 0; i < events.size(); ++i) {
+      for (u32 i = 0; i < events.size(); ++i) {
         auto obj = Object::New(iso);
         set_string(ctx, obj, "type", events[i].type);
         if (!events[i].message.empty())
@@ -771,8 +771,7 @@ namespace fxe::runtime {
         }
       }
       std::map<std::string, std::string> response_headers;
-      std::size_t line_start =
-          line_end == std::string_view::npos ? header_block.size() : line_end + 2;
+      usize line_start = line_end == std::string_view::npos ? header_block.size() : line_end + 2;
       while (line_start < header_block.size()) {
         line_end = header_block.find("\r\n", line_start);
         if (line_end == std::string_view::npos)

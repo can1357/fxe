@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <fxe/types.hpp>
 #include <iterator>
 #include <list>
 #include <span>
@@ -21,13 +22,13 @@
 
 namespace fxe::font {
   namespace {
-    [[nodiscard]] std::size_t format_index(Format format) noexcept {
+    [[nodiscard]] usize format_index(Format format) noexcept {
       return format == Format::bgra ? 1u : 0u;
     }
 
-    [[nodiscard]] std::uint64_t warning_key(const GlyphKey& key) noexcept {
-      std::uint64_t h = 14695981039346656037ull;
-      const auto mix = [&h](std::uint64_t v) {
+    [[nodiscard]] u64 warning_key(const GlyphKey& key) noexcept {
+      u64 h = 14695981039346656037ull;
+      const auto mix = [&h](u64 v) {
         h ^= v;
         h *= 1099511628211ull;
       };
@@ -36,22 +37,21 @@ namespace fxe::font {
       return h;
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> extract_pixels(const Atlas& atlas, const Glyph& glyph) {
+    [[nodiscard]] std::vector<u8> extract_pixels(const Atlas& atlas, const Glyph& glyph) {
       if (glyph.width == 0 || glyph.height == 0)
         return {};
 
       const auto size = atlas.size();
-      const auto bpp = static_cast<std::size_t>(atlas.bytes_per_pixel());
+      const auto bpp = static_cast<usize>(atlas.bytes_per_pixel());
       if (glyph.atlas_x + glyph.width > size.x || glyph.atlas_y + glyph.height > size.y)
         return {};
 
-      std::vector<std::uint8_t> out(static_cast<std::size_t>(glyph.width) * glyph.height * bpp);
-      for (std::uint32_t y = 0; y < glyph.height; ++y) {
-        const std::uint8_t* src =
-            atlas.pixels().data() +
-            (static_cast<std::size_t>(glyph.atlas_y + y) * size.x + glyph.atlas_x) * bpp;
-        std::uint8_t* dst = out.data() + static_cast<std::size_t>(y) * glyph.width * bpp;
-        std::copy_n(src, static_cast<std::size_t>(glyph.width) * bpp, dst);
+      std::vector<u8> out(static_cast<usize>(glyph.width) * glyph.height * bpp);
+      for (u32 y = 0; y < glyph.height; ++y) {
+        const u8* src = atlas.pixels().data() +
+                        (static_cast<usize>(glyph.atlas_y + y) * size.x + glyph.atlas_x) * bpp;
+        u8* dst = out.data() + static_cast<usize>(y) * glyph.width * bpp;
+        std::copy_n(src, static_cast<usize>(glyph.width) * bpp, dst);
       }
       return out;
     }
@@ -59,11 +59,11 @@ namespace fxe::font {
 
   struct GlyphCache::Impl {
     struct RenderRecipe {
-      std::uint64_t face_id = 0;
-      std::uint32_t glyph_id = 0;
-      std::uint32_t pixel_size_q = 0;
-      std::uint8_t hint = 1;
-      std::uint8_t sub_x_bin = 0;
+      u64 face_id = 0;
+      u32 glyph_id = 0;
+      u32 pixel_size_q = 0;
+      u8 hint = 1;
+      u8 sub_x_bin = 0;
     };
 
     struct Entry {
@@ -71,10 +71,10 @@ namespace fxe::font {
       std::list<GlyphKey>::iterator lru_pos{};
       // Retaining bytes costs memory, but makes repack deterministic and
       // independent of backend face lifetime.
-      std::vector<std::uint8_t> pixel_bytes;
-      std::uint32_t format = static_cast<std::uint32_t>(Format::grayscale);
-      std::uint16_t width = 0;
-      std::uint16_t height = 0;
+      std::vector<u8> pixel_bytes;
+      u32 format = static_cast<u32>(Format::grayscale);
+      u16 width = 0;
+      u16 height = 0;
       RenderRecipe render_recipe{};
     };
 
@@ -83,7 +83,7 @@ namespace fxe::font {
     }
 
     [[nodiscard]] static GlyphCacheBudget sanitize(GlyphCacheBudget b) noexcept {
-      b.initial_atlas_size = std::max<std::uint32_t>(b.initial_atlas_size, 1);
+      b.initial_atlas_size = std::max<u32>(b.initial_atlas_size, 1);
       b.max_atlas_size = std::max(b.max_atlas_size, b.initial_atlas_size);
       return b;
     }
@@ -101,17 +101,17 @@ namespace fxe::font {
       return format == Format::bgra ? color : mask;
     }
 
-    [[nodiscard]] std::size_t max_count(Format format) const noexcept {
+    [[nodiscard]] usize max_count(Format format) const noexcept {
       return format == Format::bgra ? budget.max_color_glyph_count : budget.max_mask_glyph_count;
     }
 
-    [[nodiscard]] std::size_t max_bytes(Format format) const noexcept {
+    [[nodiscard]] usize max_bytes(Format format) const noexcept {
       return format == Format::bgra ? budget.max_color_atlas_bytes : budget.max_mask_atlas_bytes;
     }
 
-    [[nodiscard]] std::size_t atlas_bytes(Format format) const noexcept {
+    [[nodiscard]] usize atlas_bytes(Format format) const noexcept {
       const auto size = atlas_for(format).size();
-      return static_cast<std::size_t>(size.x) * size.y * atlas_for(format).bytes_per_pixel();
+      return static_cast<usize>(size.x) * size.y * atlas_for(format).bytes_per_pixel();
     }
 
     void promote(std::unordered_map<GlyphKey, Entry, GlyphKeyHash>::iterator it) {
@@ -152,8 +152,7 @@ namespace fxe::font {
         if (it == cache.end() || it->second.glyph.format != format)
           continue;
         Entry& entry = it->second;
-        items.push_back(AtlasRepackItem{&entry.glyph,
-                                        std::span<const std::uint8_t>(entry.pixel_bytes),
+        items.push_back(AtlasRepackItem{&entry.glyph, std::span<const u8>(entry.pixel_bytes),
                                         entry.width, entry.height});
       }
       return items;
@@ -165,7 +164,7 @@ namespace fxe::font {
     }
 
     [[nodiscard]] bool over_budget(Format format) const noexcept {
-      const std::size_t idx = format_index(format);
+      const usize idx = format_index(format);
       return counts[idx] > max_count(format) || atlas_bytes(format) > max_bytes(format);
     }
 
@@ -182,8 +181,8 @@ namespace fxe::font {
     }
 
     [[nodiscard]] bool recover_space_for_pack(Format format, const GlyphKey& protected_key) {
-      const std::size_t before = counts[format_index(format)];
-      std::size_t to_evict = std::max<std::size_t>(1, before / 4);
+      const usize before = counts[format_index(format)];
+      usize to_evict = std::max<usize>(1, before / 4);
       bool evicted = false;
       while (to_evict-- > 0 && evict_one_lru(format, &protected_key))
         evicted = true;
@@ -212,7 +211,7 @@ namespace fxe::font {
     }
 
     void warn_oversize_once(const GlyphKey& key, Format format) {
-      const std::uint64_t wk = warning_key(key);
+      const u64 wk = warning_key(key);
       if (!oversize_warnings.insert(wk).second)
         return;
       std::fprintf(stderr,
@@ -227,9 +226,9 @@ namespace fxe::font {
     Atlas color{Format::bgra, 256, 8192};
     std::unordered_map<GlyphKey, Entry, GlyphKeyHash> cache;
     std::list<GlyphKey> lru;
-    std::array<std::size_t, 2> counts{};
-    std::array<std::size_t, 2> evictions{};
-    std::unordered_set<std::uint64_t> oversize_warnings;
+    std::array<usize, 2> counts{};
+    std::array<usize, 2> evictions{};
+    std::unordered_set<u64> oversize_warnings;
     Glyph empty{};
   };
 
@@ -250,14 +249,14 @@ namespace fxe::font {
     return impl_->color;
   }
 
-  const Glyph& GlyphCache::lookup(Face& face, std::uint32_t glyph_id, float subpixel_x, Hint hint) {
+  const Glyph& GlyphCache::lookup(Face& face, u32 glyph_id, float subpixel_x, Hint hint) {
     // Quantise subpixel x into 4 bins. 0 → integer pen position; 1 → ¼ px,
     // etc. Callers asking for `subpixel_x` outside [0, 1) get clamped.
     if (!std::isfinite(subpixel_x) || subpixel_x < 0.0f)
       subpixel_x = 0.0f;
     if (subpixel_x >= 1.0f)
       subpixel_x -= std::floor(subpixel_x);
-    const std::uint8_t sub_bin = static_cast<std::uint8_t>(subpixel_x * 4.0f) & 0x3;
+    const u8 sub_bin = static_cast<u8>(subpixel_x * 4.0f) & 0x3;
     // Snap the actual sub-pixel offset we hand to the rasteriser to the
     // centre of the chosen bin so each cache entry is rendered at a
     // consistent fractional position regardless of which fractional input
@@ -267,9 +266,9 @@ namespace fxe::font {
     GlyphKey k{};
     k.face_id = face.id();
     k.glyph_id = glyph_id;
-    k.pixel_size_q = static_cast<std::uint32_t>(std::lround(face.pixel_size() * 64.0f));
+    k.pixel_size_q = static_cast<u32>(std::lround(face.pixel_size() * 64.0f));
     k.subpixel_x = sub_bin;
-    k.hint = static_cast<std::uint8_t>(hint);
+    k.hint = static_cast<u8>(hint);
 
     if (auto it = impl_->cache.find(k); it != impl_->cache.end()) {
       impl_->promote(it);
@@ -281,7 +280,7 @@ namespace fxe::font {
     Glyph rendered = face.render_glyph(glyph_id, scratch_mask, scratch_color, hint, bin_subpixel);
     const Format format = rendered.format;
     const Atlas& scratch = (format == Format::bgra) ? scratch_color : scratch_mask;
-    std::vector<std::uint8_t> pixels = extract_pixels(scratch, rendered);
+    std::vector<u8> pixels = extract_pixels(scratch, rendered);
     if ((rendered.width != 0 || rendered.height != 0) && pixels.empty()) {
       impl_->warn_oversize_once(k, format);
       return impl_->empty;
@@ -290,9 +289,9 @@ namespace fxe::font {
     Impl::Entry entry{};
     entry.glyph = rendered;
     entry.pixel_bytes = std::move(pixels);
-    entry.format = static_cast<std::uint32_t>(format);
-    entry.width = static_cast<std::uint16_t>(std::min<std::uint32_t>(rendered.width, 0xffffu));
-    entry.height = static_cast<std::uint16_t>(std::min<std::uint32_t>(rendered.height, 0xffffu));
+    entry.format = static_cast<u32>(format);
+    entry.width = static_cast<u16>(std::min<u32>(rendered.width, 0xffffu));
+    entry.height = static_cast<u16>(std::min<u32>(rendered.height, 0xffffu));
     entry.render_recipe =
         Impl::RenderRecipe{k.face_id, k.glyph_id, k.pixel_size_q, k.hint, k.subpixel_x};
 
@@ -335,19 +334,19 @@ namespace fxe::font {
     impl_->reset_atlases();
   }
 
-  std::size_t GlyphCache::cache_size(Format format) const noexcept {
+  usize GlyphCache::cache_size(Format format) const noexcept {
     return impl_->counts[format_index(format)];
   }
 
-  std::size_t GlyphCache::eviction_count(Format format) const noexcept {
+  usize GlyphCache::eviction_count(Format format) const noexcept {
     return impl_->evictions[format_index(format)];
   }
 
-  std::size_t GlyphCache::atlas_bytes(Format format) const noexcept {
+  usize GlyphCache::atlas_bytes(Format format) const noexcept {
     return impl_->atlas_bytes(format);
   }
 
-  std::uint64_t GlyphCache::generation(Format format) const noexcept {
+  u64 GlyphCache::generation(Format format) const noexcept {
     return impl_->atlas_for(format).generation();
   }
 

@@ -14,6 +14,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#include <fxe/types.hpp>
 #include <windows.h>
 #include <wininet.h>
 #include <wtsapi32.h>
@@ -32,8 +33,8 @@ namespace fxe::os {
     std::atomic<bool> g_running{false};
     std::atomic<bool> g_last_online{true};
     std::mutex g_inhibit_mu;
-    std::unordered_map<std::uint64_t, HANDLE> g_sleep_inhibits;
-    std::atomic<std::uint64_t> g_next_inhibit_id{1};
+    std::unordered_map<u64, HANDLE> g_sleep_inhibits;
+    std::atomic<u64> g_next_inhibit_id{1};
 
     void emit_power(power_event event) {
       std::function<void(power_event)> cb;
@@ -141,7 +142,7 @@ namespace fxe::os {
                                   static_cast<int>(s.size()), nullptr, 0);
       if (n <= 0)
         return {};
-      std::wstring out(static_cast<size_t>(n), L'\0');
+      std::wstring out(static_cast<usize>(n), L'\0');
       if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()),
                               out.data(), n) != n)
         return {};
@@ -170,7 +171,7 @@ namespace fxe::os {
         return {};
       }
 
-      const std::uint64_t id = g_next_inhibit_id.fetch_add(1);
+      const u64 id = g_next_inhibit_id.fetch_add(1);
       {
         std::lock_guard<std::mutex> lock(g_inhibit_mu);
         g_sleep_inhibits.emplace(id, request);

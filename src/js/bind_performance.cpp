@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <fxe/types.hpp>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -23,7 +24,7 @@ namespace fxe::js {
 
     struct mark_entry {
       std::optional<clock::time_point> open;
-      uint64_t count = 0;
+      u64 count = 0;
       double total_ms = 0.0;
       double last_ms = 0.0;
       double min_ms = std::numeric_limits<double>::infinity();

@@ -11,26 +11,27 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
 
-  Atlas::Atlas(Format f, std::uint32_t initial_size, std::uint32_t max_size)
+  Atlas::Atlas(Format f, u32 initial_size, u32 max_size)
       : format_(f), width_(initial_size), height_(initial_size), max_size_(max_size),
         initial_size_(initial_size) {
-    pixels_.assign(static_cast<std::size_t>(width_) * height_ * bytes_per_pixel(), 0);
+    pixels_.assign(static_cast<usize>(width_) * height_ * bytes_per_pixel(), 0);
     ++generation_;
   }
 
   void Atlas::reset_empty_() {
-    width_ = std::max<std::uint32_t>(initial_size_, 1);
-    height_ = std::max<std::uint32_t>(initial_size_, 1);
+    width_ = std::max<u32>(initial_size_, 1);
+    height_ = std::max<u32>(initial_size_, 1);
     cursor_x_ = padding_;
     cursor_y_ = padding_;
     row_h_ = 0;
-    pixels_.assign(static_cast<std::size_t>(width_) * height_ * bytes_per_pixel(), 0);
+    pixels_.assign(static_cast<usize>(width_) * height_ * bytes_per_pixel(), 0);
   }
 
-  std::uint32_t Atlas::bytes_per_pixel() const noexcept {
+  u32 Atlas::bytes_per_pixel() const noexcept {
     switch (format_) {
     case Format::grayscale:
       return 1;
@@ -45,14 +46,14 @@ namespace fxe::font {
     ++generation_;
   }
 
-  std::uint8_t* Atlas::mutable_pixels() noexcept {
+  u8* Atlas::mutable_pixels() noexcept {
     ++generation_;
     return pixels_.data();
   }
 
-  bool Atlas::grow_(std::uint32_t min_w, std::uint32_t min_h) noexcept {
-    std::uint32_t new_w = std::max<std::uint32_t>(width_, 1);
-    std::uint32_t new_h = std::max<std::uint32_t>(height_, 1);
+  bool Atlas::grow_(u32 min_w, u32 min_h) noexcept {
+    u32 new_w = std::max<u32>(width_, 1);
+    u32 new_h = std::max<u32>(height_, 1);
     while (new_w < min_w && new_w < max_size_)
       new_w *= 2;
     while (new_h < min_h && new_h < max_size_)
@@ -62,12 +63,12 @@ namespace fxe::font {
     if (new_w > max_size_ || new_h > max_size_)
       return false;
 
-    const auto bpp = static_cast<std::size_t>(bytes_per_pixel());
-    std::vector<std::uint8_t> grown(static_cast<std::size_t>(new_w) * new_h * bpp, 0);
-    for (std::uint32_t y = 0; y < height_; ++y) {
-      const std::uint8_t* src = pixels_.data() + static_cast<std::size_t>(y) * width_ * bpp;
-      std::uint8_t* dst = grown.data() + static_cast<std::size_t>(y) * new_w * bpp;
-      std::memcpy(dst, src, static_cast<std::size_t>(width_) * bpp);
+    const auto bpp = static_cast<usize>(bytes_per_pixel());
+    std::vector<u8> grown(static_cast<usize>(new_w) * new_h * bpp, 0);
+    for (u32 y = 0; y < height_; ++y) {
+      const u8* src = pixels_.data() + static_cast<usize>(y) * width_ * bpp;
+      u8* dst = grown.data() + static_cast<usize>(y) * new_w * bpp;
+      std::memcpy(dst, src, static_cast<usize>(width_) * bpp);
     }
     width_ = new_w;
     height_ = new_h;
@@ -76,19 +77,16 @@ namespace fxe::font {
     return true;
   }
 
-  void Atlas::copy_into_(std::uint32_t dst_x, std::uint32_t dst_y, std::uint32_t w, std::uint32_t h,
-                         const std::uint8_t* src) noexcept {
-    const auto bpp = static_cast<std::size_t>(bytes_per_pixel());
-    for (std::uint32_t y = 0; y < h; ++y) {
-      std::uint8_t* dst =
-          pixels_.data() + (static_cast<std::size_t>(dst_y + y) * width_ + dst_x) * bpp;
-      std::memcpy(dst, src + static_cast<std::size_t>(y) * w * bpp,
-                  static_cast<std::size_t>(w) * bpp);
+  void Atlas::copy_into_(u32 dst_x, u32 dst_y, u32 w, u32 h, const u8* src) noexcept {
+    const auto bpp = static_cast<usize>(bytes_per_pixel());
+    for (u32 y = 0; y < h; ++y) {
+      u8* dst = pixels_.data() + (static_cast<usize>(dst_y + y) * width_ + dst_x) * bpp;
+      std::memcpy(dst, src + static_cast<usize>(y) * w * bpp, static_cast<usize>(w) * bpp);
     }
     ++generation_;
   }
 
-  AtlasRegion Atlas::reserve(std::uint32_t w, std::uint32_t h) noexcept {
+  AtlasRegion Atlas::reserve(u32 w, u32 h) noexcept {
     if (w == 0 || h == 0)
       return {true, 0, 0};
     if (cursor_x_ < padding_)
@@ -97,8 +95,8 @@ namespace fxe::font {
       cursor_y_ = padding_;
     for (;;) {
       // Reserve glyph + 1px padding on each side so neighbours don't bleed.
-      const std::uint32_t need_w = w + padding_ * 2;
-      const std::uint32_t need_h = h + padding_ * 2;
+      const u32 need_w = w + padding_ * 2;
+      const u32 need_h = h + padding_ * 2;
       if (need_w > width_ || need_h > height_) {
         if (!grow_(std::max(width_ * 2, need_w), std::max(height_ * 2, need_h)))
           return {false, 0, 0};
@@ -121,7 +119,7 @@ namespace fxe::font {
     }
   }
 
-  AtlasRegion Atlas::pack(std::uint32_t w, std::uint32_t h, const std::uint8_t* bytes) noexcept {
+  AtlasRegion Atlas::pack(u32 w, u32 h, const u8* bytes) noexcept {
     AtlasRegion r = reserve(w, h);
     if (!r.ok || w == 0 || h == 0 || !bytes)
       return r;
@@ -140,8 +138,7 @@ namespace fxe::font {
         item.glyph->atlas_y = 0;
         continue;
       }
-      if (item.pixels.size() !=
-          static_cast<std::size_t>(item.width) * item.height * bytes_per_pixel()) {
+      if (item.pixels.size() != static_cast<usize>(item.width) * item.height * bytes_per_pixel()) {
         return false;
       }
       AtlasRegion r = pack(item.width, item.height, item.pixels.data());

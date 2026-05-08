@@ -10,6 +10,7 @@
 #include <fxe/v8_host.hpp>
 
 #include <cstddef>
+#include <fxe/types.hpp>
 
 namespace fxe::js {
 
@@ -25,7 +26,7 @@ namespace fxe::js {
     return {};
   }
 
-  window* host::window_at(std::size_t) const noexcept {
+  window* host::window_at(usize) const noexcept {
     return nullptr;
   }
 

@@ -32,6 +32,7 @@
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <fxe/types.hpp>
 
 namespace fxe::os {
   void dispatch_notification_response(int id, const std::string& action_id,
@@ -114,21 +115,21 @@ namespace fxe::os {
       return mime_string;
     }
 
-    NSData* data_from_bytes(const uint8_t* bytes, size_t size) {
+    NSData* data_from_bytes(const u8* bytes, usize size) {
       if (size == 0)
         return [NSData data];
-      if (!bytes || size > static_cast<size_t>(NSIntegerMax))
+      if (!bytes || size > static_cast<usize>(NSIntegerMax))
         return nil;
       return [NSData dataWithBytes:bytes length:static_cast<NSUInteger>(size)];
     }
 
-    std::vector<uint8_t> bytes_from_nsdata(NSData* data) {
+    std::vector<u8> bytes_from_nsdata(NSData* data) {
       if (!data)
         return {};
       const NSUInteger length = data.length;
-      std::vector<uint8_t> out(static_cast<size_t>(length));
+      std::vector<u8> out(static_cast<usize>(length));
       if (length > 0)
-        std::memcpy(out.data(), data.bytes, static_cast<size_t>(length));
+        std::memcpy(out.data(), data.bytes, static_cast<usize>(length));
       return out;
     }
 
@@ -138,9 +139,9 @@ namespace fxe::os {
     };
 
     std::mutex g_bookmark_mu;
-    std::unordered_map<std::size_t, std::vector<active_bookmark_access>> g_active_bookmarks;
+    std::unordered_map<usize, std::vector<active_bookmark_access>> g_active_bookmarks;
 
-    std::size_t bookmark_blob_hash(std::string_view blob) {
+    usize bookmark_blob_hash(std::string_view blob) {
       return std::hash<std::string_view>{}(blob);
     }
 
@@ -336,7 +337,7 @@ namespace fxe::os {
       if (::ftruncate(fd, 0) != 0 || ::lseek(fd, 0, SEEK_SET) < 0)
         return false;
       const char* data = payload.data();
-      size_t left = payload.size();
+      usize left = payload.size();
       while (left > 0) {
         ssize_t n = ::write(fd, data, left);
         if (n < 0) {
@@ -345,7 +346,7 @@ namespace fxe::os {
           return false;
         }
         data += n;
-        left -= static_cast<size_t>(n);
+        left -= static_cast<usize>(n);
       }
       return true;
     }
@@ -414,7 +415,7 @@ namespace fxe::os {
       // Unbundled fallback: argv[0] via _NSGetExecutablePath would be cleaner,
       // but for unbundled tools we just exec the running executable.
       char buf[1024];
-      uint32_t sz = sizeof(buf);
+      u32 sz = sizeof(buf);
       // _NSGetExecutablePath comes from <mach-o/dyld.h>.
       if (_NSGetExecutablePath(buf, &sz) == 0)
         exe = [NSURL fileURLWithPath:@(buf)];
@@ -719,8 +720,8 @@ namespace fxe::os {
       int selected = show_message_box(m);
       post_main_thread_dispatch([id, selected, actions = std::move(fallback_actions)] {
         if (selected >= 0 && selected < static_cast<int>(actions.size()) &&
-            !actions[static_cast<size_t>(selected)].id.empty()) {
-          dispatch_notification_action(id, actions[static_cast<size_t>(selected)].id, std::nullopt);
+            !actions[static_cast<usize>(selected)].id.empty()) {
+          dispatch_notification_action(id, actions[static_cast<usize>(selected)].id, std::nullopt);
           return;
         }
         dispatch_notification_click(id);
@@ -995,7 +996,7 @@ namespace fxe::os {
     std::atomic<int> g_tray_seq{0};
     std::atomic<int> g_tray_listener_seq{0};
 
-    size_t tray_event_index(tray_event_kind kind) {
+    usize tray_event_index(tray_event_kind kind) {
       switch (kind) {
       case tray_event_kind::click:
         return 0;
@@ -1391,7 +1392,7 @@ namespace fxe::os {
     __block bool ok = false;
     run_on_main_sync_void(^{
       NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
-      NSData* data = data_from_bytes(reinterpret_cast<const uint8_t*>(copy.data()), copy.size());
+      NSData* data = data_from_bytes(reinterpret_cast<const u8*>(copy.data()), copy.size());
       if (!pasteboard || !data)
         return;
       [pasteboard clearContents];
@@ -1407,7 +1408,7 @@ namespace fxe::os {
       NSData* data = pasteboard ? [pasteboard dataForType:NSPasteboardTypeHTML] : nil;
       if (!data)
         return;
-      out = std::string(static_cast<const char*>(data.bytes), static_cast<size_t>(data.length));
+      out = std::string(static_cast<const char*>(data.bytes), static_cast<usize>(data.length));
     });
     return out;
   }
@@ -1417,7 +1418,7 @@ namespace fxe::os {
     __block bool ok = false;
     run_on_main_sync_void(^{
       NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
-      NSData* data = data_from_bytes(reinterpret_cast<const uint8_t*>(copy.data()), copy.size());
+      NSData* data = data_from_bytes(reinterpret_cast<const u8*>(copy.data()), copy.size());
       if (!pasteboard || !data)
         return;
       [pasteboard clearContents];
@@ -1433,14 +1434,14 @@ namespace fxe::os {
       NSData* data = pasteboard ? [pasteboard dataForType:NSPasteboardTypeRTF] : nil;
       if (!data)
         return;
-      out = std::string(static_cast<const char*>(data.bytes), static_cast<size_t>(data.length));
+      out = std::string(static_cast<const char*>(data.bytes), static_cast<usize>(data.length));
     });
     return out;
   }
 
-  bool clipboard_set_mime(std::string_view mime, const std::vector<uint8_t>& bytes) {
+  bool clipboard_set_mime(std::string_view mime, const std::vector<u8>& bytes) {
     std::string mime_copy(mime);
-    std::vector<uint8_t> data_copy(bytes);
+    std::vector<u8> data_copy(bytes);
     __block bool ok = false;
     run_on_main_sync_void(^{
       NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
@@ -1454,9 +1455,9 @@ namespace fxe::os {
     return ok;
   }
 
-  std::optional<std::vector<uint8_t>> clipboard_get_mime(std::string_view mime) {
+  std::optional<std::vector<u8>> clipboard_get_mime(std::string_view mime) {
     std::string mime_copy(mime);
-    __block std::optional<std::vector<uint8_t>> out;
+    __block std::optional<std::vector<u8>> out;
     run_on_main_sync_void(^{
       NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
       NSString* type = pasteboard_type_for_mime(mime_copy);
@@ -1518,7 +1519,7 @@ namespace fxe::os {
       if (!id.empty())
         return sanitize_single_instance_component(id);
       char exe[1024];
-      uint32_t size = sizeof(exe);
+      u32 size = sizeof(exe);
       if (_NSGetExecutablePath(exe, &size) == 0) {
         NSString* name =
             [[[NSString stringWithUTF8String:exe] lastPathComponent] stringByDeletingPathExtension];
@@ -1545,7 +1546,7 @@ namespace fxe::os {
         return false;
       addr = {};
       addr.sun_family = AF_UNIX;
-      for (size_t i = 0; i < path.size(); ++i)
+      for (usize i = 0; i < path.size(); ++i)
         addr.sun_path[i] = path[i];
       addr.sun_path[path.size()] = '\0';
       return true;
@@ -1553,13 +1554,13 @@ namespace fxe::os {
 
     bool write_all_fd(int fd, const std::string& payload) {
       const char* data = payload.data();
-      size_t left = payload.size();
+      usize left = payload.size();
       while (left > 0) {
         ssize_t n = ::write(fd, data, left);
         if (n < 0)
           return false;
         data += n;
-        left -= static_cast<size_t>(n);
+        left -= static_cast<usize>(n);
       }
       return true;
     }
@@ -1583,7 +1584,7 @@ namespace fxe::os {
       for (;;) {
         ssize_t n = ::read(client, buffer, sizeof(buffer));
         if (n > 0) {
-          payload.append(buffer, static_cast<size_t>(n));
+          payload.append(buffer, static_cast<usize>(n));
           continue;
         }
         break;
@@ -1627,12 +1628,12 @@ namespace fxe::os {
         return static_cast<OSErr>(status);
       if (size <= 0)
         return noErr;
-      std::vector<char> bytes(static_cast<size_t>(size));
+      std::vector<char> bytes(static_cast<usize>(size));
       status =
           AEGetParamPtr(event, keyDirectObject, typeUTF8Text, nullptr, bytes.data(), size, &size);
       if (status == noErr)
         single_instance_detail::dispatch_open_url(
-            std::string(bytes.data(), static_cast<size_t>(size)));
+            std::string(bytes.data(), static_cast<usize>(size)));
       return static_cast<OSErr>(status);
     }
 
@@ -1650,9 +1651,9 @@ namespace fxe::os {
             continue;
           Size size = AEGetDescDataSize(&item);
           if (size > 0) {
-            std::vector<char> bytes(static_cast<size_t>(size));
+            std::vector<char> bytes(static_cast<usize>(size));
             if (AEGetDescData(&item, bytes.data(), size) == noErr) {
-              std::string url(bytes.data(), static_cast<size_t>(size));
+              std::string url(bytes.data(), static_cast<usize>(size));
               NSURL* nsurl = [NSURL URLWithString:ns(url)];
               std::string path = from_ns([nsurl path]);
               if (!path.empty())

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -61,8 +62,8 @@ namespace {
   };
 #endif
 
-  bool send_all(socket_handle s, const std::uint8_t* data, std::size_t n) {
-    std::size_t off = 0;
+  bool send_all(socket_handle s, const u8* data, usize n) {
+    usize off = 0;
     while (off < n) {
 #ifdef _WIN32
       int sent = ::send(s, reinterpret_cast<const char*>(data + off), static_cast<int>(n - off), 0);
@@ -71,13 +72,13 @@ namespace {
 #endif
       if (sent <= 0)
         return false;
-      off += static_cast<std::size_t>(sent);
+      off += static_cast<usize>(sent);
     }
     return true;
   }
 
-  bool recv_n(socket_handle s, std::uint8_t* data, std::size_t n) {
-    std::size_t off = 0;
+  bool recv_n(socket_handle s, u8* data, usize n) {
+    usize off = 0;
     while (off < n) {
 #ifdef _WIN32
       int got = ::recv(s, reinterpret_cast<char*>(data + off), static_cast<int>(n - off), 0);
@@ -86,7 +87,7 @@ namespace {
 #endif
       if (got <= 0)
         return false;
-      off += static_cast<std::size_t>(got);
+      off += static_cast<usize>(got);
     }
     return true;
   }
@@ -94,7 +95,7 @@ namespace {
   bool read_http_headers(socket_handle s, std::string& out) {
     out.clear();
     while (out.size() < 16384) {
-      std::uint8_t c = 0;
+      u8 c = 0;
       if (!recv_n(s, &c, 1))
         return false;
       out.push_back(static_cast<char>(c));
@@ -104,14 +105,14 @@ namespace {
     return false;
   }
 
-  bool raw_deflate(const std::string& in, std::vector<std::uint8_t>& out) {
+  bool raw_deflate(const std::string& in, std::vector<u8>& out) {
     z_stream stream{};
     if (deflateInit2(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY) !=
         Z_OK)
       return false;
     stream.next_in = const_cast<Bytef*>(reinterpret_cast<const Bytef*>(in.data()));
     stream.avail_in = static_cast<uInt>(in.size());
-    std::uint8_t buf[256];
+    u8 buf[256];
     out.clear();
     bool ok = true;
     do {
@@ -131,15 +132,15 @@ namespace {
     return true;
   }
 
-  bool raw_inflate(std::vector<std::uint8_t> in, std::string& out) {
+  bool raw_inflate(std::vector<u8> in, std::string& out) {
     in.insert(in.end(), {0x00, 0x00, 0xff, 0xff});
     z_stream stream{};
     if (inflateInit2(&stream, -15) != Z_OK)
       return false;
     stream.next_in = reinterpret_cast<Bytef*>(in.data());
     stream.avail_in = static_cast<uInt>(in.size());
-    std::uint8_t buf[256];
-    std::vector<std::uint8_t> decoded;
+    u8 buf[256];
+    std::vector<u8> decoded;
     bool ok = true;
     do {
       stream.next_out = reinterpret_cast<Bytef*>(buf);
@@ -158,12 +159,11 @@ namespace {
     return true;
   }
 
-  bool send_ws_frame(socket_handle s, std::uint8_t first,
-                     const std::vector<std::uint8_t>& payload) {
-    std::vector<std::uint8_t> frame;
+  bool send_ws_frame(socket_handle s, u8 first, const std::vector<u8>& payload) {
+    std::vector<u8> frame;
     frame.push_back(first);
     if (payload.size() < 126) {
-      frame.push_back(static_cast<std::uint8_t>(payload.size()));
+      frame.push_back(static_cast<u8>(payload.size()));
     } else {
       return false;
     }
@@ -171,30 +171,30 @@ namespace {
     return send_all(s, frame.data(), frame.size());
   }
 
-  bool read_client_frame(socket_handle s, std::uint8_t& first, std::vector<std::uint8_t>& payload) {
-    std::uint8_t hdr[2] = {};
+  bool read_client_frame(socket_handle s, u8& first, std::vector<u8>& payload) {
+    u8 hdr[2] = {};
     if (!recv_n(s, hdr, 2))
       return false;
     first = hdr[0];
     bool masked = (hdr[1] & 0x80) != 0;
-    std::uint64_t len = hdr[1] & 0x7f;
+    u64 len = hdr[1] & 0x7f;
     if (len == 126) {
-      std::uint8_t ext[2];
+      u8 ext[2];
       if (!recv_n(s, ext, 2))
         return false;
-      len = (static_cast<std::uint64_t>(ext[0]) << 8) | ext[1];
+      len = (static_cast<u64>(ext[0]) << 8) | ext[1];
     } else if (len == 127) {
       return false;
     }
-    std::uint8_t mask[4] = {};
+    u8 mask[4] = {};
     if (masked && !recv_n(s, mask, 4))
       return false;
-    payload.resize(static_cast<std::size_t>(len));
+    payload.resize(static_cast<usize>(len));
     if (len != 0 && !recv_n(s, payload.data(), payload.size()))
       return false;
     if (masked) {
-      for (std::size_t i = 0; i < payload.size(); ++i)
-        payload[i] = static_cast<std::uint8_t>(payload[i] ^ mask[i & 3]);
+      for (usize i = 0; i < payload.size(); ++i)
+        payload[i] = static_cast<u8>(payload[i] ^ mask[i & 3]);
     }
     return masked;
   }
@@ -207,7 +207,7 @@ namespace {
     bool saw_client_rsv1 = false;
   };
 
-  socket_handle listen_loopback(std::uint16_t& port) {
+  socket_handle listen_loopback(u16& port) {
     socket_handle s = ::socket(AF_INET, SOCK_STREAM, 0);
     if (s == kInvalidSocket)
       return kInvalidSocket;
@@ -265,13 +265,13 @@ namespace {
         "Sec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; "
         "client_no_context_takeover; server_max_window_bits=15; client_max_window_bits=15\r\n"
         "\r\n";
-    if (!send_all(client, reinterpret_cast<const std::uint8_t*>(response), std::strlen(response))) {
+    if (!send_all(client, reinterpret_cast<const u8*>(response), std::strlen(response))) {
       result.err = "handshake response send failed";
       sock_close(client);
       return;
     }
 
-    std::vector<std::uint8_t> compressed;
+    std::vector<u8> compressed;
     if (!raw_deflate("server compressed payload", compressed) ||
         !send_ws_frame(client, 0xC1, compressed)) {
       result.err = "compressed server message send failed";
@@ -279,8 +279,8 @@ namespace {
       return;
     }
 
-    std::uint8_t first = 0;
-    std::vector<std::uint8_t> client_payload;
+    u8 first = 0;
+    std::vector<u8> client_payload;
     if (!read_client_frame(client, first, client_payload)) {
       result.err = "client frame read failed";
       sock_close(client);
@@ -298,7 +298,7 @@ namespace {
       return;
     }
 
-    std::vector<std::uint8_t> close_body = {0x03, 0xe8};
+    std::vector<u8> close_body = {0x03, 0xe8};
     (void)send_ws_frame(client, 0x88, close_body);
     sock_close(client);
     result.ok = true;
@@ -308,7 +308,7 @@ namespace {
 #ifdef _WIN32
     wsa_init wsa;
 #endif
-    std::uint16_t port = 0;
+    u16 port = 0;
     socket_handle listener = listen_loopback(port);
     CHECK(listener != kInvalidSocket);
     CHECK(port != 0);

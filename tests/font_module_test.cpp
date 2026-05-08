@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fxe/types.hpp>
 #include <memory>
 #include <string>
 #include <vector>
@@ -35,15 +36,14 @@ namespace {
   }
 #define CHECK(expr) check((expr), #expr, __FILE__, __LINE__)
 
-  fxe::font::GlyphKey make_key(const fxe::font::Face& face, std::uint32_t glyph_id,
-                               fxe::font::Hint hint = fxe::font::Hint::full,
-                               std::uint8_t subpixel = 0) {
+  fxe::font::GlyphKey make_key(const fxe::font::Face& face, u32 glyph_id,
+                               fxe::font::Hint hint = fxe::font::Hint::full, u8 subpixel = 0) {
     fxe::font::GlyphKey key{};
     key.face_id = face.id();
     key.glyph_id = glyph_id;
-    key.pixel_size_q = static_cast<std::uint32_t>(std::lround(face.pixel_size() * 64.0f));
+    key.pixel_size_q = static_cast<u32>(std::lround(face.pixel_size() * 64.0f));
     key.subpixel_x = subpixel;
-    key.hint = static_cast<std::uint8_t>(hint);
+    key.hint = static_cast<u8>(hint);
     return key;
   }
 
@@ -92,7 +92,7 @@ int main() {
     CHECK(mask.format() == Format::grayscale);
     CHECK(mask.size().x == 64 && mask.size().y == 64);
 
-    std::vector<std::uint8_t> blob(8 * 8, 200);
+    std::vector<u8> blob(8 * 8, 200);
     AtlasRegion r1 = mask.pack(8, 8, blob.data());
     CHECK(r1.ok);
     AtlasRegion r2 = mask.pack(16, 16, blob.data());
@@ -100,14 +100,14 @@ int main() {
     CHECK(r2.x != r1.x || r2.y != r1.y);
 
     // Force atlas growth by packing something larger than the initial size.
-    std::vector<std::uint8_t> big(80 * 80, 1);
+    std::vector<u8> big(80 * 80, 1);
     AtlasRegion r3 = mask.pack(80, 80, big.data());
     CHECK(r3.ok);
     CHECK(mask.size().x >= 80);
 
     Atlas color{Format::bgra, 32, 1024};
     CHECK(color.bytes_per_pixel() == 4);
-    std::vector<std::uint8_t> px(8 * 8 * 4, 0);
+    std::vector<u8> px(8 * 8 * 4, 0);
     AtlasRegion r4 = color.pack(8, 8, px.data());
     CHECK(r4.ok);
   }
@@ -125,7 +125,7 @@ int main() {
       CHECK(m.line_height > 0.0f);
       CHECK(m.ascent > 0.0f);
 
-      const std::uint32_t gA = face->glyph_index(U'A');
+      const u32 gA = face->glyph_index(U'A');
       CHECK(gA != 0);
 
       Atlas mask{Format::grayscale, 256, 4096};
@@ -158,9 +158,9 @@ int main() {
 
     // A7: bounded GlyphCache LRU eviction and atlas repack.
     if (face) {
-      std::vector<std::uint32_t> glyphs;
+      std::vector<u32> glyphs;
       for (char32_t ch = U'A'; ch <= U'J'; ++ch) {
-        const std::uint32_t gid = face->glyph_index(ch);
+        const u32 gid = face->glyph_index(ch);
         if (gid != 0)
           glyphs.push_back(gid);
       }
@@ -172,7 +172,7 @@ int main() {
         budget.max_mask_atlas_bytes = 512ull * 512ull;
         GlyphCache cache{budget};
 
-        for (std::uint32_t gid : glyphs)
+        for (u32 gid : glyphs)
           (void)cache.lookup(*face, gid);
         CHECK(cache.cache_size(Format::grayscale) == 5);
         CHECK(cache.eviction_count(Format::grayscale) == 5);
@@ -182,7 +182,7 @@ int main() {
         CHECK(cache.debug_contains(make_key(*face, glyphs[9])));
 
         GlyphCache recent_cache{budget};
-        for (std::size_t i = 0; i < 5; ++i)
+        for (usize i = 0; i < 5; ++i)
           (void)recent_cache.lookup(*face, glyphs[i]);
         (void)recent_cache.lookup(*face, glyphs[0]);
         (void)recent_cache.lookup(*face, glyphs[5]);
@@ -197,10 +197,10 @@ int main() {
         repack_budget.max_mask_glyph_count = 128;
         repack_budget.max_mask_atlas_bytes = 64ull * 64ull;
         GlyphCache repack_cache{repack_budget};
-        const std::uint64_t before_gen = repack_cache.generation(Format::grayscale);
-        std::vector<std::uint32_t> repack_glyphs;
+        const u64 before_gen = repack_cache.generation(Format::grayscale);
+        std::vector<u32> repack_glyphs;
         for (char32_t ch = U'!'; ch <= U'~'; ++ch) {
-          const std::uint32_t gid = face->glyph_index(ch);
+          const u32 gid = face->glyph_index(ch);
           if (gid == 0)
             continue;
           repack_glyphs.push_back(gid);
@@ -208,7 +208,7 @@ int main() {
         }
         CHECK(repack_cache.eviction_count(Format::grayscale) > 0);
         CHECK(repack_cache.generation(Format::grayscale) > before_gen);
-        for (std::uint32_t gid : repack_glyphs) {
+        for (u32 gid : repack_glyphs) {
           const auto key = make_key(*face, gid);
           if (!repack_cache.debug_contains(key))
             continue;
@@ -229,16 +229,16 @@ int main() {
           budget.max_color_glyph_count = 1;
           budget.max_color_atlas_bytes = 16ull * 1024ull * 1024ull;
           GlyphCache mixed{budget};
-          const std::uint32_t mask_a = face->glyph_index(U'A');
-          const std::uint32_t mask_b = face->glyph_index(U'B');
+          const u32 mask_a = face->glyph_index(U'A');
+          const u32 mask_b = face->glyph_index(U'B');
           (void)mixed.lookup(*face, mask_a);
           (void)mixed.lookup(*face, mask_b);
           const auto key_a = make_key(*face, mask_a);
           const auto key_b = make_key(*face, mask_b);
           const char32_t emoji_chars[] = {char32_t{0x1F389}, char32_t{0x1F600}, char32_t{0x1F680}};
-          std::size_t color_seen = 0;
+          usize color_seen = 0;
           for (char32_t ch : emoji_chars) {
-            const std::uint32_t gid = emoji_face->glyph_index(ch);
+            const u32 gid = emoji_face->glyph_index(ch);
             if (gid == 0)
               continue;
             const Glyph& g = mixed.lookup(*emoji_face, gid);

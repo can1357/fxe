@@ -103,9 +103,9 @@ namespace fxe {
              p[15] == 1.0f;
     }
 
-    inline static std::atomic<std::uint64_t> g_q_fast{0};
-    inline static std::atomic<std::uint64_t> g_q_tinted{0};
-    inline static std::atomic<std::uint64_t> g_q_xform{0};
+    inline static std::atomic<u64> g_q_fast{0};
+    inline static std::atomic<u64> g_q_tinted{0};
+    inline static std::atomic<u64> g_q_xform{0};
 
     void queue(const command_buffer& src, const math::mat4x4& tf = math::identity(),
                const std::optional<math::vec4>& tint = std::nullopt) {

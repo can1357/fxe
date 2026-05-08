@@ -104,7 +104,7 @@ namespace fxe::js {
 
     bool parse_url(const std::string& input, const url_data* base, url_data& out) {
       // Strip leading/trailing tabs/newlines/spaces (basic).
-      std::size_t start = 0, end = input.size();
+      usize start = 0, end = input.size();
       while (start < end && (input[start] == ' ' || input[start] == '\t' || input[start] == '\n' ||
                              input[start] == '\r'))
         ++start;
@@ -114,8 +114,8 @@ namespace fxe::js {
       std::string s = input.substr(start, end - start);
 
       // Detect scheme: first ':' before any '/', '?', '#'.
-      std::size_t colon = std::string::npos;
-      for (std::size_t i = 0; i < s.size(); ++i) {
+      usize colon = std::string::npos;
+      for (usize i = 0; i < s.size(); ++i) {
         char c = s[i];
         if (c == '/' || c == '?' || c == '#')
           break;
@@ -129,7 +129,7 @@ namespace fxe::js {
       if (colon != std::string::npos) {
         // valid scheme: ALPHA ( ALPHA / DIGIT / + / - / . )*
         bool ok = std::isalpha(static_cast<unsigned char>(s[0]));
-        for (std::size_t i = 1; ok && i < colon; ++i) {
+        for (usize i = 1; ok && i < colon; ++i) {
           char c = s[i];
           ok = std::isalnum(static_cast<unsigned char>(c)) || c == '+' || c == '-' || c == '.';
         }
@@ -153,11 +153,11 @@ namespace fxe::js {
           return parse_url(rest, nullptr, out);
         }
         // path/query/fragment
-        std::size_t hp = rest.find('#');
+        usize hp = rest.find('#');
         std::string before_hash = hp == std::string::npos ? rest : rest.substr(0, hp);
         if (hp != std::string::npos)
           out.hash = rest.substr(hp);
-        std::size_t qp = before_hash.find('?');
+        usize qp = before_hash.find('?');
         std::string path_part = qp == std::string::npos ? before_hash : before_hash.substr(0, qp);
         if (qp != std::string::npos)
           out.search = before_hash.substr(qp);
@@ -166,7 +166,7 @@ namespace fxe::js {
             out.pathname = path_part;
           } else {
             // Replace last segment of base pathname.
-            std::size_t slash = out.pathname.find_last_of('/');
+            usize slash = out.pathname.find_last_of('/');
             std::string dir = slash == std::string::npos ? "/" : out.pathname.substr(0, slash + 1);
             if (dir.empty())
               dir = "/";
@@ -182,8 +182,8 @@ namespace fxe::js {
       if (rest.size() >= 2 && rest[0] == '/' && rest[1] == '/') {
         out.has_authority = true;
         rest = rest.substr(2);
-        std::size_t end_auth = rest.size();
-        for (std::size_t i = 0; i < rest.size(); ++i) {
+        usize end_auth = rest.size();
+        for (usize i = 0; i < rest.size(); ++i) {
           char c = rest[i];
           if (c == '/' || c == '?' || c == '#') {
             end_auth = i;
@@ -194,11 +194,11 @@ namespace fxe::js {
         rest = rest.substr(end_auth);
 
         // Userinfo
-        std::size_t at = authority.rfind('@');
+        usize at = authority.rfind('@');
         if (at != std::string::npos) {
           std::string ui = authority.substr(0, at);
           authority = authority.substr(at + 1);
-          std::size_t cn = ui.find(':');
+          usize cn = ui.find(':');
           if (cn == std::string::npos) {
             out.username = ui;
           } else {
@@ -207,10 +207,10 @@ namespace fxe::js {
           }
         }
         // Port
-        std::size_t cn = std::string::npos;
+        usize cn = std::string::npos;
         // Be careful: ipv6 literals would have '[' brackets; skip until ']'.
         if (!authority.empty() && authority.front() == '[') {
-          std::size_t rb = authority.find(']');
+          usize rb = authority.find(']');
           if (rb == std::string::npos)
             return false;
           if (rb + 1 < authority.size() && authority[rb + 1] == ':')
@@ -248,11 +248,11 @@ namespace fxe::js {
       }
 
       // Path / search / hash from `rest`.
-      std::size_t hp = rest.find('#');
+      usize hp = rest.find('#');
       std::string head = hp == std::string::npos ? rest : rest.substr(0, hp);
       if (hp != std::string::npos)
         out.hash = rest.substr(hp);
-      std::size_t qp = head.find('?');
+      usize qp = head.find('?');
       std::string path = qp == std::string::npos ? head : head.substr(0, qp);
       if (qp != std::string::npos)
         out.search = head.substr(qp);
@@ -319,7 +319,7 @@ namespace fxe::js {
     std::string percent_decode_form(const std::string& s) {
       std::string out;
       out.reserve(s.size());
-      for (std::size_t i = 0; i < s.size(); ++i) {
+      for (usize i = 0; i < s.size(); ++i) {
         char c = s[i];
         if (c == '+') {
           out.push_back(' ');
@@ -362,12 +362,12 @@ namespace fxe::js {
       out.pairs.clear();
       if (q.empty())
         return;
-      std::size_t i = 0;
+      usize i = 0;
       while (i <= q.size()) {
-        std::size_t amp = q.find('&', i);
+        usize amp = q.find('&', i);
         std::string seg = amp == std::string::npos ? q.substr(i) : q.substr(i, amp - i);
         if (!seg.empty()) {
-          std::size_t eq = seg.find('=');
+          usize eq = seg.find('=');
           std::string k = eq == std::string::npos ? seg : seg.substr(0, eq);
           std::string v = eq == std::string::npos ? "" : seg.substr(eq + 1);
           out.pairs.emplace_back(percent_decode_form(k), percent_decode_form(v));
@@ -380,7 +380,7 @@ namespace fxe::js {
 
     std::string usp_serialize(const usp_data& d) {
       std::string out;
-      for (std::size_t i = 0; i < d.pairs.size(); ++i) {
+      for (usize i = 0; i < d.pairs.size(); ++i) {
         if (i)
           out.push_back('&');
         out += percent_encode_form(d.pairs[i].first);

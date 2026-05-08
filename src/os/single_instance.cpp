@@ -17,6 +17,7 @@
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <fxe/types.hpp>
 #include <mutex>
 #include <string_view>
 #include <utility>
@@ -41,7 +42,7 @@ namespace fxe::os {
       std::vector<std::string> out;
       if (argc <= 0 || !argv)
         return out;
-      out.reserve(static_cast<size_t>(argc));
+      out.reserve(static_cast<usize>(argc));
       for (int i = 0; i < argc; ++i)
         out.emplace_back(argv[i] ? argv[i] : "");
       return out;
@@ -79,7 +80,7 @@ namespace fxe::os {
     bool decode_escaped(std::string_view encoded, std::string& value) {
       std::string decoded;
       decoded.reserve(encoded.size());
-      for (size_t i = 0; i < encoded.size(); ++i) {
+      for (usize i = 0; i < encoded.size(); ++i) {
         char ch = encoded[i];
         if (ch != '\\') {
           decoded.push_back(ch);
@@ -108,10 +109,10 @@ namespace fxe::os {
       return true;
     }
 
-    bool read_line(std::string_view data, size_t& offset, std::string_view& line) {
+    bool read_line(std::string_view data, usize& offset, std::string_view& line) {
       if (offset > data.size())
         return false;
-      size_t next = data.find('\n', offset);
+      usize next = data.find('\n', offset);
       if (next == std::string_view::npos)
         return false;
       line = data.substr(offset, next - offset);
@@ -119,14 +120,14 @@ namespace fxe::os {
       return true;
     }
 
-    bool parse_argc(std::string_view line, std::uint32_t& argc) {
+    bool parse_argc(std::string_view line, u32& argc) {
       if (line.empty())
         return false;
-      std::uint32_t value = 0;
+      u32 value = 0;
       for (char ch : line) {
         if (ch < '0' || ch > '9')
           return false;
-        std::uint32_t digit = static_cast<std::uint32_t>(ch - '0');
+        u32 digit = static_cast<u32>(ch - '0');
         if (value > (4096u - digit) / 10u)
           return false;
         value = value * 10u + digit;
@@ -136,12 +137,12 @@ namespace fxe::os {
     }
 
     bool looks_like_url(std::string_view arg) {
-      size_t pos = arg.find("://");
+      usize pos = arg.find("://");
       if (pos == std::string_view::npos || pos == 0)
         return false;
       if (!std::isalpha(static_cast<unsigned char>(arg[0])))
         return false;
-      for (size_t i = 1; i < pos; ++i) {
+      for (usize i = 1; i < pos; ++i) {
         unsigned char c = static_cast<unsigned char>(arg[i]);
         if (!std::isalnum(c) && c != '+' && c != '-' && c != '.')
           return false;
@@ -215,9 +216,9 @@ namespace fxe::os {
     }
 
     bool decode_handoff(std::string_view data, std::vector<std::string>& argv, std::string& cwd) {
-      size_t offset = 0;
+      usize offset = 0;
       std::string_view line;
-      std::uint32_t argc = 0;
+      u32 argc = 0;
       if (!read_line(data, offset, line) || !parse_argc(line, argc))
         return false;
 
@@ -227,7 +228,7 @@ namespace fxe::os {
 
       std::vector<std::string> decoded;
       decoded.reserve(argc);
-      for (std::uint32_t i = 0; i < argc; ++i) {
+      for (u32 i = 0; i < argc; ++i) {
         std::string arg;
         if (!read_line(data, offset, line) || !decode_escaped(line, arg))
           return false;
@@ -251,7 +252,7 @@ namespace fxe::os {
     }
 
     void dispatch_argv_open_events(const std::vector<std::string>& argv) {
-      for (size_t i = 1; i < argv.size(); ++i) {
+      for (usize i = 1; i < argv.size(); ++i) {
         const std::string& arg = argv[i];
         if (looks_like_url(arg)) {
           dispatch_open_url(arg);

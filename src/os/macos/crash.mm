@@ -18,6 +18,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <fxe/types.hpp>
 
 extern "C" boolean_t exc_server(mach_msg_header_t* request, mach_msg_header_t* reply);
 
@@ -51,8 +52,8 @@ namespace {
 
   void append_image_list(std::ostringstream& out) {
     out << "images:\n";
-    uint32_t count = _dyld_image_count();
-    for (uint32_t i = 0; i < count; ++i) {
+    u32 count = _dyld_image_count();
+    for (u32 i = 0; i < count; ++i) {
       const mach_header* header = _dyld_get_image_header(i);
       const char* name = _dyld_get_image_name(i);
       intptr_t slide = _dyld_get_image_vmaddr_slide(i);
@@ -82,12 +83,12 @@ namespace {
       append_symbol(out, "crashing-frame", static_cast<uintptr_t>(state.__pc));
 
       struct frame_record {
-        uint64_t fp;
-        uint64_t lr;
+        u64 fp;
+        u64 lr;
       };
       out << "crashing-thread-backtrace:\n";
       append_symbol(out, "  frame", static_cast<uintptr_t>(state.__pc));
-      uint64_t fp = state.__fp;
+      u64 fp = state.__fp;
       for (int i = 0; i < 64 && fp != 0; ++i) {
         frame_record record{};
         vm_size_t copied = 0;
@@ -122,12 +123,12 @@ namespace {
       append_symbol(out, "crashing-frame", static_cast<uintptr_t>(state.__rip));
 
       struct frame_record {
-        uint64_t fp;
-        uint64_t ret;
+        u64 fp;
+        u64 ret;
       };
       out << "crashing-thread-backtrace:\n";
       append_symbol(out, "  frame", static_cast<uintptr_t>(state.__rip));
-      uint64_t fp = state.__rbp;
+      u64 fp = state.__rbp;
       for (int i = 0; i < 64 && fp != 0; ++i) {
         frame_record record{};
         vm_size_t copied = 0;

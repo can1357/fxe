@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include <fxe/types.hpp>
 #include <v8.h>
 
 namespace fxe::js {
@@ -278,7 +279,7 @@ namespace fxe::js {
       }
       auto ctx = iso->GetCurrentContext();
       auto out = v8::Array::New(iso, static_cast<int>(evicted.size()));
-      for (uint32_t i = 0; i < evicted.size(); ++i)
+      for (u32 i = 0; i < evicted.size(); ++i)
         (void)out->Set(ctx, i, v8_string(iso, evicted[i]));
       info.GetReturnValue().Set(out);
     }

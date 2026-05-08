@@ -9,6 +9,7 @@
 #include "bind_render_stats.hpp"
 
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <v8.h>
 
 namespace fxe::js {
@@ -21,7 +22,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       const auto& s = current_render_stats();
       auto out = Object::New(iso);
-      auto put = [&](Local<String> k, std::uint64_t v) {
+      auto put = [&](Local<String> k, u64 v) {
         (void)out->Set(ctx, k, Number::New(iso, static_cast<double>(v)));
       };
       put("verticesSubmitted"_v8(iso), s.vertices_submitted);

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <fxe/types.hpp>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -30,7 +31,7 @@ namespace fxe::runtime {
       if (max_size <= 0)
         return {};
 
-      std::string out(static_cast<std::size_t>(max_size), '\0');
+      std::string out(static_cast<usize>(max_size), '\0');
       if (!CFStringGetCString(value, out.data(), max_size, kCFStringEncodingUTF8))
         return {};
       out.resize(std::strlen(out.c_str()));
@@ -153,7 +154,7 @@ namespace fxe::runtime {
 
     private:
       static void events_callback(ConstFSEventStreamRef /* stream */, void* client_info,
-                                  std::size_t num_events, void* event_paths,
+                                  usize num_events, void* event_paths,
                                   const FSEventStreamEventFlags event_flags[],
                                   const FSEventStreamEventId[] /* event_ids */) {
         auto* self = static_cast<fsevents_fs_watcher*>(client_info);
@@ -161,7 +162,7 @@ namespace fxe::runtime {
           return;
 
         auto paths = static_cast<CFArrayRef>(event_paths);
-        for (std::size_t i = 0; i < num_events; ++i) {
+        for (usize i = 0; i < num_events; ++i) {
           auto path =
               static_cast<CFStringRef>(CFArrayGetValueAtIndex(paths, static_cast<CFIndex>(i)));
           self->handle_event(cf_string_to_utf8(path), event_flags[i]);

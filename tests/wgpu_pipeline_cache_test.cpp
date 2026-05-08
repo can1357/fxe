@@ -3,6 +3,7 @@
 #include <webgpu/webgpu_cpp.h>
 
 #include <cstdio>
+#include <fxe/types.hpp>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -164,7 +165,7 @@ fn ps_alt(arg: VertexOut) -> @location(0) vec4<f32> {
     vary([](fxe::pipeline_key& key) { key.topology = wgpu::PrimitiveTopology::LineList; });
     vary([](fxe::pipeline_key& key) { key.sample_count = 4; });
 
-    size_t expected_misses = 1;
+    usize expected_misses = 1;
     for (const auto& key : variants) {
       wgpu::RenderPipeline varied = cache.acquire(key, device, layout, shader);
       if (!varied)

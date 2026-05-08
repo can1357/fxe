@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <string_view>
 #include <vector>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
   namespace {
@@ -124,10 +125,10 @@ namespace fxe::font {
             if (!run_face) run_face = &face; // best-effort fallback
           }
 
-          std::vector<CGGlyph> glyphs(static_cast<std::size_t>(glyph_count));
-          std::vector<CGSize> advances(static_cast<std::size_t>(glyph_count));
-          std::vector<CGPoint> positions(static_cast<std::size_t>(glyph_count));
-          std::vector<CFIndex> indices(static_cast<std::size_t>(glyph_count));
+          std::vector<CGGlyph> glyphs(static_cast<usize>(glyph_count));
+          std::vector<CGSize> advances(static_cast<usize>(glyph_count));
+          std::vector<CGPoint> positions(static_cast<usize>(glyph_count));
+          std::vector<CFIndex> indices(static_cast<usize>(glyph_count));
           const CFRange whole = CFRangeMake(0, glyph_count);
           CTRunGetGlyphs(run, whole, glyphs.data());
           CTRunGetAdvances(run, whole, advances.data());
@@ -137,7 +138,7 @@ namespace fxe::font {
           ShapeRun srun{};
           srun.direction = opts.direction;
           srun.face = run_face;
-          srun.glyphs.reserve(static_cast<std::size_t>(glyph_count));
+          srun.glyphs.reserve(static_cast<usize>(glyph_count));
           // CTRun positions are absolute within the parent CTLine, not the
           // run. For the first run that's harmless (line starts at x=0), but
           // for subsequent runs (e.g. the emoji run after "Welcome back ")
@@ -152,22 +153,22 @@ namespace fxe::font {
               glyph_count > 0 ? static_cast<float>(positions[0].y) : 0.0f;
           for (CFIndex j = 0; j < glyph_count; ++j) {
             ShapedGlyph g{};
-            g.glyph_id = glyphs[static_cast<std::size_t>(j)];
-            g.x_advance = static_cast<float>(advances[static_cast<std::size_t>(j)].width);
-            g.y_advance = static_cast<float>(advances[static_cast<std::size_t>(j)].height);
+            g.glyph_id = glyphs[static_cast<usize>(j)];
+            g.x_advance = static_cast<float>(advances[static_cast<usize>(j)].width);
+            g.y_advance = static_cast<float>(advances[static_cast<usize>(j)].height);
             float prev_x = 0.0f;
             float prev_y = 0.0f;
             if (j > 0) {
-              const auto& p = positions[static_cast<std::size_t>(j - 1)];
+              const auto& p = positions[static_cast<usize>(j - 1)];
               prev_x = static_cast<float>(p.x) - run_origin_x
-                       + static_cast<float>(advances[static_cast<std::size_t>(j - 1)].width);
+                       + static_cast<float>(advances[static_cast<usize>(j - 1)].width);
               prev_y = static_cast<float>(p.y) - run_origin_y
-                       + static_cast<float>(advances[static_cast<std::size_t>(j - 1)].height);
+                       + static_cast<float>(advances[static_cast<usize>(j - 1)].height);
             }
-            const auto& pos = positions[static_cast<std::size_t>(j)];
+            const auto& pos = positions[static_cast<usize>(j)];
             g.x_offset = (static_cast<float>(pos.x) - run_origin_x) - prev_x;
             g.y_offset = (static_cast<float>(pos.y) - run_origin_y) - prev_y;
-            g.cluster = static_cast<std::uint32_t>(indices[static_cast<std::size_t>(j)]);
+            g.cluster = static_cast<u32>(indices[static_cast<usize>(j)]);
             srun.glyphs.push_back(g);
             srun.total_advance += g.x_advance;
           }

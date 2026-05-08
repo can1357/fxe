@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "bundle.hpp"
+#include <fxe/types.hpp>
 
 namespace fs = std::filesystem;
 
@@ -145,9 +146,9 @@ namespace {
     constexpr char sep = ':';
     const std::vector<std::string> suffixes = {""};
 #endif
-    std::size_t start = 0;
+    usize start = 0;
     while (start <= path.size()) {
-      std::size_t end = path.find(sep, start);
+      usize end = path.find(sep, start);
       if (end == std::string::npos)
         end = path.size();
       fs::path dir = path.substr(start, end - start);
@@ -514,8 +515,7 @@ namespace {
 
   std::string subst(std::string s, const std::string& key, const std::string& value) {
     std::string needle = "@" + key + "@";
-    for (std::size_t pos = 0; (pos = s.find(needle, pos)) != std::string::npos;
-         pos += value.size()) {
+    for (usize pos = 0; (pos = s.find(needle, pos)) != std::string::npos; pos += value.size()) {
       s.replace(pos, needle.size(), value);
     }
     return s;
@@ -806,9 +806,9 @@ namespace {
 
   [[maybe_unused]] std::string generate_uuid() {
     std::random_device rd;
-    std::mt19937_64 gen((static_cast<std::uint64_t>(rd()) << 32) ^ rd());
-    std::uint64_t high = gen();
-    std::uint64_t low = gen();
+    std::mt19937_64 gen((static_cast<u64>(rd()) << 32) ^ rd());
+    u64 high = gen();
+    u64 low = gen();
     unsigned char bytes[16];
     for (int i = 0; i < 8; ++i)
       bytes[i] = static_cast<unsigned char>((high >> ((7 - i) * 8)) & 0xff);

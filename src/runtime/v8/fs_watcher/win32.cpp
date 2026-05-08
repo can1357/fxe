@@ -1,4 +1,5 @@
 #include "runtime/v8/fs_watcher.hpp"
+#include <fxe/types.hpp>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -64,7 +65,7 @@ namespace fxe::runtime {
           WideCharToMultiByte(CP_UTF8, 0, value, length, nullptr, 0, nullptr, nullptr);
       if (needed <= 0)
         return {};
-      std::string out(static_cast<std::size_t>(needed), '\0');
+      std::string out(static_cast<usize>(needed), '\0');
       (void)WideCharToMultiByte(CP_UTF8, 0, value, length, out.data(), needed, nullptr, nullptr);
       return out;
     }
@@ -76,7 +77,7 @@ namespace fxe::runtime {
     }
 
     std::wstring basename_of(std::wstring_view path) {
-      const std::size_t pos = path.find_last_of(L"\\/");
+      const usize pos = path.find_last_of(L"\\/");
       if (pos == std::wstring_view::npos)
         return std::wstring(path);
       return std::wstring(path.substr(pos + 1));
@@ -287,7 +288,7 @@ namespace fxe::runtime {
       }
 
       void process_events(const std::vector<std::byte>& buffer, DWORD bytes) {
-        std::size_t offset = 0;
+        usize offset = 0;
         while (!closed_.load() && offset < bytes) {
           const auto* info =
               reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(buffer.data() + offset);

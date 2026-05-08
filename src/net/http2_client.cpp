@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <map>
 #include <memory>
 #include <nghttp2/nghttp2.h>
@@ -37,13 +38,13 @@ namespace fxe::net {
     }
 
     nghttp2_nv make_nv(const std::string& name, const std::string& value) {
-      return nghttp2_nv{reinterpret_cast<uint8_t*>(const_cast<char*>(name.data())),
-                        reinterpret_cast<uint8_t*>(const_cast<char*>(value.data())), name.size(),
+      return nghttp2_nv{reinterpret_cast<u8*>(const_cast<char*>(name.data())),
+                        reinterpret_cast<u8*>(const_cast<char*>(value.data())), name.size(),
                         value.size(), NGHTTP2_NV_FLAG_NONE};
     }
 
-    void append_setting(std::vector<nghttp2_settings_entry>& entries, int32_t id,
-                        const std::optional<uint32_t>& value) {
+    void append_setting(std::vector<nghttp2_settings_entry>& entries, i32 id,
+                        const std::optional<u32>& value) {
       if (value)
         entries.push_back(nghttp2_settings_entry{id, *value});
     }
@@ -69,7 +70,7 @@ namespace fxe::net {
 
     struct body_state {
       std::string body;
-      size_t offset = 0;
+      usize offset = 0;
     };
 
     class nghttp2_client final : public http2_client {
@@ -103,7 +104,7 @@ namespace fxe::net {
         return flush(err);
       }
 
-      int32_t submit(const http2_request& request) override {
+      i32 submit(const http2_request& request) override {
         last_error_.clear();
         if (closed_ || !session_) {
           last_error_ = "HTTP/2 client is closed";
@@ -136,8 +137,8 @@ namespace fxe::net {
           provider_ptr = &provider;
         }
 
-        const int32_t stream_id = nghttp2_submit_request(session_, nullptr, nva.data(), nva.size(),
-                                                         provider_ptr, nullptr);
+        const i32 stream_id = nghttp2_submit_request(session_, nullptr, nva.data(), nva.size(),
+                                                     provider_ptr, nullptr);
         if (stream_id < 0) {
           last_error_ = describe_nghttp2_error(stream_id, "submit HTTP/2 request");
           return -1;
@@ -155,7 +156,7 @@ namespace fxe::net {
         return stream_id;
       }
 
-      http2_response wait(int32_t stream_id, std::string& err) override {
+      http2_response wait(i32 stream_id, std::string& err) override {
         last_error_.clear();
         auto& state = responses_[stream_id];
         while (!closed_ && !state.complete && !state.failed) {
@@ -211,7 +212,7 @@ namespace fxe::net {
       }
 
     private:
-      static ssize_t send_callback(nghttp2_session*, const uint8_t* data, size_t length, int,
+      static ssize_t send_callback(nghttp2_session*, const u8* data, usize length, int,
                                    void* user_data) {
         auto* self = static_cast<nghttp2_client*>(user_data);
         ssize_t written = self->stream_->write(data, length);
@@ -220,8 +221,7 @@ namespace fxe::net {
         return written;
       }
 
-      static ssize_t recv_callback(nghttp2_session*, uint8_t* data, size_t length, int,
-                                   void* user_data) {
+      static ssize_t recv_callback(nghttp2_session*, u8* data, usize length, int, void* user_data) {
         auto* self = static_cast<nghttp2_client*>(user_data);
         ssize_t got = self->stream_->read(data, length);
         if (got == 0)
@@ -231,9 +231,9 @@ namespace fxe::net {
         return got;
       }
 
-      static int on_header_callback(nghttp2_session*, const nghttp2_frame* frame,
-                                    const uint8_t* name, size_t namelen, const uint8_t* value,
-                                    size_t valuelen, uint8_t, void* user_data) {
+      static int on_header_callback(nghttp2_session*, const nghttp2_frame* frame, const u8* name,
+                                    usize namelen, const u8* value, usize valuelen, u8,
+                                    void* user_data) {
         if (frame->hd.type != NGHTTP2_HEADERS || frame->headers.cat != NGHTTP2_HCAT_RESPONSE)
           return 0;
         auto* self = static_cast<nghttp2_client*>(user_data);
@@ -252,14 +252,14 @@ namespace fxe::net {
         return 0;
       }
 
-      static int on_data_chunk_callback(nghttp2_session*, uint8_t, int32_t stream_id,
-                                        const uint8_t* data, size_t len, void* user_data) {
+      static int on_data_chunk_callback(nghttp2_session*, u8, i32 stream_id, const u8* data,
+                                        usize len, void* user_data) {
         auto* self = static_cast<nghttp2_client*>(user_data);
         self->responses_[stream_id].response.body.append(reinterpret_cast<const char*>(data), len);
         return 0;
       }
 
-      static int on_stream_close_callback(nghttp2_session*, int32_t stream_id, uint32_t error_code,
+      static int on_stream_close_callback(nghttp2_session*, i32 stream_id, u32 error_code,
                                           void* user_data) {
         auto* self = static_cast<nghttp2_client*>(user_data);
         auto& state = self->responses_[stream_id];
@@ -272,9 +272,9 @@ namespace fxe::net {
         return 0;
       }
 
-      static ssize_t data_source_read_callback(nghttp2_session*, int32_t stream_id, uint8_t* buf,
-                                               size_t length, uint32_t* data_flags,
-                                               nghttp2_data_source*, void* user_data) {
+      static ssize_t data_source_read_callback(nghttp2_session*, i32 stream_id, u8* buf,
+                                               usize length, u32* data_flags, nghttp2_data_source*,
+                                               void* user_data) {
         auto* self = static_cast<nghttp2_client*>(user_data);
         auto it = self->request_bodies_.find(stream_id);
         if (it == self->request_bodies_.end()) {
@@ -282,8 +282,8 @@ namespace fxe::net {
           return 0;
         }
         auto& body = it->second;
-        const size_t remaining = body.body.size() - body.offset;
-        const size_t n = std::min(length, remaining);
+        const usize remaining = body.body.size() - body.offset;
+        const usize n = std::min(length, remaining);
         if (n > 0) {
           std::memcpy(buf, body.body.data() + body.offset, n);
           body.offset += n;
@@ -317,32 +317,32 @@ namespace fxe::net {
       nghttp2_session_callbacks* callbacks_ = nullptr;
       nghttp2_session* session_ = nullptr;
       bool closed_ = false;
-      std::map<int32_t, stream_response_state> responses_;
-      std::map<int32_t, body_state> request_bodies_;
+      std::map<i32, stream_response_state> responses_;
+      std::map<i32, body_state> request_bodies_;
       std::string last_error_;
     };
   } // namespace
 
   http2_client::~http2_client() = default;
 
-  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, uint16_t port,
+  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
                                                       std::string& err) {
     return connect(host, port, std::string{}, true, http2_settings{}, err);
   }
 
-  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, uint16_t port,
+  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
                                                       const http2_settings& settings,
                                                       std::string& err) {
     return connect(host, port, std::string{}, true, settings, err);
   }
 
-  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, uint16_t port,
+  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
                                                       const std::string& ca_pem,
                                                       bool reject_unauthorized, std::string& err) {
     return connect(host, port, ca_pem, reject_unauthorized, http2_settings{}, err);
   }
 
-  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, uint16_t port,
+  std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
                                                       const std::string& ca_pem,
                                                       bool reject_unauthorized,
                                                       const http2_settings& settings,

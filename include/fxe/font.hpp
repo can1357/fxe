@@ -18,6 +18,7 @@
 #include <fxe/font/glyph.hpp>
 #include <fxe/font/library.hpp>
 #include <fxe/font/shaper.hpp>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
 
@@ -25,12 +26,12 @@ namespace fxe::font {
   // owns the two atlas pages. Renderers read the pages from here each frame.
 
   struct GlyphCacheBudget {
-    std::uint32_t initial_atlas_size = 256;
-    std::uint32_t max_atlas_size = 8192;
-    std::size_t max_mask_glyph_count = 4096;
-    std::size_t max_color_glyph_count = 1024;
-    std::size_t max_mask_atlas_bytes = 16ull * 1024ull * 1024ull;
-    std::size_t max_color_atlas_bytes = 16ull * 1024ull * 1024ull;
+    u32 initial_atlas_size = 256;
+    u32 max_atlas_size = 8192;
+    usize max_mask_glyph_count = 4096;
+    usize max_color_glyph_count = 1024;
+    usize max_mask_atlas_bytes = 16ull * 1024ull * 1024ull;
+    usize max_color_atlas_bytes = 16ull * 1024ull * 1024ull;
   };
   class GlyphCache {
   public:
@@ -47,14 +48,14 @@ namespace fxe::font {
 
     // Looks up or rasterizes a glyph. `subpixel_x` is in [0, 1), quantised
     // to four bins inside.
-    [[nodiscard]] const Glyph& lookup(Face& face, std::uint32_t glyph_id, float subpixel_x = 0.0f,
+    [[nodiscard]] const Glyph& lookup(Face& face, u32 glyph_id, float subpixel_x = 0.0f,
                                       Hint hint = Hint::full);
 
     void set_budget(GlyphCacheBudget budget);
-    [[nodiscard]] std::size_t cache_size(Format format) const noexcept;
-    [[nodiscard]] std::size_t eviction_count(Format format) const noexcept;
-    [[nodiscard]] std::size_t atlas_bytes(Format format) const noexcept;
-    [[nodiscard]] std::uint64_t generation(Format format) const noexcept;
+    [[nodiscard]] usize cache_size(Format format) const noexcept;
+    [[nodiscard]] usize eviction_count(Format format) const noexcept;
+    [[nodiscard]] usize atlas_bytes(Format format) const noexcept;
+    [[nodiscard]] u64 generation(Format format) const noexcept;
     [[nodiscard]] bool debug_contains(const GlyphKey& key) const noexcept;
 
     // Drops every cached glyph. Used by tests; not needed in steady state.

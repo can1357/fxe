@@ -22,6 +22,7 @@
 #endif
 #include <cstdint>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -249,12 +250,12 @@ namespace fxe::js {
       return value->BooleanValue(iso);
     }
 
-    std::int64_t get_obj_int64(Isolate* iso, Local<Context> ctx, Local<Object> obj,
-                               const char* name, std::int64_t fallback = 0) {
+    i64 get_obj_int64(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
+                      i64 fallback = 0) {
       Local<Value> value;
       if (!obj->Get(ctx, s(iso, name)).ToLocal(&value) || !value->IsNumber())
         return fallback;
-      return static_cast<std::int64_t>(value->IntegerValue(ctx).FromMaybe(fallback));
+      return static_cast<i64>(value->IntegerValue(ctx).FromMaybe(fallback));
     }
 
     Local<Object> cookie_to_object(Isolate* iso, Local<Context> ctx, const fxe::net::cookie& c) {
@@ -286,7 +287,7 @@ namespace fxe::js {
       const bool secure = get_obj_bool(iso, ctx, obj, "secure");
       const bool http_only = get_obj_bool(iso, ctx, obj, "httpOnly");
       const std::string same_site = get_obj_string(iso, ctx, obj, "sameSite");
-      const std::int64_t expires = get_obj_int64(iso, ctx, obj, "expires", 0);
+      const i64 expires = get_obj_int64(iso, ctx, obj, "expires", 0);
       if (!domain.empty())
         header += "; Domain=" + domain;
       if (!path.empty())
@@ -323,7 +324,7 @@ namespace fxe::js {
       }
       auto cookies = fxe::net::http_client::instance().cookies().get_all(std::move(filter));
       auto arr = Array::New(iso, static_cast<int>(cookies.size()));
-      for (uint32_t i = 0; i < cookies.size(); ++i)
+      for (u32 i = 0; i < cookies.size(); ++i)
         (void)arr->Set(ctx, i, cookie_to_object(iso, ctx, cookies[i]));
       info.GetReturnValue().Set(arr);
     }
@@ -391,7 +392,7 @@ namespace fxe::js {
       (void)session->Set(ctx, "cookies"_v8(iso), cookies);
     }
 
-    bool bytes_from_value(Local<Value> value, std::vector<std::uint8_t>& out) {
+    bool bytes_from_value(Local<Value> value, std::vector<u8>& out) {
       if (value->IsArrayBufferView()) {
         auto view = value.As<ArrayBufferView>();
         out.resize(view->ByteLength());
@@ -592,8 +593,8 @@ namespace fxe::js {
       std::string error;
       auto history = fxe::runtime::updater::history(error);
       Local<Array> out = Array::New(iso, static_cast<int>(history.size()));
-      for (std::size_t i = 0; i < history.size(); ++i)
-        (void)out->Set(ctx, static_cast<std::uint32_t>(i), s(iso, history[i].c_str()));
+      for (usize i = 0; i < history.size(); ++i)
+        (void)out->Set(ctx, static_cast<u32>(i), s(iso, history[i].c_str()));
       info.GetReturnValue().Set(out);
     }
 
@@ -1016,7 +1017,7 @@ namespace fxe::js {
           return;
         }
         auto arr = Array::New(iso, static_cast<int>(argv.size()));
-        for (uint32_t i = 0; i < argv.size(); ++i)
+        for (u32 i = 0; i < argv.size(); ++i)
           (void)arr->Set(ctx, i, s(iso, argv[i].c_str()));
         Local<Value> js_argv[2] = {arr, s(iso, cwd.c_str())};
         invoke_persistent_callback(refs, 2, js_argv);
@@ -1067,9 +1068,9 @@ namespace fxe::js {
       if (!value->IsArray())
         return out;
       auto arr = value.As<Array>();
-      uint32_t len = arr->Length();
+      u32 len = arr->Length();
       out.reserve(len);
-      for (uint32_t i = 0; i < len; ++i) {
+      for (u32 i = 0; i < len; ++i) {
         Local<Value> item;
         if (!arr->Get(ctx, i).ToLocal(&item))
           continue;
@@ -1123,7 +1124,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto documents = fxe::os::app::recent_documents();
       auto arr = Array::New(iso, static_cast<int>(documents.size()));
-      for (uint32_t i = 0; i < documents.size(); ++i)
+      for (u32 i = 0; i < documents.size(); ++i)
         (void)arr->Set(ctx, i, s(iso, documents[i].c_str()));
       info.GetReturnValue().Set(arr);
     }

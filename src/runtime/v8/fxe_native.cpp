@@ -20,6 +20,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <fxe/types.hpp>
 #include <iterator>
 #include <limits>
 #include <mbedtls/asn1.h>
@@ -217,7 +218,7 @@ namespace fxe::runtime {
     double os_uptime() {
 #if defined(__APPLE__)
       timeval boot{};
-      size_t size = sizeof(boot);
+      usize size = sizeof(boot);
       int mib[2] = {CTL_KERN, KERN_BOOTTIME};
       if (sysctl(mib, 2, &boot, &size, nullptr, 0) == 0 && boot.tv_sec > 0) {
         timeval now{};
@@ -238,8 +239,8 @@ namespace fxe::runtime {
 
     double total_mem() {
 #if defined(__APPLE__)
-      std::uint64_t mem = 0;
-      size_t size = sizeof(mem);
+      u64 mem = 0;
+      usize size = sizeof(mem);
       return sysctlbyname("hw.memsize", &mem, &size, nullptr, 0) == 0 ? static_cast<double>(mem)
                                                                       : 0;
 #elif defined(__linux__)
@@ -263,12 +264,12 @@ namespace fxe::runtime {
       if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
                             reinterpret_cast<host_info64_t>(&vmstat), &count) != KERN_SUCCESS)
         return 0;
-      std::uint64_t page_size = 0;
-      size_t size = sizeof(page_size);
+      u64 page_size = 0;
+      usize size = sizeof(page_size);
       if (sysctlbyname("hw.pagesize", &page_size, &size, nullptr, 0) != 0 || page_size == 0)
         page_size = 4096;
-      const auto pages = static_cast<std::uint64_t>(vmstat.free_count) +
-                         static_cast<std::uint64_t>(vmstat.inactive_count);
+      const auto pages =
+          static_cast<u64>(vmstat.free_count) + static_cast<u64>(vmstat.inactive_count);
       return static_cast<double>(pages * page_size);
 #elif defined(__linux__)
       struct sysinfo info{};
@@ -287,7 +288,7 @@ namespace fxe::runtime {
     std::string cpu_model() {
 #if defined(__APPLE__)
       char model[256] = {};
-      size_t size = sizeof(model);
+      usize size = sizeof(model);
       if (sysctlbyname("machdep.cpu.brand_string", model, &size, nullptr, 0) == 0 && model[0])
         return model;
       size = sizeof(model);
@@ -314,8 +315,8 @@ namespace fxe::runtime {
 
     int cpu_speed_mhz() {
 #if defined(__APPLE__)
-      std::uint64_t hz = 0;
-      size_t size = sizeof(hz);
+      u64 hz = 0;
+      usize size = sizeof(hz);
       if (sysctlbyname("hw.cpufrequency", &hz, &size, nullptr, 0) == 0 && hz > 0)
         return static_cast<int>(hz / 1000000);
 #endif
@@ -405,7 +406,7 @@ namespace fxe::runtime {
       for (;;) {
         ssize_t n = ::read(fd, buf.data(), buf.size());
         if (n > 0) {
-          out.append(buf.data(), static_cast<std::size_t>(n));
+          out.append(buf.data(), static_cast<usize>(n));
           continue;
         }
         if (n == 0) {
@@ -445,12 +446,12 @@ namespace fxe::runtime {
       }
       String::Utf8Value data(iso, info[0]);
       const char* p = *data ? *data : "";
-      std::size_t left = static_cast<std::size_t>(data.length());
+      usize left = static_cast<usize>(data.length());
       while (left > 0) {
         ssize_t n = ::write(h->stdin_fd, p, left);
         if (n > 0) {
           p += n;
-          left -= static_cast<std::size_t>(n);
+          left -= static_cast<usize>(n);
           continue;
         }
         if (n < 0 && errno == EINTR)
@@ -549,9 +550,9 @@ namespace fxe::runtime {
       if (!value->IsArray())
         return out;
       auto array = value.As<Array>();
-      const uint32_t len = array->Length();
+      const u32 len = array->Length();
       out.reserve(len);
-      for (uint32_t i = 0; i < len; ++i) {
+      for (u32 i = 0; i < len; ++i) {
         Local<Value> item;
         if (!array->Get(ctx, i).ToLocal(&item))
           continue;
@@ -677,7 +678,7 @@ namespace fxe::runtime {
         return {};
       const int needed =
           MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
-      std::wstring out(static_cast<std::size_t>(needed), L'\0');
+      std::wstring out(static_cast<usize>(needed), L'\0');
       (void)MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
                                 out.data(), needed);
       return out;
@@ -729,9 +730,9 @@ namespace fxe::runtime {
       if (!value->IsArray())
         return out;
       auto array = value.As<Array>();
-      const uint32_t len = array->Length();
+      const u32 len = array->Length();
       out.reserve(len);
-      for (uint32_t i = 0; i < len; ++i) {
+      for (u32 i = 0; i < len; ++i) {
         Local<Value> item;
         if (!array->Get(ctx, i).ToLocal(&item))
           continue;
@@ -782,11 +783,11 @@ namespace fxe::runtime {
       if (!PeekNamedPipe(h, nullptr, 0, nullptr, &available, nullptr) || available == 0)
         return {};
       std::string out;
-      out.resize(static_cast<std::size_t>(available));
+      out.resize(static_cast<usize>(available));
       DWORD read = 0;
       if (!ReadFile(h, out.data(), available, &read, nullptr))
         return {};
-      out.resize(static_cast<std::size_t>(read));
+      out.resize(static_cast<usize>(read));
       return out;
     }
 
@@ -848,7 +849,7 @@ namespace fxe::runtime {
         h->exited = true;
       }
       auto out = Object::New(iso);
-      set(ctx, out, "exitCode", Integer::New(iso, static_cast<int32_t>(h->exit_code)));
+      set(ctx, out, "exitCode", Integer::New(iso, static_cast<i32>(h->exit_code)));
       set(ctx, out, "signal", Null(iso));
       return out;
     }
@@ -953,7 +954,7 @@ namespace fxe::runtime {
       tpl->Set(iso, "sleep", FunctionTemplate::New(iso, child_sleep_ms));
       auto obj = tpl->NewInstance(ctx).ToLocalChecked();
       obj->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      set(ctx, obj, "pid", Integer::New(iso, static_cast<int32_t>(pi.dwProcessId)));
+      set(ctx, obj, "pid", Integer::New(iso, static_cast<i32>(pi.dwProcessId)));
       h->self_persistent.Reset(iso, obj);
       h->self_persistent.SetWeak(h, child_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(obj);
@@ -961,9 +962,9 @@ namespace fxe::runtime {
 #endif
 
     struct byte_view {
-      const std::uint8_t* data = nullptr;
-      std::size_t size = 0;
-      std::vector<std::uint8_t> owned;
+      const u8* data = nullptr;
+      usize size = 0;
+      std::vector<u8> owned;
     };
 
     void throw_error(Isolate* iso, std::string_view message) {
@@ -992,8 +993,8 @@ namespace fxe::runtime {
         String::Utf8Value utf8(iso, value);
         if (*utf8 == nullptr)
           return false;
-        out.owned.assign(reinterpret_cast<const std::uint8_t*>(*utf8),
-                         reinterpret_cast<const std::uint8_t*>(*utf8) + utf8.length());
+        out.owned.assign(reinterpret_cast<const u8*>(*utf8),
+                         reinterpret_cast<const u8*>(*utf8) + utf8.length());
         out.data = out.owned.data();
         out.size = out.owned.size();
         return true;
@@ -1001,14 +1002,14 @@ namespace fxe::runtime {
       if (value->IsArrayBufferView()) {
         auto view = value.As<ArrayBufferView>();
         auto backing = view->Buffer()->GetBackingStore();
-        out.data = static_cast<const std::uint8_t*>(backing->Data()) + view->ByteOffset();
+        out.data = static_cast<const u8*>(backing->Data()) + view->ByteOffset();
         out.size = view->ByteLength();
         return true;
       }
       if (value->IsArrayBuffer()) {
         auto buffer = value.As<ArrayBuffer>();
         auto backing = buffer->GetBackingStore();
-        out.data = static_cast<const std::uint8_t*>(backing->Data());
+        out.data = static_cast<const u8*>(backing->Data());
         out.size = backing->ByteLength();
         return true;
       }
@@ -1061,14 +1062,13 @@ namespace fxe::runtime {
       return std::string(buf);
     }
 
-    bool fill_secure_random(std::uint8_t* data, std::size_t size,
-                            [[maybe_unused]] std::string& error) {
+    bool fill_secure_random(u8* data, usize size, [[maybe_unused]] std::string& error) {
       if (size == 0)
         return true;
 #if defined(_WIN32)
       while (size > 0) {
         const auto chunk =
-            static_cast<ULONG>(std::min<std::size_t>(size, std::numeric_limits<ULONG>::max()));
+            static_cast<ULONG>(std::min<usize>(size, std::numeric_limits<ULONG>::max()));
         const NTSTATUS status =
             BCryptGenRandom(nullptr, data, chunk, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
         if (status < 0) {
@@ -1084,13 +1084,13 @@ namespace fxe::runtime {
       arc4random_buf(data, size);
       return true;
 #elif defined(__linux__)
-    std::size_t done = 0;
+    usize done = 0;
     while (done < size) {
-      const std::size_t want = std::min<std::size_t>(
-          size - done, static_cast<std::size_t>(std::numeric_limits<ssize_t>::max()));
+      const usize want =
+          std::min<usize>(size - done, static_cast<usize>(std::numeric_limits<ssize_t>::max()));
       const ssize_t n = ::getrandom(data + done, want, 0);
       if (n > 0) {
-        done += static_cast<std::size_t>(n);
+        done += static_cast<usize>(n);
         continue;
       }
       if (n < 0 && errno == EINTR)
@@ -1110,11 +1110,11 @@ namespace fxe::runtime {
       return false;
     }
     while (done < size) {
-      const std::size_t want = std::min<std::size_t>(
-          size - done, static_cast<std::size_t>(std::numeric_limits<ssize_t>::max()));
+      const usize want =
+          std::min<usize>(size - done, static_cast<usize>(std::numeric_limits<ssize_t>::max()));
       const ssize_t n = ::read(fd, data + done, want);
       if (n > 0) {
-        done += static_cast<std::size_t>(n);
+        done += static_cast<usize>(n);
         continue;
       }
       if (n < 0 && errno == EINTR)
@@ -1140,7 +1140,7 @@ namespace fxe::runtime {
       }
       auto view = info[0].As<Uint8Array>();
       auto backing = view->Buffer()->GetBackingStore();
-      auto* data = static_cast<std::uint8_t*>(backing->Data()) + view->ByteOffset();
+      auto* data = static_cast<u8*>(backing->Data()) + view->ByteOffset();
       std::string error;
       if (!fill_secure_random(data, view->ByteLength(), error)) {
         throw_error(iso, error.empty() ? "secure random fill failed" : error);
@@ -1242,7 +1242,7 @@ namespace fxe::runtime {
       }
     }
 
-    std::size_t coord_size_bytes(mbedtls_ecp_group_id id) {
+    usize coord_size_bytes(mbedtls_ecp_group_id id) {
       switch (id) {
       case MBEDTLS_ECP_DP_SECP256R1:
         return 32;
@@ -1258,7 +1258,7 @@ namespace fxe::runtime {
     struct hash_state {
       mbedtls_md_context_t ctx;
       bool freed = false;
-      std::size_t digest_size = 0;
+      usize digest_size = 0;
       bool hmac = false;
       Global<Object> self;
 
@@ -1436,17 +1436,17 @@ namespace fxe::runtime {
         throw_error(iso, "unsupported pbkdf2 digest");
         return;
       }
-      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<std::size_t>(keylen));
+      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<usize>(keylen));
       const int rc = mbedtls_pkcs5_pbkdf2_hmac_ext(type, password.data, password.size, salt.data,
                                                    salt.size, static_cast<unsigned int>(iterations),
-                                                   static_cast<std::uint32_t>(keylen),
+                                                   static_cast<u32>(keylen),
                                                    static_cast<unsigned char*>(backing->Data()));
       if (rc != 0) {
         throw_error(iso, "pbkdf2 derivation failed");
         return;
       }
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      info.GetReturnValue().Set(Uint8Array::New(buffer, 0, static_cast<std::size_t>(keylen)));
+      info.GetReturnValue().Set(Uint8Array::New(buffer, 0, static_cast<usize>(keylen)));
     }
 
     void kdf_scrypt_sync(const FunctionCallbackInfo<Value>& info) {
@@ -1464,9 +1464,9 @@ namespace fxe::runtime {
         return;
       }
 
-      // N: power of two >= 2, fits in uint64_t (libsodium uses uint64_t).
-      // r, p: positive uint32_t.
-      // keylen: positive size_t.
+      // N: power of two >= 2, fits in u64 (libsodium uses u64).
+      // r, p: positive u32.
+      // keylen: positive usize.
       // Validate ranges before calling the FFI to avoid surfacing libsodium's EINVAL as opaque.
       Local<Value> n_val = info[2], r_val = info[3], p_val = info[4], keylen_val = info[5];
       if (!n_val->IsNumber() || !r_val->IsNumber() || !p_val->IsNumber() ||
@@ -1481,8 +1481,8 @@ namespace fxe::runtime {
       const double keylen_d = keylen_val->NumberValue(ctx).FromMaybe(-1.0);
 
       // RFC 7914 + libsodium parameter constraints:
-      //   N is a power of two strictly greater than 1, fits in uint64_t.
-      //   r >= 1, p >= 1, both fit in uint32_t.
+      //   N is a power of two strictly greater than 1, fits in u64.
+      //   r >= 1, p >= 1, both fit in u32.
       //   keylen >= 1 (we reject 0 — Node's scryptSync also rejects 0 keylen).
       // Upper bounds: cap N to 2^31 (1 << 31), r/p to 2^24 to keep memory bounded
       // (libsodium itself enforces 128 * N * r <= some platform-dependent limit).
@@ -1493,7 +1493,7 @@ namespace fxe::runtime {
         bad_range("scrypt N must be a power of two between 2 and 2^31");
         return;
       }
-      const std::uint64_t n_u64 = static_cast<std::uint64_t>(n_d);
+      const u64 n_u64 = static_cast<u64>(n_d);
       if ((n_u64 & (n_u64 - 1)) != 0) {
         bad_range("scrypt N must be a power of two");
         return;
@@ -1507,14 +1507,14 @@ namespace fxe::runtime {
         return;
       }
       if (!(keylen_d >= 1.0) || std::floor(keylen_d) != keylen_d ||
-          keylen_d > static_cast<double>(static_cast<std::size_t>(-1) / 2)) {
+          keylen_d > static_cast<double>(static_cast<usize>(-1) / 2)) {
         bad_range("scrypt keylen must be a positive integer");
         return;
       }
 
-      const std::uint32_t r_u32 = static_cast<std::uint32_t>(r_d);
-      const std::uint32_t p_u32 = static_cast<std::uint32_t>(p_d);
-      const std::size_t keylen = static_cast<std::size_t>(keylen_d);
+      const u32 r_u32 = static_cast<u32>(r_d);
+      const u32 p_u32 = static_cast<u32>(p_d);
+      const usize keylen = static_cast<usize>(keylen_d);
 
       ensure_sodium_initialized();
 
@@ -1546,7 +1546,7 @@ namespace fxe::runtime {
       mbedtls_cipher_context_t ctx;
       bool freed = false;
       mbedtls_operation_t operation = MBEDTLS_ENCRYPT;
-      std::vector<std::uint8_t> auth_tag;
+      std::vector<u8> auth_tag;
       Global<Object> self;
 
       cipher_state() {
@@ -1569,8 +1569,7 @@ namespace fxe::runtime {
       delete state;
     }
 
-    Local<Uint8Array> uint8_array_from_bytes(Isolate* iso, const std::uint8_t* data,
-                                             std::size_t size) {
+    Local<Uint8Array> uint8_array_from_bytes(Isolate* iso, const u8* data, usize size) {
       auto backing = ArrayBuffer::NewBackingStore(iso, size);
       if (size > 0)
         std::memcpy(backing->Data(), data, size);
@@ -1629,23 +1628,22 @@ namespace fxe::runtime {
     };
 
     Local<Uint8Array> mpi_to_uint8_minimal(Isolate* iso, const mbedtls_mpi* m) {
-      std::size_t len = mbedtls_mpi_size(m);
+      usize len = mbedtls_mpi_size(m);
       if (len == 0)
         len = 1;
-      std::vector<std::uint8_t> buf(len);
+      std::vector<u8> buf(len);
       (void)mbedtls_mpi_write_binary(m, reinterpret_cast<unsigned char*>(buf.data()), len);
       return uint8_array_from_bytes(iso, buf.data(), buf.size());
     }
 
-    Local<Uint8Array> mpi_to_uint8_fixed(Isolate* iso, const mbedtls_mpi* m,
-                                         std::size_t fixed_len) {
-      std::vector<std::uint8_t> buf(fixed_len);
+    Local<Uint8Array> mpi_to_uint8_fixed(Isolate* iso, const mbedtls_mpi* m, usize fixed_len) {
+      std::vector<u8> buf(fixed_len);
       (void)mbedtls_mpi_write_binary(m, reinterpret_cast<unsigned char*>(buf.data()), fixed_len);
       return uint8_array_from_bytes(iso, buf.data(), buf.size());
     }
 
     bool require_ec_coord_size(Isolate* iso, std::string_view name, const byte_view& bytes,
-                               std::size_t coord_len) {
+                               usize coord_len) {
       if (bytes.size == coord_len)
         return true;
       iso->ThrowException(
@@ -1654,7 +1652,7 @@ namespace fxe::runtime {
       return false;
     }
 
-    bool require_ec_scalar_size(Isolate* iso, const byte_view& bytes, std::size_t coord_len) {
+    bool require_ec_scalar_size(Isolate* iso, const byte_view& bytes, usize coord_len) {
       if (bytes.size > 0 && bytes.size <= coord_len)
         return true;
       iso->ThrowException(Exception::RangeError(
@@ -1663,7 +1661,7 @@ namespace fxe::runtime {
     }
 
     bool read_ec_curve(Isolate* iso, Local<Context> ctx, Local<Object> obj,
-                       mbedtls_ecp_group_id& group_id, std::size_t& coord_len) {
+                       mbedtls_ecp_group_id& group_id, usize& coord_len) {
       const auto curve = read_string_property(iso, ctx, obj, "curve");
       if (curve.empty()) {
         throw_error(iso, "missing EC curve");
@@ -1728,7 +1726,7 @@ namespace fxe::runtime {
     bool setup_ec_pk(Isolate* iso, Local<Context> ctx, Local<Object> components,
                      bool require_private, pk_context_guard& pk) {
       mbedtls_ecp_group_id group_id = MBEDTLS_ECP_DP_NONE;
-      std::size_t coord_len = 0;
+      usize coord_len = 0;
       if (!read_ec_curve(iso, ctx, components, group_id, coord_len))
         return false;
 
@@ -1931,9 +1929,9 @@ namespace fxe::runtime {
         throw_error(iso, "failed to write SPKI public key: " + mbedtls_err_str(written));
         return;
       }
-      const auto written_size = static_cast<std::size_t>(written);
+      const auto written_size = static_cast<usize>(written);
       info.GetReturnValue().Set(uint8_array_from_bytes(
-          iso, reinterpret_cast<const std::uint8_t*>(buf.data() + (buf.size() - written_size)),
+          iso, reinterpret_cast<const u8*>(buf.data() + (buf.size() - written_size)),
           written_size));
     }
 
@@ -1955,9 +1953,9 @@ namespace fxe::runtime {
         throw_error(iso, "failed to write PKCS8 private key: " + mbedtls_err_str(written));
         return;
       }
-      const auto written_size = static_cast<std::size_t>(written);
+      const auto written_size = static_cast<usize>(written);
       info.GetReturnValue().Set(uint8_array_from_bytes(
-          iso, reinterpret_cast<const std::uint8_t*>(buf.data() + (buf.size() - written_size)),
+          iso, reinterpret_cast<const u8*>(buf.data() + (buf.size() - written_size)),
           written_size));
     }
 
@@ -2002,7 +2000,7 @@ namespace fxe::runtime {
         return;
       }
 
-      std::vector<std::uint8_t> out(mbedtls_rsa_get_len(&rsa.ctx));
+      std::vector<u8> out(mbedtls_rsa_get_len(&rsa.ctx));
       auto& rng = mbedtls_rng();
       rc = mbedtls_rsa_rsaes_oaep_encrypt(&rsa.ctx, mbedtls_ctr_drbg_random, &rng.ctr_drbg,
                                           label.size ? label.data : nullptr, label.size,
@@ -2067,9 +2065,9 @@ namespace fxe::runtime {
         return;
       }
 
-      const std::size_t key_len = mbedtls_rsa_get_len(&rsa.ctx);
-      std::vector<std::uint8_t> out(key_len);
-      std::size_t out_len = 0;
+      const usize key_len = mbedtls_rsa_get_len(&rsa.ctx);
+      std::vector<u8> out(key_len);
+      usize out_len = 0;
       auto& rng = mbedtls_rng();
       rc = mbedtls_rsa_rsaes_oaep_decrypt(&rsa.ctx, mbedtls_ctr_drbg_random, &rng.ctr_drbg,
                                           label.size ? label.data : nullptr, label.size, &out_len,
@@ -2082,7 +2080,7 @@ namespace fxe::runtime {
     }
 
     bool hash_data_for_pk(Isolate* iso, mbedtls_md_type_t md_type, const byte_view& data,
-                          std::vector<std::uint8_t>& hash) {
+                          std::vector<u8>& hash) {
       const mbedtls_md_info_t* md = mbedtls_md_info_from_type(md_type);
       if (md == nullptr) {
         throw_error(iso, "unsupported ECDSA hash");
@@ -2114,7 +2112,7 @@ namespace fxe::runtime {
 
       auto components = info[0].As<Object>();
       mbedtls_ecp_group_id group_id = MBEDTLS_ECP_DP_NONE;
-      std::size_t coord_len = 0;
+      usize coord_len = 0;
       if (!read_ec_curve(iso, ctx, components, group_id, coord_len))
         return;
       byte_view d, data;
@@ -2140,7 +2138,7 @@ namespace fxe::runtime {
         throw_error(iso, "invalid EC private scalar: " + mbedtls_err_str(rc));
         return;
       }
-      std::vector<std::uint8_t> hash;
+      std::vector<u8> hash;
       if (!hash_data_for_pk(iso, md_type, data, hash))
         return;
       auto& rng = mbedtls_rng();
@@ -2150,7 +2148,7 @@ namespace fxe::runtime {
         throw_error(iso, "ECDSA sign failed: " + mbedtls_err_str(rc));
         return;
       }
-      std::vector<std::uint8_t> out(coord_len * 2);
+      std::vector<u8> out(coord_len * 2);
       (void)mbedtls_mpi_write_binary(&r.ctx, out.data(), coord_len);
       (void)mbedtls_mpi_write_binary(&s.ctx, out.data() + coord_len, coord_len);
       info.GetReturnValue().Set(uint8_array_from_bytes(iso, out.data(), out.size()));
@@ -2174,7 +2172,7 @@ namespace fxe::runtime {
 
       auto components = info[0].As<Object>();
       mbedtls_ecp_group_id group_id = MBEDTLS_ECP_DP_NONE;
-      std::size_t coord_len = 0;
+      usize coord_len = 0;
       if (!read_ec_curve(iso, ctx, components, group_id, coord_len))
         return;
       byte_view x, y, data, signature;
@@ -2221,7 +2219,7 @@ namespace fxe::runtime {
         throw_error(iso, "invalid ECDSA signature: " + mbedtls_err_str(rc));
         return;
       }
-      std::vector<std::uint8_t> hash;
+      std::vector<u8> hash;
       if (!hash_data_for_pk(iso, md_type, data, hash))
         return;
       rc = mbedtls_ecdsa_verify(&grp.ctx, hash.data(), hash.size(), &Q.ctx, &r.ctx, &s.ctx);
@@ -2314,9 +2312,9 @@ namespace fxe::runtime {
         throw_error(iso, "cipher.update requires a string, ArrayBuffer, or typed array");
         return;
       }
-      const std::size_t block_size = mbedtls_cipher_get_block_size(&state->ctx);
-      std::vector<std::uint8_t> out(bytes.size + block_size);
-      std::size_t out_len = 0;
+      const usize block_size = mbedtls_cipher_get_block_size(&state->ctx);
+      std::vector<u8> out(bytes.size + block_size);
+      usize out_len = 0;
       const int rc =
           mbedtls_cipher_update(&state->ctx, bytes.data, bytes.size, out.data(), &out_len);
       if (rc != 0) {
@@ -2352,9 +2350,9 @@ namespace fxe::runtime {
         throw_error(iso, "cipher context has already been finalized");
         return;
       }
-      const std::size_t block_size = mbedtls_cipher_get_block_size(&state->ctx);
-      std::vector<std::uint8_t> out(block_size == 0 ? 1 : block_size);
-      std::size_t out_len = 0;
+      const usize block_size = mbedtls_cipher_get_block_size(&state->ctx);
+      std::vector<u8> out(block_size == 0 ? 1 : block_size);
+      usize out_len = 0;
       int rc = mbedtls_cipher_finish(&state->ctx, out.data(), &out_len);
       if (rc == 0 && state->operation == MBEDTLS_DECRYPT && !state->auth_tag.empty())
         rc = mbedtls_cipher_check_tag(&state->ctx, state->auth_tag.data(), state->auth_tag.size());
@@ -2519,8 +2517,8 @@ namespace fxe::runtime {
     }
 
     void os_endianness(const FunctionCallbackInfo<Value>& info) {
-      const std::uint16_t marker = 0x0102;
-      const auto* bytes = reinterpret_cast<const std::uint8_t*>(&marker);
+      const u16 marker = 0x0102;
+      const auto* bytes = reinterpret_cast<const u8*>(&marker);
       info.GetReturnValue().Set(str(info.GetIsolate(), bytes[0] == 0x02 ? "LE" : "BE"));
     }
 
@@ -2556,11 +2554,11 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       const int count = cpu_count();
-      const uint32_t count_u32 = count > 0 ? static_cast<uint32_t>(count) : 0;
+      const u32 count_u32 = count > 0 ? static_cast<u32>(count) : 0;
       auto array = Array::New(iso, count > 0 ? count : 0);
       const std::string model = cpu_model();
       const int speed = cpu_speed_mhz();
-      for (uint32_t i = 0; i < count_u32; ++i) {
+      for (u32 i = 0; i < count_u32; ++i) {
         auto cpu = Object::New(iso);
         set_string(ctx, cpu, "model", model);
         set_number(ctx, cpu, "speed", speed);
@@ -2583,7 +2581,7 @@ namespace fxe::runtime {
 #if !defined(_WIN32)
       ifaddrs* interfaces = nullptr;
       if (getifaddrs(&interfaces) == 0) {
-        std::uint32_t next_index = 0;
+        u32 next_index = 0;
         for (auto* it = interfaces; it; it = it->ifa_next) {
           if (!it->ifa_addr || !it->ifa_name)
             continue;
@@ -2699,7 +2697,7 @@ namespace fxe::runtime {
                                   Local<Value> error, Local<Value> result);
     bool ensure_winsock(Isolate* iso);
 
-    enum class dns_rr_type : std::uint16_t {
+    enum class dns_rr_type : u16 {
       A = 1,
       NS = 2,
       CNAME = 5,
@@ -2741,40 +2739,38 @@ namespace fxe::runtime {
       return std::nullopt;
     }
 
-    void dns_write_u16(std::vector<std::uint8_t>& out, std::uint16_t value) {
-      out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xff));
-      out.push_back(static_cast<std::uint8_t>(value & 0xff));
+    void dns_write_u16(std::vector<u8>& out, u16 value) {
+      out.push_back(static_cast<u8>((value >> 8) & 0xff));
+      out.push_back(static_cast<u8>(value & 0xff));
     }
 
-    std::uint16_t dns_read_u16(const std::vector<std::uint8_t>& data, std::size_t offset) {
-      return static_cast<std::uint16_t>((static_cast<std::uint16_t>(data[offset]) << 8) |
-                                        static_cast<std::uint16_t>(data[offset + 1]));
+    u16 dns_read_u16(const std::vector<u8>& data, usize offset) {
+      return static_cast<u16>((static_cast<u16>(data[offset]) << 8) |
+                              static_cast<u16>(data[offset + 1]));
     }
 
-    std::uint32_t dns_read_u32(const std::vector<std::uint8_t>& data, std::size_t offset) {
-      return (static_cast<std::uint32_t>(data[offset]) << 24) |
-             (static_cast<std::uint32_t>(data[offset + 1]) << 16) |
-             (static_cast<std::uint32_t>(data[offset + 2]) << 8) |
-             static_cast<std::uint32_t>(data[offset + 3]);
+    u32 dns_read_u32(const std::vector<u8>& data, usize offset) {
+      return (static_cast<u32>(data[offset]) << 24) | (static_cast<u32>(data[offset + 1]) << 16) |
+             (static_cast<u32>(data[offset + 2]) << 8) | static_cast<u32>(data[offset + 3]);
     }
 
-    bool dns_encode_name(std::string_view name, std::vector<std::uint8_t>& out) {
+    bool dns_encode_name(std::string_view name, std::vector<u8>& out) {
       if (name.empty())
         return false;
-      std::size_t start = 0;
+      usize start = 0;
       while (start < name.size()) {
-        const std::size_t dot = name.find('.', start);
-        const std::size_t end = dot == std::string_view::npos ? name.size() : dot;
-        const std::size_t len = end - start;
+        const usize dot = name.find('.', start);
+        const usize end = dot == std::string_view::npos ? name.size() : dot;
+        const usize len = end - start;
         if (len == 0) {
           start = end + 1;
           continue;
         }
         if (len > 63)
           return false;
-        out.push_back(static_cast<std::uint8_t>(len));
-        out.insert(out.end(), name.begin() + static_cast<std::ptrdiff_t>(start),
-                   name.begin() + static_cast<std::ptrdiff_t>(end));
+        out.push_back(static_cast<u8>(len));
+        out.insert(out.end(), name.begin() + static_cast<isize>(start),
+                   name.begin() + static_cast<isize>(end));
         if (dot == std::string_view::npos)
           break;
         start = end + 1;
@@ -2783,27 +2779,26 @@ namespace fxe::runtime {
       return true;
     }
 
-    bool dns_expand_name(const std::vector<std::uint8_t>& data, std::size_t& offset,
-                         std::string& out, int depth = 0) {
+    bool dns_expand_name(const std::vector<u8>& data, usize& offset, std::string& out,
+                         int depth = 0) {
       if (depth > 16)
         return false;
-      std::size_t pos = offset;
-      std::size_t consumed = 0;
+      usize pos = offset;
+      usize consumed = 0;
       bool jumped = false;
       out.clear();
       for (;;) {
         if (pos >= data.size())
           return false;
-        const std::uint8_t len = data[pos++];
+        const u8 len = data[pos++];
         if ((len & 0xc0) == 0xc0) {
           if (pos >= data.size())
             return false;
-          const std::size_t ptr =
-              (static_cast<std::size_t>(len & 0x3f) << 8) | static_cast<std::size_t>(data[pos++]);
+          const usize ptr = (static_cast<usize>(len & 0x3f) << 8) | static_cast<usize>(data[pos++]);
           if (!jumped)
             consumed = pos - offset;
           jumped = true;
-          std::size_t nested = ptr;
+          usize nested = ptr;
           std::string suffix;
           if (!dns_expand_name(data, nested, suffix, depth + 1))
             return false;
@@ -2848,16 +2843,15 @@ namespace fxe::runtime {
     }
 
     bool dns_query_packet(Isolate* iso, Local<Context> ctx, std::string_view hostname,
-                          dns_rr_type rrtype, std::vector<std::uint8_t>& response,
-                          Local<Object>& error) {
+                          dns_rr_type rrtype, std::vector<u8>& response, Local<Object>& error) {
       if (!ensure_winsock(iso)) {
         error = make_js_error(iso, ctx, "socket initialization failed", "EAI_FAIL");
         return false;
       }
-      std::vector<std::uint8_t> query;
+      std::vector<u8> query;
       query.reserve(512);
       const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-      const std::uint16_t id = static_cast<std::uint16_t>(now & 0xffff);
+      const u16 id = static_cast<u16>(now & 0xffff);
       dns_write_u16(query, id);
       dns_write_u16(query, 0x0100);
       dns_write_u16(query, 1);
@@ -2868,7 +2862,7 @@ namespace fxe::runtime {
         error = make_js_error(iso, ctx, "invalid DNS hostname", "EINVAL");
         return false;
       }
-      dns_write_u16(query, static_cast<std::uint16_t>(rrtype));
+      dns_write_u16(query, static_cast<u16>(rrtype));
       dns_write_u16(query, 1);
 
       const std::string server = dns_default_server();
@@ -2941,12 +2935,12 @@ namespace fxe::runtime {
                               "EAI_AGAIN");
         return false;
       }
-      response.resize(static_cast<std::size_t>(received));
+      response.resize(static_cast<usize>(received));
       if (dns_read_u16(response, 0) != id) {
         error = make_js_error(iso, ctx, "DNS response id mismatch", "EAI_FAIL");
         return false;
       }
-      const std::uint16_t flags = dns_read_u16(response, 2);
+      const u16 flags = dns_read_u16(response, 2);
       const int rcode = flags & 0x000f;
       if (rcode == 3) {
         error = make_js_error(iso, ctx, "DNS name not found", "ENOTFOUND");
@@ -2959,11 +2953,11 @@ namespace fxe::runtime {
       return true;
     }
 
-    bool dns_parse_character_string(const std::vector<std::uint8_t>& packet, std::size_t& offset,
-                                    std::size_t end, std::string& out) {
+    bool dns_parse_character_string(const std::vector<u8>& packet, usize& offset, usize end,
+                                    std::string& out) {
       if (offset >= end)
         return false;
-      const std::size_t len = packet[offset++];
+      const usize len = packet[offset++];
       if (offset + len > end)
         return false;
       out.assign(reinterpret_cast<const char*>(packet.data() + offset), len);
@@ -2971,17 +2965,16 @@ namespace fxe::runtime {
       return true;
     }
 
-    bool dns_parse_records(Isolate* iso, Local<Context> ctx,
-                           const std::vector<std::uint8_t>& packet, dns_rr_type requested,
-                           Local<Value>& out, Local<Object>& error) {
+    bool dns_parse_records(Isolate* iso, Local<Context> ctx, const std::vector<u8>& packet,
+                           dns_rr_type requested, Local<Value>& out, Local<Object>& error) {
       if (packet.size() < 12) {
         error = make_js_error(iso, ctx, "short DNS response", "EAI_FAIL");
         return false;
       }
-      const std::uint16_t qd = dns_read_u16(packet, 4);
-      const std::uint16_t an = dns_read_u16(packet, 6);
-      std::size_t offset = 12;
-      for (std::uint16_t i = 0; i < qd; ++i) {
+      const u16 qd = dns_read_u16(packet, 4);
+      const u16 an = dns_read_u16(packet, 6);
+      usize offset = 12;
+      for (u16 i = 0; i < qd; ++i) {
         std::string ignored;
         if (!dns_expand_name(packet, offset, ignored) || offset + 4 > packet.size()) {
           error = make_js_error(iso, ctx, "malformed DNS question", "EAI_FAIL");
@@ -2991,9 +2984,9 @@ namespace fxe::runtime {
       }
 
       auto array = Array::New(iso);
-      std::uint32_t index = 0;
+      u32 index = 0;
       Local<Value> singleton;
-      for (std::uint16_t i = 0; i < an; ++i) {
+      for (u16 i = 0; i < an; ++i) {
         std::string owner;
         if (!dns_expand_name(packet, offset, owner) || offset + 10 > packet.size()) {
           error = make_js_error(iso, ctx, "malformed DNS answer", "EAI_FAIL");
@@ -3001,13 +2994,13 @@ namespace fxe::runtime {
         }
         const auto type = static_cast<dns_rr_type>(dns_read_u16(packet, offset));
         offset += 2;
-        const std::uint16_t klass = dns_read_u16(packet, offset);
+        const u16 klass = dns_read_u16(packet, offset);
         offset += 2;
         offset += 4;
-        const std::uint16_t rdlen = dns_read_u16(packet, offset);
+        const u16 rdlen = dns_read_u16(packet, offset);
         offset += 2;
-        const std::size_t rdata = offset;
-        const std::size_t end = offset + rdlen;
+        const usize rdata = offset;
+        const usize end = offset + rdlen;
         if (end > packet.size()) {
           error = make_js_error(iso, ctx, "truncated DNS rdata", "EAI_FAIL");
           return false;
@@ -3017,7 +3010,7 @@ namespace fxe::runtime {
           continue;
         }
 
-        std::size_t pos = rdata;
+        usize pos = rdata;
         if (requested == dns_rr_type::NS || requested == dns_rr_type::CNAME ||
             requested == dns_rr_type::PTR) {
           std::string name;
@@ -3064,7 +3057,7 @@ namespace fxe::runtime {
           (void)array->Set(ctx, index++, record);
         } else if (requested == dns_rr_type::TXT) {
           auto chunks = Array::New(iso);
-          std::uint32_t chunk_index = 0;
+          u32 chunk_index = 0;
           while (pos < end) {
             std::string chunk;
             if (!dns_parse_character_string(packet, pos, end, chunk)) {
@@ -3080,7 +3073,7 @@ namespace fxe::runtime {
             return false;
           }
           const int critical = packet[pos++];
-          const std::size_t tag_len = packet[pos++];
+          const usize tag_len = packet[pos++];
           if (pos + tag_len > end) {
             error = make_js_error(iso, ctx, "malformed CAA tag", "EAI_FAIL");
             return false;
@@ -3171,7 +3164,7 @@ namespace fxe::runtime {
                                  Undefined(iso));
         return;
       }
-      std::vector<std::uint8_t> packet;
+      std::vector<u8> packet;
       Local<Object> error;
       if (!dns_query_packet(iso, ctx, hostname, *rrtype, packet, error)) {
         call_dns_lookup_callback(iso, ctx, info[2].As<Function>(), error, Undefined(iso));
@@ -3257,7 +3250,7 @@ namespace fxe::runtime {
 
       if (all) {
         auto array = Array::New(iso);
-        uint32_t index = 0;
+        u32 index = 0;
         for (const addrinfo* it = results; it != nullptr; it = it->ai_next) {
           if (it->ai_family != AF_INET && it->ai_family != AF_INET6)
             continue;
@@ -3382,11 +3375,11 @@ namespace fxe::runtime {
       auto* v6 = reinterpret_cast<sockaddr_in6*>(&storage);
       if (inet_pton(AF_INET, address.c_str(), &v4->sin_addr) == 1) {
         v4->sin_family = AF_INET;
-        v4->sin_port = htons(static_cast<std::uint16_t>(port));
+        v4->sin_port = htons(static_cast<u16>(port));
         len = sizeof(sockaddr_in);
       } else if (inet_pton(AF_INET6, address.c_str(), &v6->sin6_addr) == 1) {
         v6->sin6_family = AF_INET6;
-        v6->sin6_port = htons(static_cast<std::uint16_t>(port));
+        v6->sin6_port = htons(static_cast<u16>(port));
         len = sizeof(sockaddr_in6);
       } else {
         call_dns_lookup_callback(iso, ctx, info[2].As<Function>(),
@@ -3750,7 +3743,7 @@ namespace fxe::runtime {
 
     void tcp_read(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      std::array<std::uint8_t, 65536> buf{};
+      std::array<u8, 65536> buf{};
       const auto fd = socket_arg(iso->GetCurrentContext(), info);
 #if defined(_WIN32)
       const int n = recv(fd, reinterpret_cast<char*>(buf.data()), static_cast<int>(buf.size()), 0);
@@ -3772,11 +3765,11 @@ namespace fxe::runtime {
         info.GetReturnValue().Set(out);
         return;
       }
-      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<std::size_t>(n));
-      std::memcpy(backing->Data(), buf.data(), static_cast<std::size_t>(n));
+      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<usize>(n));
+      std::memcpy(backing->Data(), buf.data(), static_cast<usize>(n));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
       (void)out->Set(iso->GetCurrentContext(), "data"_v8(iso),
-                     Uint8Array::New(buffer, 0, static_cast<std::size_t>(n)));
+                     Uint8Array::New(buffer, 0, static_cast<usize>(n)));
       info.GetReturnValue().Set(out);
     }
 
@@ -3788,15 +3781,15 @@ namespace fxe::runtime {
         throw_error(iso, "tcp.write requires fd and string/bytes");
         return;
       }
-      std::size_t written = 0;
+      usize written = 0;
       const auto fd = socket_arg(ctx, info);
       while (written < bytes.size) {
 #if defined(_WIN32)
-        const int n = send(
-            fd, reinterpret_cast<const char*>(bytes.data + written),
-            static_cast<int>(std::min<std::size_t>(
-                bytes.size - written, static_cast<std::size_t>(std::numeric_limits<int>::max()))),
-            0);
+        const int n =
+            send(fd, reinterpret_cast<const char*>(bytes.data + written),
+                 static_cast<int>(std::min<usize>(
+                     bytes.size - written, static_cast<usize>(std::numeric_limits<int>::max()))),
+                 0);
 #else
         const ssize_t n = send(fd, bytes.data + written, bytes.size - written, 0);
 #endif
@@ -3807,7 +3800,7 @@ namespace fxe::runtime {
           throw_error(iso, std::string("tcp write failed: ") + socket_error_message(err));
           return;
         }
-        written += static_cast<std::size_t>(n);
+        written += static_cast<usize>(n);
       }
       info.GetReturnValue().Set(Number::New(iso, static_cast<double>(written)));
     }
@@ -3970,7 +3963,7 @@ namespace fxe::runtime {
     void ipcsock_read(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      std::array<std::uint8_t, 65536> buf{};
+      std::array<u8, 65536> buf{};
       HANDLE handle = ipcsock_handle_arg(ctx, info);
       if (handle == INVALID_HANDLE_VALUE) {
         info.GetReturnValue().Set(make_socket_error(iso, ctx, ERROR_INVALID_HANDLE));
@@ -3998,11 +3991,10 @@ namespace fxe::runtime {
         info.GetReturnValue().Set(out);
         return;
       }
-      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<std::size_t>(read));
-      std::memcpy(backing->Data(), buf.data(), static_cast<std::size_t>(read));
+      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<usize>(read));
+      std::memcpy(backing->Data(), buf.data(), static_cast<usize>(read));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(ctx, "data"_v8(iso),
-                     Uint8Array::New(buffer, 0, static_cast<std::size_t>(read)));
+      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(buffer, 0, static_cast<usize>(read)));
       info.GetReturnValue().Set(out);
     }
 
@@ -4019,10 +4011,10 @@ namespace fxe::runtime {
         throw_error(iso, "ipcsock write failed: invalid handle");
         return;
       }
-      std::size_t written = 0;
+      usize written = 0;
       while (written < bytes.size) {
-        DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(
-            bytes.size - written, static_cast<std::size_t>(std::numeric_limits<DWORD>::max())));
+        DWORD chunk = static_cast<DWORD>(std::min<usize>(
+            bytes.size - written, static_cast<usize>(std::numeric_limits<DWORD>::max())));
         DWORD n = 0;
         if (!WriteFile(handle, bytes.data + written, chunk, &n, nullptr)) {
           const DWORD err = GetLastError();
@@ -4032,7 +4024,7 @@ namespace fxe::runtime {
                                socket_error_message(static_cast<int>(err)));
           return;
         }
-        written += static_cast<std::size_t>(n);
+        written += static_cast<usize>(n);
       }
       info.GetReturnValue().Set(Number::New(iso, static_cast<double>(written)));
     }
@@ -4265,7 +4257,7 @@ namespace fxe::runtime {
     void udp_recv(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      std::array<std::uint8_t, 65536> buf{};
+      std::array<u8, 65536> buf{};
       sockaddr_storage addr{};
       socklen_t len = sizeof(addr);
       const auto fd = socket_arg(ctx, info);
@@ -4286,10 +4278,10 @@ namespace fxe::runtime {
         return;
       }
       auto out = make_sockaddr_object(iso, ctx, reinterpret_cast<sockaddr*>(&addr), len);
-      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<std::size_t>(n));
-      std::memcpy(backing->Data(), buf.data(), static_cast<std::size_t>(n));
+      auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<usize>(n));
+      std::memcpy(backing->Data(), buf.data(), static_cast<usize>(n));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(buffer, 0, static_cast<std::size_t>(n)));
+      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(buffer, 0, static_cast<usize>(n)));
       info.GetReturnValue().Set(out);
     }
 
@@ -4312,11 +4304,10 @@ namespace fxe::runtime {
         return;
       const auto fd = socket_arg(ctx, info);
 #if defined(_WIN32)
-      const int n =
-          sendto(fd, reinterpret_cast<const char*>(bytes.data),
-                 static_cast<int>(std::min<std::size_t>(
-                     bytes.size, static_cast<std::size_t>(std::numeric_limits<int>::max()))),
-                 0, reinterpret_cast<sockaddr*>(&addr), addr_len);
+      const int n = sendto(fd, reinterpret_cast<const char*>(bytes.data),
+                           static_cast<int>(std::min<usize>(
+                               bytes.size, static_cast<usize>(std::numeric_limits<int>::max()))),
+                           0, reinterpret_cast<sockaddr*>(&addr), addr_len);
 #else
       const ssize_t n =
           sendto(fd, bytes.data, bytes.size, 0, reinterpret_cast<sockaddr*>(&addr), addr_len);
@@ -4330,12 +4321,12 @@ namespace fxe::runtime {
     }
 
     struct array_buffer_transfer {
-      std::uint32_t id = 0;
+      u32 id = 0;
       std::shared_ptr<BackingStore> backing;
     };
 
     struct serialized_worker_payload {
-      std::vector<std::uint8_t> bytes;
+      std::vector<u8> bytes;
       std::vector<array_buffer_transfer> transfers;
     };
 
@@ -4392,9 +4383,9 @@ namespace fxe::runtime {
         return false;
       }
       auto array = transfer_list.As<Array>();
-      const std::uint32_t length = array->Length();
+      const u32 length = array->Length();
       transfers.reserve(length);
-      for (std::uint32_t i = 0; i < length; ++i) {
+      for (u32 i = 0; i < length; ++i) {
         Local<Value> item;
         if (!array->Get(ctx, i).ToLocal(&item)) {
           error = "postMessage transferList lookup failed";
@@ -4409,7 +4400,7 @@ namespace fxe::runtime {
           error = "postMessage transferList entries must be ArrayBuffer or typed array values";
           return false;
         }
-        const auto transfer_id = static_cast<std::uint32_t>(transfers.size() + 1);
+        const auto transfer_id = static_cast<u32>(transfers.size() + 1);
         serializer.TransferArrayBuffer(transfer_id, buffer);
         transfers.push_back(array_buffer_transfer{transfer_id, buffer->GetBackingStore()});
       }
@@ -4637,7 +4628,7 @@ namespace fxe::runtime {
     Local<Array> worker_events_to_array(Isolate* iso, Local<Context> ctx,
                                         const std::deque<worker_event>& events) {
       auto arr = Array::New(iso, static_cast<int>(events.size()));
-      for (std::uint32_t i = 0; i < events.size(); ++i) {
+      for (u32 i = 0; i < events.size(); ++i) {
         Local<Object> object;
         if (!worker_event_to_object(iso, ctx, events[i]).ToLocal(&object))
           return Array::New(iso, 0);

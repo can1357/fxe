@@ -37,7 +37,7 @@ namespace fxe::debug::cdp_ws {
 
   struct frame {
     bool fin = true;
-    std::uint8_t opcode = 0;
+    u8 opcode = 0;
     std::string payload;
   };
 
@@ -59,14 +59,14 @@ namespace fxe::debug::cdp_ws {
   std::string handshake_response(const http_request& req);
   bool handshake(socket_t s, const http_request& req, std::string& error);
 
-  std::string encode_frame(std::string_view payload, std::uint8_t opcode = 0x1, bool mask = false,
-                           std::uint32_t mask_key = 0x11223344u);
+  std::string encode_frame(std::string_view payload, u8 opcode = 0x1, bool mask = false,
+                           u32 mask_key = 0x11223344u);
   bool decode_frame_from_buffer(std::string& buffer, frame& out, std::string& error,
                                 bool require_mask = true);
 
   bool send_all(socket_t s, std::string_view bytes);
   bool write_text(socket_t s, std::string_view payload);
-  bool write_close(socket_t s, std::uint16_t code = 1000, std::string_view reason = {});
+  bool write_close(socket_t s, u16 code = 1000, std::string_view reason = {});
   bool write_pong(socket_t s, std::string_view payload);
 
   class reader {
@@ -78,6 +78,6 @@ namespace fxe::debug::cdp_ws {
     bool require_mask_ = true;
     std::string buffer_;
     std::string fragmented_;
-    std::uint8_t fragmented_opcode_ = 0;
+    u8 fragmented_opcode_ = 0;
   };
 } // namespace fxe::debug::cdp_ws

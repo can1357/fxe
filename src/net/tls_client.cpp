@@ -12,6 +12,7 @@
 #include <cstring>
 #include <string_view>
 
+#include <fxe/types.hpp>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -328,7 +329,7 @@ namespace fxe::net {
         return true;
       }
 
-      ssize_t read(void* buf, size_t cap) override {
+      ssize_t read(void* buf, usize cap) override {
         last_error_.clear();
         if (!buf || cap == 0)
           return 0;
@@ -343,7 +344,7 @@ namespace fxe::net {
         return static_cast<ssize_t>(ret);
       }
 
-      ssize_t write(const void* buf, size_t len) override {
+      ssize_t write(const void* buf, usize len) override {
         last_error_.clear();
         if (!buf || len == 0)
           return 0;
@@ -373,7 +374,7 @@ namespace fxe::net {
           last_error_ = tls_error("mbedtls_x509_dn_gets", ret);
           return std::nullopt;
         }
-        return std::string(subject, static_cast<size_t>(ret));
+        return std::string(subject, static_cast<usize>(ret));
       }
 
       std::string last_error() const override {

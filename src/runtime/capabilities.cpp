@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fxe/types.hpp>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -73,13 +74,13 @@ namespace fxe::runtime {
     };
 
     parsed_endpoint parse_endpoint(std::string_view url) {
-      size_t start = 0;
+      usize start = 0;
       if (auto scheme = url.find("://"); scheme != std::string_view::npos)
         start = scheme + 3;
       else if (starts_with(url, "//"))
         start = 2;
 
-      size_t end = url.find_first_of("/?#", start);
+      usize end = url.find_first_of("/?#", start);
       if (end == std::string_view::npos)
         end = url.size();
 

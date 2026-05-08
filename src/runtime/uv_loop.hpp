@@ -1,4 +1,5 @@
 #pragma once
+#include <fxe/types.hpp>
 
 #ifndef FXE_HAS_LIBUV
 #define FXE_HAS_LIBUV 0
@@ -50,11 +51,11 @@ namespace fxe::runtime {
     // loop pump. Callbacks run on the pumping thread before uv_run(); they must
     // not call pump_nowait() recursively. Returns 0 when unavailable.
     using pump_callback = std::function<void()>;
-    std::size_t register_pump_callback(pump_callback cb);
+    usize register_pump_callback(pump_callback cb);
     using microtask_checkpoint = std::function<void()>;
-    std::size_t register_microtask_checkpoint(microtask_checkpoint cb);
-    void unregister_microtask_checkpoint(std::size_t id) noexcept;
-    void unregister_pump_callback(std::size_t id) noexcept;
+    usize register_microtask_checkpoint(microtask_checkpoint cb);
+    void unregister_microtask_checkpoint(usize id) noexcept;
+    void unregister_pump_callback(usize id) noexcept;
     void run_pump_callbacks() noexcept;
     void run_microtask_checkpoint() noexcept;
 
@@ -88,11 +89,11 @@ namespace fxe::runtime {
     std::mutex errors_mu_;
     std::vector<std::string> errors_;
     std::mutex callbacks_mu_;
-    std::vector<std::pair<std::size_t, pump_callback>> callbacks_;
-    std::size_t next_callback_id_ = 1;
+    std::vector<std::pair<usize, pump_callback>> callbacks_;
+    usize next_callback_id_ = 1;
     std::mutex microtask_mu_;
-    std::vector<std::pair<std::size_t, microtask_checkpoint>> microtask_checkpoints_;
-    std::size_t next_microtask_checkpoint_id_ = 1;
+    std::vector<std::pair<usize, microtask_checkpoint>> microtask_checkpoints_;
+    usize next_microtask_checkpoint_id_ = 1;
   };
 
 #if FXE_HAS_LIBUV

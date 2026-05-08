@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -26,13 +27,13 @@
 namespace fxe::bundle {
 
   inline constexpr char k_magic[8] = {'F', 'X', 'E', 'B', 'N', 'D', 'L', '\0'};
-  inline constexpr std::uint32_t k_version = 1;
+  inline constexpr u32 k_version = 1;
   inline constexpr std::string_view k_manifest_name = "__fxe_manifest.json";
-  inline constexpr std::size_t k_trailer_size = 32;
+  inline constexpr usize k_trailer_size = 32;
 
   struct Entry {
-    std::uint64_t offset;
-    std::uint64_t size;
+    u64 offset;
+    u64 size;
   };
 
   struct ManifestMetadata {

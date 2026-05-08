@@ -112,8 +112,8 @@ namespace fxe {
     if (!cg)
       return false;
 
-    const size_t width = CGImageGetWidth(cg);
-    const size_t height = CGImageGetHeight(cg);
+    const usize width = CGImageGetWidth(cg);
+    const usize height = CGImageGetHeight(cg);
     if (width == 0 || height == 0 || width > UINT32_MAX || height > UINT32_MAX ||
         width > (SIZE_MAX / height) / 4u) {
       return false;
@@ -140,8 +140,8 @@ namespace fxe {
   }
 
   static bool fxe_macos_write_clipboard_image(const clipboard_image& image) {
-    const size_t width = image.width;
-    const size_t height = image.height;
+    const usize width = image.width;
+    const usize height = image.height;
     if (width == 0 || height == 0 || width > (SIZE_MAX / height) / 4u ||
         image.data.size() < width * height * 4u) {
       return false;
@@ -150,8 +150,8 @@ namespace fxe {
     CGColorSpaceRef color_space = CGColorSpaceCreateDeviceRGB();
     if (!color_space)
       return false;
-    const size_t byte_count = width * height * 4u;
-    if (byte_count > static_cast<size_t>(std::numeric_limits<CFIndex>::max())) {
+    const usize byte_count = width * height * 4u;
+    if (byte_count > static_cast<usize>(std::numeric_limits<CFIndex>::max())) {
       CGColorSpaceRelease(color_space);
       return false;
     }
@@ -228,7 +228,7 @@ static std::vector<std::string> fxe_macos_file_paths_from_drag(id<NSDraggingInfo
     return paths;
   NSDictionary* options = @{NSPasteboardURLReadingFileURLsOnlyKey : @YES};
   NSArray<NSURL*>* urls = [pasteboard readObjectsForClasses:@[ [NSURL class] ] options:options];
-  paths.reserve(static_cast<std::size_t>(urls.count));
+  paths.reserve(static_cast<usize>(urls.count));
   for (NSURL* url in urls) {
     if (!url.fileURL)
       continue;
@@ -518,16 +518,16 @@ namespace fxe {
   static CGImageRef fxe_macos_create_cg_image_from_rgba(const u8* rgba, int width, int height) {
     if (!rgba || width <= 0 || height <= 0)
       return nullptr;
-    const size_t w = static_cast<size_t>(width);
-    const size_t h = static_cast<size_t>(height);
+    const usize w = static_cast<usize>(width);
+    const usize h = static_cast<usize>(height);
     if (w > (SIZE_MAX / h) / 4u)
       return nullptr;
 
     CGColorSpaceRef color_space = CGColorSpaceCreateDeviceRGB();
     if (!color_space)
       return nullptr;
-    const size_t byte_count = w * h * 4u;
-    if (byte_count > static_cast<size_t>(std::numeric_limits<CFIndex>::max())) {
+    const usize byte_count = w * h * 4u;
+    if (byte_count > static_cast<usize>(std::numeric_limits<CFIndex>::max())) {
       CGColorSpaceRelease(color_space);
       return nullptr;
     }
@@ -933,7 +933,7 @@ namespace fxe {
       redraw_requested_.store(true, std::memory_order_release);
       glfwPostEmptyEvent();
     }
-    void post_message(std::string channel, std::vector<std::vector<uint8_t>> args) override {
+    void post_message(std::string channel, std::vector<std::vector<u8>> args) override {
       input_event ev{};
       ev.kind = input_event::kind_t::message;
       ev.message_channel = std::move(channel);
@@ -1382,10 +1382,10 @@ namespace fxe {
     bool set_clipboard_rtf(std::string_view rtf) override {
       return os::clipboard_set_rtf(rtf);
     }
-    std::optional<std::vector<uint8_t>> clipboard_mime(std::string_view mime) const override {
+    std::optional<std::vector<u8>> clipboard_mime(std::string_view mime) const override {
       return os::clipboard_get_mime(mime);
     }
-    bool set_clipboard_mime(std::string_view mime, const std::vector<uint8_t>& bytes) override {
+    bool set_clipboard_mime(std::string_view mime, const std::vector<u8>& bytes) override {
       return os::clipboard_set_mime(mime, bytes);
     }
 
@@ -1459,8 +1459,8 @@ namespace fxe {
     static HICON win32_create_hicon_from_rgba(const u8* rgba, int width, int height) {
       if (!rgba || width <= 0 || height <= 0)
         return nullptr;
-      const size_t w = static_cast<size_t>(width);
-      const size_t h = static_cast<size_t>(height);
+      const usize w = static_cast<usize>(width);
+      const usize h = static_cast<usize>(height);
       if (w > (SIZE_MAX / h) / 4u)
         return nullptr;
       if (width > std::numeric_limits<LONG>::max() || height > std::numeric_limits<LONG>::max())
@@ -1491,14 +1491,14 @@ namespace fxe {
       }
 
       auto* bgra = static_cast<u8*>(bits);
-      for (size_t i = 0; i < w * h; ++i) {
+      for (usize i = 0; i < w * h; ++i) {
         bgra[i * 4u + 0u] = rgba[i * 4u + 2u];
         bgra[i * 4u + 1u] = rgba[i * 4u + 1u];
         bgra[i * 4u + 2u] = rgba[i * 4u + 0u];
         bgra[i * 4u + 3u] = rgba[i * 4u + 3u];
       }
 
-      const size_t mask_stride = ((w + 15u) / 16u) * 2u;
+      const usize mask_stride = ((w + 15u) / 16u) * 2u;
       std::vector<u8> mask_bits(mask_stride * h, 0);
       HBITMAP mask = CreateBitmap(width, height, 1, 1, mask_bits.data());
       if (!mask) {
@@ -1717,7 +1717,7 @@ namespace fxe {
     }
 
     static HGLOBAL win32_hglobal_from_wstring(const std::wstring& text) {
-      const size_t bytes = (text.size() + 1u) * sizeof(wchar_t);
+      const usize bytes = (text.size() + 1u) * sizeof(wchar_t);
       HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
       if (!h)
         return nullptr;
@@ -1731,7 +1731,7 @@ namespace fxe {
       return h;
     }
 
-    static HGLOBAL win32_hglobal_from_bytes(const void* data, size_t bytes, bool nul_terminate) {
+    static HGLOBAL win32_hglobal_from_bytes(const void* data, usize bytes, bool nul_terminate) {
       HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes + (nul_terminate ? 1u : 0u));
       if (!h)
         return nullptr;
@@ -1743,7 +1743,7 @@ namespace fxe {
       if (bytes > 0 && data)
         std::memcpy(dst, data, bytes);
       if (nul_terminate)
-        static_cast<uint8_t*>(dst)[bytes] = 0;
+        static_cast<u8*>(dst)[bytes] = 0;
       GlobalUnlock(h);
       return h;
     }
@@ -1763,15 +1763,15 @@ namespace fxe {
       std::string out;
       out.reserve(header.size() + start_marker.size() + html.size() + end_marker.size());
       out.append(header);
-      const size_t start_html = out.size();
+      const usize start_html = out.size();
       out.append(start_marker);
-      const size_t start_fragment = out.size();
+      const usize start_fragment = out.size();
       out.append(html);
-      const size_t end_fragment = out.size();
+      const usize end_fragment = out.size();
       out.append(end_marker);
-      const size_t end_html = out.size();
-      auto write = [&](const char* key, size_t value) {
-        size_t pos = out.find(key);
+      const usize end_html = out.size();
+      auto write = [&](const char* key, usize value) {
+        usize pos = out.find(key);
         if (pos == std::string::npos)
           return;
         pos += std::strlen(key);
@@ -1792,13 +1792,13 @@ namespace fxe {
     }
 
     static HGLOBAL win32_cf_dib_from_image(const image_data& image) {
-      const size_t width = image.width;
-      const size_t height = image.height;
-      if (width == 0 || height == 0 || width > static_cast<size_t>(INT32_MAX) ||
-          height > static_cast<size_t>(INT32_MAX) || width > (SIZE_MAX / height) / 4u ||
+      const usize width = image.width;
+      const usize height = image.height;
+      if (width == 0 || height == 0 || width > static_cast<usize>(INT32_MAX) ||
+          height > static_cast<usize>(INT32_MAX) || width > (SIZE_MAX / height) / 4u ||
           image.data.size() < width * height * 4u)
         return nullptr;
-      const size_t pixel_bytes = width * height * 4u;
+      const usize pixel_bytes = width * height * 4u;
       HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, sizeof(BITMAPINFOHEADER) + pixel_bytes);
       if (!h)
         return nullptr;
@@ -1815,8 +1815,8 @@ namespace fxe {
       header->biBitCount = 32;
       header->biCompression = BI_RGB;
       header->biSizeImage = static_cast<DWORD>(pixel_bytes);
-      auto* dst = reinterpret_cast<uint8_t*>(header + 1);
-      for (size_t i = 0; i < width * height; ++i) {
+      auto* dst = reinterpret_cast<u8*>(header + 1);
+      for (usize i = 0; i < width * height; ++i) {
         dst[i * 4u + 0u] = image.data[i * 4u + 2u];
         dst[i * 4u + 1u] = image.data[i * 4u + 1u];
         dst[i * 4u + 2u] = image.data[i * 4u + 0u];
@@ -1828,7 +1828,7 @@ namespace fxe {
 
     static HGLOBAL win32_hdrop_from_files(const std::vector<std::string>& files) {
       std::vector<std::wstring> wide_files;
-      size_t chars = 1;
+      usize chars = 1;
       for (const auto& file : files) {
         auto wide = win32_utf8_to_wide(file);
         if (wide.empty())
@@ -1838,7 +1838,7 @@ namespace fxe {
       }
       if (wide_files.empty())
         return nullptr;
-      const size_t bytes = sizeof(DROPFILES) + chars * sizeof(wchar_t);
+      const usize bytes = sizeof(DROPFILES) + chars * sizeof(wchar_t);
       HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes);
       if (!h)
         return nullptr;

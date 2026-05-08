@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <fxe/types.hpp>
 #include <memory>
 #include <sstream>
 #include <unordered_map>
@@ -34,7 +35,7 @@ namespace fxe::net {
     parsed_url parse_url_for_cookies(const std::string& url) {
       parsed_url out;
       auto scheme_end = url.find("://");
-      std::size_t authority = 0;
+      usize authority = 0;
       if (scheme_end != std::string::npos) {
         out.scheme = ascii_lower_copy(url.substr(0, scheme_end));
         authority = scheme_end + 3;
@@ -123,9 +124,9 @@ namespace fxe::net {
   namespace {
     constexpr long kDefaultTotalTimeoutMs = 60000L;
     constexpr long kDefaultConnectTimeoutMs = 30000L;
-    constexpr std::size_t kMaxActiveTotal = 64;
-    constexpr std::size_t kMaxActivePerOrigin = 6;
-    constexpr std::size_t kMaxPendingTotal = 256;
+    constexpr usize kMaxActiveTotal = 64;
+    constexpr usize kMaxActivePerOrigin = 6;
+    constexpr usize kMaxPendingTotal = 256;
 
     struct origin_key {
       std::string key;
@@ -135,7 +136,7 @@ namespace fxe::net {
       auto scheme_end = url.find("://");
       std::string scheme =
           scheme_end == std::string::npos ? "http" : ascii_lower_copy(url.substr(0, scheme_end));
-      std::size_t authority = scheme_end == std::string::npos ? 0 : scheme_end + 3;
+      usize authority = scheme_end == std::string::npos ? 0 : scheme_end + 3;
       auto path_pos = url.find_first_of("/?#", authority);
       std::string host_port = path_pos == std::string::npos
                                   ? url.substr(authority)
@@ -184,7 +185,7 @@ namespace fxe::net {
       std::string request_url;
       std::string origin;
       std::vector<std::string> set_cookie_headers;
-      std::size_t upload_off = 0;
+      usize upload_off = 0;
       bool aborted = false;
       char error_buf[CURL_ERROR_SIZE] = {};
       curl_mime* mime = nullptr;
@@ -201,16 +202,16 @@ namespace fxe::net {
       bool settled = false;
     };
 
-    static std::size_t write_cb(char* ptr, std::size_t size, std::size_t nmemb, void* user) {
+    static usize write_cb(char* ptr, usize size, usize nmemb, void* user) {
       auto* fl = static_cast<in_flight*>(user);
-      const std::size_t n = size * nmemb;
+      const usize n = size * nmemb;
       fl->body_buf.append(ptr, n);
       return n;
     }
 
-    static std::size_t header_cb(char* ptr, std::size_t size, std::size_t nmemb, void* user) {
+    static usize header_cb(char* ptr, usize size, usize nmemb, void* user) {
       auto* fl = static_cast<in_flight*>(user);
-      const std::size_t n = size * nmemb;
+      const usize n = size * nmemb;
       std::string line(ptr, n);
       // Trim CRLF
       while (!line.empty() && (line.back() == '\n' || line.back() == '\r'))
@@ -235,7 +236,7 @@ namespace fxe::net {
       std::string name = line.substr(0, colon);
       std::string val = line.substr(colon + 1);
       // ltrim
-      std::size_t i = 0;
+      usize i = 0;
       while (i < val.size() && (val[i] == ' ' || val[i] == '\t'))
         ++i;
       val.erase(0, i);
@@ -245,11 +246,11 @@ namespace fxe::net {
       return n;
     }
 
-    static std::size_t read_cb(char* ptr, std::size_t size, std::size_t nmemb, void* user) {
+    static usize read_cb(char* ptr, usize size, usize nmemb, void* user) {
       auto* fl = static_cast<in_flight*>(user);
-      const std::size_t avail = fl->upload_buf.size() - fl->upload_off;
-      const std::size_t want = size * nmemb;
-      const std::size_t n = avail < want ? avail : want;
+      const usize avail = fl->upload_buf.size() - fl->upload_off;
+      const usize want = size * nmemb;
+      const usize n = avail < want ? avail : want;
       if (n)
         std::memcpy(ptr, fl->upload_buf.data() + fl->upload_off, n);
       fl->upload_off += n;
@@ -384,7 +385,7 @@ namespace fxe::net {
       constexpr char k_https[] = "https://";
       if (url.size() < sizeof(k_https) - 1)
         return false;
-      for (std::size_t i = 0; i < sizeof(k_https) - 1; ++i) {
+      for (usize i = 0; i < sizeof(k_https) - 1; ++i) {
         char c = url[i];
         if (c >= 'A' && c <= 'Z')
           c = static_cast<char>(c - 'A' + 'a');
@@ -464,14 +465,14 @@ namespace fxe::net {
     std::atomic<http_request_id> next_id{1};
     std::unordered_map<http_request_id, in_flight*> by_id;
     std::unordered_map<CURL*, in_flight*> by_easy;
-    std::unordered_map<std::string, std::size_t> active_by_origin;
+    std::unordered_map<std::string, usize> active_by_origin;
     std::deque<std::shared_ptr<queued_request>> pending_fifo;
     std::unordered_map<http_request_id, std::shared_ptr<queued_request>> pending_by_id;
-    std::size_t active_total = 0;
-    std::size_t pending_total = 0;
+    usize active_total = 0;
+    usize pending_total = 0;
     cookie_jar& jar;
 
-    std::size_t pump_callback_id = 0;
+    usize pump_callback_id = 0;
     explicit impl(cookie_jar& cookie_store) : jar(cookie_store) {
       if (curl_global_init(CURL_GLOBAL_DEFAULT) == CURLE_OK) {
         multi = curl_multi_init();
@@ -502,7 +503,7 @@ namespace fxe::net {
       if (active_total >= kMaxActiveTotal)
         return false;
       auto it = active_by_origin.find(origin);
-      const std::size_t active_for_origin = it == active_by_origin.end() ? 0 : it->second;
+      const usize active_for_origin = it == active_by_origin.end() ? 0 : it->second;
       return active_for_origin < kMaxActivePerOrigin;
     }
 
@@ -659,8 +660,8 @@ namespace fxe::net {
     void admit_pending() {
       while (active_total < kMaxActiveTotal && !pending_fifo.empty()) {
         bool admitted_any = false;
-        const std::size_t batch = pending_fifo.size();
-        for (std::size_t i = 0; i < batch && active_total < kMaxActiveTotal; ++i) {
+        const usize batch = pending_fifo.size();
+        for (usize i = 0; i < batch && active_total < kMaxActiveTotal; ++i) {
           auto queued = pending_fifo.front();
           pending_fifo.pop_front();
           if (!queued || queued->settled || queued->aborted ||
@@ -858,7 +859,7 @@ namespace fxe::net {
       constexpr char k_https[] = "https://";
       if (url.size() < sizeof(k_https) - 1)
         return false;
-      for (std::size_t i = 0; i < sizeof(k_https) - 1; ++i) {
+      for (usize i = 0; i < sizeof(k_https) - 1; ++i) {
         char c = url[i];
         if (c >= 'A' && c <= 'Z')
           c = static_cast<char>(c - 'A' + 'a');

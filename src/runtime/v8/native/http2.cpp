@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
 #include <map>
 #include <memory>
@@ -34,7 +35,7 @@ namespace fxe::runtime {
       String::Utf8Value utf8(iso, value);
       if (*utf8 == nullptr)
         return {};
-      return std::string(*utf8, static_cast<size_t>(utf8.length()));
+      return std::string(*utf8, static_cast<usize>(utf8.length()));
     }
 
     Local<Value> get_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key) {
@@ -69,7 +70,7 @@ namespace fxe::runtime {
     }
 
     bool optional_uint32_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
-                              std::optional<uint32_t>& out, std::string& err) {
+                              std::optional<u32>& out, std::string& err) {
       auto value = get_prop(iso, ctx, obj, key);
       if (value->IsUndefined() || value->IsNull())
         return true;
@@ -78,7 +79,7 @@ namespace fxe::runtime {
         err = std::string("invalid HTTP/2 setting ") + key;
         return false;
       }
-      out = static_cast<uint32_t>(number.FromJust());
+      out = static_cast<u32>(number.FromJust());
       return true;
     }
 
@@ -167,7 +168,7 @@ namespace fxe::runtime {
 
     struct authority_parts {
       std::string host;
-      uint16_t port = 443;
+      u16 port = 443;
     };
 
     std::optional<authority_parts> parse_authority(std::string value) {
@@ -188,7 +189,7 @@ namespace fxe::runtime {
         out.host = value.substr(0, colon);
         const auto port_value = value.substr(colon + 1);
         try {
-          out.port = static_cast<uint16_t>(std::stoi(port_value));
+          out.port = static_cast<u16>(std::stoi(port_value));
         } catch (...) {
           return std::nullopt;
         }
@@ -300,7 +301,7 @@ namespace fxe::runtime {
       request.path = string_prop(iso, ctx, headers, ":path", "/");
       request.body = bytes_value(iso, ctx, get_prop(iso, ctx, headers, "__body"));
       auto names = headers->GetOwnPropertyNames(ctx).ToLocalChecked();
-      for (uint32_t i = 0; i < names->Length(); ++i) {
+      for (u32 i = 0; i < names->Length(); ++i) {
         auto key_value = names->Get(ctx, i).ToLocalChecked();
         auto key = string_arg(iso, key_value);
         if (key == ":method" || key == ":path" || key == "__body")
@@ -308,7 +309,7 @@ namespace fxe::runtime {
         auto value = headers->Get(ctx, key_value).ToLocalChecked();
         request.headers.emplace_back(std::move(key), string_arg(iso, value));
       }
-      int32_t stream_id = 0;
+      i32 stream_id = 0;
       {
         std::lock_guard<std::mutex> lock(client->mutex);
         stream_id = client->client->submit(request);
@@ -333,7 +334,7 @@ namespace fxe::runtime {
         throw_error(iso, "unknown HTTP/2 client handle");
         return;
       }
-      const int32_t stream_id = info[1]->Int32Value(ctx).FromMaybe(0);
+      const i32 stream_id = info[1]->Int32Value(ctx).FromMaybe(0);
       auto read = std::make_shared<read_entry>();
       int handle = 0;
       {
@@ -412,7 +413,7 @@ namespace fxe::runtime {
     void http2_write(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      size_t size = 0;
+      usize size = 0;
       if (info.Length() > 2)
         size = bytes_value(iso, ctx, info[2]).size();
       info.GetReturnValue().Set(Integer::New(iso, static_cast<int>(size)));
@@ -450,7 +451,7 @@ namespace fxe::runtime {
       fxe::net::http2_server_options server_options;
       server_options.cert_pem = string_prop(iso, ctx, options, "cert");
       server_options.key_pem = string_prop(iso, ctx, options, "key");
-      server_options.port = static_cast<uint16_t>(int_prop(iso, ctx, options, "port", 0));
+      server_options.port = static_cast<u16>(int_prop(iso, ctx, options, "port", 0));
       std::string err;
       auto parsed_settings = settings_prop(iso, ctx, options, err);
       if (!parsed_settings) {
@@ -548,7 +549,7 @@ namespace fxe::runtime {
       response.status = int_prop(iso, ctx, headers_obj, ":status", 200);
       response.body = bytes_value(iso, ctx, info[3]);
       auto names = headers_obj->GetOwnPropertyNames(ctx).ToLocalChecked();
-      for (uint32_t i = 0; i < names->Length(); ++i) {
+      for (u32 i = 0; i < names->Length(); ++i) {
         auto key_value = names->Get(ctx, i).ToLocalChecked();
         auto key = string_arg(iso, key_value);
         if (key == ":status")
@@ -557,7 +558,7 @@ namespace fxe::runtime {
         response.headers.emplace_back(std::move(key), string_arg(iso, value));
       }
       std::string err;
-      const auto request_id = static_cast<uint64_t>(info[1]->IntegerValue(ctx).FromMaybe(0));
+      const auto request_id = static_cast<u64>(info[1]->IntegerValue(ctx).FromMaybe(0));
       bool ok = false;
       {
         std::lock_guard<std::mutex> lock(server->mutex);

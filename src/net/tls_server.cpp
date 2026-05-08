@@ -26,6 +26,7 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -110,7 +111,7 @@ namespace fxe::net {
         err = tls_error("mbedtls_x509_dn_gets", ret);
         return {};
       }
-      return std::string(subject, static_cast<size_t>(ret));
+      return std::string(subject, static_cast<usize>(ret));
     }
 
     std::string lowercase_fingerprint(std::string_view value) {
@@ -254,7 +255,7 @@ namespace fxe::net {
         return true;
       }
 
-      ssize_t read(void* buf, size_t cap) override {
+      ssize_t read(void* buf, usize cap) override {
         last_error_.clear();
         if (!buf || cap == 0)
           return 0;
@@ -269,7 +270,7 @@ namespace fxe::net {
         return static_cast<ssize_t>(ret);
       }
 
-      ssize_t write(const void* buf, size_t len) override {
+      ssize_t write(const void* buf, usize len) override {
         last_error_.clear();
         if (!buf || len == 0)
           return 0;
@@ -431,7 +432,7 @@ namespace fxe::net {
         return client;
       }
 
-      uint16_t local_port() const override {
+      u16 local_port() const override {
         last_error_.clear();
         if (listen_.fd < 0)
           return 0;

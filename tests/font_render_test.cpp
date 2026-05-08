@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fxe/types.hpp>
 #include <initializer_list>
 #include <memory>
 #include <string>
@@ -27,27 +28,25 @@ namespace {
   }
 #define CHECK(e) check((e), #e, __FILE__, __LINE__)
 
-  fxe::font::GlyphKey make_key(const fxe::font::Face& face, std::uint32_t glyph_id) {
+  fxe::font::GlyphKey make_key(const fxe::font::Face& face, u32 glyph_id) {
     fxe::font::GlyphKey key{};
     key.face_id = face.id();
     key.glyph_id = glyph_id;
-    key.pixel_size_q = static_cast<std::uint32_t>(std::lround(face.pixel_size() * 64.0f));
+    key.pixel_size_q = static_cast<u32>(std::lround(face.pixel_size() * 64.0f));
     key.subpixel_x = 0;
-    key.hint = static_cast<std::uint8_t>(fxe::font::Hint::full);
+    key.hint = static_cast<u8>(fxe::font::Hint::full);
     return key;
   }
 
-  std::vector<std::uint8_t> glyph_pixels(const fxe::font::Atlas& atlas,
-                                         const fxe::font::Glyph& glyph) {
+  std::vector<u8> glyph_pixels(const fxe::font::Atlas& atlas, const fxe::font::Glyph& glyph) {
     const auto size = atlas.size();
-    const auto bpp = static_cast<std::size_t>(atlas.bytes_per_pixel());
-    std::vector<std::uint8_t> out(static_cast<std::size_t>(glyph.width) * glyph.height * bpp);
-    for (std::uint32_t y = 0; y < glyph.height; ++y) {
-      const std::uint8_t* src =
-          atlas.pixels().data() +
-          (static_cast<std::size_t>(glyph.atlas_y + y) * size.x + glyph.atlas_x) * bpp;
-      std::copy_n(src, static_cast<std::size_t>(glyph.width) * bpp,
-                  out.data() + static_cast<std::size_t>(y) * glyph.width * bpp);
+    const auto bpp = static_cast<usize>(atlas.bytes_per_pixel());
+    std::vector<u8> out(static_cast<usize>(glyph.width) * glyph.height * bpp);
+    for (u32 y = 0; y < glyph.height; ++y) {
+      const u8* src = atlas.pixels().data() +
+                      (static_cast<usize>(glyph.atlas_y + y) * size.x + glyph.atlas_x) * bpp;
+      std::copy_n(src, static_cast<usize>(glyph.width) * bpp,
+                  out.data() + static_cast<usize>(y) * glyph.width * bpp);
     }
     return out;
   }
@@ -94,8 +93,8 @@ int main() {
       if (face) {
         Atlas mask{Format::grayscale, 256, 4096};
         Atlas color{Format::bgra, 256, 4096};
-        const std::uint64_t before_gen = mask.generation();
-        const std::uint32_t gA = face->glyph_index(U'A');
+        const u64 before_gen = mask.generation();
+        const u32 gA = face->glyph_index(U'A');
         CHECK(gA != 0);
         const Glyph g = face->render_glyph(gA, mask, color, Hint::full);
         CHECK(g.advance_x > 0.0f);
@@ -124,13 +123,13 @@ int main() {
         budget.max_mask_glyph_count = 5;
         budget.max_mask_atlas_bytes = 256ull * 256ull;
         GlyphCache cache{budget};
-        const std::uint32_t gA = face->glyph_index(U'A');
+        const u32 gA = face->glyph_index(U'A');
         CHECK(gA != 0);
         const Glyph first = cache.lookup(*face, gA);
         CHECK(first.width > 0);
-        const std::vector<std::uint8_t> first_pixels = glyph_pixels(cache.mask_atlas(), first);
+        const std::vector<u8> first_pixels = glyph_pixels(cache.mask_atlas(), first);
         for (char32_t ch = U'B'; ch <= U'K'; ++ch) {
-          const std::uint32_t gid = face->glyph_index(ch);
+          const u32 gid = face->glyph_index(ch);
           if (gid != 0)
             (void)cache.lookup(*face, gid);
         }
@@ -223,7 +222,7 @@ int main() {
       if (!face) {
         std::printf("SKIP color emoji (face load failed)\n");
       } else {
-        const std::uint32_t gid = face->glyph_index(char32_t{0x1F389});
+        const u32 gid = face->glyph_index(char32_t{0x1F389});
         if (gid == 0) {
           std::printf("SKIP color emoji (glyph not present)\n");
         } else {

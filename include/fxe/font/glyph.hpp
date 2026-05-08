@@ -7,11 +7,12 @@
 #include <cstdint>
 
 #include <fxe/math.hpp>
+#include <fxe/types.hpp>
 
 namespace fxe::font {
 
   // Pixel format of an atlas page / a glyph bitmap.
-  enum class Format : std::uint8_t {
+  enum class Format : u8 {
     grayscale, // 1-channel alpha mask (FT_PIXEL_MODE_GRAY) — most non-color glyphs
     bgra,      // 4-channel premultiplied BGRA — color emoji (CBDT, sbix, COLR)
   };
@@ -21,10 +22,10 @@ namespace fxe::font {
   // to the top-left corner of the bitmap (positive y = down). `advance_x` is
   // the per-glyph advance in pixels.
   struct Glyph {
-    std::uint32_t atlas_x = 0;
-    std::uint32_t atlas_y = 0;
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
+    u32 atlas_x = 0;
+    u32 atlas_y = 0;
+    u32 width = 0;
+    u32 height = 0;
     float offset_x = 0.0f;
     float offset_y = 0.0f;
     float advance_x = 0.0f;
@@ -35,29 +36,29 @@ namespace fxe::font {
   // can render four versions of every glyph offset by 0/¼/½/¾ px without
   // re-rendering on every pen jump.
   struct GlyphKey {
-    std::uint64_t face_id = 0;
-    std::uint32_t glyph_id = 0;
-    std::uint32_t pixel_size_q = 0; // pixel-height * 64
-    std::uint8_t subpixel_x = 0;    // 0..3
-    std::uint8_t hint = 1;          // 0 = no hint, 1 = light, 2 = full
+    u64 face_id = 0;
+    u32 glyph_id = 0;
+    u32 pixel_size_q = 0; // pixel-height * 64
+    u8 subpixel_x = 0;    // 0..3
+    u8 hint = 1;          // 0 = no hint, 1 = light, 2 = full
 
     friend constexpr bool operator==(const GlyphKey&, const GlyphKey&) noexcept = default;
   };
 
   struct GlyphKeyHash {
-    [[nodiscard]] std::size_t operator()(const GlyphKey& k) const noexcept {
+    [[nodiscard]] usize operator()(const GlyphKey& k) const noexcept {
       // 64-bit fnv-1a over the packed key. Cheap and good-enough.
-      const auto mix = [](std::uint64_t h, std::uint64_t v) -> std::uint64_t {
+      const auto mix = [](u64 h, u64 v) -> u64 {
         h ^= v;
         h *= 1099511628211ull;
         return h;
       };
-      std::uint64_t h = 14695981039346656037ull;
+      u64 h = 14695981039346656037ull;
       h = mix(h, k.face_id);
-      h = mix(h, static_cast<std::uint64_t>(k.glyph_id));
-      h = mix(h, static_cast<std::uint64_t>(k.pixel_size_q));
-      h = mix(h, static_cast<std::uint64_t>((std::uint32_t{k.subpixel_x} << 8) | k.hint));
-      return static_cast<std::size_t>(h);
+      h = mix(h, static_cast<u64>(k.glyph_id));
+      h = mix(h, static_cast<u64>(k.pixel_size_q));
+      h = mix(h, static_cast<u64>((u32{k.subpixel_x} << 8) | k.hint));
+      return static_cast<usize>(h);
     }
   };
 

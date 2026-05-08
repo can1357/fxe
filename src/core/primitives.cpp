@@ -1309,7 +1309,7 @@ namespace fxe::primitives {
       opts.features.reserve(s.features.size());
       for (const auto& f : s.features) {
         font::Feature ff;
-        for (std::size_t i = 0; i < 4; ++i)
+        for (usize i = 0; i < 4; ++i)
           ff.tag.chars[i] = f.first[i];
         ff.value = f.second;
         opts.features.push_back(ff);
@@ -1317,7 +1317,7 @@ namespace fxe::primitives {
       opts.variations.reserve(s.variations.size());
       for (const auto& v : s.variations) {
         font::Variation fv;
-        for (std::size_t i = 0; i < 4; ++i)
+        for (usize i = 0; i < 4; ++i)
           fv.tag.chars[i] = v.first[i];
         fv.value = v.second;
         opts.variations.push_back(fv);
@@ -1414,7 +1414,7 @@ namespace fxe::primitives {
       const char* line_start = it;
       while (it <= end) {
         if (it == end || *it == '\n') {
-          const std::string_view line{line_start, static_cast<std::size_t>(it - line_start)};
+          const std::string_view line{line_start, static_cast<usize>(it - line_start)};
           font::ShapeOptions opts = style_to_shape_opts(style);
           auto runs = shaper->shape(face, line, opts);
           math::vec2 line_pen_fb = pen_fb;
@@ -1462,7 +1462,7 @@ namespace fxe::primitives {
       u32 lines = 0;
       while (it <= end) {
         if (it == end || *it == '\n') {
-          const std::string_view line{line_start, static_cast<std::size_t>(it - line_start)};
+          const std::string_view line{line_start, static_cast<usize>(it - line_start)};
           font::ShapeOptions opts = style_to_shape_opts(style);
           auto runs = shaper->shape(face, line, opts);
           float line_advance = 0.0f;

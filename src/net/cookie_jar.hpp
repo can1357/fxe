@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,7 +24,7 @@ namespace fxe::net {
     std::string value;
     std::string domain;
     std::string path = "/";
-    std::int64_t expires = 0; // Unix seconds; 0 = in-memory session cookie.
+    i64 expires = 0; // Unix seconds; 0 = in-memory session cookie.
     bool secure = false;
     bool http_only = false;
     bool host_only = true;
@@ -47,7 +48,7 @@ namespace fxe::net {
     bool set(cookie c);
     bool set_from_header(std::string_view header, std::string_view url);
     void set(std::string domain, std::string name, std::string value, std::string path = "/",
-             std::int64_t expires = 0, bool secure = false, bool http_only = false);
+             i64 expires = 0, bool secure = false, bool http_only = false);
     [[nodiscard]] std::string pick_for_request(std::string_view url) const;
     [[nodiscard]] std::string get(std::string_view url) const {
       return pick_for_request(url);
@@ -72,7 +73,7 @@ namespace fxe::net {
     std::string persist_path_;
     std::vector<cookie> cookies_;
 
-    void purge_expired_locked(std::int64_t now);
+    void purge_expired_locked(i64 now);
     bool set_locked(cookie c, bool schedule_save);
     void schedule_save_locked();
     void save_now_snapshot(std::vector<cookie> snapshot, std::string path) const;

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 #include <iterator>
@@ -25,12 +26,12 @@ namespace fxe::js {
     };
 
     std::mutex g_mu;
-    std::unordered_map<uint32_t, listener> g_listeners;
-    std::atomic<uint32_t> g_next_id{1};
+    std::unordered_map<u32, listener> g_listeners;
+    std::atomic<u32> g_next_id{1};
     std::once_flag g_hooks_once;
     std::mutex g_inhibit_mu;
-    std::unordered_map<uint32_t, fxe::os::power_inhibit_handle> g_inhibits;
-    std::atomic<uint32_t> g_next_inhibit{1};
+    std::unordered_map<u32, fxe::os::power_inhibit_handle> g_inhibits;
+    std::atomic<u32> g_next_inhibit{1};
 
     Local<String> s(Isolate* iso, const char* value) {
       return String::NewFromUtf8(iso, value, NewStringType::kNormal).ToLocalChecked();
@@ -84,7 +85,7 @@ namespace fxe::js {
     }
 
     void dispatch_event(const char* event) {
-      std::vector<uint32_t> ids;
+      std::vector<u32> ids;
       {
         std::lock_guard<std::mutex> lock(g_mu);
         for (const auto& [id, entry] : g_listeners) {
@@ -93,7 +94,7 @@ namespace fxe::js {
         }
       }
 
-      for (uint32_t id : ids) {
+      for (u32 id : ids) {
         Isolate* iso = nullptr;
         {
           std::lock_guard<std::mutex> lock(g_mu);
@@ -140,7 +141,7 @@ namespace fxe::js {
 
     void dispose_listener(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      uint32_t id = 0;
+      u32 id = 0;
       if (!info.Data().IsEmpty())
         id = info.Data()->Uint32Value(iso->GetCurrentContext()).FromMaybe(0);
       if (id == 0)
@@ -156,7 +157,7 @@ namespace fxe::js {
 
     void dispose_sleep_inhibit(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      uint32_t id = 0;
+      u32 id = 0;
       if (!info.Data().IsEmpty())
         id = info.Data()->Uint32Value(iso->GetCurrentContext()).FromMaybe(0);
       if (id == 0)
@@ -188,7 +189,7 @@ namespace fxe::js {
       }
 
       ensure_hooks();
-      uint32_t id = g_next_id.fetch_add(1);
+      u32 id = g_next_id.fetch_add(1);
       listener entry;
       entry.event = std::move(event);
       entry.isolate = iso;
@@ -260,7 +261,7 @@ namespace fxe::js {
         (void)throw_error(iso, "App.power.inhibitSleep failed");
         return;
       }
-      uint32_t id = g_next_inhibit.fetch_add(1);
+      u32 id = g_next_inhibit.fetch_add(1);
       {
         std::lock_guard<std::mutex> lock(g_inhibit_mu);
         g_inhibits.emplace(id, handle);

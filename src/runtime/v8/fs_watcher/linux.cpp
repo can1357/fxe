@@ -1,5 +1,6 @@
 #include "runtime/v8/fs_watcher.hpp"
 
+#include <fxe/types.hpp>
 #include <utility>
 
 #if defined(__linux__)
@@ -29,10 +30,10 @@ namespace fxe::runtime {
   namespace {
     namespace fs = std::filesystem;
 
-    constexpr std::size_t max_recursive_watches = 4096;
-    constexpr std::uint32_t directory_watch_mask = IN_CREATE | IN_DELETE | IN_MODIFY |
-                                                   IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB |
-                                                   IN_DELETE_SELF | IN_MOVE_SELF | IN_ONLYDIR;
+    constexpr usize max_recursive_watches = 4096;
+    constexpr u32 directory_watch_mask = IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM |
+                                         IN_MOVED_TO | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF |
+                                         IN_ONLYDIR;
 
     fs::path absolute_path(const std::string& path) {
       std::error_code ec;
@@ -188,7 +189,7 @@ namespace fxe::runtime {
       void wake_thread() const {
         if (wake_pipe_[1] < 0)
           return;
-        const std::uint8_t byte = 1;
+        const u8 byte = 1;
         (void)::write(wake_pipe_[1], &byte, sizeof(byte));
       }
 
@@ -259,7 +260,7 @@ namespace fxe::runtime {
         watches_.erase(it);
       }
 
-      static fs_watch_event::kind classify_event(std::uint32_t mask) {
+      static fs_watch_event::kind classify_event(u32 mask) {
         if ((mask & (IN_MODIFY | IN_ATTRIB)) != 0)
           return fs_watch_event::kind::changed;
         if ((mask & IN_CREATE) != 0)
@@ -347,7 +348,7 @@ namespace fxe::runtime {
       }
 
       void drain_wake_pipe() const {
-        std::array<std::uint8_t, 64> buffer{};
+        std::array<u8, 64> buffer{};
         while (wake_pipe_[0] >= 0) {
           const ssize_t n = ::read(wake_pipe_[0], buffer.data(), buffer.size());
           if (n < 0 && errno == EINTR)

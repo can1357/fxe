@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <fxe/types.hpp>
 #include <string>
 #include <v8.h>
 #include <vector>

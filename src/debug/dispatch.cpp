@@ -10,7 +10,7 @@
 // JSON ID/handle warning: this dispatch layer uses nlohmann::ordered_json at
 // protocol boundaries, but several upstream IDs originate in JavaScript/V8
 // where numeric values have already passed through IEEE-754 double precision.
-// Never read ID/handle fields with json::get<int64_t>() directly. Use
+// Never read ID/handle fields with json::get<i64>() directly. Use
 // parse_int64_safe() at the boundary so fractional, out-of-range, or lossy
 // numeric IDs fail with invalid_params instead of silently aliasing handles.
 
@@ -34,6 +34,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <utility>
 
 namespace fxe::debug {
@@ -48,10 +49,10 @@ namespace fxe::debug {
       throw dispatch_error{err_code::invalid_params, std::move(msg), ""};
     }
 
-    std::int64_t parse_int64_safe(const json& j, std::string* err) {
+    i64 parse_int64_safe(const json& j, std::string* err) {
       if (err)
         err->clear();
-      auto fail = [err](std::string msg) -> std::int64_t {
+      auto fail = [err](std::string msg) -> i64 {
         if (err)
           *err = std::move(msg);
         return 0;
@@ -70,7 +71,7 @@ namespace fxe::debug {
       if (d < kMinInt64 || d >= kMaxInt64Exclusive)
         return fail("is outside int64 range");
 
-      auto out = static_cast<std::int64_t>(d);
+      auto out = static_cast<i64>(d);
       if (static_cast<double>(out) != d)
         return fail("loses precision when converted to int64");
 
@@ -81,14 +82,14 @@ namespace fxe::debug {
       return out;
     }
 
-    std::size_t parse_window_id(const json& j) {
+    usize parse_window_id(const json& j) {
       std::string err;
       auto id = parse_int64_safe(j, &err);
       if (!err.empty())
         invalid_params("windowId " + err);
       if (id < 0)
         invalid_params("windowId must be >= 0");
-      return static_cast<std::size_t>(id);
+      return static_cast<usize>(id);
     }
 
     [[noreturn]] void no_host() {
@@ -113,7 +114,7 @@ namespace fxe::debug {
       throw dispatch_error{err_code::detached, "window not attached", ""};
     }
 
-    [[noreturn]] void window_not_found(std::size_t idx) {
+    [[noreturn]] void window_not_found(usize idx) {
       throw dispatch_error{err_code::detached, "window_not_found: index " + std::to_string(idx),
                            "window_not_found"};
     }
@@ -460,7 +461,7 @@ namespace fxe::debug {
       json::array_t out;
       if (cx.host) {
         auto wins = cx.host->windows();
-        for (std::size_t i = 0; i < wins.size(); ++i) {
+        for (usize i = 0; i < wins.size(); ++i) {
           auto sz = wins[i]->framebuffer_size();
           json v{json::object()};
           v["id"] = static_cast<double>(i);

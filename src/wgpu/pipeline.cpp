@@ -1,4 +1,5 @@
 #include "pipeline.hpp"
+#include <fxe/types.hpp>
 
 #if FXE_HAS_WGPU
 
@@ -18,10 +19,10 @@
 
 namespace fxe {
   namespace {
-    constexpr uint64_t kInitialCustomBufferBytes = 4096;
-    constexpr uint64_t kInitialUniformBytes = 256;
+    constexpr u64 kInitialCustomBufferBytes = 4096;
+    constexpr u64 kInitialUniformBytes = 256;
 
-    template <typename T> void hash_combine(size_t& seed, const T& value) noexcept {
+    template <typename T> void hash_combine(usize& seed, const T& value) noexcept {
       seed ^= std::hash<T>{}(value) + 0x9e3779b97f4a7c15ull + (seed << 6) + (seed >> 2);
     }
 
@@ -29,27 +30,27 @@ namespace fxe {
       return static_cast<std::underlying_type_t<E>>(value);
     }
 
-    [[nodiscard]] uint64_t fnv1a(const void* data, size_t bytes) noexcept {
-      const auto* p = static_cast<const uint8_t*>(data);
-      uint64_t h = 1469598103934665603ull;
-      for (size_t i = 0; i != bytes; ++i) {
+    [[nodiscard]] u64 fnv1a(const void* data, usize bytes) noexcept {
+      const auto* p = static_cast<const u8*>(data);
+      u64 h = 1469598103934665603ull;
+      for (usize i = 0; i != bytes; ++i) {
         h ^= p[i];
         h *= 1099511628211ull;
       }
       return h;
     }
 
-    [[nodiscard]] uint64_t hash_string(const std::string& s) noexcept {
+    [[nodiscard]] u64 hash_string(const std::string& s) noexcept {
       return fnv1a(s.data(), s.size());
     }
 
-    template <typename T> void hash_value(uint64_t& h, const T& value) noexcept {
-      const uint64_t part = fnv1a(&value, sizeof(value));
+    template <typename T> void hash_value(u64& h, const T& value) noexcept {
+      const u64 part = fnv1a(&value, sizeof(value));
       h ^= part;
       h *= 1099511628211ull;
     }
 
-    [[nodiscard]] uint64_t align_to(uint64_t value, uint64_t alignment) noexcept {
+    [[nodiscard]] u64 align_to(u64 value, u64 alignment) noexcept {
       return (value + alignment - 1) & ~(alignment - 1);
     }
 
@@ -122,11 +123,11 @@ namespace fxe {
 
     struct wgsl_resource {
       enum class kind { uniform_buffer, texture, sampler } type = kind::uniform_buffer;
-      uint32_t group = 0;
-      uint32_t binding = 0;
+      u32 group = 0;
+      u32 binding = 0;
     };
 
-    [[nodiscard]] bool parse_uint_after(const std::string& s, size_t pos, uint32_t& out) noexcept {
+    [[nodiscard]] bool parse_uint_after(const std::string& s, usize pos, u32& out) noexcept {
       while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t'))
         ++pos;
       if (pos >= s.size() || s[pos] != '(')
@@ -134,11 +135,11 @@ namespace fxe {
       ++pos;
       while (pos < s.size() && (s[pos] == ' ' || s[pos] == '\t'))
         ++pos;
-      uint32_t value = 0;
+      u32 value = 0;
       bool any = false;
       while (pos < s.size() && s[pos] >= '0' && s[pos] <= '9') {
         any = true;
-        value = value * 10u + static_cast<uint32_t>(s[pos] - '0');
+        value = value * 10u + static_cast<u32>(s[pos] - '0');
         ++pos;
       }
       out = value;
@@ -147,21 +148,21 @@ namespace fxe {
 
     [[nodiscard]] std::vector<wgsl_resource> reflect_wgsl_resources(const std::string& wgsl) {
       std::vector<wgsl_resource> resources;
-      size_t pos = 0;
+      usize pos = 0;
       while ((pos = wgsl.find("@group", pos)) != std::string::npos) {
-        uint32_t group = 0;
+        u32 group = 0;
         if (!parse_uint_after(wgsl, pos + 6, group)) {
           pos += 6;
           continue;
         }
-        const size_t stmt_end = wgsl.find(';', pos);
-        const size_t limit = stmt_end == std::string::npos ? wgsl.size() : stmt_end;
-        const size_t binding_pos = wgsl.find("@binding", pos);
+        const usize stmt_end = wgsl.find(';', pos);
+        const usize limit = stmt_end == std::string::npos ? wgsl.size() : stmt_end;
+        const usize binding_pos = wgsl.find("@binding", pos);
         if (binding_pos == std::string::npos || binding_pos > limit) {
           pos += 6;
           continue;
         }
-        uint32_t binding = 0;
+        u32 binding = 0;
         if (!parse_uint_after(wgsl, binding_pos + 8, binding)) {
           pos = binding_pos + 8;
           continue;
@@ -193,15 +194,14 @@ namespace fxe {
       return resources;
     }
 
-    [[nodiscard]] bool uses_group(const std::vector<wgsl_resource>& resources,
-                                  uint32_t group) noexcept {
+    [[nodiscard]] bool uses_group(const std::vector<wgsl_resource>& resources, u32 group) noexcept {
       return std::any_of(resources.begin(), resources.end(),
                          [group](const wgsl_resource& res) { return res.group == group; });
     }
 
-    [[nodiscard]] uint64_t layout_hash_for(const pipeline_desc& desc,
-                                           const std::vector<wgsl_resource>& resources) noexcept {
-      uint64_t h = hash_string(desc.vs_entry);
+    [[nodiscard]] u64 layout_hash_for(const pipeline_desc& desc,
+                                      const std::vector<wgsl_resource>& resources) noexcept {
+      u64 h = hash_string(desc.vs_entry);
       h ^= hash_string(desc.fs_entry) + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
       hash_value(h, desc.vertex_stride);
       hash_value(h, desc.depth_test);
@@ -220,7 +220,7 @@ namespace fxe {
       return h;
     }
 
-    [[nodiscard]] wgpu::Buffer create_buffer(wgpu::Device& device, uint64_t size,
+    [[nodiscard]] wgpu::Buffer create_buffer(wgpu::Device& device, u64 size,
                                              wgpu::BufferUsage usage, const char* label) {
       wgpu::BufferDescriptor desc{};
       desc.label = label;
@@ -248,7 +248,7 @@ namespace fxe {
         rebuild_user_bind_group();
       }
 
-      void update_uniforms(const void* data, size_t bytes) override {
+      void update_uniforms(const void* data, usize bytes) override {
         uniform_bytes_.resize(bytes);
         if (bytes && data)
           std::memcpy(uniform_bytes_.data(), data, bytes);
@@ -258,27 +258,27 @@ namespace fxe {
         rebuild_user_bind_group();
       }
 
-      void bind_texture(uint32_t binding, texture_id tex) override {
+      void bind_texture(u32 binding, texture_id tex) override {
         if (binding >= bound_textures_.size())
-          bound_textures_.resize(static_cast<size_t>(binding) + 1, null_texture);
+          bound_textures_.resize(static_cast<usize>(binding) + 1, null_texture);
         bound_textures_[binding] = tex;
         rebuild_user_bind_group();
       }
 
-      void draw(command_buffer& cb, const float* vertices, size_t vertex_count,
-                const uint32_t* indices, size_t index_count, const float matrix[16]) override {
+      void draw(command_buffer& cb, const float* vertices, usize vertex_count, const u32* indices,
+                usize index_count, const float matrix[16]) override {
         (void)matrix;
         if (dynamic_cast<renderer*>(&cb) != owner_) {
           throw std::runtime_error("Pipeline.draw requires the Dawn renderer used at construction");
         }
-        const uint64_t vertex_bytes = static_cast<uint64_t>(vertex_count) * desc_.vertex_stride;
+        const u64 vertex_bytes = static_cast<u64>(vertex_count) * desc_.vertex_stride;
         ensure_gpu_buffer(vertex_buffer_, vertex_capacity_, vertex_bytes,
                           wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
                           "fxe-custom-vbuf");
         if (vertex_bytes && vertices)
           access_->queue().WriteBuffer(vertex_buffer_, 0, vertices, vertex_bytes);
 
-        const uint64_t index_bytes = static_cast<uint64_t>(index_count) * sizeof(uint32_t);
+        const u64 index_bytes = static_cast<u64>(index_count) * sizeof(u32);
         ensure_gpu_buffer(index_buffer_, index_capacity_, index_bytes,
                           wgpu::BufferUsage::Index | wgpu::BufferUsage::CopyDst, "fxe-custom-ibuf");
         if (index_bytes && indices)
@@ -292,8 +292,8 @@ namespace fxe {
             uses_renderer_bind_group_ ? access_->renderer_bind_group() : wgpu::BindGroup{};
         draw.user_bind_group = uses_user_bind_group_ ? user_bind_group_ : wgpu::BindGroup{};
         draw.vertex_bytes = vertex_bytes;
-        draw.vertex_count = static_cast<uint32_t>(vertex_count);
-        draw.index_count = static_cast<uint32_t>(index_count);
+        draw.vertex_count = static_cast<u32>(vertex_count);
+        draw.index_count = static_cast<u32>(index_count);
         draw.uses_renderer_bind_group = uses_renderer_bind_group_;
         draw.uses_user_bind_group = uses_user_bind_group_ && static_cast<bool>(user_bind_group_);
         access_->enqueue_custom_draw(std::move(draw));
@@ -384,8 +384,8 @@ namespace fxe {
                                                            attrs, desc_.vertex_stride);
       }
 
-      void ensure_uniform_buffer(size_t required) {
-        const uint64_t needed = std::max<uint64_t>(kInitialUniformBytes, align_to(required, 16));
+      void ensure_uniform_buffer(usize required) {
+        const u64 needed = std::max<u64>(kInitialUniformBytes, align_to(required, 16));
         if (uniform_buffer_ && uniform_capacity_ >= needed)
           return;
         uniform_buffer_ = create_buffer(access_->device(), needed,
@@ -429,12 +429,12 @@ namespace fxe {
         user_bind_group_ = access_->device().CreateBindGroup(&desc);
       }
 
-      void ensure_gpu_buffer(wgpu::Buffer& buffer, uint64_t& capacity, uint64_t required,
+      void ensure_gpu_buffer(wgpu::Buffer& buffer, u64& capacity, u64 required,
                              wgpu::BufferUsage usage, const char* label) {
-        const uint64_t needed = std::max<uint64_t>(required, kInitialCustomBufferBytes);
+        const u64 needed = std::max<u64>(required, kInitialCustomBufferBytes);
         if (buffer && capacity >= needed)
           return;
-        uint64_t next = capacity ? capacity : kInitialCustomBufferBytes;
+        u64 next = capacity ? capacity : kInitialCustomBufferBytes;
         while (next < needed)
           next *= 2;
         buffer = create_buffer(access_->device(), next, usage, label);
@@ -454,18 +454,18 @@ namespace fxe {
       wgpu::BindGroup user_bind_group_;
       wgpu::RenderPipeline render_pipeline_;
       wgpu::Buffer uniform_buffer_;
-      uint64_t uniform_capacity_ = 0;
-      std::vector<uint8_t> uniform_bytes_;
+      u64 uniform_capacity_ = 0;
+      std::vector<u8> uniform_bytes_;
       std::vector<texture_id> bound_textures_;
       wgpu::Buffer vertex_buffer_;
       wgpu::Buffer index_buffer_;
-      uint64_t vertex_capacity_ = 0;
-      uint64_t index_capacity_ = 0;
+      u64 vertex_capacity_ = 0;
+      u64 index_capacity_ = 0;
     };
   } // namespace
 
-  size_t pipeline_key_hash::operator()(const pipeline_key& key) const noexcept {
-    size_t seed = 0;
+  usize pipeline_key_hash::operator()(const pipeline_key& key) const noexcept {
+    usize seed = 0;
     hash_combine(seed, key.vs_entry);
     hash_combine(seed, key.fs_entry);
     hash_combine(seed, enum_value(key.color_format));
@@ -476,8 +476,8 @@ namespace fxe {
     return seed;
   }
 
-  size_t custom_pipeline_key_hash::operator()(const custom_pipeline_key& key) const noexcept {
-    size_t seed = 0;
+  usize custom_pipeline_key_hash::operator()(const custom_pipeline_key& key) const noexcept {
+    usize seed = 0;
     hash_combine(seed, key.wgsl_hash);
     hash_combine(seed, key.layout_hash);
     hash_combine(seed, key.vertex_stride);
@@ -567,7 +567,7 @@ namespace fxe {
   wgpu::RenderPipeline pipeline_cache::acquire_custom(
       const custom_pipeline_key& key, wgpu::Device device, wgpu::PipelineLayout layout,
       wgpu::ShaderModule shader, const std::string& vs_entry, const std::string& fs_entry,
-      const std::vector<wgpu::VertexAttribute>& attrs, uint64_t vertex_stride) {
+      const std::vector<wgpu::VertexAttribute>& attrs, u64 vertex_stride) {
     if (auto it = custom_pipelines_.find(key); it != custom_pipelines_.end())
       return it->second;
 

@@ -6,6 +6,7 @@
 
 #include <fontconfig/fontconfig.h>
 
+#include <fxe/types.hpp>
 #include <memory>
 #include <string>
 #include <vector>
@@ -63,7 +64,7 @@ namespace fxe::font {
         FcResult res = FcResultMatch;
         FcFontSet* fs = FcFontSort(nullptr, pat, FcTrue, nullptr, &res);
         if (fs) {
-          out.reserve(static_cast<std::size_t>(fs->nfont));
+          out.reserve(static_cast<usize>(fs->nfont));
           for (int i = 0; i < fs->nfont; ++i) {
             FcPattern* m = fs->fonts[i];
             FcChar8* path = nullptr;
@@ -78,7 +79,7 @@ namespace fxe::font {
               r.path = std::string{reinterpret_cast<const char*>(path)};
               int idx = 0;
               if (FcPatternGetInteger(m, FC_INDEX, 0, &idx) == FcResultMatch) {
-                r.face_index = static_cast<std::uint32_t>(idx);
+                r.face_index = static_cast<u32>(idx);
               }
               out.push_back(std::move(r));
             }

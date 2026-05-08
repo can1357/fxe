@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <fxe/types.hpp>
 #include <string>
 #include <utility>
 #include <vector>
@@ -81,7 +82,7 @@ namespace fxe::net {
   };
 
   using http_callback = std::function<void(http_response)>;
-  using http_request_id = std::uint64_t;
+  using http_request_id = u64;
 
   // Process-wide singleton.
   class http_client {

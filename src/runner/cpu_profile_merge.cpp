@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <fxe/types.hpp>
 #include <unordered_map>
 
 namespace fxe::runner {
@@ -19,22 +20,22 @@ namespace fxe::runner {
       if (it->is_number_integer())
         return it->get<int>();
       if (it->is_number_unsigned())
-        return static_cast<int>(it->get<std::uint64_t>());
+        return static_cast<int>(it->get<u64>());
       if (it->is_number_float())
         return static_cast<int>(it->get<double>());
       return defv;
     }
 
-    std::int64_t read_i64(const json& j, const char* key, std::int64_t defv = 0) {
+    i64 read_i64(const json& j, const char* key, i64 defv = 0) {
       auto it = j.find(key);
       if (it == j.end() || it->is_null())
         return defv;
       if (it->is_number_integer())
-        return it->get<std::int64_t>();
+        return it->get<i64>();
       if (it->is_number_unsigned())
-        return static_cast<std::int64_t>(it->get<std::uint64_t>());
+        return static_cast<i64>(it->get<u64>());
       if (it->is_number_float())
-        return static_cast<std::int64_t>(it->get<double>());
+        return static_cast<i64>(it->get<double>());
       return defv;
     }
 
@@ -54,7 +55,7 @@ namespace fxe::runner {
       std::string out;
       out.reserve(src.size());
       bool in_string = false;
-      for (std::size_t i = 0; i < src.size(); ++i) {
+      for (usize i = 0; i < src.size(); ++i) {
         char c = src[i];
         out.push_back(c);
         if (c == '"') {
@@ -110,7 +111,7 @@ namespace fxe::runner {
           n.frame.line_number = read_int(*it, "lineNumber", -1);
           n.frame.column_number = read_int(*it, "columnNumber", -1);
         }
-        n.hit_count = static_cast<std::uint32_t>(read_int(jn, "hitCount"));
+        n.hit_count = static_cast<u32>(read_int(jn, "hitCount"));
         if (auto cit = jn.find("children"); cit != jn.end() && cit->is_array()) {
           n.children.reserve(cit->size());
           for (const auto& c : *cit)
@@ -127,22 +128,22 @@ namespace fxe::runner {
       if (auto it = j.find("timeDeltas"); it != j.end() && it->is_array()) {
         out.time_deltas.reserve(it->size());
         for (const auto& d : *it)
-          out.time_deltas.push_back(d.get<std::int64_t>());
+          out.time_deltas.push_back(d.get<i64>());
       }
       out.start_time = read_i64(j, "startTime");
       out.end_time = read_i64(j, "endTime");
       // V8 emits per-sample timeDeltas in microseconds; their mean is the
       // effective sampling period. Fall back to V8's default 1000 µs.
       if (!out.time_deltas.empty()) {
-        std::int64_t total = 0;
-        std::size_t counted = 0;
+        i64 total = 0;
+        usize counted = 0;
         for (auto d : out.time_deltas) {
           if (d > 0) {
             total += d;
             ++counted;
           }
         }
-        out.sample_period_us = counted ? (total / static_cast<std::int64_t>(counted)) : 1000;
+        out.sample_period_us = counted ? (total / static_cast<i64>(counted)) : 1000;
       } else {
         out.sample_period_us = 1000;
       }
@@ -193,14 +194,14 @@ namespace fxe::runner {
       }
       // src.nodes[0] is conventionally its root: hook it under the header.
       if (!src.nodes.empty())
-        out.nodes[static_cast<std::size_t>(subtree_root_id - 1)].children.push_back(
+        out.nodes[static_cast<usize>(subtree_root_id - 1)].children.push_back(
             remap(src.nodes.front().id));
 
       // Copy samples; replace per-sample deltas with a flat sample_period
       // so self/total math doesn't get distorted by inter-sample sleeps,
       // and so two profiles whose absolute clocks live on different
       // epochs (V8 vs CLOCK_MONOTONIC) can be concatenated cleanly.
-      const std::int64_t period = src.sample_period_us > 0 ? src.sample_period_us : 1000;
+      const i64 period = src.sample_period_us > 0 ? src.sample_period_us : 1000;
       out.samples.reserve(out.samples.size() + src.samples.size());
       out.time_deltas.reserve(out.time_deltas.size() + src.samples.size());
       for (int s : src.samples) {
@@ -224,7 +225,7 @@ namespace fxe::runner {
     out.end_time = 0;
     for (auto d : out.time_deltas)
       out.end_time += d;
-    out.sample_period_us = std::max<std::int64_t>(js.sample_period_us, native.sample_period_us);
+    out.sample_period_us = std::max<i64>(js.sample_period_us, native.sample_period_us);
     return out;
   }
 
@@ -273,11 +274,11 @@ namespace fxe::runner {
     struct agg {
       std::string function_name;
       std::string url;
-      std::int64_t self_us = 0;
-      std::int64_t total_us = 0;
+      i64 self_us = 0;
+      i64 total_us = 0;
     };
 
-    std::string format_us(std::int64_t us) {
+    std::string format_us(i64 us) {
       char buf[64];
       if (us >= 1'000'000)
         std::snprintf(buf, sizeof(buf), "%.2f s", static_cast<double>(us) / 1e6);
@@ -288,7 +289,7 @@ namespace fxe::runner {
       return buf;
     }
 
-    std::string format_pct(std::int64_t num, std::int64_t den) {
+    std::string format_pct(i64 num, i64 den) {
       if (den <= 0)
         return "0.0%";
       char buf[16];
@@ -327,30 +328,30 @@ namespace fxe::runner {
     // We treat each sample as accounting for one interval of self time on
     // its leaf node. timeDeltas[i] gives the gap *between* sample i and
     // sample i-1 in CDP convention; we use it directly per sample.
-    std::vector<std::int64_t> self_us_by_node(p.nodes.size(), 0);
+    std::vector<i64> self_us_by_node(p.nodes.size(), 0);
     if (!p.samples.empty()) {
       // Mean gap, used as fallback for samples with delta=0 or negative.
-      std::int64_t total = 0;
-      std::size_t counted = 0;
+      i64 total = 0;
+      usize counted = 0;
       for (auto d : p.time_deltas) {
         if (d > 0) {
           total += d;
           ++counted;
         }
       }
-      std::int64_t mean = counted ? total / static_cast<std::int64_t>(counted) : 1000;
+      i64 mean = counted ? total / static_cast<i64>(counted) : 1000;
 
-      for (std::size_t i = 0; i < p.samples.size(); ++i) {
+      for (usize i = 0; i < p.samples.size(); ++i) {
         int id = p.samples[i];
-        std::int64_t d = (i < p.time_deltas.size()) ? p.time_deltas[i] : mean;
+        i64 d = (i < p.time_deltas.size()) ? p.time_deltas[i] : mean;
         if (d <= 0)
           d = mean;
-        std::size_t idx = static_cast<std::size_t>(id - 1);
+        usize idx = static_cast<usize>(id - 1);
         if (idx < self_us_by_node.size())
           self_us_by_node[idx] += d;
       }
     }
-    std::int64_t total_us = 0;
+    i64 total_us = 0;
     for (auto v : self_us_by_node)
       total_us += v;
 
@@ -358,7 +359,7 @@ namespace fxe::runner {
     // post-order traversal. nodes are not guaranteed topologically sorted,
     // but the children-graph is a DAG (tree); use iterative DFS from the
     // root (id 1).
-    std::vector<std::int64_t> total_us_by_node(p.nodes.size(), 0);
+    std::vector<i64> total_us_by_node(p.nodes.size(), 0);
     std::vector<int> order;
     order.reserve(p.nodes.size());
     {
@@ -373,7 +374,7 @@ namespace fxe::runner {
       while (!wk.empty()) {
         auto [id, done] = wk.back();
         wk.pop_back();
-        std::size_t idx = static_cast<std::size_t>(id - 1);
+        usize idx = static_cast<usize>(id - 1);
         if (idx >= p.nodes.size())
           continue;
         if (done) {
@@ -388,10 +389,10 @@ namespace fxe::runner {
           wk.push_back({c, false});
       }
       for (int id : order) {
-        std::size_t idx = static_cast<std::size_t>(id - 1);
-        std::int64_t t = self_us_by_node[idx];
+        usize idx = static_cast<usize>(id - 1);
+        i64 t = self_us_by_node[idx];
         for (int c : p.nodes[idx].children) {
-          std::size_t cidx = static_cast<std::size_t>(c - 1);
+          usize cidx = static_cast<usize>(c - 1);
           if (cidx < total_us_by_node.size())
             t += total_us_by_node[cidx];
         }
@@ -408,13 +409,13 @@ namespace fxe::runner {
       }
     };
     struct key_hash {
-      std::size_t operator()(const key_t& k) const noexcept {
+      usize operator()(const key_t& k) const noexcept {
         return std::hash<std::string>{}(k.fn) ^ (std::hash<std::string>{}(k.url) << 1);
       }
     };
     std::unordered_map<key_t, agg, key_hash> by_fn;
     by_fn.reserve(p.nodes.size());
-    for (std::size_t i = 0; i < p.nodes.size(); ++i) {
+    for (usize i = 0; i < p.nodes.size(); ++i) {
       const auto& n = p.nodes[i];
       key_t k{n.frame.function_name, n.frame.url};
       auto& a = by_fn[k];
@@ -436,26 +437,26 @@ namespace fxe::runner {
     // synthetic frames past 100% of accounted time.
     {
       std::vector<int> parent(p.nodes.size(), 0);
-      for (std::size_t i = 0; i < p.nodes.size(); ++i)
+      for (usize i = 0; i < p.nodes.size(); ++i)
         for (int c : p.nodes[i].children)
-          if (static_cast<std::size_t>(c - 1) < parent.size())
-            parent[static_cast<std::size_t>(c - 1)] = p.nodes[i].id;
+          if (static_cast<usize>(c - 1) < parent.size())
+            parent[static_cast<usize>(c - 1)] = p.nodes[i].id;
 
       std::unordered_map<key_t, char, key_hash> seen;
       seen.reserve(64);
-      for (std::size_t si = 0; si < p.samples.size(); ++si) {
+      for (usize si = 0; si < p.samples.size(); ++si) {
         int leaf = p.samples[si];
-        std::int64_t period = (si < p.time_deltas.size() && p.time_deltas[si] > 0)
-                                  ? p.time_deltas[si]
-                                  : (p.sample_period_us > 0 ? p.sample_period_us : 1000);
+        i64 period = (si < p.time_deltas.size() && p.time_deltas[si] > 0)
+                         ? p.time_deltas[si]
+                         : (p.sample_period_us > 0 ? p.sample_period_us : 1000);
         seen.clear();
         int cur = leaf;
-        while (cur > 0 && static_cast<std::size_t>(cur - 1) < p.nodes.size()) {
-          const auto& n = p.nodes[static_cast<std::size_t>(cur - 1)];
+        while (cur > 0 && static_cast<usize>(cur - 1) < p.nodes.size()) {
+          const auto& n = p.nodes[static_cast<usize>(cur - 1)];
           key_t k{n.frame.function_name, n.frame.url};
           if (seen.emplace(k, 1).second)
             by_fn[k].total_us += period;
-          int pid = parent[static_cast<std::size_t>(cur - 1)];
+          int pid = parent[static_cast<usize>(cur - 1)];
           if (pid == cur)
             break;
           cur = pid;

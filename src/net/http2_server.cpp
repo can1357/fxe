@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <fxe/types.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -42,13 +43,13 @@ namespace fxe::net {
     }
 
     nghttp2_nv make_nv(const std::string& name, const std::string& value) {
-      return nghttp2_nv{reinterpret_cast<uint8_t*>(const_cast<char*>(name.data())),
-                        reinterpret_cast<uint8_t*>(const_cast<char*>(value.data())), name.size(),
+      return nghttp2_nv{reinterpret_cast<u8*>(const_cast<char*>(name.data())),
+                        reinterpret_cast<u8*>(const_cast<char*>(value.data())), name.size(),
                         value.size(), NGHTTP2_NV_FLAG_NONE};
     }
 
-    void append_setting(std::vector<nghttp2_settings_entry>& entries, int32_t id,
-                        const std::optional<uint32_t>& value) {
+    void append_setting(std::vector<nghttp2_settings_entry>& entries, i32 id,
+                        const std::optional<u32>& value) {
       if (value)
         entries.push_back(nghttp2_settings_entry{id, *value});
     }
@@ -80,7 +81,7 @@ namespace fxe::net {
 
     struct body_state {
       std::string body;
-      size_t offset = 0;
+      usize offset = 0;
     };
 
     class http2_server_impl final : public http2_server {
@@ -97,7 +98,7 @@ namespace fxe::net {
         return true;
       }
 
-      uint16_t local_port() const override {
+      u16 local_port() const override {
         clear_last_error();
         return listener_ ? listener_->local_port() : 0;
       }
@@ -113,7 +114,7 @@ namespace fxe::net {
         return request;
       }
 
-      bool respond(uint64_t request_id, const http2_response& response, std::string& err) override {
+      bool respond(u64 request_id, const http2_response& response, std::string& err) override {
         clear_last_error();
         std::shared_ptr<response_slot> slot;
         {
@@ -234,7 +235,7 @@ namespace fxe::net {
         }
 
       private:
-        static ssize_t send_callback(nghttp2_session*, const uint8_t* data, size_t length, int,
+        static ssize_t send_callback(nghttp2_session*, const u8* data, usize length, int,
                                      void* user_data) {
           auto* self = static_cast<session_worker*>(user_data);
           const ssize_t written = self->stream_->write(data, length);
@@ -243,7 +244,7 @@ namespace fxe::net {
           return written;
         }
 
-        static ssize_t recv_callback(nghttp2_session*, uint8_t* data, size_t length, int,
+        static ssize_t recv_callback(nghttp2_session*, u8* data, usize length, int,
                                      void* user_data) {
           auto* self = static_cast<session_worker*>(user_data);
           const ssize_t got = self->stream_->read(data, length);
@@ -263,9 +264,8 @@ namespace fxe::net {
           return 0;
         }
 
-        static int on_header(nghttp2_session*, const nghttp2_frame* frame, const uint8_t* name,
-                             size_t namelen, const uint8_t* value, size_t valuelen, uint8_t,
-                             void* user_data) {
+        static int on_header(nghttp2_session*, const nghttp2_frame* frame, const u8* name,
+                             usize namelen, const u8* value, usize valuelen, u8, void* user_data) {
           if (frame->hd.type != NGHTTP2_HEADERS || frame->headers.cat != NGHTTP2_HCAT_REQUEST)
             return 0;
           auto* self = static_cast<session_worker*>(user_data);
@@ -281,8 +281,8 @@ namespace fxe::net {
           return 0;
         }
 
-        static int on_data_chunk(nghttp2_session*, uint8_t, int32_t stream_id, const uint8_t* data,
-                                 size_t len, void* user_data) {
+        static int on_data_chunk(nghttp2_session*, u8, i32 stream_id, const u8* data, usize len,
+                                 void* user_data) {
           auto* self = static_cast<session_worker*>(user_data);
           self->requests_[stream_id].body.append(reinterpret_cast<const char*>(data), len);
           return 0;
@@ -303,16 +303,15 @@ namespace fxe::net {
                      : NGHTTP2_ERR_CALLBACK_FAILURE;
         }
 
-        static int on_stream_close(nghttp2_session*, int32_t stream_id, uint32_t, void* user_data) {
+        static int on_stream_close(nghttp2_session*, i32 stream_id, u32, void* user_data) {
           auto* self = static_cast<session_worker*>(user_data);
           self->requests_.erase(stream_id);
           self->response_bodies_.erase(stream_id);
           return 0;
         }
 
-        static ssize_t response_body_read(nghttp2_session*, int32_t stream_id, uint8_t* buf,
-                                          size_t length, uint32_t* data_flags, nghttp2_data_source*,
-                                          void* user_data) {
+        static ssize_t response_body_read(nghttp2_session*, i32 stream_id, u8* buf, usize length,
+                                          u32* data_flags, nghttp2_data_source*, void* user_data) {
           auto* self = static_cast<session_worker*>(user_data);
           auto it = self->response_bodies_.find(stream_id);
           if (it == self->response_bodies_.end()) {
@@ -320,8 +319,8 @@ namespace fxe::net {
             return 0;
           }
           auto& body = it->second;
-          const size_t remaining = body.body.size() - body.offset;
-          const size_t n = std::min(length, remaining);
+          const usize remaining = body.body.size() - body.offset;
+          const usize n = std::min(length, remaining);
           if (n > 0) {
             std::memcpy(buf, body.body.data() + body.offset, n);
             body.offset += n;
@@ -410,9 +409,9 @@ namespace fxe::net {
         std::unique_ptr<tls_client> stream_;
         nghttp2_session_callbacks* callbacks_ = nullptr;
         nghttp2_session* session_ = nullptr;
-        std::map<int32_t, http2_incoming_request> requests_;
-        std::map<int32_t, body_state> response_bodies_;
-        int32_t current_stream_id_ = 0;
+        std::map<i32, http2_incoming_request> requests_;
+        std::map<i32, body_state> response_bodies_;
+        i32 current_stream_id_ = 0;
       };
 
       void accept_loop() {
@@ -438,8 +437,8 @@ namespace fxe::net {
       std::atomic<bool> closed_{false};
       mutable std::mutex mutex_;
       std::deque<queued_request> queue_;
-      std::map<uint64_t, std::shared_ptr<response_slot>> slots_;
-      uint64_t next_request_id_ = 1;
+      std::map<u64, std::shared_ptr<response_slot>> slots_;
+      u64 next_request_id_ = 1;
       std::thread accept_thread_;
       std::vector<std::thread> workers_;
       mutable std::string last_error_;

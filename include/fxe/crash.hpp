@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <fxe/types.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,13 +35,13 @@ namespace fxe::os {
     std::string next_dump_path(const char* extension);
     void record_last_dump_path(std::string path);
 
-    bool write_dump_bytes(const char* extension, const void* data, std::size_t size);
+    bool write_dump_bytes(const char* extension, const void* data, usize size);
     bool write_dump_text(const char* extension, std::string_view text);
     bool upload_last_dump_if_requested(const std::string& path);
     std::vector<std::string> list_dump_paths();
 
 #ifndef _WIN32
-    bool signal_next_dump_path(const char* extension, char* out, std::size_t out_size) noexcept;
+    bool signal_next_dump_path(const char* extension, char* out, usize out_size) noexcept;
     void write_signal_dump(int signal_number, const void* address, const char* extension) noexcept;
 #endif
     bool platform_self_test() noexcept;

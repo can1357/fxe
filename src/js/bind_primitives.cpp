@@ -166,7 +166,7 @@ namespace fxe::js {
         auto* iso = Isolate::GetCurrent();
         auto ctx = iso->GetCurrentContext();
         float t[4];
-        for (uint32_t i = 0; i < 4; ++i) {
+        for (u32 i = 0; i < 4; ++i) {
           Local<Value> elt;
           if (!a->Get(ctx, i).ToLocal(&elt))
             return false;
@@ -194,7 +194,7 @@ namespace fxe::js {
         auto* iso = Isolate::GetCurrent();
         auto ctx = iso->GetCurrentContext();
         float t[2];
-        for (uint32_t i = 0; i < 2; ++i) {
+        for (u32 i = 0; i < 2; ++i) {
           Local<Value> elt;
           if (!a->Get(ctx, i).ToLocal(&elt))
             return false;
@@ -609,14 +609,14 @@ namespace fxe::js {
               u32 val = 1;
               if (el->IsString()) {
                 String::Utf8Value u(iso, el);
-                for (std::size_t k = 0; k < 4 && k < static_cast<std::size_t>(u.length()); ++k)
+                for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
                   tag[k] = (*u)[k];
               } else if (el->IsArray()) {
                 auto pair = el.As<Array>();
                 Local<Value> tv;
                 if (pair->Get(ctx, 0).ToLocal(&tv) && tv->IsString()) {
                   String::Utf8Value u(iso, tv);
-                  for (std::size_t k = 0; k < 4 && k < static_cast<std::size_t>(u.length()); ++k)
+                  for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
                     tag[k] = (*u)[k];
                 }
                 Local<Value> vv;
@@ -640,7 +640,7 @@ namespace fxe::js {
                   continue;
                 String::Utf8Value u(iso, kk);
                 std::array<char, 4> tag{' ', ' ', ' ', ' '};
-                for (std::size_t k = 0; k < 4 && k < static_cast<std::size_t>(u.length()); ++k)
+                for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
                   tag[k] = (*u)[k];
                 Local<Value> vv;
                 if (!vobj->Get(ctx, kk).ToLocal(&vv) || !vv->IsNumber())
@@ -859,8 +859,8 @@ namespace fxe::js {
       auto a0 = Array::New(iso, 4);
       auto a1 = Array::New(iso, 4);
       for (int i = 0; i < 4; ++i) {
-        (void)a0->Set(ctx, static_cast<uint32_t>(i), Number::New(iso, static_cast<double>(p0[i])));
-        (void)a1->Set(ctx, static_cast<uint32_t>(i), Number::New(iso, static_cast<double>(p1[i])));
+        (void)a0->Set(ctx, static_cast<u32>(i), Number::New(iso, static_cast<double>(p0[i])));
+        (void)a1->Set(ctx, static_cast<u32>(i), Number::New(iso, static_cast<double>(p1[i])));
       }
       (void)o->Set(ctx, "p0"_v8(iso), a0);
       (void)o->Set(ctx, "p1"_v8(iso), a1);

@@ -5,6 +5,7 @@
 #include "bind_dialog.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/types.hpp>
 #include <fxe/v8_strings.hpp>
 #include <string>
 #include <v8.h>
@@ -32,7 +33,7 @@ namespace fxe::js {
       if (v.IsEmpty() || !v->IsArray())
         return;
       auto arr = v.As<Array>();
-      for (uint32_t i = 0; i < arr->Length(); ++i) {
+      for (u32 i = 0; i < arr->Length(); ++i) {
         Local<Value> el;
         if (!arr->Get(ctx, i).ToLocal(&el) || !el->IsObject())
           continue;
@@ -43,7 +44,7 @@ namespace fxe::js {
           f.name = to_str(iso, name);
         if (obj->Get(ctx, "extensions"_v8(iso)).ToLocal(&exts) && exts->IsArray()) {
           auto ea = exts.As<Array>();
-          for (uint32_t j = 0; j < ea->Length(); ++j) {
+          for (u32 j = 0; j < ea->Length(); ++j) {
             Local<Value> e;
             if (ea->Get(ctx, j).ToLocal(&e))
               f.extensions.push_back(to_str(iso, e));
@@ -79,8 +80,8 @@ namespace fxe::js {
       }
       auto paths = fxe::os::show_open_dialog(o);
       auto arr = Array::New(iso, static_cast<int>(paths.size()));
-      for (size_t i = 0; i < paths.size(); ++i)
-        (void)arr->Set(ctx, static_cast<uint32_t>(i), s(iso, paths[i]));
+      for (usize i = 0; i < paths.size(); ++i)
+        (void)arr->Set(ctx, static_cast<u32>(i), s(iso, paths[i]));
       auto result = Object::New(iso);
       (void)result->Set(ctx, "canceled"_v8(iso), Boolean::New(iso, paths.empty()));
       (void)result->Set(ctx, "filePaths"_v8(iso), arr);
@@ -127,7 +128,7 @@ namespace fxe::js {
           o.type = to_str(iso, v);
         if (obj->Get(ctx, "buttons"_v8(iso)).ToLocal(&v) && v->IsArray()) {
           auto a = v.As<Array>();
-          for (uint32_t i = 0; i < a->Length(); ++i) {
+          for (u32 i = 0; i < a->Length(); ++i) {
             Local<Value> e;
             if (a->Get(ctx, i).ToLocal(&e))
               o.buttons.push_back(to_str(iso, e));

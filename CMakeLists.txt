@@ -213,7 +213,7 @@ add_library(
     src/net/http_client.cpp
     src/net/websocket_client.cpp
 )
-target_include_directories(fxe_net PUBLIC src)
+target_include_directories(fxe_net PUBLIC src include)
 target_compile_features(fxe_net PUBLIC cxx_std_20)
 find_package(CURL QUIET)
 if(CURL_FOUND)
@@ -270,6 +270,7 @@ target_include_directories(
     fxe_runtime
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/fxe-pack"
 )
 if(FXE_ENABLE_LIBUV)
@@ -298,7 +299,7 @@ endif()
 # Audio — miniaudio-backed engine.
 add_library(fxe_audio STATIC src/audio/audio.cpp)
 target_include_directories(fxe_audio SYSTEM PUBLIC ${FXE_MINIAUDIO_INCLUDE_DIR})
-target_include_directories(fxe_audio PUBLIC src)
+target_include_directories(fxe_audio PUBLIC src include)
 target_compile_features(fxe_audio PUBLIC cxx_std_20)
 if(APPLE)
     target_link_libraries(

@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 
+#include <fxe/types.hpp>
 #include <nlohmann/json.hpp>
 
 namespace fxe {
@@ -24,7 +25,7 @@ namespace fxe::js {
 namespace fxe::debug {
   using json = nlohmann::ordered_json;
   class server;
-  using session_id = std::uint64_t;
+  using session_id = u64;
 
   // JSON-RPC standard codes plus engine-defined range -32000..-32099.
   enum class err_code : int {

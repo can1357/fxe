@@ -10,6 +10,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <fxe/types.hpp>
 #include <iterator>
 #include <limits>
 #include <mutex>
@@ -218,7 +219,7 @@ namespace fxe::os {
         entries.push_back(path);
       std::ostringstream out;
       out << "[\n";
-      for (std::size_t i = 0; i < entries.size(); ++i) {
+      for (usize i = 0; i < entries.size(); ++i) {
         out << "  \"" << json_escape(entries[i]) << "\"";
         if (i + 1 < entries.size())
           out << ',';
@@ -238,7 +239,7 @@ namespace fxe::os {
           MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()), nullptr, 0);
       if (size <= 0)
         return {};
-      std::wstring out(static_cast<std::size_t>(size), L'\0');
+      std::wstring out(static_cast<usize>(size), L'\0');
       (void)MultiByteToWideChar(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
                                 out.data(), size);
       return out;
@@ -286,7 +287,7 @@ namespace fxe::os {
         return false;
       }
       const wchar_t* headers = L"Content-Type: application/octet-stream\r\n";
-      DWORD body_size = body.size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max())
+      DWORD body_size = body.size() > static_cast<usize>(std::numeric_limits<DWORD>::max())
                             ? 0
                             : static_cast<DWORD>(body.size());
       bool ok = body_size > 0 || body.empty();
@@ -483,7 +484,7 @@ namespace fxe::os {
       stored_last_dump_path() = std::move(path);
     }
 
-    bool write_dump_bytes(const char* extension, const void* data, std::size_t size) {
+    bool write_dump_bytes(const char* extension, const void* data, usize size) {
       if (!data && size > 0)
         return false;
       std::string path = next_dump_path(extension);
@@ -550,7 +551,7 @@ namespace fxe::os {
     }
 
 #ifndef _WIN32
-    bool signal_next_dump_path(const char* extension, char* out, std::size_t out_size) noexcept {
+    bool signal_next_dump_path(const char* extension, char* out, usize out_size) noexcept {
       if (!out || out_size == 0 || g_signal_dir[0] == '\0')
         return false;
       unsigned long long counter = dump_counter().fetch_add(1, std::memory_order_relaxed) + 1;
@@ -558,7 +559,7 @@ namespace fxe::os {
       long long epoch = static_cast<long long>(time(nullptr));
       int written = std::snprintf(out, out_size, "%s/crash-%ld-%lld-%llu.%s", g_signal_dir, pid,
                                   epoch, counter, extension ? extension : "dmp");
-      return written > 0 && static_cast<std::size_t>(written) < out_size;
+      return written > 0 && static_cast<usize>(written) < out_size;
     }
 
     void write_signal_dump(int signal_number, const void* address, const char* extension) noexcept {
@@ -573,7 +574,7 @@ namespace fxe::os {
                             "fxe crash dump\nsignal=%d\naddress=%p\nformat=signal-text\n",
                             signal_number, address);
       if (n > 0)
-        (void)write(fd, buf, static_cast<std::size_t>(n));
+        (void)write(fd, buf, static_cast<usize>(n));
       (void)close(fd);
     }
 #endif

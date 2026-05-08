@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <fxe/types.hpp>
 #include <string_view>
 
 namespace fxe::os {
@@ -20,7 +21,7 @@ namespace fxe::os {
   enum class sleep_inhibit_kind { idle, sleep };
 
   struct power_inhibit_handle {
-    std::uint64_t id = 0;
+    u64 id = 0;
     explicit operator bool() const noexcept {
       return id != 0;
     }

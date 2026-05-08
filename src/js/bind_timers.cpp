@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <GLFW/glfw3.h>
+#include <fxe/types.hpp>
 
 namespace fxe::js {
   namespace {
@@ -25,7 +26,7 @@ namespace fxe::js {
     using clock = std::chrono::steady_clock;
 
     struct timer_entry {
-      uint64_t id = 0;
+      u64 id = 0;
       clock::time_point deadline{};
       double interval_ms = 0.0; // 0 = one-shot
       bool repeat = false;
@@ -35,7 +36,7 @@ namespace fxe::js {
 
     struct heap_node {
       clock::time_point deadline;
-      uint64_t id;
+      u64 id;
       bool operator>(const heap_node& o) const {
         return deadline > o.deadline;
       }
@@ -45,16 +46,16 @@ namespace fxe::js {
       // Timers here do not own libuv timer handles. JS-visible work is ref'd
       // by V8 Globals while present in `active`/`raf_queue` and unref'd by
       // Reset() on clear, one-shot completion, or frame dispatch.
-      uint64_t next_id = 1;
-      std::unordered_map<uint64_t, std::unique_ptr<timer_entry>> active;
+      u64 next_id = 1;
+      std::unordered_map<u64, std::unique_ptr<timer_entry>> active;
       std::priority_queue<heap_node, std::vector<heap_node>, std::greater<heap_node>> heap;
 
       // requestAnimationFrame queue. Callbacks queued during dispatch land in
       // `pending`; they migrate to `current` at the start of the next drain.
-      uint64_t next_raf_id = 1;
-      std::vector<std::pair<uint64_t, Global<Function>>> raf_queue;
+      u64 next_raf_id = 1;
+      std::vector<std::pair<u64, Global<Function>>> raf_queue;
       // Set of cancelled raf ids (in case they're cancelled mid-frame).
-      std::vector<uint64_t> raf_cancelled;
+      std::vector<u64> raf_cancelled;
     };
 
     std::mutex g_states_mu;
@@ -125,12 +126,12 @@ namespace fxe::js {
       entry->id = s.next_id++;
       entry->interval_ms = ms;
       entry->repeat = repeat;
-      entry->deadline = clock::now() + std::chrono::microseconds(static_cast<int64_t>(ms * 1000.0));
+      entry->deadline = clock::now() + std::chrono::microseconds(static_cast<i64>(ms * 1000.0));
       entry->fn.Reset(iso, info[0].As<Function>());
       for (int i = 2; i < info.Length(); ++i)
         entry->args.emplace_back(iso, info[i]);
 
-      uint64_t id = entry->id;
+      u64 id = entry->id;
       s.heap.push({entry->deadline, id});
       s.active.emplace(id, std::move(entry));
       wake_event_loop();
@@ -159,7 +160,7 @@ namespace fxe::js {
       entry->fn.Reset(iso, info[0].As<Function>());
       for (int i = 1; i < info.Length(); ++i)
         entry->args.emplace_back(iso, info[i]);
-      uint64_t id = entry->id;
+      u64 id = entry->id;
       s.heap.push({entry->deadline, id});
       s.active.emplace(id, std::move(entry));
       wake_event_loop();
@@ -171,8 +172,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsNumber())
         return;
-      uint64_t id =
-          static_cast<uint64_t>(info[0]->NumberValue(iso->GetCurrentContext()).FromMaybe(0.0));
+      u64 id = static_cast<u64>(info[0]->NumberValue(iso->GetCurrentContext()).FromMaybe(0.0));
       auto& s = state_for(iso);
       auto it = s.active.find(id);
       if (it != s.active.end()) {
@@ -203,7 +203,7 @@ namespace fxe::js {
         return;
       }
       auto& s = state_for(iso);
-      uint64_t id = s.next_raf_id++;
+      u64 id = s.next_raf_id++;
       s.raf_queue.emplace_back(id, Global<Function>(iso, info[0].As<Function>()));
       info.GetReturnValue().Set(Number::New(iso, static_cast<double>(id)));
     }
@@ -213,8 +213,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       if (info.Length() < 1 || !info[0]->IsNumber())
         return;
-      uint64_t id =
-          static_cast<uint64_t>(info[0]->NumberValue(iso->GetCurrentContext()).FromMaybe(0.0));
+      u64 id = static_cast<u64>(info[0]->NumberValue(iso->GetCurrentContext()).FromMaybe(0.0));
       auto& s = state_for(iso);
       // Remove pending if still in raf_queue (not yet dispatched).
       auto it = std::remove_if(s.raf_queue.begin(), s.raf_queue.end(),
@@ -267,7 +266,7 @@ namespace fxe::js {
     auto& s = state_for(iso);
     auto now = clock::now();
     // Collect all due ids first to avoid mutating the heap mid-callback.
-    std::vector<uint64_t> due;
+    std::vector<u64> due;
     while (!s.heap.empty()) {
       auto top = s.heap.top();
       if (s.active.find(top.id) == s.active.end()) {
@@ -325,7 +324,7 @@ namespace fxe::js {
         auto it2 = s.active.find(id);
         if (it2 != s.active.end()) {
           it2->second->deadline =
-              clock::now() + std::chrono::microseconds(static_cast<int64_t>(interval * 1000.0));
+              clock::now() + std::chrono::microseconds(static_cast<i64>(interval * 1000.0));
           s.heap.push({it2->second->deadline, id});
         }
       } else {
@@ -347,11 +346,11 @@ namespace fxe::js {
     // Snapshot current frame's callbacks; new ones registered during
     // dispatch land in raf_queue (which is now empty after the swap) and
     // fire next frame.
-    std::vector<std::pair<uint64_t, Global<Function>>> current;
+    std::vector<std::pair<u64, Global<Function>>> current;
     current.swap(s.raf_queue);
     auto cancelled = std::move(s.raf_cancelled);
     s.raf_cancelled.clear();
-    auto is_cancelled = [&](uint64_t id) {
+    auto is_cancelled = [&](u64 id) {
       return std::find(cancelled.begin(), cancelled.end(), id) != cancelled.end();
     };
     double now_ms =

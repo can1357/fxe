@@ -3,6 +3,7 @@
 
 #include <atomic>
 
+#include <fxe/types.hpp>
 #include <stdexcept>
 
 namespace fxe {

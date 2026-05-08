@@ -90,24 +90,24 @@ namespace fxe::js {
     }
 
     struct blob_holder {
-      std::shared_ptr<std::vector<std::uint8_t>> bytes;
-      std::size_t offset = 0;
-      std::size_t length = 0;
+      std::shared_ptr<std::vector<u8>> bytes;
+      usize offset = 0;
+      usize length = 0;
       std::string type;
       Global<Object> self;
     };
 
     struct stream_holder {
-      std::shared_ptr<std::vector<std::uint8_t>> bytes;
-      std::size_t offset = 0;
-      std::size_t length = 0;
+      std::shared_ptr<std::vector<u8>> bytes;
+      usize offset = 0;
+      usize length = 0;
       Global<Object> self;
     };
 
     struct reader_holder {
-      std::shared_ptr<std::vector<std::uint8_t>> bytes;
-      std::size_t offset = 0;
-      std::size_t length = 0;
+      std::shared_ptr<std::vector<u8>> bytes;
+      usize offset = 0;
+      usize length = 0;
       bool consumed = false;
       Global<Object> self;
     };
@@ -159,7 +159,7 @@ namespace fxe::js {
       h->self.SetWeak(h, reader_finalizer, WeakCallbackType::kParameter);
     }
 
-    Local<ArrayBuffer> copy_array_buffer(Isolate* iso, const std::uint8_t* data, std::size_t len) {
+    Local<ArrayBuffer> copy_array_buffer(Isolate* iso, const u8* data, usize len) {
       auto store = ArrayBuffer::NewBackingStore(iso, len);
       if (len != 0)
         std::memcpy(store->Data(), data, len);
@@ -167,18 +167,18 @@ namespace fxe::js {
     }
 
     struct blob_part {
-      std::shared_ptr<std::vector<std::uint8_t>> bytes;
-      std::size_t offset = 0;
-      std::size_t length = 0;
+      std::shared_ptr<std::vector<u8>> bytes;
+      usize offset = 0;
+      usize length = 0;
     };
 
-    blob_part part_from_owned(std::vector<std::uint8_t> bytes) {
-      auto shared = std::make_shared<std::vector<std::uint8_t>>(std::move(bytes));
+    blob_part part_from_owned(std::vector<u8> bytes) {
+      auto shared = std::make_shared<std::vector<u8>>(std::move(bytes));
       return blob_part{shared, 0, shared->size()};
     }
 
     blob_part part_from_string(std::string s) {
-      std::vector<std::uint8_t> bytes(s.begin(), s.end());
+      std::vector<u8> bytes(s.begin(), s.end());
       return part_from_owned(std::move(bytes));
     }
 
@@ -190,8 +190,8 @@ namespace fxe::js {
       if (v->IsArrayBuffer()) {
         auto ab = v.As<ArrayBuffer>();
         auto bs = ab->GetBackingStore();
-        const auto* p = static_cast<const std::uint8_t*>(bs->Data());
-        std::vector<std::uint8_t> bytes(p, p + bs->ByteLength());
+        const auto* p = static_cast<const u8*>(bs->Data());
+        std::vector<u8> bytes(p, p + bs->ByteLength());
         out = part_from_owned(std::move(bytes));
         return true;
       }
@@ -199,8 +199,8 @@ namespace fxe::js {
         auto view = v.As<ArrayBufferView>();
         auto ab = view->Buffer();
         auto bs = ab->GetBackingStore();
-        const auto* p = static_cast<const std::uint8_t*>(bs->Data()) + view->ByteOffset();
-        std::vector<std::uint8_t> bytes(p, p + view->ByteLength());
+        const auto* p = static_cast<const u8*>(bs->Data()) + view->ByteOffset();
+        std::vector<u8> bytes(p, p + view->ByteLength());
         out = part_from_owned(std::move(bytes));
         return true;
       }
@@ -208,20 +208,20 @@ namespace fxe::js {
       return true;
     }
 
-    std::shared_ptr<std::vector<std::uint8_t>>
-    build_bytes_from_parts(const std::vector<blob_part>& parts, std::size_t total,
-                           std::size_t& offset, std::size_t& length) {
+    std::shared_ptr<std::vector<u8>> build_bytes_from_parts(const std::vector<blob_part>& parts,
+                                                            usize total, usize& offset,
+                                                            usize& length) {
       if (parts.empty()) {
         offset = 0;
         length = 0;
-        return std::make_shared<std::vector<std::uint8_t>>();
+        return std::make_shared<std::vector<u8>>();
       }
       if (parts.size() == 1) {
         offset = parts[0].offset;
         length = parts[0].length;
         return parts[0].bytes;
       }
-      auto bytes = std::make_shared<std::vector<std::uint8_t>>();
+      auto bytes = std::make_shared<std::vector<u8>>();
       bytes->reserve(total);
       for (const auto& part : parts) {
         if (part.length == 0)
@@ -241,17 +241,17 @@ namespace fxe::js {
       return maybe.FromMaybe(fallback);
     }
 
-    std::size_t normalize_slice_index(double value, std::size_t size) {
+    usize normalize_slice_index(double value, usize size) {
       if (std::isnan(value))
         value = 0;
       value = std::trunc(value);
       if (value < 0) {
         const double from_end = static_cast<double>(size) + value;
-        return from_end <= 0 ? 0 : static_cast<std::size_t>(from_end);
+        return from_end <= 0 ? 0 : static_cast<usize>(from_end);
       }
       if (value >= static_cast<double>(size))
         return size;
-      return static_cast<std::size_t>(value);
+      return static_cast<usize>(value);
     }
 
     std::string read_type_option(Isolate* iso, Local<Context> ctx, Local<Value> options) {
@@ -274,7 +274,7 @@ namespace fxe::js {
       }
 
       std::vector<blob_part> parts;
-      std::size_t total = 0;
+      usize total = 0;
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull()) {
         if (info[0]->IsArray()) {
           auto arr = info[0].As<Array>();
@@ -299,8 +299,8 @@ namespace fxe::js {
         }
       }
 
-      std::size_t offset = 0;
-      std::size_t length = 0;
+      usize offset = 0;
+      usize length = 0;
       auto bytes = build_bytes_from_parts(parts, total, offset, length);
       auto* h =
           new blob_holder{std::move(bytes),
@@ -391,8 +391,8 @@ namespace fxe::js {
     }
 
     Local<Object> make_reader_object(Isolate* iso, Local<Context> ctx,
-                                     std::shared_ptr<std::vector<std::uint8_t>> bytes,
-                                     std::size_t offset, std::size_t length) {
+                                     std::shared_ptr<std::vector<u8>> bytes, usize offset,
+                                     usize length) {
       auto obj =
           reader_tpl_table()[iso].Get(iso)->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       auto* h = new reader_holder{std::move(bytes), offset, length, false, {}};
@@ -401,8 +401,8 @@ namespace fxe::js {
     }
 
     Local<Object> make_stream_object(Isolate* iso, Local<Context> ctx,
-                                     std::shared_ptr<std::vector<std::uint8_t>> bytes,
-                                     std::size_t offset, std::size_t length) {
+                                     std::shared_ptr<std::vector<u8>> bytes, usize offset,
+                                     usize length) {
       auto obj =
           stream_tpl_table()[iso].Get(iso)->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       auto* h = new stream_holder{std::move(bytes), offset, length, {}};
@@ -428,7 +428,7 @@ namespace fxe::js {
         throw_type(iso, "ReadableStream must be called with new");
         return;
       }
-      auto empty = std::make_shared<std::vector<std::uint8_t>>();
+      auto empty = std::make_shared<std::vector<u8>>();
       auto* h = new stream_holder{std::move(empty), 0, 0, {}};
       init_stream_object(iso, info.This(), h);
       info.GetReturnValue().Set(info.This());
@@ -472,10 +472,9 @@ namespace fxe::js {
   } // namespace
 
   Local<Object> make_blob_object(Isolate* iso, Local<Context> ctx,
-                                 std::shared_ptr<std::vector<std::uint8_t>> bytes,
-                                 std::string type) {
+                                 std::shared_ptr<std::vector<u8>> bytes, std::string type) {
     if (!bytes)
-      bytes = std::make_shared<std::vector<std::uint8_t>>();
+      bytes = std::make_shared<std::vector<u8>>();
     const auto length = bytes->size();
     auto obj =
         blob_tpl_table()[iso].Get(iso)->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();

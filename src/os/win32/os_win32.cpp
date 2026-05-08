@@ -18,6 +18,7 @@
 #include <map>
 #include <memory>
 
+#include <fxe/types.hpp>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -92,7 +93,7 @@ namespace fxe::os {
                                   static_cast<int>(s.size()), nullptr, 0);
       if (n <= 0)
         return {};
-      std::wstring out(static_cast<size_t>(n), L'\0');
+      std::wstring out(static_cast<usize>(n), L'\0');
       if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()),
                               out.data(), n) != n)
         return {};
@@ -105,7 +106,7 @@ namespace fxe::os {
       int n = WideCharToMultiByte(CP_UTF8, 0, s, -1, nullptr, 0, nullptr, nullptr);
       if (n <= 1)
         return {};
-      std::string out(static_cast<size_t>(n - 1), '\0');
+      std::string out(static_cast<usize>(n - 1), '\0');
       WideCharToMultiByte(CP_UTF8, 0, s, -1, out.data(), n, nullptr, nullptr);
       return out;
     }
@@ -119,14 +120,13 @@ namespace fxe::os {
           WideCharToMultiByte(CP_UTF8, 0, raw, static_cast<int>(len), nullptr, 0, nullptr, nullptr);
       if (n <= 0)
         return {};
-      std::string out(static_cast<size_t>(n), '\0');
+      std::string out(static_cast<usize>(n), '\0');
       WideCharToMultiByte(CP_UTF8, 0, raw, static_cast<int>(len), out.data(), n, nullptr, nullptr);
       return out;
     }
 
-    HGLOBAL hglobal_from_bytes(const uint8_t* bytes, size_t size, bool nul_terminate = false) {
-      if (size >
-          static_cast<size_t>(std::numeric_limits<SIZE_T>::max()) - (nul_terminate ? 1u : 0u))
+    HGLOBAL hglobal_from_bytes(const u8* bytes, usize size, bool nul_terminate = false) {
+      if (size > static_cast<usize>(std::numeric_limits<SIZE_T>::max()) - (nul_terminate ? 1u : 0u))
         return nullptr;
       HGLOBAL handle =
           GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size + (nul_terminate ? 1u : 0u)));
@@ -140,13 +140,13 @@ namespace fxe::os {
       if (size > 0)
         std::memcpy(dst, bytes, size);
       if (nul_terminate)
-        static_cast<uint8_t*>(dst)[size] = 0;
+        static_cast<u8*>(dst)[size] = 0;
       GlobalUnlock(handle);
       return handle;
     }
 
     HGLOBAL hglobal_from_string(std::string_view value, bool nul_terminate = true) {
-      return hglobal_from_bytes(reinterpret_cast<const uint8_t*>(value.data()), value.size(),
+      return hglobal_from_bytes(reinterpret_cast<const u8*>(value.data()), value.size(),
                                 nul_terminate);
     }
 
@@ -168,18 +168,18 @@ namespace fxe::os {
       return ok;
     }
 
-    std::optional<std::vector<uint8_t>> get_clipboard_format(UINT format) {
+    std::optional<std::vector<u8>> get_clipboard_format(UINT format) {
       if (format == 0 || !OpenClipboard(nullptr))
         return std::nullopt;
-      std::optional<std::vector<uint8_t>> out;
+      std::optional<std::vector<u8>> out;
       HANDLE handle = GetClipboardData(format);
       if (handle) {
         SIZE_T size = GlobalSize(handle);
         void* src = GlobalLock(handle);
         if (src) {
-          out = std::vector<uint8_t>(static_cast<size_t>(size));
+          out = std::vector<u8>(static_cast<usize>(size));
           if (size > 0)
-            std::memcpy(out->data(), src, static_cast<size_t>(size));
+            std::memcpy(out->data(), src, static_cast<usize>(size));
           GlobalUnlock(handle);
         }
       }
@@ -206,15 +206,15 @@ namespace fxe::os {
       std::string out;
       out.reserve(prefix.size() + start_marker.size() + html.size() + end_marker.size());
       out.append(prefix);
-      const size_t start_html = out.size();
+      const usize start_html = out.size();
       out.append(start_marker);
-      const size_t start_fragment = out.size();
+      const usize start_fragment = out.size();
       out.append(html);
-      const size_t end_fragment = out.size();
+      const usize end_fragment = out.size();
       out.append(end_marker);
-      const size_t end_html = out.size();
-      auto write_offset = [&](std::string_view key, size_t value) {
-        size_t pos = out.find(key);
+      const usize end_html = out.size();
+      auto write_offset = [&](std::string_view key, usize value) {
+        usize pos = out.find(key);
         if (pos == std::string::npos)
           return;
         pos += key.size();
@@ -229,22 +229,22 @@ namespace fxe::os {
       return out;
     }
 
-    std::optional<size_t> cf_html_offset(const std::string& text, const char* key) {
-      size_t pos = text.find(key);
+    std::optional<usize> cf_html_offset(const std::string& text, const char* key) {
+      usize pos = text.find(key);
       if (pos == std::string::npos)
         return std::nullopt;
       pos += std::strlen(key);
       while (pos < text.size() && text[pos] == ' ')
         ++pos;
-      size_t end = pos;
+      usize end = pos;
       while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])))
         ++end;
       if (end == pos)
         return std::nullopt;
-      return static_cast<size_t>(std::strtoull(text.c_str() + pos, nullptr, 10));
+      return static_cast<usize>(std::strtoull(text.c_str() + pos, nullptr, 10));
     }
 
-    std::string fragment_from_cf_html(std::vector<uint8_t> bytes) {
+    std::string fragment_from_cf_html(std::vector<u8> bytes) {
       while (!bytes.empty() && bytes.back() == 0)
         bytes.pop_back();
       std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
@@ -312,7 +312,7 @@ namespace fxe::os {
     }
 
     void split_default_path(const std::wstring& path, std::wstring& folder, std::wstring& file) {
-      size_t pos = path.find_last_of(L"\\/");
+      usize pos = path.find_last_of(L"\\/");
       if (pos == std::wstring::npos) {
         file = path;
         return;
@@ -382,7 +382,7 @@ namespace fxe::os {
         out.specs.push_back(std::move(spec));
       }
       out.filters.reserve(out.names.size());
-      for (size_t i = 0; i < out.names.size(); ++i)
+      for (usize i = 0; i < out.names.size(); ++i)
         out.filters.push_back(COMDLG_FILTERSPEC{out.names[i].c_str(), out.specs[i].c_str()});
       return out;
     }
@@ -511,7 +511,7 @@ namespace fxe::os {
 
     std::string parse_toast_action_id(std::string_view arguments) {
       constexpr std::string_view marker = ";action=";
-      size_t pos = arguments.find(marker);
+      usize pos = arguments.find(marker);
       if (pos == std::string_view::npos)
         return {};
       pos += marker.size();
@@ -544,7 +544,7 @@ namespace fxe::os {
       }
       if (s.size() >= 2 && s[0] == 'f') {
         int n = 0;
-        for (size_t i = 1; i < s.size(); ++i) {
+        for (usize i = 1; i < s.size(); ++i) {
           if (!std::isdigit(static_cast<unsigned char>(s[i])))
             return 0;
           n = n * 10 + (s[i] - '0');
@@ -579,9 +579,9 @@ namespace fxe::os {
         return std::nullopt;
 
       std::vector<std::string_view> parts;
-      size_t start = 0;
+      usize start = 0;
       while (start <= normalized.size()) {
-        size_t plus = normalized.find('+', start);
+        usize plus = normalized.find('+', start);
         if (plus == std::string::npos) {
           parts.emplace_back(normalized.data() + start, normalized.size() - start);
           break;
@@ -593,7 +593,7 @@ namespace fxe::os {
         return std::nullopt;
 
       parsed_accelerator out;
-      for (size_t i = 0; i + 1 < parts.size(); ++i) {
+      for (usize i = 0; i + 1 < parts.size(); ++i) {
         std::string token = lower_ascii(parts[i]);
         if (token == "ctrl" || token == "control" || token == "cmdorctrl" ||
             token == "commandorcontrol")
@@ -1438,7 +1438,7 @@ namespace fxe::os {
       DWORD n = GetTempPathW(0, nullptr);
       if (n == 0)
         return {};
-      std::wstring buf(static_cast<size_t>(n), L'\0');
+      std::wstring buf(static_cast<usize>(n), L'\0');
       DWORD written = GetTempPathW(n, buf.data());
       if (written == 0 || written >= n)
         return {};
@@ -1698,7 +1698,7 @@ namespace fxe::os {
     else
       flags |= MB_ICONINFORMATION;
 
-    size_t count = opts.buttons.size();
+    usize count = opts.buttons.size();
     if (count <= 1)
       flags |= MB_OK;
     else if (count == 2)
@@ -2166,7 +2166,7 @@ namespace fxe::os {
     return std::string(reinterpret_cast<const char*>(bytes->data()), bytes->size());
   }
 
-  bool clipboard_set_mime(std::string_view mime, const std::vector<uint8_t>& bytes) {
+  bool clipboard_set_mime(std::string_view mime, const std::vector<u8>& bytes) {
     std::wstring wide = widen(mime);
     if (wide.empty())
       return false;
@@ -2174,7 +2174,7 @@ namespace fxe::os {
     return set_clipboard_format(format, hglobal_from_bytes(bytes.data(), bytes.size(), false));
   }
 
-  std::optional<std::vector<uint8_t>> clipboard_get_mime(std::string_view mime) {
+  std::optional<std::vector<u8>> clipboard_get_mime(std::string_view mime) {
     std::wstring wide = widen(mime);
     if (wide.empty())
       return std::nullopt;
@@ -2237,9 +2237,9 @@ namespace fxe::os {
       if (const char* env = std::getenv("FXE_BUNDLE_ID"); env && *env)
         return sanitize_single_instance_id(env);
       std::wstring exe = current_module_path();
-      size_t start = exe.find_last_of(L"\\\\/");
+      usize start = exe.find_last_of(L"\\\\/");
       start = start == std::wstring::npos ? 0 : start + 1;
-      size_t end = exe.find_last_of(L'.');
+      usize end = exe.find_last_of(L'.');
       if (end == std::wstring::npos || end < start)
         end = exe.size();
       return sanitize_single_instance_id(narrow(exe.substr(start, end - start).c_str()));
@@ -2395,7 +2395,7 @@ namespace fxe::os {
       Microsoft::WRL::ComPtr<IObjectCollection> collection;
       if (SUCCEEDED(CoCreateInstance(CLSID_EnumerableObjectCollection, nullptr,
                                      CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&collection)))) {
-        size_t count = 0;
+        usize count = 0;
         for (const auto& document : documents) {
           if (count++ >= 10)
             break;

@@ -166,7 +166,7 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.HolderV2());
       if (!h)
         return;
-      info.GetReturnValue().Set(static_cast<int32_t>(h->client->ready_state()));
+      info.GetReturnValue().Set(static_cast<i32>(h->client->ready_state()));
     }
     void ws_get_buffered_amount(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* h = unwrap_ws(info.HolderV2());
@@ -260,16 +260,15 @@ namespace fxe::js {
       } else if (v->IsArrayBuffer()) {
         auto ab = v.As<ArrayBuffer>();
         auto bs = ab->GetBackingStore();
-        std::vector<std::uint8_t> bytes(reinterpret_cast<std::uint8_t*>(bs->Data()),
-                                        reinterpret_cast<std::uint8_t*>(bs->Data()) +
-                                            bs->ByteLength());
+        std::vector<u8> bytes(reinterpret_cast<u8*>(bs->Data()),
+                              reinterpret_cast<u8*>(bs->Data()) + bs->ByteLength());
         h->client->send_binary(std::move(bytes));
       } else if (v->IsArrayBufferView()) {
         auto view = v.As<ArrayBufferView>();
         auto ab = view->Buffer();
         auto bs = ab->GetBackingStore();
-        auto* p = reinterpret_cast<std::uint8_t*>(bs->Data()) + view->ByteOffset();
-        std::vector<std::uint8_t> bytes(p, p + view->ByteLength());
+        auto* p = reinterpret_cast<u8*>(bs->Data()) + view->ByteOffset();
+        std::vector<u8> bytes(p, p + view->ByteLength());
         h->client->send_binary(std::move(bytes));
       } else {
         h->client->send_text(to_str(iso, v));
@@ -283,10 +282,10 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.This());
       if (!h)
         return;
-      std::uint16_t code = 1000;
+      u16 code = 1000;
       std::string reason;
       if (info.Length() >= 1 && info[0]->IsNumber())
-        code = static_cast<std::uint16_t>(info[0]->Uint32Value(ctx).FromMaybe(1000u));
+        code = static_cast<u16>(info[0]->Uint32Value(ctx).FromMaybe(1000u));
       if (info.Length() >= 2)
         reason = to_str(iso, info[1]);
       h->client->close(code, std::move(reason));
@@ -462,7 +461,7 @@ namespace fxe::js::bind_websocket {
         case fxe::net::ws_event_kind::message_binary: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("message"));
           if (h->binary_type == "blob") {
-            auto bytes = std::make_shared<std::vector<std::uint8_t>>(std::move(ev.binary));
+            auto bytes = std::make_shared<std::vector<u8>>(std::move(ev.binary));
             eo->Set(ctx, "data"_v8(iso), fxe::js::make_blob_object(iso, ctx, std::move(bytes)))
                 .Check();
           } else {

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cwchar>
 #include <filesystem>
+#include <fxe/types.hpp>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -107,7 +108,7 @@ namespace fxe::js {
       int needed = WideCharToMultiByte(CP_UTF8, 0, value, length, nullptr, 0, nullptr, nullptr);
       if (needed <= 0)
         return {};
-      std::string out(static_cast<size_t>(needed), '\0');
+      std::string out(static_cast<usize>(needed), '\0');
       WideCharToMultiByte(CP_UTF8, 0, value, length, out.data(), needed, nullptr, nullptr);
       return out;
     }
@@ -116,7 +117,7 @@ namespace fxe::js {
     bool env_value(const std::string& key, std::string& out) {
 #if defined(_WIN32)
       char* value = nullptr;
-      size_t value_len = 0;
+      usize value_len = 0;
       if (_dupenv_s(&value, &value_len, key.c_str()) != 0 || !value)
         return false;
       out.assign(value);
@@ -219,7 +220,7 @@ namespace fxe::js {
       }
 #endif
       auto arr = Array::New(iso, static_cast<int>(keys.size()));
-      for (uint32_t i = 0; i < keys.size(); ++i)
+      for (u32 i = 0; i < keys.size(); ++i)
         (void)arr->Set(ctx, i, str(iso, keys[i]));
       info.GetReturnValue().Set(arr);
     }
@@ -334,7 +335,7 @@ namespace fxe::js {
         return;
       }
       std::vector<Local<Value>> argv;
-      argv.reserve(static_cast<std::size_t>(info.Length()));
+      argv.reserve(static_cast<usize>(info.Length()));
       argv.push_back(Undefined(iso));
       for (int i = 1; i < info.Length(); ++i)
         argv.push_back(info[i]);
@@ -474,18 +475,18 @@ namespace fxe::js {
       if (!has_arg)
         (void)::umask(old_mask);
 #endif
-      info.GetReturnValue().Set(Integer::New(iso, static_cast<int32_t>(old_mask)));
+      info.GetReturnValue().Set(Integer::New(iso, static_cast<i32>(old_mask)));
     }
 
-    int64_t hrtime_nanoseconds() {
+    i64 hrtime_nanoseconds() {
       using clock = std::chrono::steady_clock;
       static const auto start = clock::now();
       return std::chrono::duration_cast<std::chrono::nanoseconds>(clock::now() - start).count();
     }
 
-    void set_hrtime_array(Isolate* iso, Local<Context> ctx, int64_t ns, Local<Array> out) {
-      const int64_t sec = ns / 1000000000LL;
-      int64_t nsec = ns % 1000000000LL;
+    void set_hrtime_array(Isolate* iso, Local<Context> ctx, i64 ns, Local<Array> out) {
+      const i64 sec = ns / 1000000000LL;
+      i64 nsec = ns % 1000000000LL;
       if (nsec < 0) {
         nsec += 1000000000LL;
       }
@@ -497,16 +498,15 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      int64_t ns = hrtime_nanoseconds();
+      i64 ns = hrtime_nanoseconds();
       if (info.Length() > 0 && info[0]->IsArray()) {
         auto previous = info[0].As<Array>();
         Local<Value> sec_value;
         Local<Value> nsec_value;
         if (previous->Get(ctx, 0).ToLocal(&sec_value) &&
             previous->Get(ctx, 1).ToLocal(&nsec_value)) {
-          const int64_t prev_sec = static_cast<int64_t>(sec_value->IntegerValue(ctx).FromMaybe(0));
-          const int64_t prev_nsec =
-              static_cast<int64_t>(nsec_value->IntegerValue(ctx).FromMaybe(0));
+          const i64 prev_sec = static_cast<i64>(sec_value->IntegerValue(ctx).FromMaybe(0));
+          const i64 prev_nsec = static_cast<i64>(nsec_value->IntegerValue(ctx).FromMaybe(0));
           ns -= prev_sec * 1000000000LL + prev_nsec;
         }
       }
@@ -533,9 +533,9 @@ namespace fxe::js {
           std::fwrite(s.data(), 1, s.size(), sink);
       } else if (v->IsArrayBufferView()) {
         auto view = v.As<ArrayBufferView>();
-        size_t n = view->ByteLength();
+        usize n = view->ByteLength();
         if (n) {
-          std::vector<uint8_t> buf(n);
+          std::vector<u8> buf(n);
           view->CopyContents(buf.data(), n);
           std::fwrite(buf.data(), 1, n, sink);
         }
@@ -559,7 +559,7 @@ namespace fxe::js {
         return true;
       auto listeners = slot.As<Array>();
       std::vector<Local<Object>> keep;
-      for (uint32_t i = 0; i < listeners->Length(); ++i) {
+      for (u32 i = 0; i < listeners->Length(); ++i) {
         Local<Value> entry_value;
         if (!listeners->Get(ctx, i).ToLocal(&entry_value) || !entry_value->IsObject())
           continue;
@@ -580,15 +580,15 @@ namespace fxe::js {
         if (!once)
           keep.push_back(entry);
       }
-      for (uint32_t i = 0; i < keep.size(); ++i)
+      for (u32 i = 0; i < keep.size(); ++i)
         (void)listeners->Set(ctx, i, keep[i]);
       (void)listeners->Set(ctx, "length"_v8(iso),
-                           Integer::NewFromUnsigned(iso, static_cast<uint32_t>(keep.size())));
+                           Integer::NewFromUnsigned(iso, static_cast<u32>(keep.size())));
       return true;
     }
 
     Local<Value> stdin_chunk_value(Isolate* iso, Local<Object> input, const char* data,
-                                   std::size_t size) {
+                                   usize size) {
       auto ctx = iso->GetCurrentContext();
       Local<Value> encoding;
       if (input->Get(ctx, "readableEncoding"_v8(iso)).ToLocal(&encoding) && encoding->IsString()) {
@@ -639,7 +639,7 @@ namespace fxe::js {
         ssize_t n = ::read(0, buf, sizeof(buf));
         if (n > 0) {
           if (!stdin_emit(iso, input, "data",
-                          stdin_chunk_value(iso, input, buf, static_cast<std::size_t>(n))))
+                          stdin_chunk_value(iso, input, buf, static_cast<usize>(n))))
             return;
           continue;
         }
@@ -772,8 +772,8 @@ namespace fxe::js {
             (void)resume_value.As<Function>()->Call(ctx, info.This(), 0, nullptr).ToLocal(&ignored);
         }
       } else {
-        uint32_t out = 0;
-        for (uint32_t i = 0; i < listeners->Length(); ++i) {
+        u32 out = 0;
+        for (u32 i = 0; i < listeners->Length(); ++i) {
           Local<Value> entry_value;
           if (!listeners->Get(ctx, i).ToLocal(&entry_value) || !entry_value->IsObject())
             continue;
@@ -890,7 +890,7 @@ namespace fxe::js {
     proc->SetAccessorProperty("platform"_v8(iso),
                               FunctionTemplate::New(iso, process_platform_getter));
     proc->SetAccessorProperty("arch"_v8(iso), FunctionTemplate::New(iso, process_arch_getter));
-    proc->Set(iso, "pid", Integer::New(iso, static_cast<int32_t>(fxe_getpid())));
+    proc->Set(iso, "pid", Integer::New(iso, static_cast<i32>(fxe_getpid())));
 
     auto versions = ObjectTemplate::New(iso);
     versions->Set(iso, "fxe", String::NewFromUtf8(iso, FXE_VERSION).ToLocalChecked());
@@ -942,7 +942,7 @@ namespace fxe::js {
             snap = g_argv;
           }
           auto arr = Array::New(iso, static_cast<int>(snap.size()));
-          for (uint32_t i = 0; i < snap.size(); ++i)
+          for (u32 i = 0; i < snap.size(); ++i)
             (void)arr->Set(ctx, i, str(iso, snap[i]));
           info.GetReturnValue().Set(arr);
         }));

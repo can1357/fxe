@@ -23,33 +23,33 @@ namespace fxe {
   // a high sentinel outside the indexed/flagged range so renderers can detect
   // blur samples that should read the captured frame instead of a spritesheet
   // entry (see primitives::blur_quad and the WGPU renderer/shader path).
-  inline constexpr uint32_t sprite_index_mask = 0x7ffffu;
-  inline constexpr uint32_t animated_sprite_flag = 0x80000u;
-  inline constexpr uint32_t multi_sprite_flag = 0x100000u;
-  inline constexpr uint32_t xl_sprite_flag = 0x200000u;
+  inline constexpr u32 sprite_index_mask = 0x7ffffu;
+  inline constexpr u32 animated_sprite_flag = 0x80000u;
+  inline constexpr u32 multi_sprite_flag = 0x100000u;
+  inline constexpr u32 xl_sprite_flag = 0x200000u;
 
-  inline constexpr uint32_t sprite_mask = sprite_index_mask;
-  inline constexpr uint32_t asprite_flag = animated_sprite_flag;
-  inline constexpr uint32_t msprite_flag = multi_sprite_flag;
-  inline constexpr uint32_t xlsprite_flag = xl_sprite_flag;
+  inline constexpr u32 sprite_mask = sprite_index_mask;
+  inline constexpr u32 asprite_flag = animated_sprite_flag;
+  inline constexpr u32 msprite_flag = multi_sprite_flag;
+  inline constexpr u32 xlsprite_flag = xl_sprite_flag;
 
   // Font module flag bits (mirrored in src/wgpu/shaders/main.wgsl).
   // FONT_MASK_FLAG samples the R8 mask atlas with vertex-color modulation;
   // FONT_COLOR_FLAG samples the BGRA color emoji atlas as-is. Both bits
   // live below the sprite_index_mask high-water so they never collide with
   // ids returned by `add_sprite`.
-  inline constexpr uint32_t font_mask_flag = 0x040000u;
-  inline constexpr uint32_t font_color_flag = 0x080000u;
+  inline constexpr u32 font_mask_flag = 0x040000u;
+  inline constexpr u32 font_color_flag = 0x080000u;
   // User-texture flag for surface caching. The lower 2 bits select one of
   // four user texture slots bound via `renderer::bind_user_texture`. Mirrored
   // in src/wgpu/shaders/main.wgsl as USER_TEX_FLAG / USER_TEX_SLOT_MASK.
-  inline constexpr uint32_t user_tex_flag = 0x200000u;
-  inline constexpr uint32_t user_tex_slot_mask = 0x3u;
-  inline constexpr uint32_t null_texture_id = 0;
-  inline constexpr uint32_t framebuffer_texture_id = 0x7ffffffeu;
+  inline constexpr u32 user_tex_flag = 0x200000u;
+  inline constexpr u32 user_tex_slot_mask = 0x3u;
+  inline constexpr u32 null_texture_id = 0;
+  inline constexpr u32 framebuffer_texture_id = 0x7ffffffeu;
 
-  inline constexpr uint32_t null_texture = null_texture_id;
-  inline constexpr uint32_t framebuffer_texture = framebuffer_texture_id;
+  inline constexpr u32 null_texture = null_texture_id;
+  inline constexpr u32 framebuffer_texture = framebuffer_texture_id;
 
   struct sprite {
     math::uvec2 at{};

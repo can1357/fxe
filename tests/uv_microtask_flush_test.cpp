@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <fxe/types.hpp>
 #include <memory>
 
 #ifndef FXE_V8_ICUDTL_PATH
@@ -47,7 +48,7 @@ namespace {
   }
 
   void test_libuv_timer_flushes_v8_microtasks_in_same_pump() {
-    std::size_t checkpoint_id = 0;
+    usize checkpoint_id = 0;
 
     auto allocator = std::unique_ptr<v8::ArrayBuffer::Allocator>(
         v8::ArrayBuffer::Allocator::NewDefaultAllocator());
@@ -132,7 +133,7 @@ namespace {
   }
 
   void test_posted_callback_flushes_v8_microtasks_in_same_pump() {
-    std::size_t checkpoint_id = 0;
+    usize checkpoint_id = 0;
 
     auto allocator = std::unique_ptr<v8::ArrayBuffer::Allocator>(
         v8::ArrayBuffer::Allocator::NewDefaultAllocator());

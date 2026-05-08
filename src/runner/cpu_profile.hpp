@@ -11,6 +11,7 @@
 #pragma once
 
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <string>
 #include <vector>
 
@@ -27,21 +28,21 @@ namespace fxe::runner {
   struct profile_node {
     int id = 0;
     call_frame frame;
-    std::uint32_t hit_count = 0;
+    u32 hit_count = 0;
     std::vector<int> children;
   };
 
   struct profile_data {
-    std::vector<profile_node> nodes;       // nodes[0] is root by convention
-    std::vector<int> samples;              // node ids, in order
-    std::vector<std::int64_t> time_deltas; // microseconds between samples
-    std::int64_t start_time = 0;           // microseconds (monotonic)
-    std::int64_t end_time = 0;
-    std::uint64_t dropped_samples = 0; // sampler dropped (overflow)
+    std::vector<profile_node> nodes; // nodes[0] is root by convention
+    std::vector<int> samples;        // node ids, in order
+    std::vector<i64> time_deltas;    // microseconds between samples
+    i64 start_time = 0;              // microseconds (monotonic)
+    i64 end_time = 0;
+    u64 dropped_samples = 0; // sampler dropped (overflow)
     // Average per-sample period; lets renderers reason about self time
     // without trusting wall-clock stamps that may live on different
     // epochs (V8's startTime counter vs CLOCK_MONOTONIC).
-    std::int64_t sample_period_us = 0;
+    i64 sample_period_us = 0;
   };
 
 } // namespace fxe::runner

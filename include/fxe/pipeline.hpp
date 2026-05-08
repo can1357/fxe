@@ -20,8 +20,8 @@
 
 namespace fxe {
   struct vertex_attribute {
-    uint32_t shader_location = 0;
-    uint32_t offset = 0;
+    u32 shader_location = 0;
+    u32 offset = 0;
     enum class format { f32, f32x2, f32x3, f32x4, u32, u8x4_norm } fmt = format::f32;
   };
 
@@ -29,11 +29,11 @@ namespace fxe {
     std::string wgsl;
     std::string vs_entry = "vs_main";
     std::string fs_entry = "fs_main";
-    uint32_t vertex_stride = 0;
+    u32 vertex_stride = 0;
     std::vector<vertex_attribute> attrs;
     // bind groups: 0 = per-frame UBO (provided by renderer), 1 = per-pipeline
     // (textures/samplers/UBOs)
-    uint32_t color_format_hint = 0;
+    u32 color_format_hint = 0;
     bool depth_test = true;
     bool blend = true;
   };
@@ -42,14 +42,14 @@ namespace fxe {
   public:
     static std::unique_ptr<pipeline> create(renderer&, const pipeline_desc&);
     virtual ~pipeline() = default;
-    virtual void update_uniforms(const void* data, size_t bytes) = 0;
-    virtual void bind_texture(uint32_t binding, texture_id tex) = 0;
-    virtual void draw(command_buffer& cb, const float* vertices, size_t vertex_count,
-                      const uint32_t* indices, size_t index_count, const float matrix[16]) = 0;
+    virtual void update_uniforms(const void* data, usize bytes) = 0;
+    virtual void bind_texture(u32 binding, texture_id tex) = 0;
+    virtual void draw(command_buffer& cb, const float* vertices, usize vertex_count,
+                      const u32* indices, usize index_count, const float matrix[16]) = 0;
   };
 
   namespace pipeline_detail {
-    [[nodiscard]] inline size_t vertex_format_size(vertex_attribute::format fmt) noexcept {
+    [[nodiscard]] inline usize vertex_format_size(vertex_attribute::format fmt) noexcept {
       switch (fmt) {
       case vertex_attribute::format::f32:
       case vertex_attribute::format::u32:
@@ -85,7 +85,7 @@ namespace fxe {
       if ((desc.vertex_stride % sizeof(float)) != 0)
         throw std::invalid_argument("Pipeline vertexStride must be a multiple of 4 bytes");
       for (const auto& attr : desc.attrs) {
-        const size_t end = static_cast<size_t>(attr.offset) + vertex_format_size(attr.fmt);
+        const usize end = static_cast<usize>(attr.offset) + vertex_format_size(attr.fmt);
         if (end > desc.vertex_stride) {
           throw std::invalid_argument("Pipeline vertex attribute exceeds vertexStride");
         }
@@ -99,25 +99,25 @@ namespace fxe {
         validate_pipeline_desc(desc_);
       }
 
-      void update_uniforms(const void* data, size_t bytes) override {
+      void update_uniforms(const void* data, usize bytes) override {
         uniforms_.resize(bytes);
         if (bytes && data)
           std::memcpy(uniforms_.data(), data, bytes);
       }
 
-      void bind_texture(uint32_t binding, texture_id tex) override {
+      void bind_texture(u32 binding, texture_id tex) override {
         if (binding >= bound_textures_.size())
-          bound_textures_.resize(static_cast<size_t>(binding) + 1, null_texture);
+          bound_textures_.resize(static_cast<usize>(binding) + 1, null_texture);
         bound_textures_[binding] = tex;
       }
 
-      void draw(command_buffer& cb, const float* vertices, size_t vertex_count,
-                const uint32_t* indices, size_t index_count, const float matrix[16]) override {
+      void draw(command_buffer& cb, const float* vertices, usize vertex_count, const u32* indices,
+                usize index_count, const float matrix[16]) override {
         (void)matrix;
         auto [out_vertices, out_indices] =
             cb.allocate(vertex_count, index_count, vertex_topology::triangle);
-        const size_t floats_per_vertex = desc_.vertex_stride / sizeof(float);
-        for (size_t i = 0; i < vertex_count; ++i) {
+        const usize floats_per_vertex = desc_.vertex_stride / sizeof(float);
+        for (usize i = 0; i < vertex_count; ++i) {
           vertex v{};
           v.color = r8g8b8a8{255, 255, 255, 255};
           if (vertices && floats_per_vertex >= 2) {
@@ -129,13 +129,13 @@ namespace fxe {
           }
           out_vertices[i] = v;
         }
-        for (size_t i = 0; i < index_count; ++i)
-          out_indices[i] = indices ? indices[i] : static_cast<uint32_t>(i);
+        for (usize i = 0; i < index_count; ++i)
+          out_indices[i] = indices ? indices[i] : static_cast<u32>(i);
       }
 
     private:
       pipeline_desc desc_;
-      std::vector<uint8_t> uniforms_;
+      std::vector<u8> uniforms_;
       std::vector<texture_id> bound_textures_;
     };
 #endif

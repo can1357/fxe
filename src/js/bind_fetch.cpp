@@ -507,7 +507,7 @@ namespace fxe::js {
       auto* d = unwrap_response(info.HolderV2());
       if (!d)
         return;
-      info.GetReturnValue().Set(static_cast<int32_t>(d->status));
+      info.GetReturnValue().Set(static_cast<i32>(d->status));
     }
     void resp_get_status_text(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -866,7 +866,7 @@ namespace fxe::js {
       std::string path = "/";
       if (info.Length() >= 4 && !info[3]->IsUndefined() && !info[3]->IsNull())
         path = to_str(iso, info[3]);
-      std::int64_t expires = 0;
+      i64 expires = 0;
       if (info.Length() >= 5 && !info[4]->IsUndefined() && !info[4]->IsNull())
         expires = info[4]->IntegerValue(ctx).FromMaybe(0);
       bool secure = false;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <fxe/types.hpp>
 #include <mbedtls/md.h>
 #if !defined(_WIN32)
 #include <sys/socket.h>
@@ -39,12 +40,12 @@ namespace fxe::debug::cdp_ws {
       return std::string(s);
     }
 
-    void append_be16(std::string& out, std::uint16_t v) {
+    void append_be16(std::string& out, u16 v) {
       out.push_back(static_cast<char>((v >> 8) & 0xffu));
       out.push_back(static_cast<char>(v & 0xffu));
     }
 
-    void append_be64(std::string& out, std::uint64_t v) {
+    void append_be64(std::string& out, u64 v) {
       for (int i = 7; i >= 0; --i)
         out.push_back(static_cast<char>((v >> (i * 8)) & 0xffu));
     }
@@ -209,18 +210,17 @@ namespace fxe::debug::cdp_ws {
     return true;
   }
 
-  std::string encode_frame(std::string_view payload, std::uint8_t opcode, bool mask,
-                           std::uint32_t mask_key) {
+  std::string encode_frame(std::string_view payload, u8 opcode, bool mask, u32 mask_key) {
     std::string out;
     out.reserve(payload.size() + 14);
     out.push_back(static_cast<char>(0x80u | (opcode & 0x0fu)));
-    std::uint64_t len = static_cast<std::uint64_t>(payload.size());
-    std::uint8_t mask_bit = mask ? 0x80u : 0u;
+    u64 len = static_cast<u64>(payload.size());
+    u8 mask_bit = mask ? 0x80u : 0u;
     if (len <= 125u) {
-      out.push_back(static_cast<char>(mask_bit | static_cast<std::uint8_t>(len)));
+      out.push_back(static_cast<char>(mask_bit | static_cast<u8>(len)));
     } else if (len <= 65535u) {
       out.push_back(static_cast<char>(mask_bit | 126u));
-      append_be16(out, static_cast<std::uint16_t>(len));
+      append_be16(out, static_cast<u16>(len));
     } else {
       out.push_back(static_cast<char>(mask_bit | 127u));
       append_be64(out, len);
@@ -248,22 +248,22 @@ namespace fxe::debug::cdp_ws {
     if (buffer.size() < 2)
       return false;
     const auto* data = reinterpret_cast<const u8*>(buffer.data());
-    std::uint8_t b0 = data[0];
-    std::uint8_t b1 = data[1];
+    u8 b0 = data[0];
+    u8 b1 = data[1];
     bool rsv = (b0 & 0x70u) != 0;
     if (rsv) {
       error = "reserved WebSocket bits set";
       return false;
     }
     bool fin = (b0 & 0x80u) != 0;
-    std::uint8_t opcode = b0 & 0x0fu;
+    u8 opcode = b0 & 0x0fu;
     bool masked = (b1 & 0x80u) != 0;
-    std::uint64_t len = b1 & 0x7fu;
+    u64 len = b1 & 0x7fu;
     usize pos = 2;
     if (len == 126u) {
       if (buffer.size() < pos + 2u)
         return false;
-      len = (static_cast<std::uint64_t>(data[pos]) << 8u) | data[pos + 1u];
+      len = (static_cast<u64>(data[pos]) << 8u) | data[pos + 1u];
       pos += 2;
     } else if (len == 127u) {
       if (buffer.size() < pos + 8u)
@@ -289,11 +289,11 @@ namespace fxe::debug::cdp_ws {
         key[i] = data[pos + i];
       pos += 4;
     }
-    if (len > static_cast<std::uint64_t>(max_ws_frame_bytes)) {
+    if (len > static_cast<u64>(max_ws_frame_bytes)) {
       error = "WebSocket frame exceeds 16777216-byte limit";
       return false;
     }
-    if (len > static_cast<std::uint64_t>(buffer.size() - pos))
+    if (len > static_cast<u64>(buffer.size() - pos))
       return false;
     if (opcode >= 0x8u) {
       if (!fin) {
@@ -339,7 +339,7 @@ namespace fxe::debug::cdp_ws {
     return send_all(s, encode_frame(payload, 0x1, false));
   }
 
-  bool write_close(socket_t s, std::uint16_t code, std::string_view reason) {
+  bool write_close(socket_t s, u16 code, std::string_view reason) {
     std::string payload;
     append_be16(payload, code);
     payload += reason;

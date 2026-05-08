@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fxe/types.hpp>
 #include <unordered_map>
 
 #if defined(__APPLE__) || defined(__linux__)
@@ -24,7 +25,7 @@ namespace fxe::runner {
     constexpr int kMaxFrames = 96;
 
     struct sample_slot {
-      std::uint64_t t_us = 0;
+      u64 t_us = 0;
       int n_frames = 0;
       void* frames[kMaxFrames] = {};
     };
@@ -33,11 +34,11 @@ namespace fxe::runner {
     // time anyway; SIGPROF is a process-wide signal).
     struct sampler_ring {
       sample_slot* slots = nullptr;
-      std::size_t cap = 0;
+      usize cap = 0;
       // Monotonically increasing. Writers (signal handler) cas-increment;
       // readers wait until !active_ then drain head/cap entries.
-      std::atomic<std::size_t> head{0};
-      std::atomic<std::uint64_t> dropped{0};
+      std::atomic<usize> head{0};
+      std::atomic<u64> dropped{0};
       std::atomic<bool> active{false};
       // Saved sigaction at install time. V8's CpuProfiler also hooks
       // SIGPROF on POSIX; if it was active when we installed, this points
@@ -51,17 +52,16 @@ namespace fxe::runner {
       return r;
     }
 
-    std::uint64_t now_us() noexcept {
+    u64 now_us() noexcept {
       timespec ts{};
       clock_gettime(CLOCK_MONOTONIC, &ts);
-      return static_cast<std::uint64_t>(ts.tv_sec) * 1000000ull +
-             static_cast<std::uint64_t>(ts.tv_nsec) / 1000ull;
+      return static_cast<u64>(ts.tv_sec) * 1000000ull + static_cast<u64>(ts.tv_nsec) / 1000ull;
     }
 
     void sigprof_handler(int sig, siginfo_t* info, void* ctx) {
       auto& r = ring();
       if (r.active.load(std::memory_order_acquire)) {
-        std::size_t idx = r.head.fetch_add(1, std::memory_order_acq_rel);
+        usize idx = r.head.fetch_add(1, std::memory_order_acq_rel);
         if (idx < r.cap) {
           sample_slot& s = r.slots[idx];
           s.t_us = now_us();
@@ -159,7 +159,7 @@ namespace fxe::runner {
       (void)stop();
   }
 
-  bool native_profiler::start(int hz, std::size_t max_samples, std::string& err) {
+  bool native_profiler::start(int hz, usize max_samples, std::string& err) {
     if (running_) {
       err = "native profiler already running";
       return false;
@@ -231,7 +231,7 @@ namespace fxe::runner {
     auto& r = ring();
     r.active.store(false, std::memory_order_release);
 
-    std::size_t produced = r.head.load(std::memory_order_acquire);
+    usize produced = r.head.load(std::memory_order_acquire);
     if (produced > r.cap)
       produced = r.cap;
     out.dropped_samples = r.dropped.load(std::memory_order_relaxed);
@@ -268,7 +268,7 @@ namespace fxe::runner {
       n.id = static_cast<int>(out.nodes.size()) + 1;
       n.frame = f;
       out.nodes.push_back(std::move(n));
-      out.nodes[static_cast<std::size_t>(parent - 1)].children.push_back(out.nodes.back().id);
+      out.nodes[static_cast<usize>(parent - 1)].children.push_back(out.nodes.back().id);
       child_index.emplace(std::move(k), out.nodes.back().id);
       return out.nodes.back().id;
     };
@@ -281,8 +281,8 @@ namespace fxe::runner {
     out.sample_period_us = (hz_ > 0) ? (1'000'000 / hz_) : 1000;
     out.samples.reserve(produced);
     out.time_deltas.reserve(produced);
-    std::uint64_t prev_t = 0;
-    for (std::size_t i = 0; i < produced; ++i) {
+    u64 prev_t = 0;
+    for (usize i = 0; i < produced; ++i) {
       const sample_slot& s = r.slots[i];
       if (s.n_frames <= kHandlerSkip)
         continue;
@@ -297,16 +297,16 @@ namespace fxe::runner {
           cf = resolve(s.frames[f]);
         cur = get_child(cur, cf);
       }
-      out.nodes[static_cast<std::size_t>(cur - 1)].hit_count += 1;
+      out.nodes[static_cast<usize>(cur - 1)].hit_count += 1;
       out.samples.push_back(cur);
       // Use a flat per-sample budget (sample_period_us) instead of raw
       // wall-clock gaps. That way self-time is hit_count × period and
       // doesn't get distorted by long sleeps between scheduled samples.
       out.time_deltas.push_back(out.sample_period_us);
       if (i == 0)
-        out.start_time = static_cast<std::int64_t>(s.t_us);
+        out.start_time = static_cast<i64>(s.t_us);
       prev_t = s.t_us;
-      out.end_time = static_cast<std::int64_t>(s.t_us);
+      out.end_time = static_cast<i64>(s.t_us);
     }
     (void)prev_t;
 
@@ -323,7 +323,7 @@ namespace fxe::runner {
 
   native_profiler::~native_profiler() = default;
 
-  bool native_profiler::start(int /*hz*/, std::size_t /*max_samples*/, std::string& err) {
+  bool native_profiler::start(int /*hz*/, usize /*max_samples*/, std::string& err) {
     err = "native CPU profiling is not implemented on this platform";
     return false;
   }

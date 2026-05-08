@@ -36,6 +36,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <fxe/types.hpp>
 #include <sqlite3.h>
 #include <v8.h>
 
@@ -235,7 +236,7 @@ namespace fxe::js {
       }
       if (v->IsBigInt()) {
         bool lossless = false;
-        int64_t i = v.As<BigInt>()->Int64Value(&lossless);
+        i64 i = v.As<BigInt>()->Int64Value(&lossless);
         if (!lossless) {
           // Build a meaningful range message.
           String::Utf8Value u(iso, v);
@@ -251,9 +252,9 @@ namespace fxe::js {
       if (v->IsNumber()) {
         double d = v->NumberValue(ctx).FromMaybe(0);
         // Match Bun: if the number is integral and fits in int64, bind as int.
-        if (std::isfinite(d) && d == static_cast<double>(static_cast<int64_t>(d)) &&
+        if (std::isfinite(d) && d == static_cast<double>(static_cast<i64>(d)) &&
             d >= -9.2233720368547758e18 && d <= 9.2233720368547758e18) {
-          if (sqlite3_bind_int64(stmt, idx, static_cast<int64_t>(d)) != SQLITE_OK)
+          if (sqlite3_bind_int64(stmt, idx, static_cast<i64>(d)) != SQLITE_OK)
             return throw_sqlite(iso, sqlite3_db_handle(stmt));
           return true;
         }
@@ -265,7 +266,7 @@ namespace fxe::js {
         auto view = v.As<ArrayBufferView>();
         auto buf = view->Buffer();
         auto bs = buf->GetBackingStore();
-        const uint8_t* data = static_cast<const uint8_t*>(bs->Data()) + view->ByteOffset();
+        const u8* data = static_cast<const u8*>(bs->Data()) + view->ByteOffset();
         int n = static_cast<int>(view->ByteLength());
         if (sqlite3_bind_blob(stmt, idx, data, n, SQLITE_TRANSIENT) != SQLITE_OK)
           return throw_sqlite(iso, sqlite3_db_handle(stmt));
@@ -326,12 +327,12 @@ namespace fxe::js {
       if (single_object) {
         auto obj = first.As<Object>();
         // Track which params were bound when strict mode is on.
-        std::vector<bool> bound(static_cast<size_t>(param_count) + 1, false);
+        std::vector<bool> bound(static_cast<usize>(param_count) + 1, false);
         Local<Array> keys;
         std::vector<std::string> ignored_unknown_keys;
         if (!obj->GetOwnPropertyNames(ctx).ToLocal(&keys))
           return throw_error(iso, "failed to read parameter object keys");
-        for (uint32_t i = 0; i < keys->Length(); ++i) {
+        for (u32 i = 0; i < keys->Length(); ++i) {
           Local<Value> k;
           if (!keys->Get(ctx, i).ToLocal(&k))
             continue;
@@ -367,12 +368,12 @@ namespace fxe::js {
             continue;
           if (!bind_one(iso, ctx, stmt, idx, val, safe_integers))
             return false;
-          if (idx > 0 && static_cast<size_t>(idx) < bound.size())
-            bound[static_cast<size_t>(idx)] = true;
+          if (idx > 0 && static_cast<usize>(idx) < bound.size())
+            bound[static_cast<usize>(idx)] = true;
         }
         if (strict) {
           for (int i = 1; i <= param_count; ++i) {
-            if (!bound[static_cast<size_t>(i)]) {
+            if (!bound[static_cast<usize>(i)]) {
               const char* nm = sqlite3_bind_parameter_name(stmt, i);
               std::string nstr = nm ? nm : ("?" + std::to_string(i));
               return throw_error(iso, "Missing parameter \"" + nstr + "\"");
@@ -397,7 +398,7 @@ namespace fxe::js {
                               bool safe_integers) {
       switch (sqlite3_column_type(stmt, col)) {
       case SQLITE_INTEGER: {
-        int64_t v = sqlite3_column_int64(stmt, col);
+        i64 v = sqlite3_column_int64(stmt, col);
         if (safe_integers)
           return BigInt::New(iso, v);
         // Match Bun: return as number even when it loses precision past 2^53.
@@ -415,10 +416,10 @@ namespace fxe::js {
       case SQLITE_BLOB: {
         const void* data = sqlite3_column_blob(stmt, col);
         int n = sqlite3_column_bytes(stmt, col);
-        auto buf = ArrayBuffer::New(iso, static_cast<size_t>(n));
+        auto buf = ArrayBuffer::New(iso, static_cast<usize>(n));
         if (n > 0)
-          std::memcpy(buf->GetBackingStore()->Data(), data, static_cast<size_t>(n));
-        return Uint8Array::New(buf, 0, static_cast<size_t>(n));
+          std::memcpy(buf->GetBackingStore()->Data(), data, static_cast<usize>(n));
+        return Uint8Array::New(buf, 0, static_cast<usize>(n));
       }
       case SQLITE_NULL:
       default:
@@ -429,7 +430,7 @@ namespace fxe::js {
     void refresh_column_names(stmt_holder* sh) {
       sh->column_names.clear();
       int n = sqlite3_column_count(sh->stmt);
-      sh->column_names.reserve(static_cast<size_t>(n));
+      sh->column_names.reserve(static_cast<usize>(n));
       for (int i = 0; i < n; ++i) {
         const char* nm = sqlite3_column_name(sh->stmt, i);
         sh->column_names.emplace_back(nm ? nm : "");
@@ -454,7 +455,7 @@ namespace fxe::js {
       }
       int n = sqlite3_column_count(sh->stmt);
       for (int i = 0; i < n; ++i) {
-        const auto& name = sh->column_names[static_cast<size_t>(i)];
+        const auto& name = sh->column_names[static_cast<usize>(i)];
         (void)row->Set(ctx, s(iso, name), column_value(iso, ctx, sh->stmt, i, safe_integers));
       }
       return row;
@@ -465,7 +466,7 @@ namespace fxe::js {
       int n = sqlite3_column_count(sh->stmt);
       auto arr = Array::New(iso, n);
       for (int i = 0; i < n; ++i) {
-        (void)arr->Set(ctx, static_cast<uint32_t>(i),
+        (void)arr->Set(ctx, static_cast<u32>(i),
                        column_value(iso, ctx, sh->stmt, i, safe_integers));
       }
       return arr;
@@ -495,7 +496,7 @@ namespace fxe::js {
         return;
       refresh_column_names(sh);
       auto out = Array::New(iso);
-      uint32_t row_idx = 0;
+      u32 row_idx = 0;
       for (;;) {
         int rc = sqlite3_step(sh->stmt);
         if (rc == SQLITE_ROW) {
@@ -544,7 +545,7 @@ namespace fxe::js {
         return;
       refresh_column_names(sh);
       auto out = Array::New(iso);
-      uint32_t i = 0;
+      u32 i = 0;
       for (;;) {
         int rc = sqlite3_step(sh->stmt);
         if (rc == SQLITE_ROW) {
@@ -561,7 +562,7 @@ namespace fxe::js {
 
     Local<Object> make_run_result(Isolate* iso, Local<Context> ctx, db_holder* dh) {
       auto out = Object::New(iso);
-      int64_t rowid = sqlite3_last_insert_rowid(dh->db);
+      i64 rowid = sqlite3_last_insert_rowid(dh->db);
       int changes = sqlite3_changes(dh->db);
       if (dh->safe_integers) {
         (void)out->Set(ctx, "lastInsertRowid"_v8(iso), BigInt::New(iso, rowid));
@@ -720,7 +721,7 @@ namespace fxe::js {
       auto arr = Array::New(iso, n);
       for (int i = 0; i < n; ++i) {
         const char* nm = sqlite3_column_name(sh->stmt, i);
-        (void)arr->Set(ctx, static_cast<uint32_t>(i), s(iso, nm ? nm : ""));
+        (void)arr->Set(ctx, static_cast<u32>(i), s(iso, nm ? nm : ""));
       }
       info.GetReturnValue().Set(arr);
     }
@@ -898,11 +899,11 @@ namespace fxe::js {
         (void)throw_error(iso, "Database.serialize failed");
         return;
       }
-      auto ab = ArrayBuffer::New(iso, static_cast<size_t>(size));
+      auto ab = ArrayBuffer::New(iso, static_cast<usize>(size));
       if (size > 0)
-        std::memcpy(ab->GetBackingStore()->Data(), buf, static_cast<size_t>(size));
+        std::memcpy(ab->GetBackingStore()->Data(), buf, static_cast<usize>(size));
       sqlite3_free(buf);
-      info.GetReturnValue().Set(Uint8Array::New(ab, 0, static_cast<size_t>(size)));
+      info.GetReturnValue().Set(Uint8Array::New(ab, 0, static_cast<usize>(size)));
     }
 
     void db_load_extension(const FunctionCallbackInfo<Value>& info) {
@@ -964,7 +965,7 @@ namespace fxe::js {
       if (v->IsArrayBufferView()) {
         auto view = v.As<ArrayBufferView>();
         auto bs = view->Buffer()->GetBackingStore();
-        void* p = static_cast<uint8_t*>(bs->Data()) + view->ByteOffset();
+        void* p = static_cast<u8*>(bs->Data()) + view->ByteOffset();
         int rc = sqlite3_file_control(dh->db, "main", op, p);
         info.GetReturnValue().Set(Integer::New(iso, rc));
         return;
@@ -1060,7 +1061,7 @@ namespace fxe::js {
 
       // Forward args + this to the wrapped function.
       std::vector<Local<Value>> argv;
-      argv.reserve(static_cast<size_t>(info.Length()));
+      argv.reserve(static_cast<usize>(info.Length()));
       for (int i = 0; i < info.Length(); ++i)
         argv.push_back(info[i]);
 
@@ -1258,7 +1259,7 @@ namespace fxe::js {
         (void)throw_error(iso, "Database.deserialize: cannot open in-memory db");
         return;
       }
-      const size_t n = view->ByteLength();
+      const usize n = view->ByteLength();
       // Copy the bytes into a sqlite-managed allocation; sqlite takes ownership.
       auto* copy = static_cast<unsigned char*>(sqlite3_malloc64(n ? n : 1));
       if (!copy) {
@@ -1268,7 +1269,7 @@ namespace fxe::js {
       }
       if (n > 0) {
         auto bs = view->Buffer()->GetBackingStore();
-        std::memcpy(copy, static_cast<uint8_t*>(bs->Data()) + view->ByteOffset(), n);
+        std::memcpy(copy, static_cast<u8*>(bs->Data()) + view->ByteOffset(), n);
       }
       unsigned int dflags = SQLITE_DESERIALIZE_FREEONCLOSE | SQLITE_DESERIALIZE_RESIZEABLE;
       if (readonly)

@@ -27,6 +27,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <fxe/types.hpp>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -162,7 +163,7 @@ namespace fxe::js {
 
     // Extract a write payload from a v8::Value. Accepts string (UTF-8) or
     // any TypedArray / ArrayBuffer / DataView. Returns false if neither.
-    bool extract_data(Isolate* iso, Local<Value> v, std::vector<uint8_t>& out) {
+    bool extract_data(Isolate* iso, Local<Value> v, std::vector<u8>& out) {
       if (v->IsString()) {
         auto s = utf8(iso, v);
         out.assign(s.begin(), s.end());
@@ -170,7 +171,7 @@ namespace fxe::js {
       }
       if (v->IsArrayBufferView()) {
         auto view = v.As<ArrayBufferView>();
-        size_t n = view->ByteLength();
+        usize n = view->ByteLength();
         out.resize(n);
         if (n)
           view->CopyContents(out.data(), n);
@@ -178,7 +179,7 @@ namespace fxe::js {
       }
       if (v->IsArrayBuffer()) {
         auto ab = v.As<ArrayBuffer>();
-        size_t n = ab->ByteLength();
+        usize n = ab->ByteLength();
         out.resize(n);
         if (n)
           std::memcpy(out.data(), ab->Data(), n);
@@ -225,7 +226,7 @@ namespace fxe::js {
     }
 
     // Reads file bytes. Sets ec on failure.
-    std::vector<uint8_t> read_all(const fs::path& p, std::error_code& ec) {
+    std::vector<u8> read_all(const fs::path& p, std::error_code& ec) {
       std::ifstream f(p, std::ios::binary);
       if (!f) {
         ec = std::make_error_code(std::errc::no_such_file_or_directory);
@@ -234,9 +235,9 @@ namespace fxe::js {
       f.seekg(0, std::ios::end);
       auto sz = f.tellg();
       f.seekg(0, std::ios::beg);
-      std::vector<uint8_t> buf;
+      std::vector<u8> buf;
       if (sz > 0)
-        buf.resize(static_cast<size_t>(sz));
+        buf.resize(static_cast<usize>(sz));
       if (sz > 0)
         f.read(reinterpret_cast<char*>(buf.data()), sz);
       if (f.bad()) {
@@ -246,7 +247,7 @@ namespace fxe::js {
       return buf;
     }
 
-    bool write_all(const fs::path& p, const std::vector<uint8_t>& data, bool append,
+    bool write_all(const fs::path& p, const std::vector<u8>& data, bool append,
                    std::error_code& ec) {
       auto mode = std::ios::binary | (append ? std::ios::app : std::ios::trunc);
       std::ofstream f(p, mode);
@@ -266,7 +267,7 @@ namespace fxe::js {
     }
 
     // Build a Uint8Array that owns a freshly-allocated backing store.
-    Local<Value> bytes_to_uint8(Isolate* iso, const std::vector<uint8_t>& bytes) {
+    Local<Value> bytes_to_uint8(Isolate* iso, const std::vector<u8>& bytes) {
       auto store = ArrayBuffer::NewBackingStore(iso, bytes.size());
       if (!bytes.empty())
         std::memcpy(store->Data(), bytes.data(), bytes.size());
@@ -284,9 +285,9 @@ namespace fxe::js {
       bool is_file = fs::is_regular_file(st);
       bool is_dir = fs::is_directory(st);
       bool is_symlink = fs::is_symlink(st);
-      uint64_t size = 0;
+      u64 size = 0;
       if (is_file) {
-        size = static_cast<uint64_t>(fs::file_size(p, ec));
+        size = static_cast<u64>(fs::file_size(p, ec));
         if (ec)
           return out;
       }
@@ -321,7 +322,7 @@ namespace fxe::js {
       if (ec)
         return Local<Value>();
       auto arr = Array::New(iso, static_cast<int>(entries.size()));
-      uint32_t i = 0;
+      u32 i = 0;
       for (const auto& e : entries) {
         auto name = e.path().filename().generic_string();
         if (with_types) {
@@ -514,7 +515,7 @@ namespace fxe::js {
     }
 
     std::string random_temp_path(const fs::path& p) {
-      static std::atomic<uint64_t> counter{0};
+      static std::atomic<u64> counter{0};
       auto tick = std::chrono::high_resolution_clock::now().time_since_epoch().count();
       std::ostringstream out;
       out << p.generic_string() << ".tmp." << tick << "." << counter.fetch_add(1);
@@ -541,8 +542,8 @@ namespace fxe::js {
     }
 
     bool match_component(std::string_view pat, std::string_view text) {
-      size_t pi = 0, ti = 0, star = std::string_view::npos, mark = 0;
-      auto char_match = [&](size_t& pidx, char c) {
+      usize pi = 0, ti = 0, star = std::string_view::npos, mark = 0;
+      auto char_match = [&](usize& pidx, char c) {
         if (pidx >= pat.size())
           return false;
         if (pat[pidx] == '?') {
@@ -574,7 +575,7 @@ namespace fxe::js {
           star = pi++;
           mark = ti;
         } else {
-          size_t next = pi;
+          usize next = pi;
           if (char_match(next, text[ti])) {
             pi = next;
             ++ti;
@@ -591,12 +592,12 @@ namespace fxe::js {
       return pi == pat.size();
     }
 
-    bool match_parts(const std::vector<std::string>& pat, size_t pi,
-                     const std::vector<std::string>& parts, size_t si) {
+    bool match_parts(const std::vector<std::string>& pat, usize pi,
+                     const std::vector<std::string>& parts, usize si) {
       if (pi == pat.size())
         return si == parts.size();
       if (pat[pi] == "**") {
-        for (size_t i = si; i <= parts.size(); ++i) {
+        for (usize i = si; i <= parts.size(); ++i) {
           if (match_parts(pat, pi + 1, parts, i))
             return true;
         }
@@ -609,7 +610,7 @@ namespace fxe::js {
     Local<Array> string_array(Isolate* iso, const std::vector<std::string>& values) {
       auto ctx = iso->GetCurrentContext();
       auto arr = Array::New(iso, static_cast<int>(values.size()));
-      for (uint32_t i = 0; i < values.size(); ++i)
+      for (u32 i = 0; i < values.size(); ++i)
         (void)arr->Set(ctx, i, str(iso, values[i]));
       return arr;
     }
@@ -646,7 +647,7 @@ namespace fxe::js {
 
     struct glob_iter_state : weak_holder<glob_iter_state> {
       std::vector<std::string> entries;
-      size_t index = 0;
+      usize index = 0;
     };
 
     glob_iter_state* glob_iter_from(Local<Object> self) {
@@ -730,7 +731,7 @@ namespace fxe::js {
       auto p = utf8(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
-      std::vector<uint8_t> data;
+      std::vector<u8> data;
       if (!extract_data(iso, info[1], data)) {
         (void)throw_type_error(iso, "data must be string or TypedArray");
         return;
@@ -1087,7 +1088,7 @@ namespace fxe::js {
       auto p = utf8(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
-      std::vector<uint8_t> data;
+      std::vector<u8> data;
       if (!extract_data(iso, info[1], data)) {
         (void)throw_type_error(iso, "data must be string or TypedArray");
         return;
@@ -1219,7 +1220,7 @@ namespace fxe::js {
     }
 
     struct fs_stat_record {
-      uint64_t size = 0;
+      u64 size = 0;
       bool is_file = false;
       bool is_dir = false;
       double mtime_ms = 0;
@@ -1240,7 +1241,7 @@ namespace fxe::js {
       out.is_dir = fs::is_directory(st);
       out.size = 0;
       if (out.is_file) {
-        out.size = static_cast<uint64_t>(fs::file_size(p, ec));
+        out.size = static_cast<u64>(fs::file_size(p, ec));
         if (ec)
           return false;
       }
@@ -1291,7 +1292,7 @@ namespace fxe::js {
                                           bool with_types) {
       auto ctx = iso->GetCurrentContext();
       auto arr = Array::New(iso, static_cast<int>(entries.size()));
-      uint32_t i = 0;
+      u32 i = 0;
       for (const auto& entry : entries) {
         if (with_types) {
           auto o = Object::New(iso);
@@ -1371,8 +1372,8 @@ namespace fxe::js {
       std::string path2;
       std::string syscall;
       read_encoding encoding = read_encoding::raw;
-      std::vector<uint8_t> data;
-      std::vector<uint8_t> bytes;
+      std::vector<u8> data;
+      std::vector<u8> bytes;
       fs_stat_record stat;
       std::vector<fs_dir_entry_record> entries;
       std::string text;

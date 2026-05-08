@@ -7,7 +7,7 @@
 //     raw ma_sound* pointers across the engine boundary so loaded sounds can
 //     migrate slots if we ever compact (today: stable, free-list style).
 //   * Loading from bytes uses a custom decoder that reads from an owned
-//     std::vector<uint8_t>. The vector outlives the ma_sound.
+//     std::vector<u8>. The vector outlives the ma_sound.
 
 #include "audio.hpp"
 
@@ -15,6 +15,7 @@
 #include <miniaudio.h>
 
 #include <cstring>
+#include <fxe/types.hpp>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -32,7 +33,7 @@ namespace fxe::audio {
       bool sound_initialised = false;
       ma_sound sound{};
       // For load_from_bytes: backing buffer + decoder owned by the slot.
-      std::vector<uint8_t> bytes;
+      std::vector<u8> bytes;
       bool decoder_initialised = false;
       ma_decoder decoder{};
     };
@@ -45,8 +46,8 @@ namespace fxe::audio {
       ma_device device{};
       ma_device_id selected_id{};
       captured_audio_callback callback;
-      uint32_t channels = 0;
-      uint32_t sample_rate = 0;
+      u32 channels = 0;
+      u32 sample_rate = 0;
     };
 
     struct engine_state {
@@ -108,7 +109,7 @@ namespace fxe::audio {
       const auto* bytes = reinterpret_cast<const unsigned char*>(&id);
       std::string out;
       out.resize(sizeof(ma_device_id) * 2);
-      for (std::size_t i = 0; i < sizeof(ma_device_id); ++i) {
+      for (usize i = 0; i < sizeof(ma_device_id); ++i) {
         out[i * 2] = k_hex[(bytes[i] >> 4) & 0x0f];
         out[i * 2 + 1] = k_hex[bytes[i] & 0x0f];
       }
@@ -121,14 +122,14 @@ namespace fxe::audio {
       auto* slot = static_cast<capture_slot*>(device->pUserData);
       if (slot == nullptr || !slot->callback)
         return;
-      slot->callback(static_cast<const float*>(input), static_cast<std::size_t>(frame_count),
+      slot->callback(static_cast<const float*>(input), static_cast<usize>(frame_count),
                      slot->channels, slot->sample_rate);
     }
 
     sound_slot* slot_for_id(engine_state& s, int id) {
       if (id < 0)
         return nullptr;
-      const auto index = static_cast<std::size_t>(id);
+      const auto index = static_cast<usize>(id);
       if (index >= s.slots.size())
         return nullptr;
       return &s.slots[index];
@@ -144,7 +145,7 @@ namespace fxe::audio {
           return id;
         }
       }
-      if (s.slots.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      if (s.slots.size() >= static_cast<usize>(std::numeric_limits<int>::max()))
         return std::nullopt;
       try {
         s.slots.emplace_back();
@@ -186,11 +187,11 @@ namespace fxe::audio {
       while (!s.capture_free_list.empty()) {
         int id = s.capture_free_list.back();
         s.capture_free_list.pop_back();
-        if (id >= 0 && static_cast<std::size_t>(id) < s.capture_slots.size() &&
-            s.capture_slots[static_cast<std::size_t>(id)] == nullptr)
+        if (id >= 0 && static_cast<usize>(id) < s.capture_slots.size() &&
+            s.capture_slots[static_cast<usize>(id)] == nullptr)
           return id;
       }
-      if (s.capture_slots.size() >= static_cast<std::size_t>(std::numeric_limits<int>::max()))
+      if (s.capture_slots.size() >= static_cast<usize>(std::numeric_limits<int>::max()))
         return std::nullopt;
       try {
         s.capture_slots.emplace_back(nullptr);
@@ -203,7 +204,7 @@ namespace fxe::audio {
     capture_slot* capture_slot_for_id(engine_state& s, int id) {
       if (id < 0)
         return nullptr;
-      const auto index = static_cast<std::size_t>(id);
+      const auto index = static_cast<usize>(id);
       if (index >= s.capture_slots.size())
         return nullptr;
       return s.capture_slots[index].get();
@@ -248,7 +249,7 @@ namespace fxe::audio {
       if (!s.initialised) {
         // Capture devices are independent of the playback engine.
       } else {
-        for (size_t i = 0; i < s.slots.size(); ++i) {
+        for (usize i = 0; i < s.slots.size(); ++i) {
           if (s.slots[i].in_use)
             release_slot_locked(s, static_cast<int>(i));
         }
@@ -287,7 +288,7 @@ namespace fxe::audio {
     return sound_handle{*id};
   }
 
-  sound_handle load_from_bytes(const uint8_t* data, std::size_t size) {
+  sound_handle load_from_bytes(const u8* data, usize size) {
     auto& s = state();
     std::lock_guard<std::mutex> g(s.mu);
     if (!s.initialised)
@@ -484,7 +485,7 @@ namespace fxe::audio {
         return fail_capture(audio_error::out_of_slots);
       }
       id = *acquired;
-      s.capture_slots[static_cast<std::size_t>(id)] = std::move(slot);
+      s.capture_slots[static_cast<usize>(id)] = std::move(slot);
     }
 
     capture_slot* started_slot = nullptr;
@@ -509,7 +510,7 @@ namespace fxe::audio {
     auto& s = state();
     {
       std::lock_guard<std::mutex> g(s.mu);
-      auto index = static_cast<std::size_t>(h.id);
+      auto index = static_cast<usize>(h.id);
       if (!h.valid() || index >= s.capture_slots.size() || !s.capture_slots[index])
         return set_last_error(audio_error::invalid_handle);
       slot = std::move(s.capture_slots[index]);

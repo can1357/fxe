@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <fxe/types.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -23,11 +24,11 @@ namespace fxe::runtime {
     std::string expected_signing_authority;
     std::string expected_subject;
     update_channel channel = update_channel::stable;
-    std::vector<std::uint8_t> artifact;
+    std::vector<u8> artifact;
   };
 
-  bool ed25519_verify(std::span<const std::uint8_t> sig, std::span<const std::uint8_t> message,
-                      std::span<const std::uint8_t> public_key);
+  bool ed25519_verify(std::span<const u8> sig, std::span<const u8> message,
+                      std::span<const u8> public_key);
 
   bool verify_manifest_signature(std::string_view signature_b64,
                                  std::string_view canonical_manifest,
