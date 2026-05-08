@@ -92,10 +92,7 @@ export function xAtGlyphIndex(text: string, style: TextStyle, idx: number): numb
       return old;
     }
     const native = nativeXAtGlyphIndex(text, fontSize, letterSpacing, idx);
-    const v =
-      native !== null
-        ? native
-        : measureLineWidth(text, fontSize, letterSpacing);
+    const v = native !== null ? native : measureLineWidth(text, fontSize, letterSpacing);
     TAIL_WIDTH_CACHE.set(k, v);
     if (TAIL_WIDTH_CACHE.size >= TAIL_WIDTH_CACHE_MAX) {
       g_tail_width_old = TAIL_WIDTH_CACHE;

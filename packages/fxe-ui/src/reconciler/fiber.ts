@@ -17,15 +17,7 @@
 // changing the slot count between renders throws — same rules-of-hooks as
 // React.
 
-import type {
-  Mat4,
-  Renderer,
-  Vec4,
-  Window,
-  WindowDisposer,
-  WindowEventMap,
-  WindowEventName,
-} from 'fxe';
+import type { Mat4, Vec4, Window, WindowDisposer, WindowEventMap, WindowEventName } from 'fxe';
 import { CommandBuffer, OffscreenRenderer, Primitives, Renderer } from 'fxe';
 import { tickAnimatedFrames } from '../animated/timing.ts';
 import {
@@ -215,10 +207,7 @@ function translateMat(tx: number, ty: number): Float32Array {
   return m;
 }
 
-function bakeFiberSurface(
-  cache: CommandBuffer,
-  renderer: Renderer,
-): SurfaceCacheEntry | null {
+function bakeFiberSurface(cache: CommandBuffer, renderer: Renderer): SurfaceCacheEntry | null {
   const bb = cache.bounds();
   if (!bb || bb.width <= 0 || bb.height <= 0) return null;
   const slot = allocSurfaceSlot(renderer);

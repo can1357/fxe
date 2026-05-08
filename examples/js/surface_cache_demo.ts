@@ -33,15 +33,7 @@ function paintSubtree(target: Renderer | OffscreenRenderer): void {
     for (let j = 0; j < 4; ++j) {
       const x = 12 + i * 36;
       const y = 60 + j * 30;
-      Primitives.fillRect(
-        target,
-        x,
-        y,
-        32,
-        24,
-        0,
-        0x334155ff + ((i * 30 + j * 8) & 0x3f),
-      );
+      Primitives.fillRect(target, x, y, 32, 24, 0, 0x334155ff + ((i * 30 + j * 8) & 0x3f));
       Primitives.drawText(target, x + 4, y + 4, 0, `${i},${j}`, 12, 0xe2e8f0ff);
     }
   }

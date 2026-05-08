@@ -2946,7 +2946,9 @@ declare module 'node:querystring' {
   ): string;
   export const decode: typeof parse;
   export const encode: typeof stringify;
+  // biome-ignore lint/suspicious/noShadowRestrictedNames: querystring API mirrors Node's escape/unescape
   export function escape(str: string): string;
+  // biome-ignore lint/suspicious/noShadowRestrictedNames: querystring API mirrors Node's escape/unescape
   export function unescape(str: string): string;
   const querystring: {
     parse: typeof parse;
