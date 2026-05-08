@@ -4127,3 +4127,88 @@ declare module 'node:v8' {
   };
   export default def;
 }
+
+// ---------------------------------------------------------------------------
+// Markdown — CommonMark + GFM parser exposed via the `Markdown` global.
+// Backed by md4c (src/markdown/parser.cpp). Parses to a JSON-shaped AST;
+// rendering lives in the fxe-ui Markdown component.
+// ---------------------------------------------------------------------------
+
+declare namespace FXEMarkdown {
+  type NodeType =
+    | 'document' | 'paragraph' | 'heading' | 'blockquote'
+    | 'list' | 'list_item' | 'code_block' | 'html_block' | 'thematic_break'
+    | 'table' | 'table_head' | 'table_body' | 'table_row' | 'table_cell'
+    | 'emph' | 'strong' | 'strikethrough' | 'underline' | 'code_span'
+    | 'link' | 'image' | 'latex_math' | 'wikilink' | 'raw_html'
+    | 'text' | 'soft_break' | 'hard_break' | 'entity' | 'null_char';
+
+  interface BaseNode {
+    type: NodeType;
+    children?: Node[];
+  }
+  interface DocumentNode extends BaseNode { type: 'document'; children: Node[]; }
+  interface ParagraphNode extends BaseNode { type: 'paragraph'; children: Node[]; }
+  interface HeadingNode extends BaseNode { type: 'heading'; level: 1 | 2 | 3 | 4 | 5 | 6; children: Node[]; }
+  interface BlockquoteNode extends BaseNode { type: 'blockquote'; children: Node[]; }
+  interface ListNode extends BaseNode { type: 'list'; ordered: boolean; tight: boolean; start?: number; children: ListItemNode[]; }
+  interface ListItemNode extends BaseNode { type: 'list_item'; task?: true; checked?: boolean; children: Node[]; }
+  interface CodeBlockNode extends BaseNode { type: 'code_block'; info: string; lang: string; children: TextNode[]; }
+  interface HtmlBlockNode extends BaseNode { type: 'html_block'; text: string; }
+  interface ThematicBreakNode extends BaseNode { type: 'thematic_break'; }
+  interface TableNode extends BaseNode { type: 'table'; children: Node[]; }
+  interface TableHeadNode extends BaseNode { type: 'table_head'; children: TableRowNode[]; }
+  interface TableBodyNode extends BaseNode { type: 'table_body'; children: TableRowNode[]; }
+  interface TableRowNode extends BaseNode { type: 'table_row'; children: TableCellNode[]; }
+  interface TableCellNode extends BaseNode { type: 'table_cell'; align?: 'left' | 'right' | 'center'; children: Node[]; }
+  interface EmphNode extends BaseNode { type: 'emph'; children: Node[]; }
+  interface StrongNode extends BaseNode { type: 'strong'; children: Node[]; }
+  interface StrikethroughNode extends BaseNode { type: 'strikethrough'; children: Node[]; }
+  interface UnderlineNode extends BaseNode { type: 'underline'; children: Node[]; }
+  interface CodeSpanNode extends BaseNode { type: 'code_span'; children: TextNode[]; }
+  interface LinkNode extends BaseNode { type: 'link'; href: string; title?: string; autolink?: true; children: Node[]; }
+  interface ImageNode extends BaseNode { type: 'image'; src: string; title?: string; children: Node[]; }
+  interface LatexMathNode extends BaseNode { type: 'latex_math'; }
+  interface WikilinkNode extends BaseNode { type: 'wikilink'; target: string; children: Node[]; }
+  interface RawHtmlNode extends BaseNode { type: 'raw_html'; text: string; }
+  interface TextNode extends BaseNode { type: 'text'; text: string; }
+  interface SoftBreakNode extends BaseNode { type: 'soft_break'; }
+  interface HardBreakNode extends BaseNode { type: 'hard_break'; }
+  interface EntityNode extends BaseNode { type: 'entity'; text: string; }
+  interface NullCharNode extends BaseNode { type: 'null_char'; text: string; }
+
+  type Node =
+    | DocumentNode | ParagraphNode | HeadingNode | BlockquoteNode
+    | ListNode | ListItemNode | CodeBlockNode | HtmlBlockNode | ThematicBreakNode
+    | TableNode | TableHeadNode | TableBodyNode | TableRowNode | TableCellNode
+    | EmphNode | StrongNode | StrikethroughNode | UnderlineNode | CodeSpanNode
+    | LinkNode | ImageNode | LatexMathNode | WikilinkNode | RawHtmlNode
+    | TextNode | SoftBreakNode | HardBreakNode | EntityNode | NullCharNode;
+
+  interface ParseOptions {
+    /** Convenience preset. Defaults to 'github'. Overridden by `flags`. */
+    dialect?: 'commonmark' | 'github' | 'gfm';
+    /** Bitmask of `Markdown.FLAG_*` constants. Overrides `dialect`. */
+    flags?: number;
+  }
+}
+
+declare const Markdown: {
+  parse(source: string, opts?: FXEMarkdown.ParseOptions): FXEMarkdown.DocumentNode;
+  readonly FLAG_COLLAPSE_WHITESPACE: number;
+  readonly FLAG_PERMISSIVE_ATX_HEADERS: number;
+  readonly FLAG_PERMISSIVE_URL_AUTOLINKS: number;
+  readonly FLAG_PERMISSIVE_EMAIL_AUTOLINKS: number;
+  readonly FLAG_NO_INDENTED_CODE_BLOCKS: number;
+  readonly FLAG_NO_HTML_BLOCKS: number;
+  readonly FLAG_NO_HTML_SPANS: number;
+  readonly FLAG_TABLES: number;
+  readonly FLAG_STRIKETHROUGH: number;
+  readonly FLAG_PERMISSIVE_WWW_AUTOLINKS: number;
+  readonly FLAG_TASKLISTS: number;
+  readonly FLAG_LATEX_MATH_SPANS: number;
+  readonly FLAG_WIKILINKS: number;
+  readonly FLAG_UNDERLINE: number;
+  readonly DIALECT_COMMONMARK: number;
+  readonly DIALECT_GITHUB: number;
+};

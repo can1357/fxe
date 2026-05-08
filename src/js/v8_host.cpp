@@ -36,6 +36,7 @@
 #include "bind_indexed_db.hpp"
 #include "bind_ipc.hpp"
 #include "bind_menu.hpp"
+#include "bind_markdown.hpp"
 #include "bind_notification.hpp"
 #include "bind_offscreen.hpp"
 #include "bind_path.hpp"
@@ -1841,6 +1842,7 @@ Error.prepareStackTrace = function(err, frames) {
       install_primitives_namespace(isolate, global);
       install_text_document_template(isolate, global);
       install_print_global(isolate, global);
+      install_markdown_global(isolate, global);
       install_render_stats_global(isolate, global);
       install_image_global(isolate, global);
       install_spritesheet_global(isolate, global);
