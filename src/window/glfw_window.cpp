@@ -869,7 +869,21 @@ namespace fxe {
         }
       }
 #elif defined(_WIN32)
+      {
+        HWND hwnd = glfwGetWin32Window(handle_);
+        fxe::os::install_win32_ime_bridge(
+            hwnd, this, [](void* owner, const char* p, int c, const char* k) {
+              static_cast<glfw_window*>(owner)->push_compose_event(p, c, k);
+            });
+      }
       install_win32_drop_target();
+#elif defined(__linux__) && FXE_OS_DBUS
+      {
+        (void)fxe::os::install_linux_ime_bridge(
+            this, [](void* owner, const char* p, int c, const char* k) {
+              static_cast<glfw_window*>(owner)->push_compose_event(p, c, k);
+            });
+      }
 #else
       // GLFW/X11 and GLFW/Wayland expose file paths only at Xdnd drop time; they do not
       // surface native drag enter/position/leave events for us to forward.

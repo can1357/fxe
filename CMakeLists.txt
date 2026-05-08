@@ -456,6 +456,14 @@ if(APPLE)
     )
 endif()
 
+if(WIN32)
+    target_sources(fxe_window PRIVATE src/window/ime_win32.cpp)
+    target_link_libraries(fxe_window PRIVATE imm32)
+endif()
+if(UNIX AND NOT APPLE AND FXE_OS_DBUS)
+    target_sources(fxe_window PRIVATE src/window/ime_linux.cpp)
+endif()
+
 if(FXE_ENABLE_WGPU)
     target_compile_definitions(fxe_window PUBLIC FXE_HAS_WGPU=1)
     add_library(

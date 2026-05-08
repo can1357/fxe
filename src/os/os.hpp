@@ -196,4 +196,19 @@ namespace fxe::os {
   bool clipboard_set_mime(std::string_view mime, const std::vector<u8>& bytes);
   std::optional<std::vector<u8>> clipboard_get_mime(std::string_view mime);
 
+#if !defined(FXE_OS_DBUS) && defined(FXE_HAS_DBUS)
+#define FXE_OS_DBUS FXE_HAS_DBUS
+#endif
+
+#if defined(_WIN32)
+  using win32_ime_emit_fn = void (*)(void* owner, const char* preedit, int cursor,
+                                     const char* committed);
+  void install_win32_ime_bridge(void* hwnd, void* owner, win32_ime_emit_fn emit);
+#endif
+
+#if defined(__linux__) && FXE_OS_DBUS
+  using linux_ime_emit_fn = void (*)(void* owner, const char* preedit, int cursor,
+                                     const char* committed);
+  bool install_linux_ime_bridge(void* owner, linux_ime_emit_fn emit);
+#endif
 } // namespace fxe::os

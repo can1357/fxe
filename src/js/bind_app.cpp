@@ -222,7 +222,6 @@ namespace fxe::js {
       return env;
     }
 #endif
-#endif
 
     struct persistent_callback_refs {
       Isolate* isolate = nullptr;
