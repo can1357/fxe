@@ -9,6 +9,7 @@
 #include "weak_holder.hpp"
 
 #include "../net/http_client.hpp"
+#include "../debug/dispatch.hpp"
 #include "runtime/capabilities.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
@@ -111,6 +112,14 @@ namespace fxe::js {
       for (char& c : s)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       return s;
+
+    std::string header_value(const net::header_list& headers, std::string_view key) {
+      const std::string want = ascii_lower(std::string(key));
+      for (auto it = headers.rbegin(); it != headers.rend(); ++it) {
+        if (ascii_lower(it->first) == want)
+          return it->second;
+      }
+      return {};
     }
     void throw_type(Isolate* iso, const char* m) {
       (void)throw_type_error(iso, m);
@@ -491,6 +500,8 @@ namespace fxe::js {
       bool aborted = false;
       bool settled = false;
       std::string abort_reason;
+      std::string debug_request_id;
+      std::string request_url;
       std::shared_ptr<struct stream_state> upload_stream;
       Global<Object> upload_reader;
       Global<Function> upload_on_read;
@@ -1073,6 +1084,7 @@ namespace fxe::js {
       auto resolver = st.resolver.Get(iso);
       if (st.aborted || resp.last_error == net::http_error::abort) {
         const std::string reason = abort_reason_from_state(iso, st);
+        fxe::debug::network::emit_loading_failed(st.debug_request_id, "Fetch", reason, true);
         cleanup_in_flight_state(iso, st);
         resolver->Reject(ctx, make_abort_error(iso, reason)).Check();
         st.resolver.Reset();
@@ -1080,6 +1092,8 @@ namespace fxe::js {
         return;
       }
       if (resp.last_error == net::http_error::timeout) {
+        constexpr std::string_view kTimeout = "fetch timed out";
+        fxe::debug::network::emit_loading_failed(st.debug_request_id, "Fetch", kTimeout, false);
         cleanup_in_flight_state(iso, st);
         resolver->Reject(ctx, make_timeout_error(iso, "fetch timed out")).Check();
         st.resolver.Reset();
@@ -1088,12 +1102,20 @@ namespace fxe::js {
       }
       if (!resp.error.empty()) {
         std::string msg = "fetch failed: " + resp.error;
+        fxe::debug::network::emit_loading_failed(st.debug_request_id, "Fetch", msg, false);
         cleanup_in_flight_state(iso, st);
         resolver->Reject(ctx, Exception::Error(s8(iso, msg))).Check();
         st.resolver.Reset();
         st.ctx.Reset();
         return;
       }
+      const i64 encoded_length = static_cast<i64>(resp.body.size());
+      fxe::debug::network::emit_response_received(
+          st.debug_request_id, resp.final_url.empty() ? st.request_url : resp.final_url,
+          static_cast<int>(resp.status), resp.status_text, resp.headers,
+          header_value(resp.headers, "content-type"), "Fetch",
+                                                  encoded_length);
+      fxe::debug::network::emit_loading_finished(st.debug_request_id, encoded_length);
       auto h_data = std::make_unique<headers_data>();
       for (auto& [k, v] : resp.headers)
         h_data->entries.emplace_back(ascii_lower(k), v);
@@ -1260,6 +1282,8 @@ namespace fxe::js {
       state->ctx.Reset(iso, ctx);
       if (have_signal)
         state->signal_obj.Reset(iso, signal_obj_local);
+      state->debug_request_id = fxe::debug::network::fresh_request_id();
+      state->request_url = hreq.url;
 
       if (!stream_body_local.IsEmpty()) {
         auto upload_stream = std::make_shared<stream_state>();
@@ -1321,6 +1345,12 @@ namespace fxe::js {
         state->upload_on_read.Reset(iso, on_read_maybe.ToLocalChecked());
         state->upload_on_error.Reset(iso, on_error_maybe.ToLocalChecked());
       }
+
+      fxe::debug::network::emit_request_will_be_sent(
+          state->debug_request_id, hreq.url, hreq.method, hreq.headers,
+          hreq.body.empty() ? std::optional<std::string_view>{}
+                            : std::optional<std::string_view>{hreq.body},
+          "Fetch");
 
       // Submit. Capture state by value so the lambda owns it. The completion
       // may run synchronously inside submit() when libcurl is unavailable,

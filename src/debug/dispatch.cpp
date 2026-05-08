@@ -22,6 +22,7 @@
 #include <fxe/window.hpp>
 
 #include <unordered_map>
+#include <atomic>
 
 #include "screenshot.hpp"
 #include "server_internal.hpp"
@@ -36,6 +37,8 @@
 #include <cstring>
 #include <fxe/types.hpp>
 #include <utility>
+#include <optional>
+#include <vector>
 
 namespace fxe::debug {
   runtime_handlers& runtime_storage();
@@ -43,7 +46,54 @@ namespace fxe::debug {
   heap_profiler_handlers& heap_profiler_storage();
 
   namespace {
+    std::atomic<bool> g_network_enabled{false};
+    std::atomic<u64> g_network_request_counter{0};
+
+    double network_timestamp_now() {
+      using clock = std::chrono::steady_clock;
+      return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+    }
+
+    double network_wall_time_now() {
+      using clock = std::chrono::system_clock;
+      return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+    }
+
+    json network_headers_to_json(const std::vector<std::pair<std::string, std::string>>& headers) {
+      json out{json::object()};
+      for (const auto& [name, value] : headers) {
+        if (name.empty())
+          continue;
+        auto it = out.find(name);
+        if (it != out.end() && it->is_string() && name == "set-cookie")
+          *it = it->get_ref<const std::string&>() + "\n" + value;
+        else
+          out[name] = value;
+      }
+      return out;
+    }
+
+    std::optional<std::string> network_post_data(std::optional<std::string_view> post_data) {
+      if (!post_data.has_value() || post_data->empty())
+        return std::nullopt;
+      constexpr usize kMaxPostData = 65536;
+      const usize n = std::min(post_data->size(), kMaxPostData);
+      return std::string(post_data->substr(0, n));
+    }
+
+    void emit_network_event(std::string_view method, json params) {
+      if (!g_network_enabled.load(std::memory_order_acquire))
+        return;
+      auto* srv = active_server();
+      if (!srv)
+        return;
+      srv->emit_event(method, std::move(params));
+    }
+
     using handler_fn = json (*)(dispatch_context&, const json&);
+  }
+
+  namespace {
 
     [[noreturn]] void invalid_params(std::string msg) {
       throw dispatch_error{err_code::invalid_params, std::move(msg), ""};
@@ -207,6 +257,8 @@ namespace fxe::debug {
       caps.emplace_back(std::string("Reconciler.snapshot"));
       caps.emplace_back(std::string("Runtime.enable"));
       caps.emplace_back(std::string("Debugger.enable"));
+      caps.emplace_back(std::string("Network.enable"));
+      caps.emplace_back(std::string("Network.disable"));
       caps.emplace_back(std::string("Performance.timeline"));
       caps.emplace_back(std::string("Window.subscribe"));
       caps.emplace_back(std::string("Window.unsubscribe"));
@@ -335,6 +387,7 @@ namespace fxe::debug {
       domains.push_back({{"name", "Runtime"}, {"version", "1.3"}});
       domains.push_back({{"name", "Debugger"}, {"version", "1.3"}});
       domains.push_back({{"name", "Reconciler"}, {"version", "1.3"}});
+      domains.push_back({{"name", "Network"}, {"version", "1.3"}});
       if (profiler_available())
         domains.push_back({{"name", "Profiler"}, {"version", "1.3"}});
       if (heap_profiler_available())
@@ -345,6 +398,16 @@ namespace fxe::debug {
     }
 
     json h_runtime_enable(dispatch_context&, const json&) {
+      return json{json::object()};
+    }
+
+    json h_network_enable(dispatch_context&, const json&) {
+      g_network_enabled.store(true, std::memory_order_release);
+      return json{json::object()};
+    }
+
+    json h_network_disable(dispatch_context&, const json&) {
+      g_network_enabled.store(false, std::memory_order_release);
       return json{json::object()};
     }
 
@@ -886,6 +949,8 @@ namespace fxe::debug {
           {"Runtime.reimportModule", &h_runtime_reimport_module},
           {"Schema.getDomains", &h_schema_get_domains},
           {"Runtime.enable", &h_runtime_enable},
+          {"Network.enable", &h_network_enable},
+          {"Network.disable", &h_network_disable},
           {"Console.enable", &h_console_enable},
           {"Console.disable", &h_console_disable},
           {"Page.framebufferSize", &h_page_fb_size},
@@ -959,6 +1024,138 @@ namespace fxe::debug {
   runtime_handlers get_runtime_handlers() noexcept {
     return runtime_storage();
   }
+
+  namespace network {
+    bool enabled() {
+      return g_network_enabled.load(std::memory_order_acquire);
+    }
+
+    std::string fresh_request_id() {
+      return std::to_string(g_network_request_counter.fetch_add(1, std::memory_order_acq_rel) + 1u);
+    }
+
+    void emit_request_will_be_sent(
+        std::string_view req_id, std::string_view url, std::string_view method,
+        const std::vector<std::pair<std::string, std::string>>& headers,
+        std::optional<std::string_view> post_data, std::string_view type) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["wallTime"] = network_wall_time_now();
+      params["initiator"] = {{"type", "script"}};
+      json request{
+          {"url", std::string(url)},
+          {"method", std::string(method)},
+          {"headers", network_headers_to_json(headers)},
+      };
+      if (auto body = network_post_data(post_data); body.has_value())
+        request["postData"] = std::move(*body);
+      params["request"] = std::move(request);
+      if (!type.empty())
+        params["type"] = std::string(type);
+      emit_network_event("Network.requestWillBeSent", std::move(params));
+    }
+
+    void emit_response_received(std::string_view req_id, std::string_view url, int status,
+                                std::string_view status_text,
+                                const std::vector<std::pair<std::string, std::string>>& headers,
+                                std::string_view mime_type, std::string_view type,
+                                i64 encoded_length) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["type"] = std::string(type);
+      params["response"] = {
+          {"url", std::string(url)},
+          {"status", status},
+          {"statusText", std::string(status_text)},
+          {"headers", network_headers_to_json(headers)},
+          {"mimeType", std::string(mime_type)},
+          {"encodedDataLength", encoded_length},
+      };
+      emit_network_event("Network.responseReceived", std::move(params));
+    }
+
+    void emit_loading_finished(std::string_view req_id, i64 encoded_length) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["encodedDataLength"] = encoded_length;
+      emit_network_event("Network.loadingFinished", std::move(params));
+    }
+
+    void emit_loading_failed(std::string_view req_id, std::string_view type,
+                             std::string_view error_text, bool canceled) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["type"] = std::string(type);
+      params["errorText"] = std::string(error_text);
+      if (canceled)
+        params["canceled"] = true;
+      emit_network_event("Network.loadingFailed", std::move(params));
+    }
+
+    void emit_ws_created(std::string_view req_id, std::string_view url) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["url"] = std::string(url);
+      params["initiator"] = {{"type", "script"}};
+      emit_network_event("Network.webSocketCreated", std::move(params));
+    }
+
+    void emit_ws_handshake_request(
+        std::string_view req_id,
+        const std::vector<std::pair<std::string, std::string>>& headers) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["wallTime"] = network_wall_time_now();
+      params["request"] = {{"headers", network_headers_to_json(headers)}};
+      emit_network_event("Network.webSocketWillSendHandshakeRequest", std::move(params));
+    }
+
+    void emit_ws_handshake_response(
+        std::string_view req_id, int status, std::string_view status_text,
+        const std::vector<std::pair<std::string, std::string>>& headers) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["response"] = {
+          {"status", status},
+          {"statusText", std::string(status_text)},
+          {"headers", network_headers_to_json(headers)},
+      };
+      emit_network_event("Network.webSocketHandshakeResponseReceived", std::move(params));
+    }
+
+    void emit_ws_frame_sent(std::string_view req_id, int opcode, std::string_view payload_b64) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["response"] = {{"opcode", opcode}, {"mask", true}, {"payloadData", std::string(payload_b64)}};
+      emit_network_event("Network.webSocketFrameSent", std::move(params));
+    }
+
+    void emit_ws_frame_received(std::string_view req_id, int opcode, std::string_view payload_b64) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      params["response"] = {
+          {"opcode", opcode},
+          {"mask", false},
+          {"payloadData", std::string(payload_b64)},
+      };
+      emit_network_event("Network.webSocketFrameReceived", std::move(params));
+    }
+
+    void emit_ws_closed(std::string_view req_id) {
+      json params{json::object()};
+      params["requestId"] = std::string(req_id);
+      params["timestamp"] = network_timestamp_now();
+      emit_network_event("Network.webSocketClosed", std::move(params));
+    }
+  } // namespace network
 
   json dispatch(dispatch_context& cx, std::string_view method, const json& params) {
     auto it = table().find(method);

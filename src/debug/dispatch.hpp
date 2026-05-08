@@ -9,6 +9,9 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <optional>
+#include <utility>
+#include <vector>
 
 #include <fxe/types.hpp>
 #include <nlohmann/json.hpp>
@@ -118,4 +121,32 @@ namespace fxe::debug {
   void emit_event_if_attached(event_channel channel, std::string_view method, json params);
   bool channel_enabled(event_channel channel);
   void set_channel_enabled(event_channel channel, bool enabled);
+
+  namespace network {
+    [[nodiscard]] bool enabled();
+    std::string fresh_request_id();
+    void emit_request_will_be_sent(
+        std::string_view req_id, std::string_view url, std::string_view method,
+        const std::vector<std::pair<std::string, std::string>>& headers,
+        std::optional<std::string_view> post_data, std::string_view type);
+    void emit_response_received(std::string_view req_id, std::string_view url, int status,
+                                std::string_view status_text,
+                                const std::vector<std::pair<std::string, std::string>>& headers,
+                                std::string_view mime_type, std::string_view type,
+                                i64 encoded_length);
+    void emit_loading_finished(std::string_view req_id, i64 encoded_length);
+    void emit_loading_failed(std::string_view req_id, std::string_view type,
+                             std::string_view error_text, bool canceled);
+    void emit_ws_created(std::string_view req_id, std::string_view url);
+    void emit_ws_handshake_request(
+        std::string_view req_id,
+        const std::vector<std::pair<std::string, std::string>>& headers);
+    void emit_ws_handshake_response(
+        std::string_view req_id, int status, std::string_view status_text,
+        const std::vector<std::pair<std::string, std::string>>& headers);
+    void emit_ws_frame_sent(std::string_view req_id, int opcode, std::string_view payload_b64);
+    void emit_ws_frame_received(std::string_view req_id, int opcode,
+                                std::string_view payload_b64);
+    void emit_ws_closed(std::string_view req_id);
+  } // namespace network
 } // namespace fxe::debug
