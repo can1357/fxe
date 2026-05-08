@@ -36,9 +36,5 @@ if(TARGET fxe_js)
     target_link_libraries(fxe_js PUBLIC fxe_runtime)
 endif()
 
-if(FXE_BUILD_PACKAGER AND NOT TARGET fxe-pack)
-    add_subdirectory(tools/fxe-pack)
-endif()
-
 install(FILES src/runtime/bundle_loader.hpp DESTINATION include/fxe/runtime)
 install(FILES tools/fxe-pack/bundle.hpp DESTINATION include/fxe/bundle)

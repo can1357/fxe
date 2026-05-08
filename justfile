@@ -123,7 +123,7 @@ format-shell-check:
 [group('format')]
 format-cmake:
     @if command -v gersemi >/dev/null 2>&1; then \
-        gersemi -i CMakeLists.txt cmake/*.cmake; \
+        gersemi -i CMakeLists.txt cmake/*.cmake cmake/targets/*.cmake; \
     else \
         printf '{{ yellow }}skip:{{ reset }} gersemi not found (see `just doctor`)\n' >&2; \
     fi
@@ -132,7 +132,7 @@ format-cmake:
 [group('format')]
 format-cmake-check:
     @if command -v gersemi >/dev/null 2>&1; then \
-        gersemi --check CMakeLists.txt cmake/*.cmake; \
+        gersemi --check CMakeLists.txt cmake/*.cmake cmake/targets/*.cmake; \
     else \
         printf '{{ yellow }}skip:{{ reset }} gersemi not found (see `just doctor`)\n' >&2; \
     fi
@@ -326,7 +326,7 @@ _ci-checks: format-check format-js-check format-cmake-check ts-check lint-js
 ci: _ci-checks test
     @printf '{{ green }}{{ bold }}✓ CI passed{{ reset }}\n'
 
-[doc('Fast local check: format-check + format-js-check + ts-check + lint-js (no build)')]
+[doc('Fast local check: format-check + format-js-check + format-cmake-check + ts-check + lint-js (no build)')]
 [group('ci')]
-ci-quick: format-check format-js-check ts-check lint-js
+ci-quick: format-check format-js-check format-cmake-check ts-check lint-js
     @printf '{{ green }}✓ ci-quick passed{{ reset }}\n'

@@ -10,6 +10,11 @@ option(
     ${FXE_ENABLE_V8}
 )
 option(
+    FXE_ENABLE_TREESITTER
+    "Build tree-sitter integration + bundled grammars"
+    ${FXE_ENABLE_V8}
+)
+option(
     FXE_ENABLE_NODE_COMPAT
     "Generate vendored unenv assets for V8 Node compatibility shims"
     ON

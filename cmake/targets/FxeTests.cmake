@@ -29,13 +29,24 @@ if(FXE_BUILD_TESTS)
                     PROPERTIES ENVIRONMENT "FXE_RUN=$<TARGET_FILE:fxe_run>"
                 )
             endif()
-            add_executable(fxe_pack_webauthn_entitlement_tests tests/fxe_pack_webauthn_entitlement_test.cpp)
-            target_compile_features(fxe_pack_webauthn_entitlement_tests PRIVATE cxx_std_20)
+            add_executable(
+                fxe_pack_webauthn_entitlement_tests
+                tests/fxe_pack_webauthn_entitlement_test.cpp
+            )
+            target_compile_features(
+                fxe_pack_webauthn_entitlement_tests
+                PRIVATE cxx_std_20
+            )
             add_dependencies(fxe_pack_webauthn_entitlement_tests fxe-pack)
-            add_test(NAME fxe_pack_webauthn_entitlement_tests COMMAND fxe_pack_webauthn_entitlement_tests)
+            add_test(
+                NAME fxe_pack_webauthn_entitlement_tests
+                COMMAND fxe_pack_webauthn_entitlement_tests
+            )
             set_tests_properties(
                 fxe_pack_webauthn_entitlement_tests
-                PROPERTIES ENVIRONMENT "FXE_PACK=$<TARGET_FILE:fxe-pack>;FXE_RUN=$<TARGET_FILE:fxe_run>"
+                PROPERTIES
+                    ENVIRONMENT
+                        "FXE_PACK=$<TARGET_FILE:fxe-pack>;FXE_RUN=$<TARGET_FILE:fxe_run>"
             )
         endif()
         if(NOT WIN32)

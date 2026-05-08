@@ -173,17 +173,24 @@ if(FXE_ENABLE_V8)
     # src/runner/ so it is not picked up here.
     file(GLOB _fxe_js_sources CONFIGURE_DEPENDS src/js/*.cpp)
     file(GLOB _fxe_runtime_v8_sources CONFIGURE_DEPENDS src/runtime/v8/*.cpp)
-    list(APPEND _fxe_runtime_v8_sources src/runtime/v8/native/v8_module.cpp
-                                            src/runtime/v8/native/async_hooks.cpp
-                                            src/runtime/v8/native/inspector.cpp
-                                            src/runtime/v8/native/vm.cpp)
+    list(
+        APPEND _fxe_runtime_v8_sources
+        src/runtime/v8/native/v8_module.cpp
+        src/runtime/v8/native/async_hooks.cpp
+        src/runtime/v8/native/inspector.cpp
+        src/runtime/v8/native/vm.cpp
+    )
     if(FXE_ENABLE_NATIVE_TLS_HTTP2)
         file(
             GLOB _fxe_runtime_v8_native
             CONFIGURE_DEPENDS
             src/runtime/v8/native/*.cpp
         )
-        list(FILTER _fxe_runtime_v8_native EXCLUDE REGEX "src/runtime/v8/native/v8_module\\.cpp$")
+        list(
+            FILTER _fxe_runtime_v8_native
+            EXCLUDE
+            REGEX "src/runtime/v8/native/v8_module\\.cpp$"
+        )
         list(APPEND _fxe_runtime_v8_sources ${_fxe_runtime_v8_native})
     endif()
     add_library(

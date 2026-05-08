@@ -1,14 +1,19 @@
 if(FXE_ENABLE_WEBAUTHN)
     file(GLOB _fxe_webauthn_sources CONFIGURE_DEPENDS src/webauthn/*.cpp)
     list(
-        FILTER _fxe_webauthn_sources EXCLUDE REGEX
-        "/platform_(win32|linux|macos|stub)\\.cpp$"
+        FILTER _fxe_webauthn_sources
+        EXCLUDE
+        REGEX "/platform_(win32|linux|macos|stub)\\.cpp$"
     )
     add_library(fxe_webauthn STATIC ${_fxe_webauthn_sources})
     add_library(fxe::webauthn ALIAS fxe_webauthn)
     target_include_directories(fxe_webauthn PUBLIC include src)
     target_compile_features(fxe_webauthn PUBLIC cxx_std_20)
-    target_link_libraries(fxe_webauthn PUBLIC fxe_runtime PRIVATE MbedTLS::mbedcrypto)
+    target_link_libraries(
+        fxe_webauthn
+        PUBLIC fxe_runtime
+        PRIVATE MbedTLS::mbedcrypto
+    )
     target_link_libraries(fxe_webauthn PRIVATE unofficial::sqlite3::sqlite3)
     target_compile_definitions(fxe_webauthn PUBLIC FXE_HAS_WEBAUTHN=1)
     target_link_libraries(fxe_debug PUBLIC fxe_webauthn)

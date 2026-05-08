@@ -1,6 +1,5 @@
 # OS shims (App, shell, dialog, notification, menu, tray, globalShortcut).
-set(
-    _fxe_os_sources
+set(_fxe_os_sources
     src/os/a11y.cpp
     src/os/crash_common.cpp
     src/os/menu_handler.cpp
@@ -10,8 +9,7 @@ add_library(fxe_os STATIC ${_fxe_os_sources})
 target_include_directories(fxe_os PUBLIC src include)
 target_compile_features(fxe_os PUBLIC cxx_std_20)
 if(APPLE)
-    set(
-        _fxe_os_platform
+    set(_fxe_os_platform
         src/os/macos/a11y_macos.mm
         src/os/macos/crash.mm
         src/os/macos/os_macos.mm
