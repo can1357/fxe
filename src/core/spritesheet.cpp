@@ -58,7 +58,15 @@ namespace fxe {
     mutable std::unordered_map<u32, std::shared_ptr<font::Face>> face_by_size;
   };
 
-  static font_info fallback_font{};
+  font_info& fallback_font() {
+    // Touch the FreeType library singleton first so its destructor is
+    // registered before this `font_info`'s. The fallback owns a
+    // `shared_ptr<font_runtime>` which calls FT_Done_Face on teardown;
+    // if the library was destroyed first we'd segfault inside libharfbuzz.
+    (void)font::shared_library();
+    static font_info inst{};
+    return inst;
+  }
 
   texture_id spritesheet::add_texture(texture_data tex) {
     textures.push_back(std::move(tex));
@@ -125,7 +133,7 @@ namespace fxe {
   }
 
   const font_info& get_font_info() {
-    return fallback_font;
+    return fallback_font();
   }
 
   spritesheet& get_default_spritesheet() {
@@ -300,7 +308,7 @@ namespace fxe {
       bytes_storage = std::move(*bytes);
     }
     build_default_font(sheet, sheet.default_font, std::move(face), std::move(bytes_storage));
-    fallback_font = sheet.default_font;
+    fallback_font() = sheet.default_font;
   }
 
   void init_default_fonts(spritesheet& sheet, std::span<const u8> ttf_bytes) {
@@ -323,6 +331,6 @@ namespace fxe {
       bytes_storage = std::move(*bytes);
     }
     build_default_font(sheet, sheet.default_font, std::move(face), std::move(bytes_storage));
-    fallback_font = sheet.default_font;
+    fallback_font() = sheet.default_font;
   }
 } // namespace fxe

@@ -253,16 +253,18 @@ namespace fxe::font {
                                            std::uint32_t face_index) {
     if (bytes.empty())
       return nullptr;
-    auto& lib = shared_library();
-    auto guard = lib.lock();
-    FT_Library ftlib = static_cast<FT_Library>(lib.raw());
-    if (!ftlib)
-      return nullptr;
-    std::vector<std::uint8_t> owned(bytes.begin(), bytes.end());
     FT_Face face = nullptr;
-    if (FT_New_Memory_Face(ftlib, owned.data(), static_cast<FT_Long>(owned.size()),
-                           static_cast<FT_Long>(face_index), &face) != 0) {
-      return nullptr;
+    std::vector<std::uint8_t> owned(bytes.begin(), bytes.end());
+    {
+      auto& lib = shared_library();
+      auto guard = lib.lock();
+      FT_Library ftlib = static_cast<FT_Library>(lib.raw());
+      if (!ftlib)
+        return nullptr;
+      if (FT_New_Memory_Face(ftlib, owned.data(), static_cast<FT_Long>(owned.size()),
+                             static_cast<FT_Long>(face_index), &face) != 0) {
+        return nullptr;
+      }
     }
     return std::make_unique<FreeTypeFace>(face, std::move(owned), pixel_size);
   }
