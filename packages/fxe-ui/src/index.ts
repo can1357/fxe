@@ -16,3 +16,15 @@ export * from './svg/index.ts';
 export * from './a11y/index.ts';
 export { glyphIndexAt, wrapText, xAtGlyphIndex } from './text/wrap.ts';
 export type { WrappedText, WrapOptions } from './text/wrap.ts';
+export {
+  buildApplicationEditSubmenu,
+  buildEditMenuItems,
+  editActionFromMenuId,
+  installApplicationEditMenu,
+  popupEditMenu,
+} from './text/edit_menu.ts';
+export type {
+  EditMenuAction,
+  EditMenuOptions,
+  InstallApplicationEditMenuOptions,
+} from './text/edit_menu.ts';

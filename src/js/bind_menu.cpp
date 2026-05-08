@@ -203,8 +203,7 @@ namespace fxe::js {
       if (fn.IsEmpty())
         return;
       Local<String> arg_str;
-      if (!String::NewFromUtf8(iso, id.data(), NewStringType::kNormal,
-                               static_cast<int>(id.size()))
+      if (!String::NewFromUtf8(iso, id.data(), NewStringType::kNormal, static_cast<int>(id.size()))
                .ToLocal(&arg_str)) {
         return;
       }

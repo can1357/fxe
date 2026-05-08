@@ -764,6 +764,16 @@ declare module 'fxe-ui' {
     onKeyDown?: (ev: unknown) => void;
     onKeyPress?: (ev: unknown) => void;
     onDrag?: (ev: SyntheticEvent) => void;
+    onContextMenu?: (ev: SyntheticEvent) => void;
+    onPressIn?: (ev: SyntheticEvent) => void;
+    onPressOut?: (ev: SyntheticEvent) => void;
+    onPress?: (ev: SyntheticEvent) => void;
+    onHoverIn?: (ev: SyntheticEvent) => void;
+    onHoverOut?: (ev: SyntheticEvent) => void;
+    onWheel?: (ev: SyntheticEvent & { dx: number; dy: number }) => void;
+    onCompose?: (ev: WindowEventMap['compose']) => void;
+    onEditCommand?: (action: EditMenuAction) => void;
+    cursor?: CursorKind;
   }
   export function clearHitTargets(): void;
   export function registerHitTarget(
@@ -773,6 +783,7 @@ declare module 'fxe-ui' {
   export function dispatchMouseMove(
     ev: WindowEventMap['mousemove'],
     cursorSink?: { setCursor?(kind: CursorKind): void },
+    dragSink?: { startDrag?(payload: DragOutPayload): boolean },
   ): void;
   export function dispatchMouseDown(ev: WindowEventMap['mousedown']): void;
   export function dispatchMouseUp(ev: WindowEventMap['mouseup']): void;
@@ -788,6 +799,34 @@ declare module 'fxe-ui' {
   export function focusTarget(id: string | 'next' | 'previous'): HitTarget | null;
   export function focusedTargetId(): string | null;
   export function clearFocus(): void;
+
+  export type EditMenuAction = 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'selectAll';
+  export interface EditMenuOptions {
+    hasSelection?: boolean;
+    canUndo?: boolean;
+    canRedo?: boolean;
+    canPaste?: boolean;
+    readOnly?: boolean;
+    disabled?: boolean;
+  }
+  export interface InstallApplicationEditMenuOptions {
+    extras?: ReadonlyArray<unknown>;
+    dispatch?: (action: EditMenuAction) => void;
+  }
+  export interface DragOutPayload {
+    files?: readonly string[];
+    text?: string;
+    html?: string;
+  }
+  export function buildEditMenuItems(opts?: EditMenuOptions): unknown[];
+  export function buildApplicationEditSubmenu(): unknown;
+  export function editActionFromMenuId(id: string): EditMenuAction | null;
+  export function popupEditMenu(
+    x: number,
+    y: number,
+    opts?: EditMenuOptions,
+  ): Promise<EditMenuAction | null>;
+  export function installApplicationEditMenu(opts?: InstallApplicationEditMenuOptions): () => void;
 }
 
 declare module 'fxe-ui/jsx-runtime' {

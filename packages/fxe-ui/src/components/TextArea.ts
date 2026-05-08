@@ -308,12 +308,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
     const padX = rect.paddingLeft ?? 0;
     const padY = rect.paddingTop ?? 0;
     const wrapped = wrapText(value, textStyle, { maxWidth: wrapMaxForHit() });
-    return pointToTextIndex(
-      wrapped,
-      textStyle,
-      x - rect.x - padX,
-      y - rect.y - padY + scrollY,
-    );
+    return pointToTextIndex(wrapped, textStyle, x - rect.x - padX, y - rect.y - padY + scrollY);
   };
 
   const moveCaretVertical = (idx: number, dir: 1 | -1): number => {
@@ -370,10 +365,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
 
   useFrame((dt) => {
     if (focused && !disabled && blinkMs > 0) {
-      if (
-        selectionStart === selectionEnd &&
-        imePreedit.preedit.length === 0
-      ) {
+      if (selectionStart === selectionEnd && imePreedit.preedit.length === 0) {
         blinkAccum.current.ms += dt;
         if (blinkAccum.current.ms >= blinkMs) {
           blinkAccum.current.ms = 0;
@@ -470,9 +462,8 @@ export const TextArea = Component((props: TextAreaProps): Node => {
         const dx = ev.x - pend.x;
         const dy = ev.y - pend.y;
         if (dx * dx + dy * dy > CLICK_SLOP * CLICK_SLOP) {
-          const drag = (
-            ev as { requestDragOut?: (payload: { text: string }) => boolean }
-          ).requestDragOut;
+          const drag = (ev as { requestDragOut?: (payload: { text: string }) => boolean })
+            .requestDragOut;
           if (drag) drag({ text: pend.text });
           pendingDragOut.current = null;
           dragEdge.current = null;
@@ -561,6 +552,42 @@ export const TextArea = Component((props: TextAreaProps): Node => {
           return;
         }
       });
+    },
+    onEditCommand: (action) => {
+      if (disabled) return;
+      if (action === 'undo') return doUndo();
+      if (action === 'redo') return doRedo();
+      if (action === 'selectAll') {
+        setSelection(0, value.length);
+        return;
+      }
+      const sink = clipboardSink();
+      if (action === 'copy') {
+        if (secure) return;
+        const t = selectedText();
+        if (t.length > 0) sink?.write?.(t);
+        return;
+      }
+      if (action === 'cut') {
+        if (secure || readOnly) return;
+        const t = selectedText();
+        if (t.length > 0) {
+          sink?.write?.(t);
+          replaceSelection('', 'cut');
+        }
+        return;
+      }
+      if (action === 'paste') {
+        if (readOnly) return;
+        const t = sink?.read?.() ?? '';
+        if (props.onPaste) {
+          const r = props.onPaste(t);
+          if (r === null) return;
+          if (r.length > 0) replaceSelection(r, 'paste');
+          return;
+        }
+        if (t.length > 0) replaceSelection(t, 'paste');
+      }
     },
     onKeyPress: (ev) => {
       if (disabled || readOnly) return;

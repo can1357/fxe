@@ -967,9 +967,8 @@ namespace fxe::os {
           id = it->second;
       }
       if (!id.empty()) {
-        post_main_thread_dispatch([id]() {
-          fxe::os::detail::dispatch_application_menu_command(id);
-        });
+        post_main_thread_dispatch(
+            [id]() { fxe::os::detail::dispatch_application_menu_command(id); });
       }
     }
 
@@ -1927,8 +1926,8 @@ namespace fxe::os {
     // cursor-pos reporting on Windows). Convert through the owner HWND.
     POINT pt{static_cast<LONG>(x), static_cast<LONG>(y)};
     ClientToScreen(owner, &pt);
-    UINT cmd = TrackPopupMenu(popup.menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, owner,
-                              nullptr);
+    UINT cmd =
+        TrackPopupMenu(popup.menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, owner, nullptr);
     std::string id;
     auto it = popup.command_ids.find(cmd);
     if (it != popup.command_ids.end())

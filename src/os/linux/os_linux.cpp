@@ -1612,9 +1612,8 @@ namespace fxe::os {
             action = find_action_id(g_app_menu, id);
           }
           if (!action.empty())
-            post_main_thread_dispatch([action]() {
-              fxe::os::detail::dispatch_application_menu_command(action);
-            });
+            post_main_thread_dispatch(
+                [action]() { fxe::os::detail::dispatch_application_menu_command(action); });
         }
         DBusMessage* reply = dbus_message_new_method_return(msg);
         if (reply) {

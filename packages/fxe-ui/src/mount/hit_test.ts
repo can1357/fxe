@@ -36,6 +36,13 @@ export interface HitTarget {
   onKeyDown?: (ev: unknown) => void;
   onKeyPress?: (ev: unknown) => void;
   onCompose?: (ev: ComposeEvent) => void;
+  /**
+   * Routed application-menu commands (Edit menu actions installed via
+   * `installApplicationEditMenu`). Implementing components — currently
+   * `TextInput` and `TextArea` — handle `'undo' | 'redo' | 'cut' | 'copy' |
+   * 'paste' | 'selectAll'`.
+   */
+  onEditCommand?: (action: string) => void;
 }
 function isInteractiveTarget(target: HitTarget): boolean {
   return Boolean(
@@ -51,7 +58,8 @@ function isInteractiveTarget(target: HitTarget): boolean {
       target.onBlur ||
       target.onKeyDown ||
       target.onKeyPress ||
-      target.onCompose,
+      target.onCompose ||
+      target.onEditCommand,
   );
 }
 
