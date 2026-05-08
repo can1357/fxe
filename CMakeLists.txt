@@ -765,7 +765,12 @@ if(FXE_ENABLE_V8)
         )
     endif()
 
-    add_executable(fxe_run src/runner/fxe_run.cpp)
+    add_executable(
+        fxe_run
+        src/runner/fxe_run.cpp
+        src/runner/cpu_profile_native.cpp
+        src/runner/cpu_profile_merge.cpp
+    )
     target_link_libraries(fxe_run PRIVATE fxe_js)
     target_link_libraries(fxe_js PUBLIC fxe_debug)
     if(TARGET fxe_wgpu)
@@ -1005,6 +1010,20 @@ if(FXE_BUILD_TESTS)
         endif()
         add_test(NAME ${_name} COMMAND ${_name})
     endforeach()
+
+    if(TARGET fxe_run AND TARGET fxe_wgpu)
+        add_test(
+            NAME fxe_run_cpu_prof_screenshot_exit
+            COMMAND
+                fxe_run
+                --cpu-prof=${CMAKE_CURRENT_BINARY_DIR}/fxe_run_cpu_prof_screenshot.cpuprofile
+                --cpu-prof-md=${CMAKE_CURRENT_BINARY_DIR}/fxe_run_cpu_prof_screenshot.md
+                --cpu-prof-hz=500
+                --screenshot=${CMAKE_CURRENT_BINARY_DIR}/fxe_run_cpu_prof_screenshot.png
+                --screenshot-delay=50
+                ${CMAKE_CURRENT_SOURCE_DIR}/examples/js/hello.ts
+        )
+    endif()
 
     # ---------------------------------------------------------------------
     # V8 TypeScript tests.

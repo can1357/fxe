@@ -72,6 +72,10 @@
 #include "../js/bind_process.hpp"
 #include "../runtime/bundle_loader.hpp"
 
+#include "cpu_profile.hpp"
+#include "cpu_profile_merge.hpp"
+#include "cpu_profile_native.hpp"
+
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -155,7 +159,14 @@ namespace {
                  "  --screenshot-format=F  Force png or jpeg.\n"
                  "  --screenshot-quality=N JPEG quality 1-100 (default 90).\n"
                  "  --screenshot-stay      Don't auto-close the window after\n"
-                 "                          capture; keep the script running.\n",
+                 "                          capture; keep the script running.\n"
+                 "  --cpu-prof[=PATH]      Profile V8 + native code into PATH\n"
+                 "                          (default fxe.cpuprofile). Merged.\n"
+                 "  --cpu-prof-md[=PATH]   Also emit an agent-friendly markdown\n"
+                 "                          report (default: PATH with .md ext).\n"
+                 "  --cpu-prof-hz=N        Native sampling rate (default 1000).\n"
+                 "  --cpu-prof-js-only     Skip the native sampler.\n"
+                 "  --cpu-prof-native-only Skip V8's CPU profiler.\n",
                  argv0 ? argv0 : "fxe_run");
   }
 
@@ -179,6 +190,15 @@ namespace {
     bool screenshot_exit_after = true; // close window once captured
     bool show_usage = false;
     bool watch = false;
+
+    // CPU profile (V8 + native sampling, merged).
+    bool cpu_prof = false;
+    std::string cpu_prof_path = "fxe.cpuprofile";
+    bool cpu_prof_md = false;
+    std::string cpu_prof_md_path; // empty -> derived from cpu_prof_path
+    int cpu_prof_hz = 1000;
+    bool cpu_prof_native_only = false;
+    bool cpu_prof_js_only = false;
 
     fxe::js::runner_render_overrides render_overrides;
   };
@@ -264,6 +284,26 @@ namespace {
         }
         o.screenshot_max_w = static_cast<u32>(std::stoul(v.substr(0, x)));
         o.screenshot_max_h = static_cast<u32>(std::stoul(v.substr(x + 1)));
+      } else if (a == "--cpu-prof") {
+        o.cpu_prof = true;
+      } else if (starts_with(a, "--cpu-prof=")) {
+        o.cpu_prof = true;
+        o.cpu_prof_path = std::string(a.substr(11));
+      } else if (a == "--cpu-prof-md") {
+        o.cpu_prof = true;
+        o.cpu_prof_md = true;
+      } else if (starts_with(a, "--cpu-prof-md=")) {
+        o.cpu_prof = true;
+        o.cpu_prof_md = true;
+        o.cpu_prof_md_path = std::string(a.substr(14));
+      } else if (starts_with(a, "--cpu-prof-hz=")) {
+        o.cpu_prof_hz = std::stoi(std::string(a.substr(14)));
+      } else if (a == "--cpu-prof-native-only") {
+        o.cpu_prof = true;
+        o.cpu_prof_native_only = true;
+      } else if (a == "--cpu-prof-js-only") {
+        o.cpu_prof = true;
+        o.cpu_prof_js_only = true;
       } else if (a == "--screenshot-stay") {
         o.screenshot_exit_after = false;
       } else if (starts_with(a, "--")) {
@@ -678,6 +718,42 @@ int main(int argc, char** argv) {
     }
     host.attach_debug_pump(&combined_pump_trampoline, &combined_paused_trampoline, &pump_state);
 
+    // ----- CPU profile (V8 + native, merged) -------------------------------
+    fxe::runner::native_profiler nprof;
+    bool nprof_started = false;
+    bool jsprof_started = false;
+    if (opts.cpu_prof) {
+      if (!opts.cpu_prof_native_only) {
+        auto r = host.debug_profiler_start();
+        if (!r.ok) {
+          std::fprintf(stderr, "fxe_run: --cpu-prof: V8 profiler start failed: %s\n",
+                       r.message.c_str());
+          status = 1;
+        } else {
+          jsprof_started = true;
+        }
+      }
+      if (status == 0 && !opts.cpu_prof_js_only) {
+        // Size the ring for ~ hz * 120s of headroom; capped to keep the
+        // resident set bounded.
+        std::size_t cap = static_cast<std::size_t>(opts.cpu_prof_hz) * 120u;
+        if (cap < 4096) cap = 4096;
+        if (cap > (1u << 20)) cap = (1u << 20);
+        std::string err;
+        if (!nprof.start(opts.cpu_prof_hz, cap, err)) {
+          std::fprintf(stderr, "fxe_run: --cpu-prof: native profiler start failed: %s\n",
+                       err.c_str());
+          // Non-fatal: keep V8 profile if it started.
+        } else {
+          nprof_started = true;
+        }
+      }
+      std::fprintf(stderr, "fxe_run: --cpu-prof: js=%s native=%s hz=%d -> %s\n",
+                   jsprof_started ? "on" : "off", nprof_started ? "on" : "off",
+                   opts.cpu_prof_hz, opts.cpu_prof_path.c_str());
+      std::fflush(stderr);
+    }
+
     if (opts.render_overrides.show_fps_counter) {
       auto r = host.run_script(kFpsCounterScript, "<fxe-runner-fps-counter>");
       if (!r.ok) {
@@ -701,6 +777,81 @@ int main(int argc, char** argv) {
     // Surface screenshot watchdog failures (encode/write errors) as exit code.
     if (opts.screenshot && shot.exit_code != 0 && status == 0)
       status = shot.exit_code;
+
+    // ----- CPU profile: stop + merge + write -------------------------------
+    if (opts.cpu_prof) {
+      fxe::runner::profile_data js_prof;
+      fxe::runner::profile_data native_prof;
+
+      // Stop the native sampler first. V8's CPU profiler hooks SIGPROF on
+      // POSIX and restores its saved prior action when stopped; if our
+      // sampler thread is still alive at that moment, the next pthread_kill
+      // hits SIG_DFL and kills the process. Native stop disarms our
+      // handler (-> SIG_IGN) and joins the sampler before doing anything
+      // else, so it's safe to land here first.
+      if (nprof_started)
+        native_prof = nprof.stop();
+
+      if (jsprof_started) {
+        auto r = host.debug_profiler_stop();
+        if (!r.ok) {
+          std::fprintf(stderr, "fxe_run: --cpu-prof: V8 profiler stop failed: %s\n",
+                       r.message.c_str());
+        } else {
+          std::string err;
+          if (!fxe::runner::parse_v8_profile(r.profile_json, js_prof, err)) {
+            std::fprintf(stderr, "fxe_run: --cpu-prof: %s\n", err.c_str());
+            // Fall back to writing raw V8 JSON only.
+            if (auto* f = std::fopen(opts.cpu_prof_path.c_str(), "wb")) {
+              std::fwrite(r.profile_json.data(), 1, r.profile_json.size(), f);
+              std::fclose(f);
+            }
+          }
+        }
+      }
+
+      auto merged = fxe::runner::merge_profiles(js_prof, native_prof);
+
+      // Write JSON.
+      auto json = fxe::runner::serialize_cpuprofile(merged);
+      if (auto* f = std::fopen(opts.cpu_prof_path.c_str(), "wb")) {
+        if (std::fwrite(json.data(), 1, json.size(), f) != json.size())
+          std::fprintf(stderr, "fxe_run: --cpu-prof: short write to %s\n",
+                       opts.cpu_prof_path.c_str());
+        std::fclose(f);
+        std::fprintf(stderr,
+                     "fxe_run: --cpu-prof: wrote %s "
+                     "(%zu nodes, %zu samples, %llu dropped)\n",
+                     opts.cpu_prof_path.c_str(), merged.nodes.size(), merged.samples.size(),
+                     static_cast<unsigned long long>(merged.dropped_samples));
+      } else {
+        std::fprintf(stderr, "fxe_run: --cpu-prof: cannot open %s: %s\n",
+                     opts.cpu_prof_path.c_str(), std::strerror(errno));
+      }
+
+      // Markdown export.
+      if (opts.cpu_prof_md) {
+        std::string md_path = opts.cpu_prof_md_path;
+        if (md_path.empty()) {
+          md_path = opts.cpu_prof_path;
+          auto dot = md_path.rfind('.');
+          if (dot != std::string::npos)
+            md_path.replace(dot, std::string::npos, ".md");
+          else
+            md_path += ".md";
+        }
+        auto md = fxe::runner::render_markdown(merged);
+        if (auto* f = std::fopen(md_path.c_str(), "wb")) {
+          std::fwrite(md.data(), 1, md.size(), f);
+          std::fclose(f);
+          std::fprintf(stderr, "fxe_run: --cpu-prof-md: wrote %s\n", md_path.c_str());
+        } else {
+          std::fprintf(stderr, "fxe_run: --cpu-prof-md: cannot open %s: %s\n",
+                       md_path.c_str(), std::strerror(errno));
+        }
+      }
+      std::fflush(stderr);
+    }
 
     // ----- Keepalive --------------------------------------------------------
     if (debug_srv && opts.debug_keepalive && status == 0) {

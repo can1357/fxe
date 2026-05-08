@@ -47,5 +47,5 @@ function Demo(): Node {
 }
 
 const win = new Window({ width: 760, height: 520, title: 'fxe-ui toolkit demo' });
-mount(<Demo />, win, { lazy: false });
-App.run({ animate: true, fps: 60 });
+mount(<Demo />, win);
+App.run();
