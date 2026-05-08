@@ -62,9 +62,63 @@ namespace fxe::runtime {
       return out;
     }
 
+    int attestation_rank(std::string_view value) {
+      if (value == "direct")
+        return 2;
+      if (value == "indirect")
+        return 1;
+      return 0;
+    }
+
+    std::string attestation_name(int rank) {
+      switch (rank) {
+      case 2:
+        return "direct";
+      case 1:
+        return "indirect";
+      default:
+        return "none";
+      }
+    }
+
+    int user_verification_rank(std::string_view value) {
+      if (value == "required")
+        return 2;
+      if (value == "preferred")
+        return 1;
+      if (value == "discouraged")
+        return 0;
+      return 1;
+    }
+
+    std::string user_verification_name(int rank) {
+      switch (rank) {
+      case 2:
+        return "required";
+      case 1:
+        return "preferred";
+      default:
+        return "discouraged";
+      }
+    }
+
+    capability_set::webauthn_policy
+    normalise_webauthn_policy(capability_set::webauthn_policy policy) {
+      for (auto& rp_id : policy.rp_ids)
+        rp_id = ascii_lower(std::move(rp_id));
+      for (auto& transport : policy.transports)
+        transport = ascii_lower(std::move(transport));
+      policy.attestation = attestation_name(attestation_rank(policy.attestation));
+      policy.user_verification =
+          user_verification_name(user_verification_rank(policy.user_verification));
+      return policy;
+    }
+
     capability_set normalise_policy(capability_set policy) {
       policy.fs_allow = canonical_fs_allow(std::move(policy.fs_allow));
       policy.net_allow = normalise_net_allow(std::move(policy.net_allow));
+      if (policy.webauthn_allow)
+        policy.webauthn_allow = normalise_webauthn_policy(std::move(*policy.webauthn_allow));
       return policy;
     }
 
@@ -129,6 +183,14 @@ namespace fxe::runtime {
             return entry_has_port(entry) ? entry == endpoint.host_port : entry == endpoint.host;
           });
     }
+
+    bool webauthn_policy_matches(const capability_set::webauthn_policy& policy,
+                                 std::string_view rp_id) {
+      if (policy.allow_virtual_authenticator && policy.rp_ids.empty())
+        return true;
+      return std::any_of(policy.rp_ids.begin(), policy.rp_ids.end(),
+                         [&](const auto& allowed) { return allowed == rp_id; });
+    }
   } // namespace
 
   void register_window_capabilities(int window_id, capability_set policy) {
@@ -189,5 +251,38 @@ namespace fxe::runtime {
         return true;
     }
     return false;
+  }
+
+  std::optional<capability_set::webauthn_policy> webauthn_allowed(std::string_view rp_id) {
+    const std::string lowered = ascii_lower(std::string(rp_id));
+    std::lock_guard<std::mutex> lock(g_mu);
+    if (g_policies.empty())
+      return std::nullopt;
+
+    std::optional<capability_set::webauthn_policy> merged;
+    for (const auto& entry : g_policies) {
+      const auto& policy = entry.second;
+      if (!policy.webauthn_allow || !webauthn_policy_matches(*policy.webauthn_allow, lowered))
+        continue;
+      if (!merged) {
+        merged = *policy.webauthn_allow;
+        merged->rp_ids = {lowered};
+        continue;
+      }
+      merged->attestation =
+          attestation_name(std::max(attestation_rank(merged->attestation),
+                                    attestation_rank(policy.webauthn_allow->attestation)));
+      merged->user_verification = user_verification_name(
+          std::max(user_verification_rank(merged->user_verification),
+                   user_verification_rank(policy.webauthn_allow->user_verification)));
+      merged->allow_virtual_authenticator =
+          merged->allow_virtual_authenticator || policy.webauthn_allow->allow_virtual_authenticator;
+      merged->transports.insert(merged->transports.end(), policy.webauthn_allow->transports.begin(),
+                                policy.webauthn_allow->transports.end());
+      std::sort(merged->transports.begin(), merged->transports.end());
+      merged->transports.erase(std::unique(merged->transports.begin(), merged->transports.end()),
+                               merged->transports.end());
+    }
+    return merged;
   }
 } // namespace fxe::runtime

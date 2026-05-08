@@ -230,6 +230,93 @@ namespace fxe::js {
       return true;
     }
 
+    bool is_webauthn_attestation_value(std::string_view value) {
+      return value == "none" || value == "indirect" || value == "direct";
+    }
+
+    bool is_webauthn_user_verification_value(std::string_view value) {
+      return value == "discouraged" || value == "preferred" || value == "required";
+    }
+
+    bool
+    parse_webauthn_permissions(Isolate* iso, Local<Context> ctx, Local<Object> perms,
+                               std::optional<fxe::runtime::capability_set::webauthn_policy>& out) {
+      Local<Value> value;
+      if (!perms->Get(ctx, str(iso, "webauthn")).ToLocal(&value) || value->IsUndefined())
+        return true;
+      if (value->IsBoolean()) {
+        if (value->BooleanValue(iso)) {
+          // Phase 1 dev sugar: empty rp_ids + allow_virtual_authenticator means
+          // allow any RP ID through the virtual authenticator.
+          fxe::runtime::capability_set::webauthn_policy policy;
+          policy.allow_virtual_authenticator = true;
+          out = std::move(policy);
+        } else {
+          out = std::nullopt;
+        }
+        return true;
+      }
+      if (!value->IsObject()) {
+        (void)throw_type_error(iso, "permissions.webauthn must be boolean or an object");
+        return false;
+      }
+
+      auto obj = value.As<Object>();
+      fxe::runtime::capability_set::webauthn_policy policy;
+      Local<Value> field;
+      if (!obj->Get(ctx, str(iso, "rpIds")).ToLocal(&field) || !field->IsArray()) {
+        (void)throw_type_error(iso, "permissions.webauthn.rpIds must be a string[]");
+        return false;
+      }
+      if (!read_string_array(iso, ctx, field, policy.rp_ids, "webauthn.rpIds"))
+        return false;
+
+      if (obj->Get(ctx, str(iso, "attestation")).ToLocal(&field) && !field->IsUndefined()) {
+        if (!field->IsString()) {
+          (void)throw_type_error(iso, "permissions.webauthn.attestation must be a string");
+          return false;
+        }
+        policy.attestation = utf8(iso, field);
+        if (!is_webauthn_attestation_value(policy.attestation)) {
+          (void)throw_type_error(
+              iso, "permissions.webauthn.attestation must be 'none', 'indirect', or 'direct'");
+          return false;
+        }
+      }
+      if (obj->Get(ctx, str(iso, "userVerification")).ToLocal(&field) && !field->IsUndefined()) {
+        if (!field->IsString()) {
+          (void)throw_type_error(iso, "permissions.webauthn.userVerification must be a string");
+          return false;
+        }
+        policy.user_verification = utf8(iso, field);
+        if (!is_webauthn_user_verification_value(policy.user_verification)) {
+          (void)throw_type_error(iso, "permissions.webauthn.userVerification must be "
+                                      "'discouraged', 'preferred', or 'required'");
+          return false;
+        }
+      }
+      if (obj->Get(ctx, str(iso, "transports")).ToLocal(&field) && !field->IsUndefined()) {
+        if (!read_string_array(iso, ctx, field, policy.transports, "webauthn.transports"))
+          return false;
+      }
+      if (obj->Get(ctx, str(iso, "allowVirtualAuthenticator")).ToLocal(&field) &&
+          !field->IsUndefined()) {
+        if (!field->IsBoolean()) {
+          (void)throw_type_error(iso,
+                                 "permissions.webauthn.allowVirtualAuthenticator must be boolean");
+          return false;
+        }
+        policy.allow_virtual_authenticator = field->BooleanValue(iso);
+      }
+      if (policy.rp_ids.empty() && !policy.allow_virtual_authenticator) {
+        (void)throw_type_error(iso, "permissions.webauthn.rpIds must be non-empty unless "
+                                    "allowVirtualAuthenticator is true");
+        return false;
+      }
+      out = std::move(policy);
+      return true;
+    }
+
     bool parse_window_permissions(Isolate* iso, Local<Context> ctx, Local<Value> value,
                                   fxe::runtime::capability_set& out) {
       if (value.IsEmpty() || value->IsUndefined() || value->IsNull())
@@ -242,7 +329,8 @@ namespace fxe::js {
       return parse_string_allowlist(iso, ctx, perms, "fs", out.fs_allow) &&
              parse_string_allowlist(iso, ctx, perms, "net", out.net_allow) &&
              parse_boolean_allow(iso, ctx, perms, "shell", out.shell_allow) &&
-             parse_boolean_allow(iso, ctx, perms, "native", out.native_allow);
+             parse_boolean_allow(iso, ctx, perms, "native", out.native_allow) &&
+             parse_webauthn_permissions(iso, ctx, perms, out.webauthn_allow);
     }
 
     std::string current_script_origin(Isolate* iso) {

@@ -52,6 +52,7 @@
 #include "bind_tray.hpp"
 #include "bind_url.hpp"
 #include "bind_wasm.hpp"
+#include "bind_webauthn.hpp"
 #include "bind_websocket.hpp"
 #include "os/os.hpp"
 #include "source_map.hpp"
@@ -1851,6 +1852,7 @@ Error.prepareStackTrace = function(err, frames) {
       install_sqlite_bindings(isolate, global);
       install_storage_globals(isolate, global);
       install_indexed_db_bindings(isolate, global);
+      install_webauthn_globals(isolate, global);
       install_ipc_bindings(isolate, global);
       install_runtime_dispatch_handlers();
     }

@@ -185,12 +185,22 @@ declare namespace FXE {
      * - `net`: true | false | string[] (allow only requests whose URL host matches any entry; entries may be 'example.com' or 'sub.example.com:8080').
      * - `shell`: true | false (gates shell.openExternal/showItemInFolder/trashItem/beep).
      * - `native`: true | false (reserved for future native-plugin loading; no enforcement yet).
+     * - `webauthn`: true | false | object (gates navigator.credentials.{create,get} for the virtual authenticator).
      */
     permissions?: {
       fs?: boolean | string[];
       net?: boolean | string[];
       shell?: boolean;
       native?: boolean;
+      webauthn?:
+        | boolean
+        | {
+            rpIds: string[];
+            attestation?: 'none' | 'indirect' | 'direct';
+            userVerification?: 'discouraged' | 'preferred' | 'required';
+            transports?: Array<'usb' | 'nfc' | 'ble' | 'internal' | 'hybrid'>;
+            allowVirtualAuthenticator?: boolean;
+          };
     };
   }
 
@@ -947,6 +957,133 @@ declare namespace FXE {
   const Monitors: MonitorsNamespace;
   const App: AppNamespace;
 }
+
+type COSEAlgorithmIdentifier = number;
+type AttestationConveyancePreference = 'none' | 'indirect' | 'direct' | 'enterprise';
+type AuthenticatorAttachment = 'platform' | 'cross-platform';
+type AuthenticatorTransport = 'usb' | 'nfc' | 'ble' | 'internal' | 'hybrid';
+type ResidentKeyRequirement = 'discouraged' | 'preferred' | 'required';
+type UserVerificationRequirement = 'discouraged' | 'preferred' | 'required';
+type CredentialMediationRequirement = 'silent' | 'optional' | 'required' | 'conditional';
+type PublicKeyCredentialType = 'public-key';
+type BufferSource = ArrayBufferView | ArrayBuffer;
+
+interface PublicKeyCredentialRpEntity {
+  id?: string;
+  name: string;
+}
+
+interface PublicKeyCredentialUserEntity {
+  id: BufferSource;
+  name: string;
+  displayName: string;
+}
+
+interface PublicKeyCredentialParameters {
+  type: PublicKeyCredentialType;
+  alg: COSEAlgorithmIdentifier;
+}
+
+interface PublicKeyCredentialDescriptor {
+  type: PublicKeyCredentialType;
+  id: BufferSource;
+  transports?: AuthenticatorTransport[];
+}
+
+interface AuthenticatorSelectionCriteria {
+  authenticatorAttachment?: AuthenticatorAttachment;
+  residentKey?: ResidentKeyRequirement;
+  requireResidentKey?: boolean;
+  userVerification?: UserVerificationRequirement;
+}
+
+interface AuthenticationExtensionsClientInputs {
+  [k: string]: unknown;
+}
+
+interface AuthenticationExtensionsClientOutputs {
+  [k: string]: unknown;
+}
+
+interface PublicKeyCredentialCreationOptions {
+  rp: PublicKeyCredentialRpEntity;
+  user: PublicKeyCredentialUserEntity;
+  challenge: BufferSource;
+  pubKeyCredParams: PublicKeyCredentialParameters[];
+  timeout?: number;
+  excludeCredentials?: PublicKeyCredentialDescriptor[];
+  authenticatorSelection?: AuthenticatorSelectionCriteria;
+  attestation?: AttestationConveyancePreference;
+  extensions?: AuthenticationExtensionsClientInputs;
+}
+
+interface PublicKeyCredentialRequestOptions {
+  challenge: BufferSource;
+  timeout?: number;
+  rpId?: string;
+  allowCredentials?: PublicKeyCredentialDescriptor[];
+  userVerification?: UserVerificationRequirement;
+  extensions?: AuthenticationExtensionsClientInputs;
+}
+
+interface AuthenticatorResponse {
+  readonly clientDataJSON: ArrayBuffer;
+}
+
+interface AuthenticatorAttestationResponse extends AuthenticatorResponse {
+  readonly attestationObject: ArrayBuffer;
+  getAuthenticatorData(): ArrayBuffer;
+  getPublicKey(): ArrayBuffer | null;
+  getPublicKeyAlgorithm(): COSEAlgorithmIdentifier;
+  getTransports(): AuthenticatorTransport[];
+}
+
+interface AuthenticatorAssertionResponse extends AuthenticatorResponse {
+  readonly authenticatorData: ArrayBuffer;
+  readonly signature: ArrayBuffer;
+  readonly userHandle: ArrayBuffer | null;
+}
+
+interface Credential {
+  readonly id: string;
+  readonly type: string;
+}
+
+interface PublicKeyCredential extends Credential {
+  readonly type: 'public-key';
+  readonly rawId: ArrayBuffer;
+  readonly response: AuthenticatorAttestationResponse | AuthenticatorAssertionResponse;
+  readonly authenticatorAttachment: AuthenticatorAttachment | null;
+  getClientExtensionResults(): AuthenticationExtensionsClientOutputs;
+}
+
+declare const PublicKeyCredential: {
+  prototype: PublicKeyCredential;
+  isUserVerifyingPlatformAuthenticatorAvailable(): Promise<boolean>;
+  isConditionalMediationAvailable(): Promise<boolean>;
+};
+
+interface CredentialCreationOptions {
+  publicKey?: PublicKeyCredentialCreationOptions;
+  signal?: AbortSignal;
+}
+
+interface CredentialRequestOptions {
+  publicKey?: PublicKeyCredentialRequestOptions;
+  signal?: AbortSignal;
+  mediation?: CredentialMediationRequirement;
+}
+
+interface CredentialsContainer {
+  create(options: CredentialCreationOptions): Promise<PublicKeyCredential | null>;
+  get(options: CredentialRequestOptions): Promise<PublicKeyCredential | null>;
+}
+
+interface Navigator {
+  readonly credentials: CredentialsContainer;
+}
+
+declare const navigator: Navigator;
 
 declare module 'fxe' {
   export type Vec2 = FXE.Vec2;

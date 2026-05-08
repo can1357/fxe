@@ -8,11 +8,20 @@
 namespace fxe::runtime {
 
   struct capability_set {
+    struct webauthn_policy {
+      std::vector<std::string> rp_ids;
+      std::string attestation = "none";
+      std::string user_verification = "preferred";
+      std::vector<std::string> transports;
+      bool allow_virtual_authenticator = false;
+    };
+
     // Each entry: nullopt = allow-all (legacy default), {} = deny-all, populated = allowlist.
     std::optional<std::vector<std::string>> fs_allow;  // path prefixes (canonicalised)
     std::optional<std::vector<std::string>> net_allow; // host[:port] entries
     std::optional<bool> shell_allow;                   // nullopt = allow, false = deny
     std::optional<bool> native_allow;                  // reserved for plugin loading
+    std::optional<webauthn_policy> webauthn_allow;
   };
 
   // Register the policy for a window. window_id is the bind_window holder pointer or 0
@@ -31,5 +40,6 @@ namespace fxe::runtime {
   bool net_host_allowed(std::string_view url);
   bool shell_allowed();
   bool native_allowed();
+  std::optional<capability_set::webauthn_policy> webauthn_allowed(std::string_view rp_id);
 
 } // namespace fxe::runtime
