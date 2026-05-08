@@ -5,7 +5,12 @@
   "description": "fxe — a small WebGPU/V8-based renderer",
   "dependencies": [
     "glm",
-    "glfw3",
+    {
+      "name": "glfw3",
+      "features": [
+        { "name": "wayland", "platform": "linux" }
+      ]
+    },
     "stb",
     "nlohmann-json",
     "libuv",
