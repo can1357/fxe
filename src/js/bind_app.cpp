@@ -22,16 +22,30 @@
 #define FXE_APP_VERSION "0.0.0"
 #endif
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fxe/types.hpp>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 #include <v8.h>
 #include <vector>
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <spawn.h>
+#include <unistd.h>
+#else
+#include <spawn.h>
+#include <unistd.h>
+#endif
 
 namespace fxe::js {
   using namespace v8;
@@ -63,6 +77,152 @@ namespace fxe::js {
       (void)err->Set(ctx, "code"_v8(iso), s(iso, code));
       iso->ThrowException(err);
     }
+
+    std::optional<std::filesystem::path> current_executable_path() {
+#if defined(_WIN32)
+      std::vector<wchar_t> buf(MAX_PATH);
+      for (;;) {
+        DWORD written = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (written == 0)
+          return std::nullopt;
+        if (written < static_cast<DWORD>(buf.size()))
+          return std::filesystem::path(std::wstring(buf.data(), written));
+        buf.resize(buf.size() * 2);
+      }
+#elif defined(__APPLE__)
+      uint32_t size = 0;
+      if (_NSGetExecutablePath(nullptr, &size) != -1 || size == 0)
+        return std::nullopt;
+      std::vector<char> buf(size);
+      if (_NSGetExecutablePath(buf.data(), &size) != 0)
+        return std::nullopt;
+      std::error_code ec;
+      auto resolved = std::filesystem::weakly_canonical(std::filesystem::path(buf.data()), ec);
+      if (ec)
+        return std::filesystem::path(buf.data());
+      return resolved;
+#elif defined(__linux__)
+      std::vector<char> buf(1024);
+      for (;;) {
+        ssize_t n = ::readlink("/proc/self/exe", buf.data(), buf.size() - 1);
+        if (n < 0)
+          return std::nullopt;
+        if (static_cast<usize>(n) < buf.size() - 1) {
+          buf[static_cast<usize>(n)] = '\0';
+          return std::filesystem::path(buf.data());
+        }
+        buf.resize(buf.size() * 2);
+      }
+#else
+      return std::nullopt;
+#endif
+    }
+
+    bool is_regular_file(const std::filesystem::path& path) {
+      std::error_code ec;
+      return std::filesystem::is_regular_file(path, ec);
+    }
+
+    std::optional<std::filesystem::path> resolve_devtools_entry_path() {
+      if (const char* env = std::getenv("FXE_DEVTOOLS_ENTRY"); env && *env) {
+        std::filesystem::path configured(env);
+        if (is_regular_file(configured))
+          return configured;
+      }
+
+      auto exe_path = current_executable_path();
+      if (!exe_path)
+        return std::nullopt;
+      std::filesystem::path exe_dir = exe_path->parent_path();
+      std::vector<std::filesystem::path> candidates = {
+          (exe_dir / ".." / "packages" / "fxe-devtools" / "src" / "main.tsx").lexically_normal(),
+          (exe_dir / ".." / ".." / "packages" / "fxe-devtools" / "src" / "main.tsx")
+              .lexically_normal(),
+          (exe_dir / "share" / "fxe" / "devtools" / "main.tsx").lexically_normal(),
+      };
+      for (const auto& candidate : candidates) {
+        if (is_regular_file(candidate))
+          return candidate;
+      }
+      return std::nullopt;
+    }
+
+    std::string system_error_message(int code) {
+      return std::system_category().message(code);
+    }
+
+#if defined(_WIN32)
+    std::wstring widen_utf8(std::string_view s) {
+      if (s.empty())
+        return {};
+      int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(),
+                                  static_cast<int>(s.size()), nullptr, 0);
+      if (n <= 0)
+        return {};
+      std::wstring out(static_cast<usize>(n), L'\0');
+      if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()),
+                              out.data(), n) != n)
+        return {};
+      return out;
+    }
+
+    std::wstring quote_windows_arg(const std::wstring& arg) {
+      std::wstring out = L"\"";
+      unsigned slashes = 0;
+      for (wchar_t ch : arg) {
+        if (ch == L'\\') {
+          ++slashes;
+        } else if (ch == L'\"') {
+          out.append(slashes * 2 + 1, L'\\');
+          out.push_back(ch);
+          slashes = 0;
+        } else {
+          out.append(slashes, L'\\');
+          slashes = 0;
+          out.push_back(ch);
+        }
+      }
+      out.append(slashes * 2, L'\\');
+      out.push_back(L'\"');
+      return out;
+    }
+
+    std::vector<wchar_t> build_child_environment_block() {
+      std::vector<wchar_t> block;
+      LPWCH raw = GetEnvironmentStringsW();
+      if (!raw) {
+        block.push_back(L'\0');
+        block.push_back(L'\0');
+        return block;
+      }
+
+      for (const wchar_t* entry = raw; *entry != L'\0'; entry += std::wcslen(entry) + 1) {
+        const wchar_t* equal = std::wcschr(entry, L'=');
+        if (equal != nullptr) {
+          std::wstring name(entry, static_cast<usize>(equal - entry));
+          if (_wcsicmp(name.c_str(), L"FXE_DEBUG_PORT") == 0)
+            continue;
+        }
+        block.insert(block.end(), entry, entry + std::wcslen(entry) + 1);
+      }
+      FreeEnvironmentStringsW(raw);
+      block.push_back(L'\0');
+      return block;
+    }
+#else
+    std::vector<std::string> build_child_environment_storage() {
+      extern char** environ;
+      std::vector<std::string> env;
+      for (char** entry = environ; entry && *entry; ++entry) {
+        std::string_view var(*entry);
+        if (var.rfind("FXE_DEBUG_PORT=", 0) == 0)
+          continue;
+        env.emplace_back(var);
+      }
+      return env;
+    }
+#endif
+#endif
 
     struct persistent_callback_refs {
       Isolate* isolate = nullptr;
@@ -203,10 +363,112 @@ namespace fxe::js {
       info.GetReturnValue().Set(window);
     }
     void app_open_devtools(const FunctionCallbackInfo<Value>& info) {
-      (void)info;
-      // TODO(E1): spawn a child host window for the devtools shell and wire the
-      // global shortcut (Cmd-Opt-I / Ctrl-Shift-I) to this entrypoint.
-      info.GetReturnValue().SetNull();
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+
+      auto devtools_entry = resolve_devtools_entry_path();
+      if (!devtools_entry) {
+        (void)throw_type_error(iso,
+                               "App.openDevTools: devtools entry not found; set FXE_DEVTOOLS_ENTRY");
+        return;
+      }
+
+      const char* debug_port = std::getenv("FXE_DEBUG_PORT");
+      if (!debug_port || !*debug_port) {
+        (void)throw_type_error(iso, "App.openDevTools: launch with --debug to enable DevTools");
+        return;
+      }
+
+      auto exe_path = current_executable_path();
+      if (!exe_path || !is_regular_file(*exe_path)) {
+        iso->ThrowException(
+            Exception::Error(s(iso, "App.openDevTools: failed to resolve fxe_run executable")));
+        return;
+      }
+
+      std::string cdp_url = std::string("ws://127.0.0.1:") + debug_port + "/cdp";
+      std::string exe_string = exe_path->string();
+      std::string entry_string = devtools_entry->string();
+
+#if defined(_WIN32)
+      std::wstring exe_w = exe_path->wstring();
+      std::wstring entry_w = devtools_entry->wstring();
+      std::wstring cdp_url_w = widen_utf8(cdp_url);
+      if (exe_w.empty() || entry_w.empty() || cdp_url_w.empty()) {
+        iso->ThrowException(
+            Exception::Error(s(iso, "App.openDevTools: failed to prepare child process arguments")));
+        return;
+      }
+
+      std::wstring command_line = quote_windows_arg(exe_w);
+      command_line += L" ";
+      command_line += quote_windows_arg(entry_w);
+      command_line += L" --devtools-target ";
+      command_line += quote_windows_arg(cdp_url_w);
+
+      auto env_block = build_child_environment_block();
+      STARTUPINFOW startup{};
+      startup.cb = sizeof(startup);
+      startup.dwFlags = STARTF_USESTDHANDLES;
+      startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+      startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+      startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+      PROCESS_INFORMATION process{};
+      BOOL ok =
+          CreateProcessW(exe_w.c_str(), command_line.data(), nullptr, nullptr, TRUE, 0,
+                         env_block.data(), nullptr, &startup, &process);
+      if (!ok) {
+        int err = static_cast<int>(GetLastError());
+        std::string message =
+            std::string("App.openDevTools: spawn failed: ") + system_error_message(err);
+        iso->ThrowException(Exception::Error(s(iso, message.c_str())));
+        return;
+      }
+      CloseHandle(process.hThread);
+      CloseHandle(process.hProcess);
+      Local<Object> result = Object::New(iso);
+      (void)result->Set(ctx, "pid"_v8(iso), Number::New(iso, static_cast<double>(process.dwProcessId)));
+      info.GetReturnValue().Set(result);
+#else
+      auto child_env_storage = build_child_environment_storage();
+      std::vector<char*> child_env;
+      child_env.reserve(child_env_storage.size() + 1);
+      for (auto& entry : child_env_storage)
+        child_env.push_back(entry.data());
+      child_env.push_back(nullptr);
+
+      std::vector<std::string> argv_storage = {exe_string, entry_string, "--devtools-target",
+                                               cdp_url};
+      std::vector<char*> argv;
+      argv.reserve(argv_storage.size() + 1);
+      for (auto& arg : argv_storage)
+        argv.push_back(arg.data());
+      argv.push_back(nullptr);
+
+      posix_spawn_file_actions_t actions;
+      int rc = posix_spawn_file_actions_init(&actions);
+      if (rc != 0) {
+        std::string message =
+            std::string("App.openDevTools: posix_spawn file actions failed: ")
+            + system_error_message(rc);
+        iso->ThrowException(Exception::Error(s(iso, message.c_str())));
+        return;
+      }
+
+      pid_t pid = -1;
+      rc = ::posix_spawn(&pid, exe_string.c_str(), &actions, nullptr, argv.data(), child_env.data());
+      (void)posix_spawn_file_actions_destroy(&actions);
+      if (rc != 0) {
+        std::string message =
+            std::string("App.openDevTools: spawn failed: ") + system_error_message(rc);
+        iso->ThrowException(Exception::Error(s(iso, message.c_str())));
+        return;
+      }
+
+      Local<Object> result = Object::New(iso);
+      (void)result->Set(ctx, "pid"_v8(iso), Number::New(iso, static_cast<double>(pid)));
+      info.GetReturnValue().Set(result);
+#endif
     }
     void app_request_single_instance_lock(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
