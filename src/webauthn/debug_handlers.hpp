@@ -13,7 +13,8 @@ namespace fxe::webauthn {
 } // namespace fxe::webauthn
 
 namespace fxe::webauthn::debug {
-  using dispatch_fn = nlohmann::ordered_json (*)(fxe::debug::dispatch_context&, const nlohmann::ordered_json&);
+  using dispatch_fn = nlohmann::ordered_json (*)(fxe::debug::dispatch_context&,
+                                                 const nlohmann::ordered_json&);
 
   struct registered_method {
     const char* name;

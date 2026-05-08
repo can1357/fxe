@@ -119,12 +119,93 @@ class Keyboard:
             )
 
 
+class _WebAuthn:
+    def __init__(self, page: "Page") -> None:
+        self._page = page
+
+    async def enable(self, *, enable_ui: bool = False) -> None:
+        await self._page._client.call("WebAuthn.enable", {"enableUI": enable_ui})
+
+    async def disable(self) -> None:
+        await self._page._client.call("WebAuthn.disable")
+
+    async def add_virtual_authenticator(
+        self,
+        *,
+        protocol: str = "ctap2",
+        transport: str = "internal",
+        has_resident_key: bool = True,
+        has_user_verification: bool = True,
+        is_user_verified: bool = True,
+        automatic_presence_simulation: bool = True,
+    ) -> str:
+        result = await self._page._client.call(
+            "WebAuthn.addVirtualAuthenticator",
+            {
+                "options": {
+                    "protocol": protocol,
+                    "transport": transport,
+                    "hasResidentKey": has_resident_key,
+                    "hasUserVerification": has_user_verification,
+                    "isUserVerified": is_user_verified,
+                    "automaticPresenceSimulation": automatic_presence_simulation,
+                }
+            },
+        )
+        return str(result["authenticatorId"])
+
+    async def remove_virtual_authenticator(self, authenticator_id: str) -> None:
+        await self._page._client.call(
+            "WebAuthn.removeVirtualAuthenticator", {"authenticatorId": authenticator_id}
+        )
+
+    async def add_credential(self, authenticator_id: str, credential: dict[str, Any]) -> None:
+        await self._page._client.call(
+            "WebAuthn.addCredential",
+            {"authenticatorId": authenticator_id, "credential": credential},
+        )
+
+    async def get_credential(self, authenticator_id: str, credential_id: str) -> dict[str, Any]:
+        result = await self._page._client.call(
+            "WebAuthn.getCredential",
+            {"authenticatorId": authenticator_id, "credentialId": credential_id},
+        )
+        return dict(result["credential"])
+
+    async def get_credentials(self, authenticator_id: str) -> list[dict[str, Any]]:
+        result = await self._page._client.call(
+            "WebAuthn.getCredentials", {"authenticatorId": authenticator_id}
+        )
+        return list(result.get("credentials", []))
+
+    async def remove_credential(self, authenticator_id: str, credential_id: str) -> None:
+        await self._page._client.call(
+            "WebAuthn.removeCredential",
+            {"authenticatorId": authenticator_id, "credentialId": credential_id},
+        )
+
+    async def clear_credentials(self, authenticator_id: str) -> None:
+        await self._page._client.call("WebAuthn.clearCredentials", {"authenticatorId": authenticator_id})
+
+    async def set_user_verified(self, authenticator_id: str, *, is_user_verified: bool) -> None:
+        await self._page._client.call(
+            "WebAuthn.setUserVerified",
+            {"authenticatorId": authenticator_id, "isUserVerified": is_user_verified},
+        )
+
+    async def set_automatic_presence_simulation(self, authenticator_id: str, *, enabled: bool) -> None:
+        await self._page._client.call(
+            "WebAuthn.setAutomaticPresenceSimulation",
+            {"authenticatorId": authenticator_id, "enabled": enabled},
+        )
+
 class Page:
     def __init__(self, client: Client, handshake: Handshake | None = None) -> None:
         self._client = client
         self._handshake = handshake
         self.mouse = Mouse(self)
         self.keyboard = Keyboard(self)
+        self.webauthn = _WebAuthn(self)
         self._console_queue: asyncio.Queue[ConsoleMessage] | None = None
         self._console_enabled = False
         self._paused_event = asyncio.Event()

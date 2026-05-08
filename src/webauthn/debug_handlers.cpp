@@ -120,8 +120,8 @@ namespace fxe::webauthn::debug {
         out.push_back(kAlphabet[(n >> 18u) & 0x3Fu]);
         out.push_back(kAlphabet[(n >> 12u) & 0x3Fu]);
       } else if (rem == 2u) {
-        const uint32_t n = (static_cast<uint32_t>(bytes[i]) << 16u) |
-                           (static_cast<uint32_t>(bytes[i + 1u]) << 8u);
+        const uint32_t n =
+            (static_cast<uint32_t>(bytes[i]) << 16u) | (static_cast<uint32_t>(bytes[i + 1u]) << 8u);
         out.push_back(kAlphabet[(n >> 18u) & 0x3Fu]);
         out.push_back(kAlphabet[(n >> 12u) & 0x3Fu]);
         out.push_back(kAlphabet[(n >> 6u) & 0x3Fu]);
@@ -225,11 +225,13 @@ namespace fxe::webauthn::debug {
         invalid_params("failed to initialize EC key export");
       int rc = mbedtls_ecp_group_load(&ec->MBEDTLS_PRIVATE(grp), MBEDTLS_ECP_DP_SECP256R1);
       if (rc == 0)
-        rc = mbedtls_mpi_read_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X), credential.public_key.x.data(),
-                                     credential.public_key.x.size());
+        rc =
+            mbedtls_mpi_read_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X),
+                                    credential.public_key.x.data(), credential.public_key.x.size());
       if (rc == 0)
-        rc = mbedtls_mpi_read_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(Y), credential.public_key.y.data(),
-                                     credential.public_key.y.size());
+        rc =
+            mbedtls_mpi_read_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(Y),
+                                    credential.public_key.y.data(), credential.public_key.y.size());
       if (rc == 0)
         rc = mbedtls_mpi_lset(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(Z), 1);
       if (rc == 0)
@@ -244,7 +246,8 @@ namespace fxe::webauthn::debug {
       return std::vector<uint8_t>(der.end() - written, der.end());
     }
 
-    virtual_credential credential_from_json(const json& credential_json, const authenticator_entry& entry) {
+    virtual_credential credential_from_json(const json& credential_json,
+                                            const authenticator_entry& entry) {
       virtual_credential credential;
       credential.credential_id = base64url_decode(require_string(credential_json, "credentialId"));
       credential.resident = require_bool(credential_json, "isResidentCredential");
@@ -254,7 +257,8 @@ namespace fxe::webauthn::debug {
       credential.public_key.alg = cose_algorithm::es256;
       credential.public_key.crv = 1;
 
-      if (auto it = credential_json.find("userHandle"); it != credential_json.end() && !it->is_null()) {
+      if (auto it = credential_json.find("userHandle");
+          it != credential_json.end() && !it->is_null()) {
         if (!it->is_string())
           invalid_params("userHandle must be a base64url string");
         credential.user.id = base64url_decode(it->get<std::string>());
@@ -263,8 +267,9 @@ namespace fxe::webauthn::debug {
       const auto private_key_der = base64url_decode(require_string(credential_json, "privateKey"));
       pk_guard pk;
       auto& rng = mirrored_impl(default_virtual_authenticator()).ctr_drbg;
-      const int parse_rc = mbedtls_pk_parse_key(&pk.ctx, private_key_der.data(), private_key_der.size(), nullptr,
-                                                0, mbedtls_ctr_drbg_random, &rng);
+      const int parse_rc =
+          mbedtls_pk_parse_key(&pk.ctx, private_key_der.data(), private_key_der.size(), nullptr, 0,
+                               mbedtls_ctr_drbg_random, &rng);
       if (parse_rc != 0)
         invalid_params("invalid PKCS#8 private key: " + mbedtls_err_str(parse_rc));
       const auto type = mbedtls_pk_get_type(&pk.ctx);
@@ -278,18 +283,20 @@ namespace fxe::webauthn::debug {
       int rc = mbedtls_mpi_write_binary(&ec->MBEDTLS_PRIVATE(d), credential.private_key_d.data(),
                                         credential.private_key_d.size());
       if (rc == 0) {
-        rc = mbedtls_mpi_write_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X), credential.public_key.x.data(),
+        rc = mbedtls_mpi_write_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X),
+                                      credential.public_key.x.data(),
                                       credential.public_key.x.size());
       }
       if (rc == 0) {
-        rc = mbedtls_mpi_write_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(Y), credential.public_key.y.data(),
+        rc = mbedtls_mpi_write_binary(&ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(Y),
+                                      credential.public_key.y.data(),
                                       credential.public_key.y.size());
       }
       if (rc != 0)
         invalid_params("failed to decode privateKey: " + mbedtls_err_str(rc));
 
-      const auto rp_hash = sha256(std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(credential.rp_id.data()),
-                                                           credential.rp_id.size()));
+      const auto rp_hash = sha256(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(credential.rp_id.data()), credential.rp_id.size()));
       credential.rp_id_hash.assign(rp_hash.begin(), rp_hash.end());
       return credential;
     }
@@ -471,12 +478,14 @@ namespace fxe::webauthn::debug {
     return kCapabilities;
   }
 
-  void on_credential_registered(std::string_view, const register_response&, const virtual_credential& credential) {
+  void on_credential_registered(std::string_view, const register_response&,
+                                const virtual_credential& credential) {
     for (const auto& authenticator_id : authenticator_ids_for(&default_virtual_authenticator()))
       emit_event("WebAuthn.credentialAdded", authenticator_id, credential);
   }
 
-  void on_credential_asserted(std::string_view, const assert_response&, const virtual_credential& credential) {
+  void on_credential_asserted(std::string_view, const assert_response&,
+                              const virtual_credential& credential) {
     for (const auto& authenticator_id : authenticator_ids_for(&default_virtual_authenticator()))
       emit_event("WebAuthn.credentialAsserted", authenticator_id, credential);
   }
