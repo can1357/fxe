@@ -1,6 +1,6 @@
 #include "cdp_ws.hpp"
 
-#include "base64.hpp"
+#include <libbase64.h>
 
 #include <algorithm>
 #include <array>
@@ -90,13 +90,26 @@ namespace fxe::debug::cdp_ws {
   }
 
   std::optional<std::string> websocket_accept(std::string_view sec_websocket_key) {
-    auto decoded = base64::decode(sec_websocket_key);
-    if (sec_websocket_key.empty() || !decoded || decoded->size() != 16u)
+    if (sec_websocket_key.empty())
+      return std::nullopt;
+    // Standard WebSocket handshake: the client nonce decodes to exactly 16 bytes.
+    if (sec_websocket_key.size() % 4 != 0)
+      return std::nullopt;
+    std::array<u8, 16> nonce{};
+    usize nonce_len = 0;
+    if (::base64_decode(sec_websocket_key.data(), sec_websocket_key.size(),
+                        reinterpret_cast<char*>(nonce.data()), &nonce_len, 0) != 1 ||
+        nonce_len != nonce.size())
       return std::nullopt;
     std::string seed(sec_websocket_key);
     seed += kMagic;
     auto digest = sha1(seed);
-    return base64::encode(digest.data(), digest.size());
+    // Sec-WebSocket-Accept: base64 of a 20-byte SHA-1 digest = 28 chars padded.
+    std::array<char, 32> accept_buf{};
+    usize accept_len = 0;
+    ::base64_encode(reinterpret_cast<const char*>(digest.data()), digest.size(),
+                    accept_buf.data(), &accept_len, 0);
+    return std::string(accept_buf.data(), accept_len);
   }
 
   std::string http_request::header(std::string_view name) const {

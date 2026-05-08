@@ -1,9 +1,10 @@
 // Tests for the fxe debug protocol primitives (base64, dispatch lookup).
 // No socket / V8 / GPU dependency — runs in the `dev` preset.
 
-#include "../src/debug/base64.hpp"
 #include "../src/debug/dispatch.hpp"
 #include "../src/debug/server.hpp"
+
+#include <libbase64.h>
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/window.hpp>
@@ -154,35 +155,6 @@ namespace {
     };
     return be32(16) == w && be32(20) == h;
   }
-
-  void test_base64() {
-    using namespace fxe::debug;
-    CHECK(base64::encode("") == "");
-    CHECK(base64::encode("f") == "Zg==");
-    CHECK(base64::encode("fo") == "Zm8=");
-    CHECK(base64::encode("foo") == "Zm9v");
-    CHECK(base64::encode("foob") == "Zm9vYg==");
-    CHECK(base64::encode("fooba") == "Zm9vYmE=");
-    CHECK(base64::encode("foobar") == "Zm9vYmFy");
-
-    auto out = base64::decode("");
-    CHECK(out.has_value());
-    CHECK(out->empty());
-
-    out = base64::decode("Zm9vYmFy");
-    CHECK(out.has_value());
-    CHECK(out->size() == 6);
-    CHECK(std::memcmp(out->data(), "foobar", 6) == 0);
-
-    out = base64::decode("Zm8=");
-    CHECK(out.has_value());
-    CHECK(out->size() == 2);
-    CHECK(std::memcmp(out->data(), "fo", 2) == 0);
-
-    CHECK(!base64::decode("Z"));    // length not multiple of 4
-    CHECK(!base64::decode("Z!==")); // bad char
-  }
-
   void test_method_table() {
     using namespace fxe::debug;
     CHECK(method_exists("System.handshake"));
@@ -268,10 +240,14 @@ namespace {
     CHECK(out.at("width").get<double>() == 2.0);
     CHECK(out.at("height").get<double>() == 1.0);
     CHECK(out.at("byteSize").get<double>() > 0.0);
-    auto png = base64::decode(out.at("dataBase64").get<std::string>());
-    CHECK(png.has_value());
-    if (png)
-      CHECK(png_has_ihdr_size(*png, 2, 1));
+    const auto b64 = out.at("dataBase64").get<std::string>();
+    std::vector<u8> png(b64.size() / 4 * 3 + 3);
+    usize png_len = 0;
+    const int rc = ::base64_decode(b64.data(), b64.size(),
+                                   reinterpret_cast<char*>(png.data()), &png_len, 0);
+    CHECK(rc == 1);
+    png.resize(png_len);
+    CHECK(png_has_ihdr_size(png, 2, 1));
 
     auto cap = rdr.capture_frame();
     CHECK(cap.ok);
@@ -1001,7 +977,6 @@ int main([[maybe_unused]] int argc, char** argv) {
   (void)argc;
   (void)argv;
 #endif
-  test_base64();
   test_method_table();
   test_handshake_dispatch();
   test_method_not_found();

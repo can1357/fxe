@@ -23,7 +23,7 @@
 
 #include <unordered_map>
 
-#include "base64.hpp"
+#include <libbase64.h>
 #include "screenshot.hpp"
 #include "server_internal.hpp"
 
@@ -628,8 +628,14 @@ namespace fxe::debug {
       out["sourceWidth"] = static_cast<double>(cap.width);
       out["sourceHeight"] = static_cast<double>(cap.height);
       out["byteSize"] = static_cast<double>(encoded.size());
-      if (!omit_data || save_path.empty())
-        out["dataBase64"] = base64::encode(encoded);
+      if (!omit_data || save_path.empty()) {
+        std::string b64;
+        b64.resize(((encoded.size() + 2) / 3) * 4);
+        usize b64_len = 0;
+        ::base64_encode(encoded.data(), encoded.size(), b64.data(), &b64_len, 0);
+        b64.resize(b64_len);
+        out["dataBase64"] = std::move(b64);
+      }
       if (!save_path.empty()) {
         out["path"] = save_path;
         out["saved"] = saved;
