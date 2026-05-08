@@ -169,6 +169,33 @@ ctest --preset release --output-on-failure
 - **Errors:** Bindings throw Node-shaped errors `{code, errno, syscall, path}`
   where applicable (`EAUDIO_DECODE`, `ERR_FXE_UPDATE_*`, etc.). Async fs
   surfaces `AbortError` for AbortSignal cancellation.
+- **V8 binding helpers (`<fxe/v8_helpers.hpp>`):** Bindings **MUST** route
+  through these instead of hand-rolled equivalents. The header is the
+  single source of truth for the four most-repeated V8 patterns; mixing
+  the raw forms in new bindings is rejected on review.
+  - `set_native(iso, obj, ptr, tag)` — assign internal field 0 = External
+    pointer + field 1 = Uint32 tag in one call. Use this in every
+    constructor / wrap site instead of two separate `SetInternalField`
+    calls.
+  - `internal_ptr<T>(obj, slot)` / `external_ptr<T>(value | external | data)`
+    / `make_external(iso, ptr)` — pointer recovery and wrapping. Use
+    `js::unwrap(obj, expected_tag)` from `<fxe/js_bindings.hpp>` when you
+    need the tag check; only fall back to `internal_ptr<T>` when the slot
+    layout is already verified.
+  - `throw_error(iso, msg)` / `throw_type_error(iso, msg)` /
+    `throw_range_error(iso, msg)` — accept `std::string_view` *or*
+    `std::format_string<...>` plus arguments and always return `false`.
+    Never write `iso->ThrowException(Exception::TypeError(
+    String::NewFromUtf8(iso, ...).ToLocalChecked()))` in new code, and
+    never concatenate with `+`: prefer `throw_range_error(iso, "unknown
+    language '{}'", name)` over `throw_range_error(iso, "unknown language
+    '" + name + "'")`. The format-string overloads SFINAE out for the
+    zero-arg case so plain literals stay on the cheap `string_view`
+    overload.
+  - Call-site idiom: from `bool` helpers `return throw_type_error(iso,
+    "...");`, from `void` callbacks `(void)throw_type_error(iso, "...");
+    return;`. Suppressing the discard with `(void)` is mandatory under
+    `bugprone-unused-return-value`.
 - **V8 string literals (`_v8(iso)`):** Use the user-defined literal from
   `<fxe/v8_strings.hpp>` for any string passed across the V8 boundary —
   `obj->Get(ctx, "width"_v8(iso))`, `iso->ThrowException(Exception::TypeError("..."_v8(iso)))`,
