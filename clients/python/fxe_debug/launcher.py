@@ -23,7 +23,7 @@ def _candidate_binaries(explicit: str | None) -> list[Path]:
     env = os.environ.get("FXE_RUN")
     if env:
         cands.append(Path(env))
-    cands.append(Path.cwd() / "build" / "dev-v8-wgpu" / "fxe_run")
+    cands.append(Path.cwd() / "build" / "dev" / "fxe_run")
     return cands
 
 
@@ -36,7 +36,7 @@ def _resolve_fxe_run(explicit: str | None) -> Path:
     raise LaunchError(
         "could not locate fxe_run; tried:\n  "
         + paths
-        + "\nSet FXE_RUN, pass fxe_run=, or build the dev-v8-wgpu preset."
+        + "\nSet FXE_RUN, pass fxe_run=, or build the dev preset."
     )
 
 

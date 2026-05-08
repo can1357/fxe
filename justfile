@@ -204,7 +204,7 @@ bootstrap:
         ./vcpkg/bootstrap-vcpkg.sh -disableMetrics; \
     fi
 
-[doc('Configure a CMake preset (default: dev). Presets: dev, release, dev-wgpu, dev-v8')]
+[doc('Configure a CMake preset (default: dev). Presets: dev, release')]
 [group('build')]
 configure preset=preset: bootstrap
     cmake --preset '{{ preset }}'
@@ -257,18 +257,18 @@ ts-check:
 
 [doc('Run a JS/TS example through fxe_run with Dawn/WebGPU. Extra args go through to fxe_run BEFORE the script path: just ts ui_demo --debug')]
 [group('examples')]
-ts name='ui_demo' *ARGS: (build 'dev-v8-wgpu')
+ts name='ui_demo' *ARGS: (build 'dev')
     @script=$(just --justfile '{{ justfile() }}' _resolve_js_script '{{ name }}'); \
-        echo "./build/dev-v8-wgpu/fxe_run {{ ARGS }} $script"; \
-        './build/dev-v8-wgpu/fxe_run' {{ ARGS }} "$script"
+        echo "./build/dev/fxe_run {{ ARGS }} $script"; \
+        './build/dev/fxe_run' {{ ARGS }} "$script"
 
 
 [doc('Run a JS/TS example through the release V8/WebGPU fxe_run. Extra args go through to fxe_run BEFORE the script path: just js-release login_form --show-fps')]
 [group('examples')]
-js-release name='ui_demo' *ARGS: (build 'release-v8-wgpu')
+js-release name='ui_demo' *ARGS: (build 'release')
     @script=$(just --justfile '{{ justfile() }}' _resolve_js_script '{{ name }}'); \
-        echo "./build/release-v8-wgpu/fxe_run {{ ARGS }} $script"; \
-        './build/release-v8-wgpu/fxe_run' {{ ARGS }} "$script"
+        echo "./build/release/fxe_run {{ ARGS }} $script"; \
+        './build/release/fxe_run' {{ ARGS }} "$script"
 
 # Resolve a JS/TS example name to a real script path under examples/js/.
 # Accepts: bare names (probe known extensions), names with extensions,
@@ -288,10 +288,10 @@ _resolve_js_script name:
 
 [doc('Launch fxe_run with the debug protocol enabled (paused) on PORT. Inspect via the TS client.')]
 [group('debug')]
-debug name='ui_demo' port='9333' *ARGS: (build 'dev-v8-wgpu')
+debug name='ui_demo' port='9333' *ARGS: (build 'dev')
     @script=$(just --justfile '{{ justfile() }}' _resolve_js_script '{{ name }}'); \
-        echo "./build/dev-v8-wgpu/fxe_run --debug={{ port }} --debug-pause {{ ARGS }} $script"; \
-        './build/dev-v8-wgpu/fxe_run' '--debug={{ port }}' --debug-pause {{ ARGS }} "$script"
+        echo "./build/dev/fxe_run --debug={{ port }} --debug-pause {{ ARGS }} $script"; \
+        './build/dev/fxe_run' '--debug={{ port }}' --debug-pause {{ ARGS }} "$script"
 
 [doc('Run the Python debug CLI from clients/python/')]
 [group('debug')]

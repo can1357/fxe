@@ -155,7 +155,7 @@ runtime if needed, and runs your script under `fxe_run`.
 Runner rendering overrides are available for app-level QA and profiling:
 
 ```sh
-./build/dev-v8-wgpu/fxe_run --no-vsync --fps-limit=120 --msaa=1 --show-fps examples/js/hello.ts
+./build/dev/fxe_run --no-vsync --fps-limit=120 --msaa=1 --show-fps examples/js/hello.ts
 ```
 
 `--vsync` / `--no-vsync`, `--fps-limit=N`, `--msaa=N` (or `--samples=N`), and
@@ -342,9 +342,6 @@ Run `just doctor` to check for required and optional tooling.
 | ------------- | ---------- | ------------------------------------------------ |
 | `dev`         | Debug      | Full runtime (V8 + Dawn + node compat)           |
 | `release`     | Release    | Full runtime, optimized                          |
-| `dev-wgpu`    | Debug      | Legacy alias — same as `dev`                     |
-| `dev-v8`      | Debug      | Legacy alias — same as `dev`                     |
-| `dev-v8-wgpu` | Debug      | Legacy alias — same as `dev`                     |
 
 ### External dependencies
 

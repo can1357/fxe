@@ -100,10 +100,8 @@ platform. The audio engine handles its own threads internally.
 
 ## Development Commands
 
-Driven by `just` (CMake under the hood). The default `dev` and `release`
-presets enable the full runtime (V8 + Dawn + node compat + native TLS/HTTP2);
-the legacy `dev-wgpu`, `dev-v8`, and `dev-v8-wgpu` presets are kept as
-aliases for the same configuration.
+Driven by `just` (CMake under the hood). The `dev` and `release` presets
+enable the full runtime (V8 + Dawn + node compat + native TLS/HTTP2).
 
 ```bash
 just bootstrap                 # one-time: build in-tree vcpkg

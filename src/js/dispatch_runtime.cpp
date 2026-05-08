@@ -254,7 +254,6 @@ namespace fxe::js {
       return std::string(*utf8, utf8.length());
     }
 
-
     bool hmr_path_arg(const v8::FunctionCallbackInfo<v8::Value>& info, std::string& out) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsString()) {
