@@ -1633,6 +1633,168 @@ namespace fxe::primitives {
   }
 
   // ---------------------------------------------------------------------------
+  // Phase 0 editor primitives.
+  // ---------------------------------------------------------------------------
+  namespace {
+    inline float advance_to_tab_stop(float pen_x, float origin_x, float tab_size) {
+      if (tab_size <= 0.0f)
+        return pen_x;
+      const float rel = pen_x - origin_x;
+      const float steps = std::floor(rel / tab_size) + 1.0f;
+      return origin_x + steps * tab_size;
+    }
+
+    // Draw text honoring tab_size by splitting on '\t' and advancing pen to
+    // the next tab stop. Returns end pen.x. Single-line only; callers handle
+    // newlines.
+    float draw_text_line_with_tabs(command_buffer& r, math::vec2 at, float depth,
+                                   std::string_view text, const font_info& font,
+                                   text_style style, float origin_x_for_tabs) {
+      if (text.empty())
+        return at.x;
+      if (style.tab_size <= 0.0f) {
+        // No tab handling: original code path.
+        auto out = draw_text(r, at, depth, text, font, style);
+        return at.x + out.z; // out.z = advance_total
+      }
+      float pen_x = at.x;
+      usize start = 0;
+      for (usize i = 0; i <= text.size(); ++i) {
+        const bool is_end = i == text.size();
+        const bool is_tab = !is_end && text[i] == '\t';
+        if (is_end || is_tab) {
+          if (i > start) {
+            std::string_view seg = text.substr(start, i - start);
+            text_style seg_style = style;
+            seg_style.tab_size = 0.0f; // suppress recursion
+            auto out = draw_text(r, math::vec2{pen_x, at.y}, depth, seg, font, seg_style);
+            pen_x += out.z;
+          }
+          if (is_tab) {
+            const float prev = pen_x;
+            pen_x = advance_to_tab_stop(pen_x, origin_x_for_tabs, style.tab_size);
+            // Visualize tab as a faint horizontal arrow when requested.
+            if (style.whitespace == whitespace_glyphs::visible && pen_x > prev) {
+              r8g8b8a8 c = style.color;
+              c.a = static_cast<u8>(c.a * 0.35f);
+              const float y = at.y + style.pt * 0.55f;
+              const float pad = 2.0f;
+              draw_line(r, math::vec4{prev + pad, y, depth, 0.0f},
+                        math::vec4{pen_x - pad, y, depth, 0.0f}, c, 1.0f);
+            }
+            start = i + 1;
+          } else {
+            start = i;
+          }
+        }
+      }
+      return pen_x;
+    }
+  } // namespace
+
+  math::vec4 draw_text_spans(command_buffer& r, math::vec2 at, float depth,
+                             std::span<const text_span> spans,
+                             const font_info& fallback_font) {
+    float pen_x = at.x;
+    float max_pt = 0.0f;
+    u32 glyph_count = 0;
+    const float origin_x = at.x;
+    for (const auto& span : spans) {
+      if (span.text.empty())
+        continue;
+      const font_info* font = span.font ? span.font : &fallback_font;
+      text_style s = span.style;
+      if (s.pt <= 0.0f)
+        s.pt = 16.0f;
+      max_pt = math::fmax(max_pt, s.pt);
+      const float seg_start = pen_x;
+      // Force tab origin to the spans' starting x so multi-span lines align.
+      if (s.tab_size > 0.0f && s.tab_origin_x == 0.0f)
+        s.tab_origin_x = origin_x;
+      const float origin_for_tabs = s.tab_origin_x != 0.0f ? s.tab_origin_x : origin_x;
+      pen_x = draw_text_line_with_tabs(r, math::vec2{pen_x, at.y}, depth, span.text, *font, s,
+                                       origin_for_tabs);
+      // Decoration overlays for this span — single straight underline /
+      // strikethrough across [seg_start, pen_x].
+      if (span.underline && pen_x > seg_start) {
+        const float y = at.y + s.pt * 1.05f;
+        draw_line(r, math::vec4{seg_start, y, depth, 0.0f},
+                  math::vec4{pen_x, y, depth, 0.0f}, s.color, 1.0f);
+      }
+      if (span.strikethrough && pen_x > seg_start) {
+        const float y = at.y + s.pt * 0.55f;
+        draw_line(r, math::vec4{seg_start, y, depth, 0.0f},
+                  math::vec4{pen_x, y, depth, 0.0f}, s.color, 1.0f);
+      }
+      glyph_count += static_cast<u32>(span.text.size());
+    }
+    const float width = pen_x - at.x;
+    const float height = max_pt * 1.2f;
+    return math::vec4{width, height, width, static_cast<float>(glyph_count)};
+  }
+
+  void draw_selection_rects(command_buffer& r, std::span<const math::vec4> rects, r8g8b8a8 color,
+                            float depth) {
+    for (const auto& rc : rects) {
+      if (rc.z <= 0.0f || rc.w <= 0.0f)
+        continue;
+      fill_rect(r, math::vec2{rc.x, rc.y}, math::vec2{rc.z, rc.w}, depth, color);
+    }
+  }
+
+  void draw_decoration_underline(command_buffer& r, float x1, float x2, float y,
+                                 decoration_style style, r8g8b8a8 color, float thickness,
+                                 float depth) {
+    if (x2 <= x1)
+      return;
+    const float t = thickness > 0.0f ? thickness : 1.0f;
+    switch (style) {
+    case decoration_style::solid: {
+      draw_line(r, math::vec4{x1, y, depth, 0.0f}, math::vec4{x2, y, depth, 0.0f}, color, t);
+      break;
+    }
+    case decoration_style::dashed: {
+      const float dash = math::fmax(2.0f, t * 4.0f);
+      const float gap = dash;
+      for (float x = x1; x < x2; x += dash + gap) {
+        const float xe = math::fmin(x + dash, x2);
+        draw_line(r, math::vec4{x, y, depth, 0.0f}, math::vec4{xe, y, depth, 0.0f}, color, t);
+      }
+      break;
+    }
+    case decoration_style::dotted: {
+      const float step = math::fmax(2.0f, t * 2.0f);
+      for (float x = x1; x < x2; x += step) {
+        const float xe = math::fmin(x + 1.0f, x2);
+        draw_line(r, math::vec4{x, y, depth, 0.0f}, math::vec4{xe, y, depth, 0.0f}, color, t);
+      }
+      break;
+    }
+    case decoration_style::wavy: {
+      const float amp = math::fmax(1.0f, t * 1.5f);
+      const float period = math::fmax(4.0f, t * 6.0f);
+      bool up = true;
+      float prev_x = x1;
+      float prev_y = y;
+      for (float x = x1 + period * 0.5f; x <= x2 + 0.001f; x += period * 0.5f) {
+        const float yn = up ? y - amp : y + amp;
+        const float xn = math::fmin(x, x2);
+        draw_line(r, math::vec4{prev_x, prev_y, depth, 0.0f},
+                  math::vec4{xn, yn, depth, 0.0f}, color, t);
+        prev_x = xn;
+        prev_y = yn;
+        up = !up;
+      }
+      if (prev_x < x2) {
+        draw_line(r, math::vec4{prev_x, prev_y, depth, 0.0f},
+                  math::vec4{x2, y, depth, 0.0f}, color, t);
+      }
+      break;
+    }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Blur — emit the 5x5 Gaussian sample pattern used by the original engine.
   // Samples are tagged with framebuffer_texture_id; GPU backends interpret that
   // reserved texture id as the captured/current frame, while CPU-only tests can

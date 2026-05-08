@@ -118,7 +118,7 @@ namespace fxe::js {
 #endif
     }
 
-    bool is_regular_file(const std::filesystem::path& path) {
+    bool path_is_regular_file(const std::filesystem::path& path) {
       std::error_code ec;
       return std::filesystem::is_regular_file(path, ec);
     }
@@ -126,7 +126,7 @@ namespace fxe::js {
     std::optional<std::filesystem::path> resolve_devtools_entry_path() {
       if (const char* env = std::getenv("FXE_DEVTOOLS_ENTRY"); env && *env) {
         std::filesystem::path configured(env);
-        if (is_regular_file(configured))
+        if (path_is_regular_file(configured))
           return configured;
       }
 
@@ -141,7 +141,7 @@ namespace fxe::js {
           (exe_dir / "share" / "fxe" / "devtools" / "main.tsx").lexically_normal(),
       };
       for (const auto& candidate : candidates) {
-        if (is_regular_file(candidate))
+        if (path_is_regular_file(candidate))
           return candidate;
       }
       return std::nullopt;
@@ -367,8 +367,8 @@ namespace fxe::js {
 
       auto devtools_entry = resolve_devtools_entry_path();
       if (!devtools_entry) {
-        (void)throw_type_error(iso,
-                               "App.openDevTools: devtools entry not found; set FXE_DEVTOOLS_ENTRY");
+        (void)throw_type_error(
+            iso, "App.openDevTools: devtools entry not found; set FXE_DEVTOOLS_ENTRY");
         return;
       }
 
@@ -379,7 +379,7 @@ namespace fxe::js {
       }
 
       auto exe_path = current_executable_path();
-      if (!exe_path || !is_regular_file(*exe_path)) {
+      if (!exe_path || !path_is_regular_file(*exe_path)) {
         iso->ThrowException(
             Exception::Error(s(iso, "App.openDevTools: failed to resolve fxe_run executable")));
         return;
@@ -394,8 +394,8 @@ namespace fxe::js {
       std::wstring entry_w = devtools_entry->wstring();
       std::wstring cdp_url_w = widen_utf8(cdp_url);
       if (exe_w.empty() || entry_w.empty() || cdp_url_w.empty()) {
-        iso->ThrowException(
-            Exception::Error(s(iso, "App.openDevTools: failed to prepare child process arguments")));
+        iso->ThrowException(Exception::Error(
+            s(iso, "App.openDevTools: failed to prepare child process arguments")));
         return;
       }
 
@@ -413,9 +413,8 @@ namespace fxe::js {
       startup.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
       startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
       PROCESS_INFORMATION process{};
-      BOOL ok =
-          CreateProcessW(exe_w.c_str(), command_line.data(), nullptr, nullptr, TRUE, 0,
-                         env_block.data(), nullptr, &startup, &process);
+      BOOL ok = CreateProcessW(exe_w.c_str(), command_line.data(), nullptr, nullptr, TRUE, 0,
+                               env_block.data(), nullptr, &startup, &process);
       if (!ok) {
         int err = static_cast<int>(GetLastError());
         std::string message =
@@ -426,7 +425,8 @@ namespace fxe::js {
       CloseHandle(process.hThread);
       CloseHandle(process.hProcess);
       Local<Object> result = Object::New(iso);
-      (void)result->Set(ctx, "pid"_v8(iso), Number::New(iso, static_cast<double>(process.dwProcessId)));
+      (void)result->Set(ctx, "pid"_v8(iso),
+                        Number::New(iso, static_cast<double>(process.dwProcessId)));
       info.GetReturnValue().Set(result);
 #else
       auto child_env_storage = build_child_environment_storage();
@@ -447,15 +447,15 @@ namespace fxe::js {
       posix_spawn_file_actions_t actions;
       int rc = posix_spawn_file_actions_init(&actions);
       if (rc != 0) {
-        std::string message =
-            std::string("App.openDevTools: posix_spawn file actions failed: ")
-            + system_error_message(rc);
+        std::string message = std::string("App.openDevTools: posix_spawn file actions failed: ") +
+                              system_error_message(rc);
         iso->ThrowException(Exception::Error(s(iso, message.c_str())));
         return;
       }
 
       pid_t pid = -1;
-      rc = ::posix_spawn(&pid, exe_string.c_str(), &actions, nullptr, argv.data(), child_env.data());
+      rc =
+          ::posix_spawn(&pid, exe_string.c_str(), &actions, nullptr, argv.data(), child_env.data());
       (void)posix_spawn_file_actions_destroy(&actions);
       if (rc != 0) {
         std::string message =

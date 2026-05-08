@@ -795,6 +795,21 @@ declare namespace FXE {
          * (e.g. `wght`, `width`) mapped to numeric values.
          */
         variations?: { readonly [axisTag: string]: number };
+        /**
+         * Visual tab stop width in pixels (logical). When > 0, tab characters
+         * advance the pen to the next multiple of `tabSize` from `tabOriginX`.
+         * Zero (default) renders TAB as the underlying glyph.
+         */
+        tabSize?: number;
+        /**
+         * Tab origin x (logical px). Defaults to the draw origin x. Used by
+         * editors painting indented lines that need a global stop alignment.
+         */
+        tabOriginX?: number;
+        /**
+         * When true, tab characters draw a faint horizontal arrow marker.
+         */
+        showWhitespace?: boolean;
       },
     ): [number, number, number, number];
     drawText(
@@ -806,6 +821,66 @@ declare namespace FXE {
       pointSize?: number,
       color?: Color,
     ): [number, number, number, number];
+    /**
+     * Editor-grade text paint: paints N styled spans on the same baseline in
+     * a single V8 trampoline. Spans are laid out left-to-right starting at
+     * `(x, y)`. Each span may override color/size/font/weight/features.
+     * Underline & strikethrough decorations are drawn after the glyph run.
+     *
+     * Returns `[width, height, advanceX, glyphCount]` (same shape as
+     * `drawText`).
+     */
+    drawTextSpans(
+      cb: CommandBuffer | Renderer,
+      x: number,
+      y: number,
+      depth: number,
+      spans: ReadonlyArray<{
+        text: string;
+        color?: Color;
+        size?: number;
+        fontId?: number;
+        bold?: boolean;
+        italic?: boolean;
+        underline?: boolean;
+        strikethrough?: boolean;
+        features?: ReadonlyArray<string | readonly [string, number]>;
+      }>,
+      opts?: {
+        tabSize?: number;
+        tabOriginX?: number;
+        lineHeight?: number;
+        showWhitespace?: boolean;
+        size?: number;
+        color?: Color;
+        fontId?: number;
+      },
+    ): [number, number, number, number];
+    /**
+     * Paint many axis-aligned rects in one trampoline. `rects` is a packed
+     * Float32Array `[x0,y0,w0,h0, x1,y1,w1,h1, …]`. Used by editor selections
+     * (one rect per visible line per cursor).
+     */
+    drawSelectionRects(
+      cb: CommandBuffer | Renderer,
+      rects: Float32Array,
+      color?: Color,
+      depth?: number,
+    ): void;
+    /**
+     * Underline decoration for diagnostics, spell-check, hyperlinks. `y` is
+     * the decoration baseline (typically the text baseline + 1–2 px).
+     */
+    drawDecorationUnderline(
+      cb: CommandBuffer | Renderer,
+      x1: number,
+      x2: number,
+      y: number,
+      style: 'solid' | 'dashed' | 'dotted' | 'wavy',
+      color?: Color,
+      thickness?: number,
+      depth?: number,
+    ): void;
     /**
      * Batched draw_text. Collapses N V8 trampolines into one. Each run is
      * drawn as if `drawText(cb, run.x, run.y, run.depth ?? 0, run.text,

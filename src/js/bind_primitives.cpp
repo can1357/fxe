@@ -727,6 +727,199 @@ namespace fxe::js {
       }
     }
 
+    // Decode a text_style options object as used by drawText.
+    void decode_text_style_opts(Isolate* iso, Local<Context> ctx, Local<Value> v,
+                                primitives::text_style& style, u32* out_font_id) {
+      if (!v->IsObject() || v->IsNumber())
+        return;
+      auto o = v.As<Object>();
+      Local<Value> field;
+      if (o->Get(ctx, "color"_v8(iso)).ToLocal(&field) && !field->IsUndefined())
+        style.color = decode_color(iso, ctx, field);
+      if (o->Get(ctx, "size"_v8(iso)).ToLocal(&field) && field->IsNumber())
+        style.pt = static_cast<float>(field->NumberValue(ctx).FromMaybe(16.0));
+      if (o->Get(ctx, "pt"_v8(iso)).ToLocal(&field) && field->IsNumber())
+        style.pt = static_cast<float>(field->NumberValue(ctx).FromMaybe(16.0));
+      if (out_font_id && o->Get(ctx, "fontId"_v8(iso)).ToLocal(&field) && field->IsNumber())
+        *out_font_id = static_cast<u32>(field->NumberValue(ctx).FromMaybe(0.0));
+      if (o->Get(ctx, "lineHeight"_v8(iso)).ToLocal(&field) && field->IsNumber())
+        style.line_height = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+      if (o->Get(ctx, "tabSize"_v8(iso)).ToLocal(&field) && field->IsNumber())
+        style.tab_size = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+      if (o->Get(ctx, "tabOriginX"_v8(iso)).ToLocal(&field) && field->IsNumber())
+        style.tab_origin_x = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+      if (o->Get(ctx, "showWhitespace"_v8(iso)).ToLocal(&field) && field->IsBoolean()) {
+        style.whitespace = field->BooleanValue(iso) ? primitives::whitespace_glyphs::visible
+                                                    : primitives::whitespace_glyphs::none;
+      }
+      if (o->Get(ctx, "bold"_v8(iso)).ToLocal(&field) && field->BooleanValue(iso))
+        style.flags |= primitives::text_bold;
+      if (o->Get(ctx, "italic"_v8(iso)).ToLocal(&field) && field->BooleanValue(iso))
+        style.flags |= primitives::text_italic;
+      if (o->Get(ctx, "features"_v8(iso)).ToLocal(&field) && field->IsArray()) {
+        auto a = field.As<Array>();
+        const u32 n = a->Length();
+        for (u32 i = 0; i < n; ++i) {
+          Local<Value> el;
+          if (!a->Get(ctx, i).ToLocal(&el))
+            continue;
+          std::array<char, 4> tag{' ', ' ', ' ', ' '};
+          u32 val = 1;
+          if (el->IsString()) {
+            String::Utf8Value u(iso, el);
+            for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
+              tag[k] = (*u)[k];
+          } else if (el->IsArray()) {
+            auto pair = el.As<Array>();
+            Local<Value> tv;
+            if (pair->Get(ctx, 0).ToLocal(&tv) && tv->IsString()) {
+              String::Utf8Value u(iso, tv);
+              for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
+                tag[k] = (*u)[k];
+            }
+            Local<Value> vv;
+            if (pair->Get(ctx, 1).ToLocal(&vv) && vv->IsNumber())
+              val = static_cast<u32>(vv->NumberValue(ctx).FromMaybe(1.0));
+          }
+          style.features.emplace_back(tag, val);
+        }
+      }
+    }
+
+    // drawTextSpans(cb, x, y, depth, spans[, opts])
+    //  spans: Array<{ text, color?, size?, fontId?, bold?, italic?, underline?,
+    //                 strikethrough?, features? }>
+    //  opts:  { tabSize?, tabOriginX?, lineHeight?, showWhitespace? }
+    // Returns [width, height, advanceX, glyphCount].
+    void p_drawTextSpans(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      if (info.Length() < 5 || !info[4]->IsArray()) {
+        (void)throw_type_error(iso,
+                               "drawTextSpans: expected (cb, x, y, depth, spans[], opts?)");
+        return;
+      }
+      const float x = static_cast<float>(num(ctx, info[1]));
+      const float y = static_cast<float>(num(ctx, info[2]));
+      const float depth = static_cast<float>(num(ctx, info[3]));
+      auto spans_arr = info[4].As<Array>();
+      const u32 n = spans_arr->Length();
+      primitives::text_style common{};
+      u32 common_font_id = 0;
+      if (info.Length() >= 6)
+        decode_text_style_opts(iso, ctx, info[5], common, &common_font_id);
+      auto k_text = "text"_v8(iso);
+      auto k_underline = "underline"_v8(iso);
+      auto k_strikethrough = "strikethrough"_v8(iso);
+      std::vector<std::string> texts;
+      texts.reserve(n);
+      std::vector<primitives::text_span> spans;
+      spans.reserve(n);
+      for (u32 i = 0; i < n; ++i) {
+        Local<Value> ev;
+        if (!spans_arr->Get(ctx, i).ToLocal(&ev) || !ev->IsObject())
+          continue;
+        auto o = ev.As<Object>();
+        Local<Value> field;
+        std::string text;
+        if (o->Get(ctx, k_text).ToLocal(&field) && !field->IsUndefined())
+          text = utf8(iso, field);
+        if (text.empty())
+          continue;
+        primitives::text_span sp;
+        sp.style = common;
+        u32 font_id = common_font_id;
+        decode_text_style_opts(iso, ctx, ev, sp.style, &font_id);
+        if (sp.style.pt <= 0.0f)
+          sp.style.pt = 16.0f;
+        if (font_id != 0) {
+          if (const auto* f = resolve_font_id(font_id))
+            sp.font = f;
+        }
+        if (o->Get(ctx, k_underline).ToLocal(&field))
+          sp.underline = field->BooleanValue(iso);
+        if (o->Get(ctx, k_strikethrough).ToLocal(&field))
+          sp.strikethrough = field->BooleanValue(iso);
+        texts.emplace_back(std::move(text));
+        sp.text = texts.back();
+        spans.push_back(sp);
+      }
+      const auto* fb_font = common_font_id != 0 ? resolve_font_id(common_font_id) : nullptr;
+      auto out = primitives::draw_text_spans(*cb, math::vec2{x, y}, depth, spans,
+                                             fb_font ? *fb_font : get_font_info());
+      auto arr = Array::New(iso, 4);
+      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(out.x)));
+      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(out.y)));
+      (void)arr->Set(ctx, 2, Number::New(iso, static_cast<double>(out.z)));
+      (void)arr->Set(ctx, 3, Number::New(iso, static_cast<double>(out.w)));
+      info.GetReturnValue().Set(arr);
+    }
+
+    // drawSelectionRects(cb, rects: Float32Array (4N: [x,y,w,h, ...]), color?, depth?)
+    void p_drawSelectionRects(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      if (info.Length() < 2 || !info[1]->IsFloat32Array()) {
+        (void)throw_type_error(
+            iso, "drawSelectionRects: expected (cb, Float32Array, color?, depth?)");
+        return;
+      }
+      auto a = info[1].As<Float32Array>();
+      const u32 n = static_cast<u32>(a->Length()) / 4u;
+      if (n == 0)
+        return;
+      std::vector<float> raw(a->Length());
+      a->CopyContents(raw.data(), raw.size() * sizeof(float));
+      std::vector<math::vec4> rects;
+      rects.reserve(n);
+      for (u32 i = 0; i < n; ++i)
+        rects.emplace_back(raw[i * 4 + 0], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]);
+      const auto color = info.Length() >= 3 ? decode_color(iso, ctx, info[2]) : white;
+      const float depth = info.Length() >= 4 ? static_cast<float>(num(ctx, info[3])) : 0.0f;
+      primitives::draw_selection_rects(*cb, std::span<const math::vec4>{rects}, color, depth);
+    }
+
+    // drawDecorationUnderline(cb, x1, x2, y, style, color?, thickness?, depth?)
+    void p_drawDecorationUnderline(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      if (info.Length() < 5) {
+        (void)throw_type_error(iso, "drawDecorationUnderline: expected (cb, x1, x2, y, style, "
+                                    "color?, thickness?, depth?)");
+        return;
+      }
+      const float x1 = static_cast<float>(num(ctx, info[1]));
+      const float x2 = static_cast<float>(num(ctx, info[2]));
+      const float y = static_cast<float>(num(ctx, info[3]));
+      primitives::decoration_style style = primitives::decoration_style::solid;
+      if (info[4]->IsString()) {
+        std::string s = utf8(iso, info[4]);
+        if (s == "dashed")
+          style = primitives::decoration_style::dashed;
+        else if (s == "dotted")
+          style = primitives::decoration_style::dotted;
+        else if (s == "wavy")
+          style = primitives::decoration_style::wavy;
+      }
+      const auto color = info.Length() >= 6 ? decode_color(iso, ctx, info[5]) : white;
+      const float thickness =
+          info.Length() >= 7 ? static_cast<float>(num(ctx, info[6], 1.0)) : 1.0f;
+      const float depth = info.Length() >= 8 ? static_cast<float>(num(ctx, info[7])) : 0.0f;
+      primitives::draw_decoration_underline(*cb, x1, x2, y, style, color, thickness, depth);
+    }
+
     // drawTextureQuad(cb, slot, x, y, w, h, [u0, v0, u1, v1], [tint:Color],
     //                [depth:number])
     //
@@ -1440,13 +1633,7 @@ namespace fxe::js {
       primitives::color_list<4> cl{c, c, c, c};
       primitives::blur_quad(*cb, p1, p2, p3, p4, cl, disp, math::vec2{sw, sh});
     }
-    // drawSprite(cb, spriteId, x, y, w, h, depth?, tint?)
-    //
-    // ENGINE GAP: the renderer currently exposes only one global atlas
-    // (set via renderer::set_atlas), so per-spriteId texture sampling is
-    // not yet wired through. This v0 emits a tinted, untextured rect of
-    // the requested size — geometry, layering and tinting all work; the
-    // sampled image will land once the multi-texture path exists.
+    // drawSprite(cb, spriteId, x, y, w, h, depth?, tint?) — samples from the default spritesheet.
     void p_drawSprite(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -1458,12 +1645,47 @@ namespace fxe::js {
         (void)throw_type_error(iso, "drawSprite(cb, spriteId, x, y, w, h, depth?, tint?)");
         return;
       }
-      (void)info[1]->Uint32Value(ctx).FromMaybe(0u); // spriteId reserved for future routing
-      math::vec2 at{float(num(ctx, info[2])), float(num(ctx, info[3]))};
-      math::vec2 size{float(num(ctx, info[4])), float(num(ctx, info[5]))};
-      float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
-      auto tint = info.Length() >= 8 ? decode_color(iso, ctx, info[7]) : white;
-      primitives::fill_rect(*cb, at, size, depth, tint);
+      const texture_id sprite_id = info[1]->Uint32Value(ctx).FromMaybe(0u);
+      const math::vec2 at{float(num(ctx, info[2])), float(num(ctx, info[3]))};
+      const math::vec2 size{float(num(ctx, info[4])), float(num(ctx, info[5]))};
+      const float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
+      const auto tint = info.Length() >= 8 ? decode_color(iso, ctx, info[7]) : white;
+      const auto fallback = [&] { primitives::fill_rect(*cb, at, size, depth, tint); };
+      if (sprite_id == null_texture) {
+        fallback();
+        return;
+      }
+      auto& sheet = get_default_spritesheet();
+      const texture_id resolved = sheet.resolve_if(sprite_id, 0.0f);
+      if ((resolved & (msprite_flag | xlsprite_flag)) != 0) {
+        fallback();
+        return;
+      }
+      const texture_id sprite_index = resolved & sprite_index_mask;
+      if (sprite_index == 0 || sprite_index > sheet.sprites.size()) {
+        fallback();
+        return;
+      }
+      const sprite& spr = sheet.sprites[sprite_index - 1];
+      const texture_id texture_index = spr.texture & sprite_index_mask;
+      if (texture_index == 0 || texture_index > sheet.textures.size()) {
+        fallback();
+        return;
+      }
+      const texture_data& td = sheet.textures[texture_index - 1];
+      if (td.size.x == 0 || td.size.y == 0) {
+        fallback();
+        return;
+      }
+      const float u0 = static_cast<float>(spr.at.x) / static_cast<float>(td.size.x);
+      const float v0 = static_cast<float>(spr.at.y) / static_cast<float>(td.size.y);
+      const float u1 = static_cast<float>(spr.at.x + spr.size.x) / static_cast<float>(td.size.x);
+      const float v1 = static_cast<float>(spr.at.y + spr.size.y) / static_cast<float>(td.size.y);
+      auto* vp = cb->allocate_strip(4, vertex_topology::triangle);
+      vp[0] = make_vertex({at.x, at.y}, depth, {u0, v0}, spr.texture, tint);
+      vp[1] = make_vertex({at.x + size.x, at.y}, depth, {u1, v0}, spr.texture, tint);
+      vp[2] = make_vertex({at.x, at.y + size.y}, depth, {u0, v1}, spr.texture, tint);
+      vp[3] = make_vertex({at.x + size.x, at.y + size.y}, depth, {u1, v1}, spr.texture, tint);
     }
   } // namespace
 
@@ -1504,6 +1726,9 @@ namespace fxe::js {
     P("fillRectRounded", p_fillRectRounded);
     P("drawRectRounded", p_drawRectRounded);
     P("drawText", p_drawText);
+    P("drawTextSpans", p_drawTextSpans);
+    P("drawSelectionRects", p_drawSelectionRects);
+    P("drawDecorationUnderline", p_drawDecorationUnderline);
     P("drawTextRun", p_drawTextRun);
     P("drawTextureQuad", p_drawTextureQuad);
     P("calcText", p_calcText);

@@ -61,6 +61,11 @@ namespace fxe::primitives {
   };
   inline constexpr u32 wrap_after_disabled = 0xffffffffu;
 
+  enum class whitespace_glyphs : u32 {
+    none = 0,    // tab/newline render as ordinary glyph (or absent)
+    visible = 1, // render whitespace as faint visual marks
+  };
+
   struct text_style {
     r8g8b8a8 color = white;
     float pt = 16.0f; // pixel height for one line of text
@@ -69,6 +74,12 @@ namespace fxe::primitives {
     // Optional override for line height. Zero/negative → use the face's
     // metrics-derived value.
     float line_height = 0.0f;
+    // Visual tab stop in pixels (logical). Zero = render TAB literally.
+    float tab_size = 0.0f;
+    // Tab origin x in pixels (logical). Tab stops snap to multiples of
+    // tab_size relative to this origin. Defaults to the draw origin.x.
+    float tab_origin_x = 0.0f;
+    whitespace_glyphs whitespace = whitespace_glyphs::none;
     // OpenType feature settings (e.g. {"liga", 1}, {"ss01", 1}). Empty list
     // = use the font module's default features (calt + liga + kern).
     std::vector<std::pair<std::array<char, 4>, u32>> features;
@@ -257,6 +268,39 @@ namespace fxe::primitives {
                        const font_info& font, text_style style = {});
   math::vec4 draw_text(command_buffer& r, const math::mat4x4& transform, std::string_view text,
                        const font_info& font, text_style style = {});
+
+  // --- Phase 0 editor primitives -------------------------------------------
+  // One trampoline, N styled spans on the same baseline.
+  // Each span is laid out left-to-right starting at `at`. The baseline
+  // position is shared. Returns (width, height, advance_x, glyph_count) like
+  // draw_text. tab_size on each span's style is honoured against `at.x`.
+  struct text_span {
+    std::string_view text;
+    text_style style;
+    const font_info* font = nullptr; // null → use fallback_font
+    bool underline = false;          // baseline-relative straight underline
+    bool strikethrough = false;      // mid-x strike line
+  };
+  math::vec4 draw_text_spans(command_buffer& r, math::vec2 at, float depth,
+                             std::span<const text_span> spans,
+                             const font_info& fallback_font);
+
+  // Paint many axis-aligned rects in one trampoline. Used by editor
+  // selections (one rect per visible line per cursor).
+  void draw_selection_rects(command_buffer& r, std::span<const math::vec4> rects,
+                            r8g8b8a8 color, float depth = 0.0f);
+
+  // Decoration underline (squiggle / dashed / dotted / solid) for diagnostics
+  // and spell-check. `y` is the baseline at which the decoration sits.
+  enum class decoration_style : u32 {
+    solid = 0,
+    dashed = 1,
+    dotted = 2,
+    wavy = 3,
+  };
+  void draw_decoration_underline(command_buffer& r, float x1, float x2, float y,
+                                 decoration_style style, r8g8b8a8 color,
+                                 float thickness = 1.0f, float depth = 0.0f);
 
   // ---------------------------------------------------------------------------
   // Blur helpers — emit textured quads that the post-process chain blurs in the
