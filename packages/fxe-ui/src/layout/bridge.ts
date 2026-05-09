@@ -3,8 +3,8 @@
 // dirtying internally; if reconciler-level memo is later needed, layer it
 // at the fiber boundary).
 
-import type { Constraint, LayoutNode, LayoutResult, Length, LayoutStyle } from './types.ts';
 import type { TaggedMeasureFn } from './measure.ts';
+import type { Constraint, LayoutNode, LayoutResult, LayoutStyle, Length } from './types.ts';
 
 const NativeLayout = (
   globalThis as { Layout?: { solve: (root: unknown, constraint?: Constraint) => LayoutResult } }

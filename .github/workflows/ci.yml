@@ -9,20 +9,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - name: Add node_modules/.bin to PATH
         run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
-      - uses: extractions/setup-just@v2
       - name: Install lint/format toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y shellcheck pipx
           sudo pipx install --global --force clang-format==22.1.4
-      - run: just ci-quick
+      - run: bun run ci:quick
 
   build:
     strategy:

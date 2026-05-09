@@ -104,23 +104,28 @@ Driven by `just` (CMake under the hood). The `dev` and `release` presets
 enable the full runtime (V8 + Dawn + node compat + native TLS/HTTP2).
 
 ```bash
-just bootstrap                 # one-time: build in-tree vcpkg
-just configure [preset]        # cmake --preset
-just build [preset] [-- args]  # alias: just b
-just test [preset]             # ctest --preset; alias: just t
-just test-core [preset]        # run fxe_core_tests directly
-just example hello_sprite      # build+run native example; alias: just r
-just ts ui_demo [-- args]      # build dev preset, run examples/js/ui_demo.ts
-just debug ui_demo 9333        # run paused with debug protocol on port 9333
-just ts-check                  # tsc --noEmit -p tsconfig.json
-just format / format-check     # clang-format over tracked C++ sources; alias: just f
-just format-js / format-js-check / lint-js / fix-js      # biome over JS/TS
-just format-py / format-cmake / format-shell           # optional, soft-skip
-just ci                        # format-check + test + ts-check
-just ci-quick                  # format/lint/typecheck only (no build)
-just pycli ...                 # python -m fxe_debug.cli (Python debug CLI)
-just pytest                    # unittest discover under clients/python/tests
-just doctor                    # report which dev tools are installed
+bun install                    # install JS devDeps (Biome, TS, @types/node)
+bun run bootstrap              # one-time: clone + bootstrap in-tree vcpkg
+bun run configure              # cmake --preset dev
+bun run configure:release      # cmake --preset release
+bun run build                  # cmake --build --preset dev
+bun run build:release          # cmake --build --preset release
+bun run test                   # ctest --preset dev --output-on-failure
+bun run test:core              # ./build/dev/fxe_core_tests
+bun run test:py                # unittest discover under clients/python/tests
+bun run js ui_demo             # build (release, only if needed) + run examples/js/ui_demo
+bun run js --dev hello         # same on the dev preset
+bun run js --rebuild ui_demo   # force a cmake rebuild before running
+bun run js ui_demo --debug=9333 --debug-pause   # any unknown flag forwards to fxe_run
+bun run watch ui_demo          # rebuild + re-run on file changes (watchexec)
+bun run typecheck              # tsc --noEmit -p tsconfig.json
+bun run fmt / fmt:check        # biome over JS/TS
+bun run fmt:cpp / fmt:cpp:check  # clang-format over tracked C/C++ sources
+bun run lint / fix             # biome lint / biome check --write
+bun run check                  # fmt:check + fmt:cpp:check + typecheck + lint
+bun run ci                     # check + test
+bun run ci:quick               # check (no build/test)
+bun run doctor                 # report which dev tools are installed
 ```
 
 Direct CMake equivalents work too:
@@ -134,7 +139,7 @@ ctest --preset release --output-on-failure
 ## Code Conventions & Common Patterns
 
 - **C++ formatting:** LLVM base, 2-space indent, 100 col, left pointer
-  alignment, namespaces indented (`All`). Run `just format` before committing.
+  alignment, namespaces indented (`All`). Run `bun run fmt:cpp` before committing.
 - **Naming:** C++ uses `snake_case` for functions/types matching gfw/gfwx
   heritage (`fillRect`, `command_buffer`, `texture_info`); JS bindings expose
   `camelCase` (`fillRect`, `beginFrame`). Opcode constants are
@@ -327,15 +332,16 @@ mount(<App />, new Window({ width: 480, height: 320 }));
 ## Runtime/Tooling Preferences
 
 - **Build:** CMake ≥ 3.24, Ninja generator, vcpkg manifest mode.
-  `just bootstrap` builds the in-tree vcpkg.
+  `bun run bootstrap` builds the in-tree vcpkg.
 - **C++:** C++20. Compilers: clang/gcc/MSVC matched in CI.
-- **TypeScript:** `tsc` (npm devDep `typescript ^5.9.3`) for type-checking
-  only — `tsconfig.json` targets ES2022, Node16 modules. Runtime
-  transpilation is performed inside V8 and does **not** type-check; always
-  run `just ts-check` before relying on TS examples.
-- **Node/npm:** used solely as a `tsc` carrier (plus `@biomejs/biome` and
-  `@types/node` devDeps). No application runtime depends on Node — the JS
-  runtime is V8 embedded directly. Do not introduce npm runtime deps.
+- **TypeScript:** `tsc` (devDep `typescript ^5.9.3`) for type-checking only —
+  `tsconfig.json` targets ES2022, Node16 modules. Runtime transpilation is
+  performed inside V8 and does **not** type-check; always run `bun run
+  typecheck` before relying on TS examples.
+- **Bun/Node:** Bun is the package manager and script runner (`bun install`,
+  `bun run X`). The JS toolchain (Biome, tsc, @types/node) lives in `package.json`
+  devDeps. No application runtime depends on Node — the JS runtime is V8
+  embedded directly. Do not introduce JS runtime deps.
 - **V8:** prefer system/distro V8; otherwise vendor with
   `scripts/build_v8.sh` (or `.ps1`) which uses depot_tools and installs to
   `.vendor/v8-install/`. Configure with `-DFXE_ENABLE_V8=ON` and export
@@ -383,20 +389,20 @@ mount(<App />, new Window({ width: 480, height: 320 }));
   / scroll / text-wrap / animated / reconciler), `hmr_*`,
   `worker_threads_*`, messaging, native runtime, perf, I/O, auto-update,
   clipboard, stdin, window chrome, packager contract.
-- **Run:** `just test` (full preset), `just test-core` (core exe directly),
-  `just pytest` (Python SDK).
+- **Run:** `bun run test` (full preset), `bun run test:core` (core exe directly),
+  `bun run test:py` (Python SDK).
 - **Golden tests:** deterministic FNV-1a hashes over command buffers in
   `core_tests.cpp` (showcase + text/sprite). Pixel goldens under
   `tests/golden/` are reserved for Dawn-backed frame capture; not yet wired.
-- **Type checks:** `just ts-check` (or `npm run typecheck`) — required
+- **Type checks:** `bun run typecheck` — required
   before merging TS-touching changes.
-- **Format gate:** `just format-check` + `just format-js-check` — CI fails
+- **Format gate:** `bun run fmt:cpp:check` + `bun run fmt:check` — CI fails
   on diffs.
-- **Local CI parity:** `just ci` (= format-check + format-js-check +
-  ts-check + lint-js + test).
-- **Headless Linux:** CI uses `xvfb`; replicate with `xvfb-run -a just test`
+- **Local CI parity:** `bun run ci` (= `check` + `test`; `check` is
+  `fmt:check` + `fmt:cpp:check` + `typecheck` + `lint`).
+- **Headless Linux:** CI uses `xvfb`; replicate with `xvfb-run -a bun run test`
   if no display is available.
-- **Python SDK:** `just pytest` runs `unittest discover` under
+- **Python SDK:** `bun run test:py` runs `unittest discover` under
   `clients/python/tests`.
 
 ## Debugging FXE Apps with the Python SDK
@@ -408,7 +414,7 @@ drive `fxe_run` through the Python SDK rather than reading source and
 guessing. The SDK is Puppeteer-style: launch the app, attach, evaluate,
 screenshot, inject input.
 
-**Prerequisite:** `just build` (default `dev` preset includes V8 + Dawn).
+**Prerequisite:** `bun run build` (default `dev` preset includes V8 + Dawn).
 
 ### Quick recipes
 
@@ -525,14 +531,13 @@ finally:
 ### CLI alternative (one-shot, no Python)
 
 ```bash
-just debug ui_demo 9333          # spawn paused on port 9333 (separate shell)
-just pycli inspect --port 9333   # handshake + globals + framebuffer
-just pycli screenshot --port 9333 --out shot.png
-just pycli eval --port 9333 'window.foo'
-just pycli mouse click --port 9333 100 100
-just pycli console --port 9333   # tail console.* messages until Ctrl-C
-just pycli resume --port 9333
-just pycli close --port 9333
+bun run js --dev hello --debug=9333 --debug-pause   # spawn paused on port 9333
+bun run pycli inspect --port 9333    # handshake + globals + framebuffer
+bun run pycli screenshot --port 9333 --out shot.png
+bun run pycli eval --port 9333 'window.foo'
+bun run pycli mouse click --port 9333 100 100
+bun run pycli console --port 9333    # tail console.* messages until Ctrl-C
+bun run pycli resume --port 9333
 ```
 
 ### Live function tracing (no source edits)
@@ -601,15 +606,15 @@ easiest way to force a full layout pass into the buffer.
 
 ### When NOT to use the SDK
 
-- Modifying the script under test — just edit + re-run `just ts ...`.
+- Modifying the script under test — just edit + re-run `bun run js …`.
 - Pure C++ unit tests — use `fxe_core_tests` / `fxe_debug_tests`.
-- Type errors — `just ts-check` is faster than launching V8.
+- Type errors — `bun run typecheck` is faster than launching V8.
 
 ### Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `LaunchError: FXE_DEBUG_PORT not detected` | binary missing or build stale | `just build dev` |
+| `LaunchError: FXE_DEBUG_PORT not detected` | binary missing or build stale | `bun run build` |
 | `ProtocolError(-32002, "V8 host not attached")` | called Runtime.* before the host loaded | wait for handshake / `await asyncio.sleep(0.05)` |
 | `ProtocolError(-32001, "capture armed; retry after the next render")` or `"capture in progress; retry shortly"` | screenshot capture is not ready yet | retry after a short sleep (see helper above) |
 | `ProtocolError(-32002, "window not attached")` / `"renderer not attached"` | the script hasn't run `new Window`/`new Renderer` yet | the SDK should `await page.resume()` if launched paused; otherwise wait |
@@ -618,20 +623,21 @@ easiest way to force a full layout pass into the buffer.
 
 ## Dev Tooling
 
-Beyond the C++ build/test recipes, `justfile` exposes a fuller dev console.
-Run `just doctor` to see which tools are present and `just --list` for the
-full grouped recipe index.
+Beyond the C++ build/test recipes, `package.json` defines a small set of
+scripts. Run `bun run doctor` to see which tools are present.
 
-- **Required:** `cmake`, `ninja`, `clang-format`, `tsc`, `python3`.
+- **Required:** `bun`, `cmake`, `ninja`, `clang-format`, `python3` (`tsc` is
+  installed locally via `bun install`).
 - **Optional (soft-skip if missing):**
-  - `biome` — JS/TS format + lint (`just format-js`, `just lint-js`, `just fix-js`).
-  - `ruff` — Python format + lint (`just format-py`, `just lint-py`).
-  - `shfmt` / `shellcheck` — shell formatting + linting (`just format-shell`, `just lint-shell`).
-  - `gersemi` — CMake formatting (`just format-cmake`, `just format-cmake-check`).
-  - `tint` — WGSL validation (`just lint-shaders`; honours `FXE_WGSL_VALIDATOR`).
-  - `watchexec` / `fswatch` — `just watch <example>` rebuild loop.
+  - `ruff` — Python format + lint (call directly: `ruff format clients/python`,
+    `ruff check clients/python`).
+  - `shfmt` / `shellcheck` — shell formatting + linting.
+  - `gersemi` — CMake formatting.
+  - `tint` — WGSL validation (set `FXE_WGSL_VALIDATOR` or have it on PATH).
+  - `watchexec` — `bun run watch <example>` rebuild loop.
 
-Aggregate recipes: `just format-all` (writes), `just lint` (read-only),
-`just ci-quick` (no build), `just ci` (full local pipeline). The CI workflow
-runs `ci-quick` on every PR; the existing matrix build still runs the
+Aggregate scripts: `bun run fmt` (writes), `bun run lint` (read-only),
+`bun run check` (fmt-check + cpp-fmt-check + typecheck + lint),
+`bun run ci:quick` (= `check`), `bun run ci` (= `check` + `test`). The CI
+workflow runs `ci:quick` on every PR; the matrix build still runs the
 native test smoke.

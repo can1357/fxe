@@ -1,7 +1,7 @@
 import { CommandBuffer } from 'fxe';
 import { assertEqual, run, test } from '../../../../tests/ts_harness.ts';
 import { View } from '../components/View.ts';
-import { Component, Draw, createContext, render, useContext } from './fiber.ts';
+import { Component, createContext, Draw, render, useContext } from './fiber.ts';
 
 test('custom Context.Provider is visible to useContext on the first render', () => {
   const NumberContext = createContext(0);

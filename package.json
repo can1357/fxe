@@ -1,16 +1,42 @@
 {
-  "name": "fxe",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "format": "biome format --write",
-    "format:check": "biome format",
-    "lint": "biome lint"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.0.0",
-    "@types/node": "^25.6.0",
-    "typescript": "^5.9.3"
-  }
+	"name": "fxe",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"js": "bun scripts/js.ts",
+		"watch": "watchexec --restart --exts ts,tsx,cpp,hpp,wgsl,h -- bun scripts/js.ts --dev",
+		"dev": "bun run fmt && bun run typecheck && bun scripts/js.ts --dev",
+
+		"bootstrap": "[ -x vcpkg/vcpkg ] || { [ -d vcpkg/.git ] || git clone --depth=1 https://github.com/microsoft/vcpkg.git vcpkg; ./vcpkg/bootstrap-vcpkg.sh -disableMetrics; }",
+		"configure": "cmake --preset dev",
+		"configure:release": "cmake --preset release",
+		"build": "cmake --build --preset dev",
+		"build:release": "cmake --build --preset release",
+		"clean": "rm -rf build/dev",
+		"clean:all": "rm -rf build build-*",
+
+		"test": "ctest --preset dev --output-on-failure",
+		"test:core": "./build/dev/fxe_core_tests",
+		"test:py": "python3 -m unittest discover -s clients/python/tests -v",
+		"pycli": "cd clients/python && python3 -m fxe_debug.cli",
+
+		"typecheck": "tsc --noEmit -p tsconfig.json",
+		"fmt": "biome format --write examples/js tests packages types",
+		"fmt:check": "biome format examples/js tests packages types",
+		"fmt:cpp": "bun scripts/cpp-fmt.ts",
+		"fmt:cpp:check": "bun scripts/cpp-fmt.ts --check",
+		"lint": "biome lint examples/js tests packages types",
+		"fix": "biome check --write examples/js tests packages types",
+
+		"check": "bun run fmt:check && bun run fmt:cpp:check && bun run typecheck && bun run lint",
+		"ci": "bun run check && bun run test",
+		"ci:quick": "bun run check",
+
+		"doctor": "bash scripts/doctor.sh"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.0.0",
+		"@types/node": "^25.6.0",
+		"typescript": "^5.9.3"
+	}
 }

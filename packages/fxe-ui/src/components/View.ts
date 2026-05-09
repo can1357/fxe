@@ -9,10 +9,10 @@ import { currentRenderTargetSize } from '../mount/mount.ts';
 import { coarseClip } from '../paint/clip.ts';
 import { paintView } from '../paint/view_painter.ts';
 import {
-  currentContextFrames,
   type BoundaryChild,
   Component,
   type ContextFrameSnapshot,
+  currentContextFrames,
   type Node,
   Portal,
   useId,
