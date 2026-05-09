@@ -42,12 +42,46 @@ export function attachInternalLayout(
   layoutResult: LayoutResult,
   textStyle?: TextStyle,
 ): Node {
-  if (node.type !== 'component') return node;
-  return {
-    ...node,
-    internalLayout: layoutResult,
-    internalTextStyle: textStyle,
-  };
+  if (node.type === 'component') {
+    return {
+      ...node,
+      internalLayout: layoutResult,
+      internalTextStyle: textStyle,
+    };
+  }
+  if (node.type === 'layer') {
+    if (node.props.children.length !== 1) return node;
+    const attached = attachInternalLayout(node.props.children[0], layoutResult, textStyle);
+    return attached === node.props.children[0]
+      ? node
+      : {
+          ...node,
+          props: {
+            ...node.props,
+            children: [attached],
+          },
+        };
+  }
+  if (
+    node.type === 'provider' ||
+    node.type === 'portal' ||
+    node.type === 'error-boundary' ||
+    node.type === 'suspense'
+  ) {
+    const children = normalizeChildren(node.props.children);
+    if (children.length !== 1) return node;
+    const attached = attachInternalLayout(children[0], layoutResult, textStyle);
+    return attached === children[0]
+      ? node
+      : {
+          ...node,
+          props: {
+            ...node.props,
+            children: [attached],
+          },
+        };
+  }
+  return node;
 }
 
 export function layoutChildren(

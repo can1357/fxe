@@ -16,6 +16,7 @@ import {
   useReducer,
   useRef,
   useState,
+  View,
 } from 'fxe-ui';
 
 import { assert, assertEqual, assertThrows, run, test } from './ts_harness.ts';
@@ -116,6 +117,30 @@ test('memo re-renders when parent internal layout changes', () => {
   render(root('internal-layout-root', [withInternalLayout(Probe(stableProps), 3, 1)]), second);
   assertEqual(renders, 2);
   assertEqual(second.vertexCount(), 3);
+});
+
+test('single-child Layer forwards parent layout to wrapped component', () => {
+  let renders = 0;
+  const Probe = Component(() => {
+    ++renders;
+    const layout = useInternalLayout();
+    return Draw((cb: CommandBuffer) => point(cb, layout?.width ?? 1));
+  }, 'LayerLayoutForwardProbe');
+
+  const cb = new CommandBuffer();
+  render(
+    root('layer-layout-root', [
+      View({
+        key: 'host',
+        style: { width: 3, height: 1 },
+        children: Layer({ key: 'wrapped', children: [Probe({ key: 'probe' })] }),
+      }),
+    ]),
+    cb,
+  );
+
+  assertEqual(renders, 1);
+  assertEqual(cb.vertexCount(), 3);
 });
 
 test('useReducer dispatch updates state and requests redraw', () => {

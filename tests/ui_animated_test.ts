@@ -125,9 +125,13 @@ test('useAnimatedValue returns a stable value and stops active animation on unmo
     if (first === null) first = value;
     second = value;
     useEffect(() => {
-      Animated.timing(value, { to: 1, duration: 100, easing: 'linear' }).start((result) => {
+      const animation = Animated.timing(value, { to: 1, duration: 100, easing: 'linear' });
+      animation.start((result) => {
         results.push(result.finished);
       });
+      return () => {
+        animation.stop();
+      };
     }, [value]);
     return Draw(() => undefined);
   }, 'AnimatedProbe');

@@ -1,6 +1,6 @@
 // FXE resolves these package names through the host loader rather than node_modules.
-import { Component, Draw, ErrorBoundary, Layer, Suspense, Text, View } from 'fxe-ui';
-import { Fragment, jsx, jsxs } from 'fxe-ui/jsx-runtime';
+import { Component, Draw, ErrorBoundary, Layer, Suspense } from 'fxe-ui';
+import { jsx, jsxs } from 'fxe-ui/jsx-runtime';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 

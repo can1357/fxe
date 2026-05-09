@@ -203,7 +203,7 @@ test('sqlite: transaction commits then rolls back on throw', () => {
 
     const n = insertMany(['a', 'b', 'c']);
     assertEqual(n, 3);
-    assertEqual(db.query<{ c: number }>('SELECT count(*) as c FROM t').get()!.c, 3);
+    assertEqual(db.query<{ c: number }>('SELECT count(*) as c FROM t').get()?.c, 3);
 
     const rollbackMany = db.transaction((items: string[]) => {
       for (const item of items) {
@@ -214,7 +214,7 @@ test('sqlite: transaction commits then rolls back on throw', () => {
     assertThrows(() => rollbackMany(['x', 'BOOM']), /rollback me/);
 
     // Rollback should undo only the failed transaction; first 3 rows survive.
-    assertEqual(db.query<{ c: number }>('SELECT count(*) as c FROM t').get()!.c, 3);
+    assertEqual(db.query<{ c: number }>('SELECT count(*) as c FROM t').get()?.c, 3);
   } finally {
     db.close();
   }

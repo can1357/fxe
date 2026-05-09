@@ -3654,8 +3654,8 @@ declare module 'node:events' {
     removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
     removeAllListeners(eventName?: string | symbol): this;
     emit(eventName: string | symbol, ...args: any[]): boolean;
-    listeners(eventName: string | symbol): Function[];
-    rawListeners(eventName: string | symbol): Function[];
+    listeners(eventName: string | symbol): ((...args: any[]) => any)[];
+    rawListeners(eventName: string | symbol): ((...args: any[]) => any)[];
     listenerCount(eventName: string | symbol, listener?: (...args: any[]) => void): number;
     eventNames(): Array<string | symbol>;
     setMaxListeners(n: number): this;
@@ -3777,12 +3777,12 @@ declare module 'node:util' {
   export function format(format?: any, ...args: any[]): string;
   export function formatWithOptions(options: unknown, format?: any, ...args: any[]): string;
   export function inspect(value: unknown, options?: unknown): string;
-  export function inherits(ctor: Function, superCtor: Function): void;
-  export function promisify(fn: Function): Function;
+  export function inherits(ctor: (...args: any[]) => any, superCtor: (...args: any[]) => any): void;
+  export function promisify(fn: (...args: any[]) => any): (...args: any[]) => any;
   export namespace promisify {
     const custom: symbol;
   }
-  export function callbackify(fn: Function): Function;
+  export function callbackify(fn: (...args: any[]) => any): (...args: any[]) => any;
   export const types: {
     isArrayBuffer(value: unknown): value is ArrayBuffer;
     isAnyArrayBuffer(value: unknown): value is ArrayBuffer;

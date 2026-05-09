@@ -1,5 +1,5 @@
 declare module 'node:https' {
-  import type { EventEmitter } from 'events';
+  import type { EventEmitter } from 'node:events';
 
   type ResponseLike = EventEmitter & { statusCode: number; headers: Record<string, string> };
   type RequestLike = EventEmitter & { end(data?: string): void };

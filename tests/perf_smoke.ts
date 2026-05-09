@@ -48,7 +48,7 @@ export function exercise(): PerformanceTimelineSnapshot {
   if (typeof dt !== 'number') throw new Error('endMark must return a duration');
 
   const snap = performance.timeline.snapshot();
-  const frame = snap.marks['frame'];
+  const frame = snap.marks.frame;
   if (!frame || frame.count < 1) throw new Error('frame mark missing after endMark');
   return snap;
 }

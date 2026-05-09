@@ -472,7 +472,10 @@ declare module 'fxe-ui' {
   export function useInternalLayout(): LayoutResult | null;
   export function useInternalTextStyle(): TextStyle | null;
   export function useMemo<T>(fn: () => T, deps: ReadonlyArray<unknown>): T;
-  export function useEffect(fn: () => void | (() => void), deps?: ReadonlyArray<unknown>): void;
+  export function useEffect(
+    fn: () => undefined | (() => void),
+    deps?: ReadonlyArray<unknown>,
+  ): void;
   export function useFrame(fn: (dtMs: number) => void): void;
   export function useEvent<K extends WindowEventName>(
     win: Window,
@@ -969,7 +972,7 @@ declare module 'fxe-ui/jsx-runtime' {
   export namespace JSX {
     type Element = JSXNode;
     interface ElementChildrenAttribute {
-      children: {};
+      children: Record<keyof any, never>;
     }
     interface IntrinsicElements {
       view: import('fxe-ui').ViewProps;

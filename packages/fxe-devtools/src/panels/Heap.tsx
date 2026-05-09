@@ -96,6 +96,7 @@ export function HeapPanel({ cdp }: { cdp: CdpClient }) {
 
   useEffect(() => {
     void cdp.send('HeapProfiler.enable').catch(() => {});
+    return undefined;
   }, [cdp]);
 
   const takeSnapshot = (): void => {

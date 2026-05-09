@@ -2,12 +2,12 @@
 
 import { Buffer } from 'node:buffer';
 import { createHash, randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import * as fsPromises from 'node:fs/promises';
 import pathDefault, { basename, join } from 'node:path';
 import * as workerThreads from 'node:worker_threads';
-import { EventEmitter } from 'events';
 
-import { assert, assertEqual, run, test } from './ts_harness.ts';
+import { assertEqual, run, test } from './ts_harness.ts';
 
 test('node compat integration resolves pure and host-backed modules together', () => {
   assertEqual(pathDefault.basename('/tmp/fxe/integration.txt'), 'integration.txt');

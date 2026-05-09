@@ -14,12 +14,12 @@
       "packages/**/*.ts",
       "packages/**/*.tsx",
       "types/**/*.d.ts",
-      "!**/node_modules/**",
-      "!**/build/**",
-      "!**/build-*/**",
-      "!**/vendor/**",
-      "!**/third_party/**",
-      "!**/vcpkg/**"
+      "!**/node_modules",
+      "!**/build",
+      "!**/build-*",
+      "!**/vendor",
+      "!**/third_party",
+      "!**/vcpkg"
     ]
   },
   "formatter": {

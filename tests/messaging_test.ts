@@ -1,4 +1,4 @@
-import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
+import { assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 
 type MessageEventLike<T = unknown> = {
   readonly type: 'message';

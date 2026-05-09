@@ -477,9 +477,12 @@ function applyPathData(path: Path, d: string, transform: Affine): void {
       }
       case 'C': {
         while (hasNumber(tokens, index + 5)) {
-          const c1 = readPoint(tokens, index, abs, cx, cy)!;
-          const c2 = readPoint(tokens, c1.next, abs, cx, cy)!;
-          const end = readPoint(tokens, c2.next, abs, cx, cy)!;
+          const c1 = readPoint(tokens, index, abs, cx, cy);
+          if (!c1) break;
+          const c2 = readPoint(tokens, c1.next, abs, cx, cy);
+          if (!c2) break;
+          const end = readPoint(tokens, c2.next, abs, cx, cy);
+          if (!end) break;
           cubicTo(path, transform, c1.x, c1.y, c2.x, c2.y, end.x, end.y);
           cx = end.x;
           cy = end.y;
@@ -495,8 +498,10 @@ function applyPathData(path: Path, d: string, transform: Affine): void {
             lastCubic === undefined
               ? { x: cx, y: cy }
               : { x: 2 * cx - lastCubic.x, y: 2 * cy - lastCubic.y };
-          const c2 = readPoint(tokens, index, abs, cx, cy)!;
-          const end = readPoint(tokens, c2.next, abs, cx, cy)!;
+          const c2 = readPoint(tokens, index, abs, cx, cy);
+          if (!c2) break;
+          const end = readPoint(tokens, c2.next, abs, cx, cy);
+          if (!end) break;
           cubicTo(path, transform, c1.x, c1.y, c2.x, c2.y, end.x, end.y);
           cx = end.x;
           cy = end.y;
@@ -508,8 +513,10 @@ function applyPathData(path: Path, d: string, transform: Affine): void {
       }
       case 'Q': {
         while (hasNumber(tokens, index + 3)) {
-          const control = readPoint(tokens, index, abs, cx, cy)!;
-          const end = readPoint(tokens, control.next, abs, cx, cy)!;
+          const control = readPoint(tokens, index, abs, cx, cy);
+          if (!control) break;
+          const end = readPoint(tokens, control.next, abs, cx, cy);
+          if (!end) break;
           quadTo(path, transform, control.x, control.y, end.x, end.y);
           cx = end.x;
           cy = end.y;
@@ -525,7 +532,8 @@ function applyPathData(path: Path, d: string, transform: Affine): void {
             lastQuad === undefined
               ? { x: cx, y: cy }
               : { x: 2 * cx - lastQuad.x, y: 2 * cy - lastQuad.y };
-          const end = readPoint(tokens, index, abs, cx, cy)!;
+          const end = readPoint(tokens, index, abs, cx, cy);
+          if (!end) break;
           quadTo(path, transform, control.x, control.y, end.x, end.y);
           cx = end.x;
           cy = end.y;
@@ -542,7 +550,8 @@ function applyPathData(path: Path, d: string, transform: Affine): void {
           const angle = ((tokens[index + 2] as number) * Math.PI) / 180;
           const largeArc = (tokens[index + 3] as number) !== 0;
           const sweep = (tokens[index + 4] as number) !== 0;
-          const target = readPoint(tokens, index + 5, abs, cx, cy)!;
+          const target = readPoint(tokens, index + 5, abs, cx, cy);
+          if (!target) break;
           arcToCubics(
             path,
             transform,

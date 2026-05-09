@@ -534,8 +534,8 @@ type Cleanup = () => void;
 interface EffectSlot {
   kind: 'effect';
   deps: ReadonlyArray<unknown> | undefined;
-  cleanup: Cleanup | void;
-  pending: (() => void | Cleanup) | null;
+  cleanup: Cleanup | undefined;
+  pending: (() => undefined | Cleanup) | null;
 }
 
 interface MemoSlot<T> {
@@ -1222,7 +1222,7 @@ export function useMemo<T>(fn: () => T, deps: ReadonlyArray<unknown>): T {
   return slot.value;
 }
 
-export function useEffect(fn: () => void | Cleanup, deps?: ReadonlyArray<unknown>): void {
+export function useEffect(fn: () => undefined | Cleanup, deps?: ReadonlyArray<unknown>): void {
   const ctx = requireCtx('useEffect');
   const slot = nextSlot<EffectSlot>('effect', () => ({
     kind: 'effect',

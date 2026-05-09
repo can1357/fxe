@@ -3,6 +3,7 @@
 import assertStrict from 'node:assert/strict';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Buffer } from 'node:buffer';
+import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import pathDefault, { basename, join } from 'node:path';
 import querystring from 'node:querystring';
@@ -10,7 +11,6 @@ import { Readable } from 'node:stream';
 import { text } from 'node:stream/consumers';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { URL, URLSearchParams } from 'node:url';
-import { EventEmitter } from 'events';
 
 import { assert, assertDeepEqual, assertEqual, assertThrows, run, test } from './ts_harness.ts';
 
