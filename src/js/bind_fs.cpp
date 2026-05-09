@@ -922,9 +922,13 @@ namespace fxe::js {
       auto guarded_target = guarded_symlink_target_path(target, link_path).generic_string();
       if (!guard_fs(iso, guarded_target) || !guard_fs(iso, link_path))
         return;
-      std::string type = info.Length() >= 3 && info[2]->IsString() ? utf8(iso, info[2]) : "";
+      bool dir_link = false;
+      if (info.Length() >= 3 && info[2]->IsString()) {
+        auto type = info[2].As<String>();
+        dir_link = type == "dir"_v8 || type == "junction"_v8;
+      }
       std::error_code ec;
-      if (type == "dir" || type == "junction")
+      if (dir_link)
         fs::create_directory_symlink(fs::path(target), fs::path(link_path), ec);
       else
         fs::create_symlink(fs::path(target), fs::path(link_path), ec);

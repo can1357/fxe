@@ -128,14 +128,15 @@ namespace fxe::js {
         return true;
       }
       if (value->IsString()) {
-        const std::string s = utf8(iso, value);
-        if (s == "auto") {
+        auto s = value.As<String>();
+        if (s == "auto"_v8) {
           out.kind = layout::LengthKind::auto_;
           out.value = 0.0f;
           return true;
         }
+        const std::string raw = utf8(iso, s);
         float percent = 0.0f;
-        if (parse_percent_string(s, percent)) {
+        if (parse_percent_string(raw, percent)) {
           out.kind = layout::LengthKind::percent;
           out.value = percent;
           return true;
@@ -144,106 +145,106 @@ namespace fxe::js {
       return throw_type_error(iso, "unsupported length: {}", value_repr(iso, ctx, value));
     }
 
-    bool parse_display(Isolate* iso, const std::string& s, std::optional<layout::Display>& out) {
-      if (s == "flex")
+    bool parse_display(Isolate* iso, Local<String> s, std::optional<layout::Display>& out) {
+      if (s == "flex"_v8)
         out = layout::Display::flex;
-      else if (s == "none")
+      else if (s == "none"_v8)
         out = layout::Display::none;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported display '{}'", s);
+        return throw_type_error(iso, "Layout.solve: unsupported display '{}'", utf8(iso, s));
       return true;
     }
 
-    bool parse_flex_direction(Isolate* iso, const std::string& s,
+    bool parse_flex_direction(Isolate* iso, Local<String> s,
                               std::optional<layout::FlexDirection>& out) {
-      if (s == "row")
+      if (s == "row"_v8)
         out = layout::FlexDirection::row;
-      else if (s == "column")
+      else if (s == "column"_v8)
         out = layout::FlexDirection::column;
-      else if (s == "row-reverse")
+      else if (s == "row-reverse"_v8)
         out = layout::FlexDirection::row_reverse;
-      else if (s == "column-reverse")
+      else if (s == "column-reverse"_v8)
         out = layout::FlexDirection::column_reverse;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported flexDirection '{}'", s);
+        return throw_type_error(iso, "Layout.solve: unsupported flexDirection '{}'", utf8(iso, s));
       return true;
     }
 
-    bool parse_flex_wrap(Isolate* iso, const std::string& s, std::optional<layout::FlexWrap>& out) {
-      if (s == "nowrap")
+    bool parse_flex_wrap(Isolate* iso, Local<String> s, std::optional<layout::FlexWrap>& out) {
+      if (s == "nowrap"_v8)
         out = layout::FlexWrap::nowrap;
-      else if (s == "wrap")
+      else if (s == "wrap"_v8)
         out = layout::FlexWrap::wrap;
-      else if (s == "wrap-reverse")
+      else if (s == "wrap-reverse"_v8)
         out = layout::FlexWrap::wrap_reverse;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported flexWrap '{}'", s);
+        return throw_type_error(iso, "Layout.solve: unsupported flexWrap '{}'", utf8(iso, s));
       return true;
     }
 
-    bool parse_justify(Isolate* iso, const std::string& s, std::optional<layout::Justify>& out) {
-      if (s == "flex-start")
+    bool parse_justify(Isolate* iso, Local<String> s, std::optional<layout::Justify>& out) {
+      if (s == "flex-start"_v8)
         out = layout::Justify::flex_start;
-      else if (s == "flex-end")
+      else if (s == "flex-end"_v8)
         out = layout::Justify::flex_end;
-      else if (s == "center")
+      else if (s == "center"_v8)
         out = layout::Justify::center;
-      else if (s == "space-between")
+      else if (s == "space-between"_v8)
         out = layout::Justify::space_between;
-      else if (s == "space-around")
+      else if (s == "space-around"_v8)
         out = layout::Justify::space_around;
-      else if (s == "space-evenly")
+      else if (s == "space-evenly"_v8)
         out = layout::Justify::space_evenly;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported justifyContent '{}'", s);
+        return throw_type_error(iso, "Layout.solve: unsupported justifyContent '{}'", utf8(iso, s));
       return true;
     }
 
-    bool parse_align(Isolate* iso, const std::string& s, std::optional<layout::Align>& out,
+    bool parse_align(Isolate* iso, Local<String> s, std::optional<layout::Align>& out,
                      const char* field, bool allow_space_values) {
-      if (s == "auto")
+      if (s == "auto"_v8)
         out = layout::Align::auto_;
-      else if (s == "flex-start")
+      else if (s == "flex-start"_v8)
         out = layout::Align::flex_start;
-      else if (s == "flex-end")
+      else if (s == "flex-end"_v8)
         out = layout::Align::flex_end;
-      else if (s == "center")
+      else if (s == "center"_v8)
         out = layout::Align::center;
-      else if (s == "stretch")
+      else if (s == "stretch"_v8)
         out = layout::Align::stretch;
-      else if (s == "baseline")
+      else if (s == "baseline"_v8)
         out = layout::Align::baseline;
-      else if (allow_space_values && s == "space-between")
+      else if (allow_space_values && s == "space-between"_v8)
         out = layout::Align::space_between;
-      else if (allow_space_values && s == "space-around")
+      else if (allow_space_values && s == "space-around"_v8)
         out = layout::Align::space_around;
-      else if (allow_space_values && s == "space-evenly")
+      else if (allow_space_values && s == "space-evenly"_v8)
         out = layout::Align::space_evenly;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported {} '{}'", field, s);
+        return throw_type_error(iso, "Layout.solve: unsupported {} '{}'", field, utf8(iso, s));
       return true;
     }
 
-    bool parse_position_type(Isolate* iso, const std::string& s,
+    bool parse_position_type(Isolate* iso, Local<String> s,
                              std::optional<layout::PositionType>& out) {
-      if (s == "relative")
+      if (s == "relative"_v8)
         out = layout::PositionType::relative;
-      else if (s == "absolute")
+      else if (s == "absolute"_v8)
         out = layout::PositionType::absolute;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported position '{}'", s);
+        return throw_type_error(iso, "Layout.solve: unsupported position '{}'", utf8(iso, s));
       return true;
     }
 
-    bool parse_overflow(Isolate* iso, const std::string& s, std::optional<layout::Overflow>& out) {
-      if (s == "visible")
+    bool parse_overflow(Isolate* iso, Local<String> s, std::optional<layout::Overflow>& out) {
+      if (s == "visible"_v8)
         out = layout::Overflow::visible;
-      else if (s == "hidden")
+      else if (s == "hidden"_v8)
         out = layout::Overflow::hidden;
-      else if (s == "scroll")
+      else if (s == "scroll"_v8)
         out = layout::Overflow::scroll;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported overflow '{}'", s);
+        return throw_type_error(iso, "Layout.solve: unsupported overflow '{}'", utf8(iso, s));
       return true;
     }
 
@@ -258,7 +259,7 @@ namespace fxe::js {
         return true;
       if (!value->IsString())
         return throw_type_error(iso, "Layout.solve: {} must be a string", utf8(iso, key));
-      return parser(iso, utf8(iso, value), out);
+      return parser(iso, value.As<String>(), out);
     }
 
     bool parse_optional_length_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj,
@@ -397,21 +398,15 @@ namespace fxe::js {
                                            out.justify_content) ||
           !parse_optional_string_enum_prop(
               iso, ctx, obj, "alignItems"_v8(iso),
-              [](Isolate* i, const std::string& s, std::optional<layout::Align>& out_align) {
-                return parse_align(i, s, out_align, "alignItems", true);
-              },
+              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) { return parse_align(i, s, out_align, "alignItems", true); },
               out.align_items) ||
           !parse_optional_string_enum_prop(
               iso, ctx, obj, "alignSelf"_v8(iso),
-              [](Isolate* i, const std::string& s, std::optional<layout::Align>& out_align) {
-                return parse_align(i, s, out_align, "alignSelf", true);
-              },
+              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) { return parse_align(i, s, out_align, "alignSelf", true); },
               out.align_self) ||
           !parse_optional_string_enum_prop(
               iso, ctx, obj, "alignContent"_v8(iso),
-              [](Isolate* i, const std::string& s, std::optional<layout::Align>& out_align) {
-                return parse_align(i, s, out_align, "alignContent", true);
-              },
+              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) { return parse_align(i, s, out_align, "alignContent", true); },
               out.align_content) ||
           !parse_optional_number_prop(iso, ctx, obj, "flex"_v8(iso), "flex", out.flex) ||
           !parse_optional_number_prop(iso, ctx, obj, "flexGrow"_v8(iso), "flexGrow",
@@ -511,10 +506,10 @@ namespace fxe::js {
       Local<Value> kind_value;
       if (!measure_obj->Get(ctx, "kind"_v8(iso)).ToLocal(&kind_value) || !kind_value->IsString())
         return throw_type_error(iso, "Layout.solve: measure.kind must be a string");
-      const std::string kind = utf8(iso, kind_value);
+      auto kind_str = kind_value.As<String>();
       out.measure_is_leaf = true;
 
-      if (kind == "text") {
+      if (kind_str == "text"_v8) {
         Local<Value> text_value;
         Local<Value> font_size_value;
         if (!measure_obj->Get(ctx, "text"_v8(iso)).ToLocal(&text_value) || !text_value->IsString())
@@ -532,7 +527,7 @@ namespace fxe::js {
         return true;
       }
 
-      if (kind == "image") {
+      if (kind_str == "image"_v8) {
         Local<Value> width_value;
         Local<Value> height_value;
         if (!measure_obj->Get(ctx, "width"_v8(iso)).ToLocal(&width_value) ||
@@ -551,7 +546,7 @@ namespace fxe::js {
         return true;
       }
 
-      if (kind == "js") {
+      if (kind_str == "js"_v8) {
         Local<Value> fn_value;
         if (!measure_obj->Get(ctx, "fn"_v8(iso)).ToLocal(&fn_value))
           return false;
@@ -608,7 +603,8 @@ namespace fxe::js {
         return true;
       }
 
-      return throw_type_error(iso, "Layout.solve: unsupported measure.kind '{}'", kind);
+      return throw_type_error(iso, "Layout.solve: unsupported measure.kind '{}'",
+                              utf8(iso, kind_str));
     }
 
     Local<Object> result_to_v8(Isolate* iso, Local<Context> ctx, const layout::Result& result) {

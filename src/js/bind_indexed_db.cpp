@@ -2089,8 +2089,8 @@ namespace fxe::js {
       // 'prev' / 'prevunique' as descending).
       bool descending = false;
       if (info.Length() >= 2 && info[1]->IsString()) {
-        std::string dir = utf8(iso, info[1]);
-        if (dir == "prev" || dir == "prevunique")
+        auto dir = info[1].As<String>();
+        if (dir == "prev"_v8 || dir == "prevunique"_v8)
           descending = true;
       }
 

@@ -904,12 +904,12 @@ namespace fxe::js {
       const float y = static_cast<float>(num(ctx, info[3]));
       primitives::decoration_style style = primitives::decoration_style::solid;
       if (info[4]->IsString()) {
-        std::string s = utf8(iso, info[4]);
-        if (s == "dashed")
+        auto s = info[4].As<String>();
+        if (s == "dashed"_v8)
           style = primitives::decoration_style::dashed;
-        else if (s == "dotted")
+        else if (s == "dotted"_v8)
           style = primitives::decoration_style::dotted;
-        else if (s == "wavy")
+        else if (s == "wavy"_v8)
           style = primitives::decoration_style::wavy;
       }
       const auto color = info.Length() >= 6 ? decode_color(iso, ctx, info[5]) : white;
@@ -1112,7 +1112,8 @@ namespace fxe::js {
       auto paint = info.Length() >= 3 ? decode_paint(iso, ctx, info[2])
                                       : primitives::paint_value::solid(white);
       primitives::fill_rule rule = primitives::fill_rule::nonzero;
-      if (info.Length() >= 4 && info[3]->IsString() && utf8(iso, info[3]) == "evenodd")
+      if (info.Length() >= 4 && info[3]->IsString() &&
+          info[3].As<String>() == "evenodd"_v8)
         rule = primitives::fill_rule::evenodd;
       float depth = info.Length() >= 5 ? float(num(ctx, info[4])) : 0.0f;
       primitives::fill_path(*cb, p->path, paint, rule, depth);

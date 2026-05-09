@@ -587,12 +587,11 @@ namespace fxe::js {
                                              "EAUDIO_INVALID_HANDLE", true));
         return;
       }
-      String::Utf8Value kind_s(iso, info[0]);
-      std::string kind(*kind_s ? *kind_s : "", static_cast<usize>(kind_s.length()));
+      auto kind_str = info[0].As<String>();
       audio::device_kind kind_value;
-      if (kind == "input") {
+      if (kind_str == "input"_v8) {
         kind_value = audio::device_kind::input;
-      } else if (kind == "output") {
+      } else if (kind_str == "output"_v8) {
         kind_value = audio::device_kind::output;
       } else {
         iso->ThrowException(make_audio_error(iso, ctx, "expected 'input' or 'output'",

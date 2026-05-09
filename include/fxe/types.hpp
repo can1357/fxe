@@ -27,7 +27,9 @@ using f32 = float;
 using f64 = double;
 
 // V8 internalized-string literal. Use as `"frameCount"_v8(iso)` to materialize
-// a per-isolate cached, internalized v8::Local<v8::String>. The UDL itself
+// a per-isolate cached, internalized v8::Local<v8::String>. For equality against
+// a dynamic handle, include <fxe/v8_strings.hpp> and write `s == "flex"_v8`
+// (uses the current isolate). The UDL itself
 // only captures `{const char*, usize}`; the call operator is defined in
 // <fxe/v8_strings.hpp>, which any V8-using TU (every src/js/bind_*.cpp) must
 // include before invoking it. types.hpp deliberately stays free of v8.h so

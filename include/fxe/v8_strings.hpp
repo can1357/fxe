@@ -9,7 +9,14 @@
 //
 //     obj->Get(ctx, "frameCount"_v8(iso))
 //
-// and amortise the allocation: the first hit interns the string and stores a
+// and string equality as
+//
+//     if (s == "flex"_v8)
+//
+// (`operator==` uses `v8::Isolate::GetCurrent()`, materialises the cached
+// internalized literal, then `v8::String::StringEquals`.)
+//
+// The first hit interns the string and stores a
 // v8::Eternal<v8::String> in a per-isolate hashmap keyed by the literal's
 // `const char*` address. Subsequent hits resolve to a single pointer load and
 // V8 fast-paths property lookups by internalized-string identity.
@@ -22,7 +29,6 @@
 //     alive to release its slot).
 
 #include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
 #include <type_traits>
 #include <v8.h>
 
@@ -47,4 +53,23 @@ template <typename Iso> auto v8_string_literal::operator()(Iso* iso) const {
   static_assert(std::is_same_v<Iso, v8::Isolate>,
                 "_v8 literal must be invoked with a v8::Isolate*");
   return ::fxe::js::intern_literal(iso, *this);
+}
+
+inline bool operator==(v8::Local<v8::String> a, v8_string_literal lit) {
+  auto* iso = v8::Isolate::GetCurrent();
+  if (a.IsEmpty() || iso == nullptr)
+    return false;
+  return a->StringEquals(lit(iso));
+}
+
+inline bool operator!=(v8::Local<v8::String> a, v8_string_literal lit) {
+  return !(a == lit);
+}
+
+inline bool operator==(v8_string_literal lit, v8::Local<v8::String> a) {
+  return a == lit;
+}
+
+inline bool operator!=(v8_string_literal lit, v8::Local<v8::String> a) {
+  return !(a == lit);
 }

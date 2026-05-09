@@ -102,12 +102,12 @@ namespace fxe::js {
           size_px = field->NumberValue(ctx).FromMaybe(16.0);
         }
         if (o->Get(ctx, "style"_v8(iso)).ToLocal(&field) && field->IsString()) {
-          const std::string s = utf8(iso, field);
-          if (s == "bold")
+          auto s = field.As<String>();
+          if (s == "bold"_v8)
             want_style = fxe::font::Style::bold;
-          else if (s == "italic")
+          else if (s == "italic"_v8)
             want_style = fxe::font::Style::italic;
-          else if (s == "bold-italic")
+          else if (s == "bold-italic"_v8)
             want_style = fxe::font::Style::bold_italic;
         }
       }

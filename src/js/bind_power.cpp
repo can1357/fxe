@@ -244,11 +244,11 @@ namespace fxe::js {
         (void)throw_type_error(iso, "App.power.inhibitSleep requires options.what");
         return;
       }
-      std::string what = to_str(iso, what_value);
+      auto what_str = what_value.As<String>();
       fxe::os::sleep_inhibit_kind kind;
-      if (what == "idle") {
+      if (what_str == "idle"_v8) {
         kind = fxe::os::sleep_inhibit_kind::idle;
-      } else if (what == "sleep") {
+      } else if (what_str == "sleep"_v8) {
         kind = fxe::os::sleep_inhibit_kind::sleep;
       } else {
         (void)throw_type_error(iso,

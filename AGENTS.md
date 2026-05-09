@@ -208,6 +208,14 @@ ctest --preset release --output-on-failure
   isolates spun up outside the host must call `install_string_cache`
   before any binding code runs (a missing cache falls back to an
   uncached internalized string, never an empty handle).
+  **String equality:** compare a dynamic `v8::Local<v8::String>` to a
+  literal with `s == "flex"_v8` (also ` "flex"_v8 == s`). Do not reintroduce
+  `s->StringEquals("flex"_v8(iso))` for routine checks — the `operator==` /
+  `operator!=` in `<fxe/v8_strings.hpp>` materialises the same cached
+  internalized literal via `v8::Isolate::GetCurrent()` and delegates to
+  `StringEquals`. If `GetCurrent()` is not valid for the call site (not on
+  the entered isolate), use the explicit `s->StringEquals("…"_v8(iso))`
+  form instead.
 - **V8 weak callbacks (`Global<T>::SetWeak`):** V8 requires the
   first-pass weak callback to either `Reset()` the persistent that
   triggered it or call `SetSecondPassCallback()`. Doing neither aborts
