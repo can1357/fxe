@@ -15,12 +15,19 @@
 import { type Color, type CommandBuffer, Primitives } from 'fxe';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
-import { Component, type Node, useEffect, useId, useState } from '../reconciler/fiber.ts';
+import {
+  Component,
+  type Node,
+  useEffect,
+  useId,
+  useInternalLayout,
+  useInternalTextStyle,
+  useState,
+} from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { useTextStyle } from '../theme/text_context.ts';
-import { type InternalLayoutProps, rectFromStyle } from './common.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
+import { rectFromStyle } from './common.ts';
 
 /** A single styled run on one line. Cols are UTF-16 code-unit indices. */
 export interface LineSpan {
@@ -55,7 +62,7 @@ export interface LineDecorations {
 
 export type LineDecorationFn = (line: number) => LineDecorations | null;
 
-export interface LineViewportProps extends InternalLayoutProps {
+export interface LineViewportProps {
   key?: string;
   style?: StyleValue;
   document: TextDocument;
@@ -83,19 +90,19 @@ const DEFAULT_SELECTION_COLOR: Color = 0x3b82f654;
 export const LineViewport = Component((props: LineViewportProps): Node => {
   const id = useId();
   const inheritedText = useTextStyle();
+  const internalText = useInternalTextStyle();
+  const internalLayout = useInternalLayout();
   const resolved = splitStyle(props.style);
   const textStyle: TextStyle = {
     ...inheritedText,
-    ...(props[INTERNAL_TEXT_STYLE] ?? {}),
+    ...(internalText ?? {}),
     ...resolved.text,
   };
-  const rect = props[INTERNAL_LAYOUT]
-    ? { ...props[INTERNAL_LAYOUT] }
-    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
+  const rect = internalLayout ? { ...internalLayout } : rectFromStyle(resolved.layout, undefined);
   recordLayout({
     component: 'LineViewport',
     rect,
-    hasParentLayout: props[INTERNAL_LAYOUT] !== undefined,
+    hasParentLayout: internalLayout !== null,
     styleWidth: resolved.layout.width,
     styleHeight: resolved.layout.height,
   });

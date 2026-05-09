@@ -1824,23 +1824,28 @@ namespace fxe::js {
 
     struct run_opts {
       double frame_period = 0.0;
+      // True when the caller wants a redraw every loop iteration (no lazy
+      // gating on input/redraw requests). With this set, the loop polls
+      // events instead of calling `wait_events_timeout`, which on macOS
+      // periodically stalls inside `mach_msg` for 25-55 ms when asked to
+      // wait 1 ms — the dominant source of frame-time outliers.
+      bool continuous = false;
     };
 
     bool parse_run_opts(Isolate* iso, Local<Context> ctx, Local<Value> v, run_opts& out) {
       out = {};
       const auto& runner_overrides = get_runner_render_overrides();
-      // Floor used when --no-lazy is set without an explicit --fps. 1 ms
-      // wakeups let vsync pace actual presents; on machines with vsync
-      // disabled this is the effective fps cap.
-      constexpr double kContinuousFloorPeriod = 1.0 / 1000.0;
+      // Disabled vsync: the loop polls events every iteration instead of
+      // sleeping inside `wait_events_timeout`, since short Cocoa waits
+      // periodically overshoot by 25-55 ms.
       if (runner_overrides.override_fps) {
         out.frame_period = runner_overrides.fps > 0.0 ? 1.0 / runner_overrides.fps : 0.0;
-        if (out.frame_period <= 0.0 && runner_overrides.force_continuous)
-          out.frame_period = kContinuousFloorPeriod;
+        out.continuous = runner_overrides.force_continuous;
         return true;
       }
       if (runner_overrides.force_continuous) {
-        out.frame_period = kContinuousFloorPeriod;
+        out.continuous = true;
+        out.frame_period = 0.0;
         return true;
       }
       if (!v->IsObject())
@@ -1935,7 +1940,7 @@ namespace fxe::js {
     // picked up safely. Re-entrant calls (from a second Window.run while the
     // loop is already executing in this isolate) return immediately so each
     // run() simply registers its onFrame.
-    void app_run_loop(Isolate* iso, double frame_period) {
+    void app_run_loop(Isolate* iso, double frame_period, bool continuous) {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = host_for_isolate(iso);
@@ -1993,6 +1998,8 @@ namespace fxe::js {
         }
       }
 
+
+
       while (true) {
         auto wins = h->windows();
         if (wins.empty())
@@ -2002,15 +2009,23 @@ namespace fxe::js {
         if (all_closed)
           break;
 
-        // One global GLFW event-pump call drives every window.
-        double timer_dl = fxe::js::next_timer_deadline_seconds(iso);
-        double timeout = frame_period > 0.0 ? frame_period : 0.05;
-        if (timer_dl < timeout)
-          timeout = timer_dl;
-        if (timeout < 0.0)
-          timeout = 0.0;
-        wins.front()->wait_events_timeout(timeout);
-        if (frame_period > 0.0)
+        // One global GLFW event-pump call drives every window. In
+        // continuous mode we poll instead of waiting: short Cocoa waits
+        // (e.g. wait_events_timeout(1ms)) periodically stall in mach_msg
+        // for 25-55 ms even when no events are pending, which surfaces as
+        // 30+ ms frame-time spikes under --no-lazy --no-vsync.
+        if (continuous) {
+          wins.front()->wait_events_timeout(0.0);
+        } else {
+          double timer_dl = fxe::js::next_timer_deadline_seconds(iso);
+          double timeout = frame_period > 0.0 ? frame_period : 0.05;
+          if (timer_dl < timeout)
+            timeout = timer_dl;
+          if (timeout < 0.0)
+            timeout = 0.0;
+          wins.front()->wait_events_timeout(timeout);
+        }
+        if (continuous || frame_period > 0.0)
           for (auto* w : wins)
             w->post_redraw();
 
@@ -2111,7 +2126,7 @@ namespace fxe::js {
       hh->on_frame.Reset(iso, info[0].As<Function>());
       hh->self_strong.Reset(iso, info.This());
 
-      app_run_loop(iso, opts.frame_period);
+      app_run_loop(iso, opts.frame_period, opts.continuous);
     }
 
     // setFrameCallback(cb): register the per-window onFrame without
@@ -2192,7 +2207,7 @@ namespace fxe::js {
       run_opts opts;
       Local<Value> opt_value = info.Length() >= 1 ? info[0] : Undefined(iso).As<Value>();
       parse_run_opts(iso, ctx, opt_value, opts);
-      app_run_loop(iso, opts.frame_period);
+      app_run_loop(iso, opts.frame_period, opts.continuous);
     }
 
     void app_quit(const FunctionCallbackInfo<Value>& info) {

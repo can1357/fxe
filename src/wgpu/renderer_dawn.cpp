@@ -33,6 +33,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -276,8 +277,14 @@ namespace fxe {
         present_mode_ = choose_present_mode(caps, opts.vsync);
         if (!opts.vsync && present_mode_ == wgpu::PresentMode::Fifo) {
           FXE_WARN("wgpu.renderer", "--no-vsync requested, but surface only supports FIFO present; "
-                                    "presentation remains display-paced");
+                                    "falling back to platform vsync override (e.g. macOS "
+                                    "CAMetalLayer.displaySyncEnabled)");
         }
+        // Even when Dawn maps to Fifo, the platform window may have a direct
+        // way to disable display-paced presentation (e.g. macOS Metal layer
+        // displaySyncEnabled). configure_surface() re-applies want_vsync_
+        // after every Surface.Configure (which itself resets the layer state).
+        want_vsync_ = opts.vsync;
 
         build_resources();
         configure_surface(w.framebuffer_size().x, w.framebuffer_size().y);
@@ -325,7 +332,28 @@ namespace fxe {
           FXE_TRACE("wgpu.renderer", "frame_end mask_gen={} color_gen={}",
                     gc.generation(font::Format::grayscale), gc.generation(font::Format::bgra));
         }
+        // --no-vsync fast-skip path: macOS' CAMetalLayer always paces drawable
+        // release at the compositor refresh, so calling Surface.GetCurrentTexture
+        // every frame is hard-capped at display refresh — even with present
+        // mode Immediate / Mailbox and displaySyncEnabled=NO. When the script
+        // opted out of vsync, skip the swapchain present whenever we'd land
+        // closer than `min_present_period_s_` to the previous one. The JS
+        // frame loop still tags "endFrame" so script-side throughput is
+        // observable; the visual just refreshes at most once per period.
+        if (!want_vsync_ && min_present_period_s_ > 0.0) {
+          const auto now = std::chrono::steady_clock::now();
+          const auto since = std::chrono::duration<double>(now - last_present_).count();
+          if (since < min_present_period_s_) {
+            return;
+          }
+        }
         instance_.ProcessEvents();
+        // Re-assert want_vsync_ on the platform layer immediately before
+        // GetCurrentTexture. Dawn's MetalSwapChain calls
+        // [layer setDisplaySyncEnabled:(presentMode == Fifo)] inside
+        // GetCurrentTextureImpl, which clobbers the user's --no-vsync intent
+        // every frame.
+        win_.set_vsync(want_vsync_);
         // 1. Acquire the next surface texture.
         wgpu::SurfaceTexture surf_tex{};
         surface_.GetCurrentTexture(&surf_tex);
@@ -542,6 +570,7 @@ namespace fxe {
         captured_frame_available_ = false;
         surface_.Present();
         instance_.ProcessEvents();
+        last_present_ = std::chrono::steady_clock::now();
       }
 
       bool queue_dev(const command_buffer& src, const vshader_cbuf& cbuf,
@@ -1151,6 +1180,13 @@ namespace fxe {
         cfg.presentMode = present_mode_;
         cfg.alphaMode = alpha_mode_;
         surface_.Configure(&cfg);
+        // Dawn's Surface.Configure resets CAMetalLayer.displaySyncEnabled to
+        // match the requested present mode. On macOS Fifo is the only mode
+        // Dawn exposes, so even with --no-vsync we'd be re-pinned to display
+        // refresh after every reconfigure (resize, dpr change, …) unless we
+        // re-assert the user's vsync intent here. The window backend honours
+        // it via CAMetalLayer.displaySyncEnabled.
+        win_.set_vsync(want_vsync_);
 
         depth_view_ = {};
         destroy_texture(depth_texture_);
@@ -1421,6 +1457,10 @@ namespace fxe {
       wgpu::TextureFormat depth_format_ = wgpu::TextureFormat::Depth24Plus;
       wgpu::CompositeAlphaMode alpha_mode_ = wgpu::CompositeAlphaMode::Auto;
       wgpu::PresentMode present_mode_ = wgpu::PresentMode::Fifo;
+      bool want_vsync_ = true;
+      // --no-vsync fast-skip pacing. See end_frame() for rationale.
+      std::chrono::steady_clock::time_point last_present_ = std::chrono::steady_clock::now();
+      double min_present_period_s_ = 1.0 / 120.0;
 
       wgpu::Buffer ubo_;
       wgpu::Buffer vbuf_;

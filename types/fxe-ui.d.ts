@@ -403,11 +403,14 @@ declare module 'fxe-ui' {
     | { type: 'draw'; props: DrawProps; key?: string }
     | {
         type: 'component';
+        componentType?: object;
         render: (props: unknown) => Node;
         props: unknown;
         displayName?: string;
         key?: string;
         memo?: { areEqual: (prev: unknown, next: unknown) => boolean };
+        internalLayout?: LayoutResult;
+        internalTextStyle?: TextStyle;
       }
     | { type: 'provider'; props: ProviderNodeProps; key?: string }
     | { type: 'portal'; props: PortalProps; key?: string }
@@ -466,6 +469,8 @@ declare module 'fxe-ui' {
   export function useRef<T>(initial: T): { current: T };
   export function useId(): string;
   export function useContext<T>(context: Context<T>): T;
+  export function useInternalLayout(): LayoutResult | null;
+  export function useInternalTextStyle(): TextStyle | null;
   export function useMemo<T>(fn: () => T, deps: ReadonlyArray<unknown>): T;
   export function useEffect(fn: () => void | (() => void), deps?: ReadonlyArray<unknown>): void;
   export function useFrame(fn: (dtMs: number) => void): void;

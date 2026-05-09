@@ -33,7 +33,6 @@ export const Button = Component((props: ButtonProps): Node => {
         borderRadius: theme.radii.md,
         backgroundColor: props.disabled ? theme.colors.border : theme.colors.primary,
         alignItems: 'center',
-        height: '100%',
         justifyContent: 'center',
       },
       typeof props.style === 'function'

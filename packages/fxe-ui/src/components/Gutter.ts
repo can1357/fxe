@@ -7,12 +7,17 @@
 
 import { type Color, type CommandBuffer, Primitives } from 'fxe';
 import { recordLayout } from '../debug/layout_trace.ts';
-import { Component, type Node, useId } from '../reconciler/fiber.ts';
+import {
+  Component,
+  type Node,
+  useId,
+  useInternalLayout,
+  useInternalTextStyle,
+} from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { useTextStyle } from '../theme/text_context.ts';
-import { type InternalLayoutProps, rectFromStyle } from './common.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
+import { rectFromStyle } from './common.ts';
 
 /** Per-line marker drawn left of the line number (e.g. breakpoint). */
 export interface GutterMark {
@@ -24,7 +29,7 @@ export interface GutterMark {
 
 export type GutterMarkFn = (line: number) => GutterMark | null;
 
-export interface GutterProps extends InternalLayoutProps {
+export interface GutterProps {
   key?: string;
   style?: StyleValue;
   document: TextDocument;
@@ -42,19 +47,19 @@ export interface GutterProps extends InternalLayoutProps {
 export const Gutter = Component((props: GutterProps): Node => {
   useId();
   const inheritedText = useTextStyle();
+  const internalText = useInternalTextStyle();
+  const internalLayout = useInternalLayout();
   const resolved = splitStyle(props.style);
   const textStyle: TextStyle = {
     ...inheritedText,
-    ...(props[INTERNAL_TEXT_STYLE] ?? {}),
+    ...(internalText ?? {}),
     ...resolved.text,
   };
-  const rect = props[INTERNAL_LAYOUT]
-    ? { ...props[INTERNAL_LAYOUT] }
-    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
+  const rect = internalLayout ? { ...internalLayout } : rectFromStyle(resolved.layout, undefined);
   recordLayout({
     component: 'Gutter',
     rect,
-    hasParentLayout: props[INTERNAL_LAYOUT] !== undefined,
+    hasParentLayout: internalLayout !== null,
     styleWidth: resolved.layout.width,
     styleHeight: resolved.layout.height,
   });

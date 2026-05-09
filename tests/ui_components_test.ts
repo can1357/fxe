@@ -1,5 +1,5 @@
 import { CommandBuffer } from 'fxe';
-import { Button, Image, render, Text, View } from 'fxe-ui';
+import { Button, dispatchMouseDown, dispatchMouseUp, hitTest, Image, render, Text, View } from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 
@@ -43,8 +43,23 @@ test('Image emits placeholder quad with tint', () => {
 
 test('Button composes pressable view and text', () => {
   const cb = new CommandBuffer();
-  render(Button({ key: 'component-button', title: 'Save', style: { width: 90, height: 36 } }), cb);
+  let presses = 0;
+  render(
+    Button({
+      key: 'component-button',
+      title: 'Save',
+      style: { width: 90, height: 36 },
+      onPress: () => {
+        presses += 1;
+      },
+    }),
+    cb,
+  );
   assert(cb.vertexCount() > 4, 'button should paint surface and label');
+  assert(hitTest(45, 18)?.componentType === 'Button', 'button hit target should be registered');
+  dispatchMouseDown({ type: 'mousedown', x: 45, y: 18, button: 0, modifiers: 0 });
+  dispatchMouseUp({ type: 'mouseup', x: 45, y: 18, button: 0, modifiers: 0 });
+  assertEqual(presses, 1);
 });
 
 await run();

@@ -5,20 +5,20 @@ import {
   Component,
   type Node,
   useEffect,
+  useInternalLayout,
   useMemo,
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
-import { type InternalLayoutProps, rectFromStyle } from './common.ts';
+import { rectFromStyle } from './common.ts';
 import { ScrollView } from './ScrollView.ts';
 import { View } from './View.ts';
 
 export type VirtualItemHeight = number | ((index: number) => number);
 
-export interface VirtualListProps<T> extends InternalLayoutProps, AccessibilityProps {
+export interface VirtualListProps<T> extends AccessibilityProps {
   key?: string;
   style?: StyleValue;
   contentStyle?: StyleValue;
@@ -31,7 +31,7 @@ export interface VirtualListProps<T> extends InternalLayoutProps, AccessibilityP
   onScroll?: (offset: { x: number; y: number }) => void;
 }
 
-interface VirtualListRowProps extends InternalLayoutProps {
+interface VirtualListRowProps {
   key?: string;
   top: number;
   width: number;
@@ -41,7 +41,7 @@ interface VirtualListRowProps extends InternalLayoutProps {
 }
 
 const VirtualListRow = Component((props: VirtualListRowProps): Node => {
-  const measuredHeight = props[INTERNAL_LAYOUT]?.height;
+  const measuredHeight = useInternalLayout()?.height;
 
   useEffect(() => {
     if (props.onMeasure === undefined || measuredHeight === undefined || measuredHeight <= 0) {
@@ -193,7 +193,7 @@ export const VirtualList = Component(<T>(props: VirtualListProps<T>): Node => {
     measuredRef.current = { data: props.data, heights: new Map<number, number>() };
   }
 
-  const rect = rectFromStyle(splitStyle(props.style).layout, props[INTERNAL_LAYOUT]);
+  const rect = rectFromStyle(splitStyle(props.style).layout, useInternalLayout() ?? undefined);
   const count = props.data.length;
   const overscan = cleanCount(props.overscan, 5);
   const fixedHeight =

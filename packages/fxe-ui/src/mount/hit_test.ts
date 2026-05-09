@@ -104,12 +104,15 @@ export function replayHitTargets(captured: readonly HitTarget[]): void {
 
 export function hitTest(x: number, y: number): HitTarget | null {
   let passive: HitTarget | null = null;
+  let blockedByPassive: HitTarget | null = null;
   for (const target of [...targets].sort((a, b) => b.z - a.z)) {
     const r = target.rect;
     if (x < r.x || y < r.y || x > r.x + r.width || y > r.y + r.height) continue;
     if (isInteractiveTarget(target)) return target;
     passive ??= target;
+    if (target.componentType !== 'Text') blockedByPassive ??= target;
   }
+  if (blockedByPassive) return blockedByPassive;
   return passive;
 }
 

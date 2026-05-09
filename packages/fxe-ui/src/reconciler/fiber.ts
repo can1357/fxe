@@ -20,13 +20,14 @@
 import type { Mat4, Vec4, Window, WindowDisposer, WindowEventMap, WindowEventName } from 'fxe';
 import { CommandBuffer, OffscreenRenderer, Primitives, Renderer } from 'fxe';
 import { tickAnimatedFrames } from '../animated/timing.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
+import type { LayoutResult } from '../layout/types.ts';
 import {
   captureHitTargetsSince,
   type HitTarget,
   hitTargetCount,
   replayHitTargets,
 } from '../mount/hit_test.ts';
+import type { TextStyle } from '../style/types.ts';
 import {
   type DevtoolsFiberNode,
   installFiberTreeSnapshotProvider,
@@ -133,6 +134,12 @@ export type Node =
       displayName?: string;
       key?: string;
       memo?: ComponentMemo;
+      // Framework-internal layout state pushed down by parent layout primitives
+      // (e.g. View). Read by the child fiber's body via useInternalLayout().
+      // Lives outside `props` so user-visible memo bail and shallow-equal
+      // comparisons never see it.
+      internalLayout?: LayoutResult;
+      internalTextStyle?: TextStyle;
     }
   | { type: 'provider'; props: ProviderNodeProps; key?: string }
   | { type: 'portal'; props: PortalProps; key?: string }
@@ -313,19 +320,55 @@ function releaseSurface(entry: SurfaceCacheEntry): void {
   freeSurfaceSlot(entry.renderer, entry.slot);
 }
 
+// ----------------------------------------------------------- component meta
+//
+// `Component(fn)` and `memo(fn)` return factory functions, but the
+// metadata describing how to render an instance lives on the factory
+// itself via these symbol-keyed slots. JSX (createElement) and `memo`
+// read them so they can build a single component Node directly,
+// without an outer-wrapper / inner-component double fiber pair.
+
+export interface FxComponentMeta {
+  componentType: ComponentIdentity;
+  render: (props: unknown) => Node;
+  displayName?: string;
+}
+
+export interface FxMemoMeta extends FxComponentMeta {
+  areEqual: (prev: unknown, next: unknown) => boolean;
+}
+
+export const kFxComponentMeta: unique symbol = Symbol('fxe-ui.componentMeta');
+export const kFxMemo: unique symbol = Symbol('fxe-ui.memoMeta');
+
+export function getComponentMeta(value: unknown): FxComponentMeta | undefined {
+  if (typeof value !== 'function' && (typeof value !== 'object' || value === null))
+    return undefined;
+  return (value as { [kFxComponentMeta]?: FxComponentMeta })[kFxComponentMeta];
+}
+
+export function getMemoMeta(value: unknown): FxMemoMeta | undefined {
+  if (typeof value !== 'function' && (typeof value !== 'object' || value === null))
+    return undefined;
+  return (value as { [kFxMemo]?: FxMemoMeta })[kFxMemo];
+}
+
 export function Component<P>(
   render: (props: P) => Node,
   displayName?: string,
 ): (props: P & { key?: string }) => Node {
   const componentType: ComponentIdentity = {};
+  const innerRender = (raw: unknown): Node => render(raw as P);
   const factory = (props: P & { key?: string }): Node => ({
     type: 'component',
     componentType,
-    render: (raw: unknown) => render(raw as P),
+    render: innerRender,
     props,
     displayName,
     key: props.key,
   });
+  const meta: FxComponentMeta = { componentType, render: innerRender, displayName };
+  Object.defineProperty(factory, kFxComponentMeta, { value: meta, configurable: false });
   // JSX runtime reads the wrapper component's `.name` when computing its
   // displayName (`type.name || 'JSXComponent'`). Arrow functions returned
   // from a higher-order helper get an empty `.name`, so callers like
@@ -355,27 +398,61 @@ export function shallowEqualProps(prev: unknown, next: unknown): boolean {
   return true;
 }
 
+function layoutResultEqual(prev: LayoutResult | null, next: LayoutResult | null): boolean {
+  if (prev === next) return true;
+  if (prev === null || next === null) return false;
+  if (
+    prev.x !== next.x ||
+    prev.y !== next.y ||
+    prev.width !== next.width ||
+    prev.height !== next.height ||
+    prev.paddingLeft !== next.paddingLeft ||
+    prev.paddingTop !== next.paddingTop ||
+    prev.paddingRight !== next.paddingRight ||
+    prev.paddingBottom !== next.paddingBottom ||
+    prev.children.length !== next.children.length
+  ) {
+    return false;
+  }
+  for (let i = 0; i < prev.children.length; ++i) {
+    if (!layoutResultEqual(prev.children[i], next.children[i])) return false;
+  }
+  return true;
+}
+
 export function memo<P>(
   component: (props: P & { key?: string }) => Node,
   areEqual?: PropsEqual<P & { key?: string }>,
 ): (props: P & { key?: string }) => Node {
   const compare = (areEqual ?? shallowEqualProps) as (prev: unknown, next: unknown) => boolean;
-  // Stable identity for this memo factory so the reconciler can match fibers
-  // across renders. We deliberately do NOT call `component` eagerly: doing so
-  // would always run the user's body, defeating the bail. Defer it to render()
-  // time so a memo bail (props identity unchanged + fiber not dirty) skips the
-  // component body entirely. Works for both `memo(fn)` and `memo(Component(fn))`.
-  const componentType: ComponentIdentity = {};
-  const displayName = component.name || 'MemoComponent';
+  // If the inner argument is itself a Component(...) factory, unwrap one
+  // layer so a memo'd component renders the user body directly. Without
+  // this, every `<MemoFoo />` would produce TWO fibers — the memo wrapper
+  // plus the inner Foo wrapper — even though both walk the same render
+  // function. Matches React's `SimpleMemoComponent`: one fiber per
+  // memo'd boundary, identity stabilization at the bail.
+  const baseMeta = getComponentMeta(component);
+  const componentType: ComponentIdentity = baseMeta?.componentType ?? {};
+  const innerRender =
+    baseMeta?.render ?? ((raw: unknown): Node => component(raw as P & { key?: string }));
+  const displayName = baseMeta?.displayName ?? component.name ?? 'MemoComponent';
+  const memoInfo: ComponentMemo = { areEqual: compare };
   const factory = (props: P & { key?: string }): Node => ({
     type: 'component',
     componentType,
-    render: (raw: unknown) => component(raw as P & { key?: string }),
+    render: innerRender,
     props,
     displayName,
     key: props.key,
-    memo: { areEqual: compare },
+    memo: memoInfo,
   });
+  const meta: FxMemoMeta = {
+    componentType,
+    render: innerRender,
+    displayName,
+    areEqual: compare,
+  };
+  Object.defineProperty(factory, kFxMemo, { value: meta, configurable: false });
   Object.defineProperty(factory, 'name', { value: displayName, configurable: true });
   return factory;
 }
@@ -410,21 +487,14 @@ function singleBoundaryNode(child: BoundaryChild): Node {
   const children = normalizeBoundaryChildren(child);
   return children.length === 1 ? children[0] : Layer({ children });
 }
-
-function propagateInternalComponentProps(node: Node, produced: Node | null): Node | null {
+function propagateInternalToProduced(node: Node, produced: Node | null): Node | null {
   if (produced === null) return produced;
   if (node.type !== 'component') return produced;
   if (produced.type !== 'component') return produced;
-  const props = node.props as { [INTERNAL_LAYOUT]?: unknown; [INTERNAL_TEXT_STYLE]?: unknown };
-  if (props[INTERNAL_LAYOUT] === undefined && props[INTERNAL_TEXT_STYLE] === undefined) return produced;
-  return {
-    ...produced,
-    props: {
-      ...(produced.props as Record<string, unknown>),
-      ...(props[INTERNAL_LAYOUT] === undefined ? {} : { [INTERNAL_LAYOUT]: props[INTERNAL_LAYOUT] }),
-      ...(props[INTERNAL_TEXT_STYLE] === undefined ? {} : { [INTERNAL_TEXT_STYLE]: props[INTERNAL_TEXT_STYLE] }),
-    },
-  };
+  const layout = produced.internalLayout ?? node.internalLayout;
+  const text = produced.internalTextStyle ?? node.internalTextStyle;
+  if (layout === produced.internalLayout && text === produced.internalTextStyle) return produced;
+  return { ...produced, internalLayout: layout, internalTextStyle: text };
 }
 
 export function ErrorBoundary(props: ErrorBoundaryProps): Node {
@@ -550,12 +620,18 @@ interface BaseSlot {
 }
 type HookSlot = BaseSlot;
 
-interface Fiber {
+export interface Fiber {
   key: string; // structural identity in the parent's child list
   node: Node | null; // last node we reconciled into this fiber
   parent: Fiber | null;
   children: Map<string, Fiber>; // keyed lookup (insertion order = render order)
   childOrder: string[];
+  // Subset of `children` whose node.type is 'layer' | 'provider' | 'portal'.
+  // findVisibleChildFiber walks these to look through transparent wrappers
+  // when the produced subtree skips over them. null until reconcileChildren
+  // populates it; an empty array means "no wrappers" — short-circuits the
+  // miss branch in the hot path. Maintained by reconcileChildren.
+  wrapperChildren: Fiber[] | null;
   // Layer-only:
   cache: CommandBuffer | null;
   lastDeps: ReadonlyArray<unknown> | undefined;
@@ -582,9 +658,16 @@ interface Fiber {
   // user-tex slot it's bound to.
   surfaceHits: number;
   surface: SurfaceCacheEntry | null;
+  // Framework-internal layout state pushed down by parent layout primitives
+  // before this fiber's body runs. Exposed to the body via useInternalLayout()
+  // / useInternalTextStyle(). Lives on the fiber, NOT on user-visible props.
+  internalLayout: LayoutResult | null;
+  internalTextStyle: TextStyle | null;
   // Component-only:
   hooks: HookSlot[];
   lastProps: unknown;
+  lastProducedNode: Node | null;
+  layoutCache?: { props: unknown; values: unknown[]; layoutNode: unknown };
   // Subtree state.
   // Provider-only:
   providedContext: ContextImpl<unknown> | null;
@@ -698,11 +781,11 @@ function ensureFiberDebugMetadata(fiber: Fiber): FiberDebugMetadata {
       type: fiber.node?.type ?? 'unknown',
       displayName: fiber.node ? displayNameForNode(fiber.node) : null,
       key: fiber.key,
-      props: fiber.node ? summarizeProps(propsForNode(fiber.node)) : '{}',
-      propsSummary: fiber.node ? summarizeProps(propsForNode(fiber.node)) : '{}',
+      props: '{}',
+      propsSummary: '{}',
       dirty: fiber.dirty,
       lastRebuildFrame: 0,
-      deps: fiber.node ? depsForNode(fiber.node) : [],
+      deps: [],
       cacheHit: null,
       cacheHitMiss: null,
       children: [],
@@ -713,13 +796,16 @@ function ensureFiberDebugMetadata(fiber: Fiber): FiberDebugMetadata {
 }
 
 function updateFiberDebugNode(fiber: Fiber, node: Node): void {
-  if (!devMode()) return; // skip in production: summarize + stringify per render
+  if (!devMode()) return;
+  // Hot path: only refresh the cheap descriptive fields. The heavy
+  // summarizeProps/depsForNode work is deferred to reconcilerSnapshot,
+  // which is the only consumer of metadata.props/propsSummary/deps and
+  // is called only when devtools actually request a tree snapshot.
+  // Eager summarization here used to dominate the render profile (~28%
+  // of frame time on the markdown demo) for data nothing was reading.
   const metadata = ensureFiberDebugMetadata(fiber);
   metadata.type = node.type;
   metadata.displayName = displayNameForNode(node);
-  metadata.props = summarizeProps(propsForNode(node));
-  metadata.propsSummary = metadata.props;
-  if (node.type !== 'component') metadata.deps = depsForNode(node);
 }
 function recordFiberCacheStatus(
   fiber: Fiber,
@@ -735,10 +821,12 @@ function recordFiberCacheStatus(
 }
 
 function beginFiberHookDebugDeps(fiber: Fiber): void {
+  if (!devMode()) return;
   ensureFiberDebugMetadata(fiber).deps = [];
 }
 
 function recordCurrentHookDebugDeps(deps: ReadonlyArray<unknown> | undefined): void {
+  if (!devMode()) return;
   if (!g_ctx) return;
   ensureFiberDebugMetadata(g_ctx.fiber).deps.push(summarizeDeps(deps));
 }
@@ -758,11 +846,14 @@ export function reconcilerSnapshot(): { tree: FiberNode[] } {
       type: metadata.type,
       displayName: metadata.displayName,
       key: fiber.key,
-      props: metadata.props,
-      propsSummary: metadata.propsSummary,
+      props: summarizeProps(propsForNode(fiber.node)),
+      propsSummary: summarizeProps(propsForNode(fiber.node)),
       dirty: fiber.dirty,
       lastRebuildFrame: metadata.lastRebuildFrame,
-      deps: metadata.deps.map((deps) => [...deps]),
+      deps:
+        fiber.node.type === 'component'
+          ? metadata.deps.map((deps) => [...deps])
+          : depsForNode(fiber.node),
       cacheHit: metadata.cacheHit,
       cacheHitMiss: metadata.cacheHitMiss,
       children,
@@ -790,11 +881,13 @@ function newFiber(key: string, parent: Fiber | null): Fiber {
     parent,
     children: new Map(),
     childOrder: [],
+    wrapperChildren: null,
     cache: null,
     cachedHitTargets: null,
     lastDeps: undefined,
     cacheAtlasEpoch: 0,
     lastProps: undefined,
+    lastProducedNode: null,
     hooks: [],
     providedContext: null,
     providedValue: undefined,
@@ -802,6 +895,8 @@ function newFiber(key: string, parent: Fiber | null): Fiber {
     failed: false,
     surfaceHits: 0,
     surface: null,
+    internalLayout: null,
+    internalTextStyle: null,
   };
   const fiberId = ensureFiberDebugMetadata(fiber).id;
   registerFiberWork(fiberId, () => {
@@ -884,6 +979,10 @@ export function currentContextFrames(): readonly ContextFrameSnapshot[] {
   return g_ctx?.contextStack ?? g_context_frame_probe ?? [];
 }
 
+export function getCurrentRenderFiber(): Fiber | null {
+  return g_ctx?.fiber ?? null;
+}
+
 export function withContextFrames<T>(frames: readonly ContextFrameSnapshot[], fn: () => T): T {
   const prev = g_context_frame_probe;
   g_context_frame_probe = frames;
@@ -891,6 +990,72 @@ export function withContextFrames<T>(frames: readonly ContextFrameSnapshot[], fn
     return fn();
   } finally {
     g_context_frame_probe = prev;
+  }
+}
+
+export function findChildFiberFor(parent: Fiber, child: Node, index: number): Fiber | undefined {
+  return parent.children.get(childKey(child, index));
+}
+
+export function findVisibleChildFiber(parent: Fiber, child: Node, slotIndex: number): Fiber | null {
+  return findVisibleByKey(parent, childKey(child, slotIndex));
+}
+
+function findVisibleByKey(parent: Fiber, targetKey: string): Fiber | null {
+  const direct = parent.children.get(targetKey);
+  if (direct) return direct;
+  // No layer/provider/portal wrappers under this parent — the produced
+  // subtree cannot be hiding behind one, so the miss is final. This is
+  // the common case for plain View / Text / List children and avoids the
+  // O(N) childOrder walk per missed lookup.
+  const wrappers = parent.wrapperChildren;
+  if (wrappers === null || wrappers.length === 0) return null;
+  for (let i = 0; i < wrappers.length; ++i) {
+    const found = findVisibleByKey(wrappers[i], targetKey);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function runInSandboxFiber<T>(fn: () => T): T {
+  const prevCtx = requireCtx('runInSandboxFiber');
+  const sandboxFiber: Fiber = {
+    key: '__layout_sandbox__',
+    node: null,
+    parent: null,
+    children: new Map(),
+    childOrder: [],
+    wrapperChildren: null,
+    cache: null,
+    lastDeps: undefined,
+    cacheAtlasEpoch: 0,
+    cachedHitTargets: null,
+    surfaceHits: 0,
+    surface: null,
+    internalLayout: null,
+    internalTextStyle: null,
+    hooks: [],
+    lastProps: undefined,
+    lastProducedNode: null,
+    providedContext: null,
+    providedValue: undefined,
+    dirty: true,
+    failed: false,
+  };
+  g_ctx = {
+    fiber: sandboxFiber,
+    hookIndex: 0,
+    pendingEffects: [],
+    pendingCleanups: [],
+    frameCallbacks: [],
+    contextStack: [...prevCtx.contextStack],
+    parentTarget: prevCtx.parentTarget,
+    rootRenderer: prevCtx.rootRenderer,
+  };
+  try {
+    return fn();
+  } finally {
+    g_ctx = prevCtx;
   }
 }
 
@@ -1030,6 +1195,19 @@ export function useContext<T>(context: Context<T>): T {
   return context.defaultValue;
 }
 
+// Framework-only readers for the parent-pushed layout / inherited text
+// style. NOT counted toward rules-of-hooks (no slot consumption); they
+// just expose the fiber's internalLayout / internalTextStyle fields to
+// the running component body. Returns null when the parent didn't push
+// any value (e.g. a top-level mount root before withRootLayout fires).
+export function useInternalLayout(): LayoutResult | null {
+  return g_ctx?.fiber.internalLayout ?? null;
+}
+
+export function useInternalTextStyle(): TextStyle | null {
+  return g_ctx?.fiber.internalTextStyle ?? null;
+}
+
 export function useMemo<T>(fn: () => T, deps: ReadonlyArray<unknown>): T {
   const slot = nextSlot<MemoSlot<T>>('memo', () => ({
     kind: 'memo',
@@ -1136,6 +1314,9 @@ function sameNodeIdentity(prev: Node | null, next: Node): boolean {
   if (prev.type === 'component' && next.type === 'component') {
     return (prev.componentType ?? prev.render) === (next.componentType ?? next.render);
   }
+  if (prev.type === 'provider' && next.type === 'provider') {
+    return prev.props.ctx === next.props.ctx;
+  }
   return true;
 }
 
@@ -1143,12 +1324,14 @@ function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
   const liveKeys = new Set<string>();
   const ordered: Fiber[] = [];
   const order: string[] = [];
+  let wrappers: Fiber[] | null = null;
   for (let i = 0; i < nodes.length; ++i) {
-    const k = childKey(nodes[i], i);
+    const node = nodes[i];
+    const k = childKey(node, i);
     if (isDevMode() && liveKeys.has(k)) throw duplicateKeyError(k, parent);
     liveKeys.add(k);
     let f = parent.children.get(k);
-    if (f && !sameNodeIdentity(f.node, nodes[i])) {
+    if (f && !sameNodeIdentity(f.node, node)) {
       unmountFiber(f);
       f = newFiber(k, parent);
       parent.children.set(k, f);
@@ -1159,6 +1342,10 @@ function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
     }
     ordered.push(f);
     order.push(k);
+    const t = node.type;
+    if (t === 'layer' || t === 'provider' || t === 'portal') {
+      (wrappers ??= []).push(f);
+    }
   }
   // Drop fibers that disappeared this frame; run their cleanups.
   for (const [k, f] of parent.children) {
@@ -1168,6 +1355,7 @@ function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
     }
   }
   parent.childOrder = order;
+  parent.wrapperChildren = wrappers;
   return ordered;
 }
 
@@ -1204,6 +1392,9 @@ function unmountFiber(f: Fiber): void {
     f.surface = null;
   }
   f.lastProps = undefined;
+  f.lastProducedNode = null;
+  f.internalLayout = null;
+  f.internalTextStyle = null;
   f.providedContext = null;
   f.providedValue = undefined;
   const fiberId = ensureFiberDebugMetadata(f).id;
@@ -1225,7 +1416,7 @@ function asThenable(value: unknown): Thenable | null {
   }
 }
 
-function requestRenderTargetRedraw(): void {
+export function requestRenderTargetRedraw(): void {
   const win = g_render_target;
   if (win) win.requestRedraw();
 }
@@ -1284,9 +1475,29 @@ function renderNode(
   if (node.type === 'component') {
     const memoInfo = node.memo;
     const epoch = atlasEpoch();
+    const nextInternalLayout = node.internalLayout ?? null;
+    const nextInternalTextStyle = node.internalTextStyle ?? null;
+    const internalInputsEqual =
+      layoutResultEqual(fiber.internalLayout, nextInternalLayout) &&
+      shallowEqualProps(fiber.internalTextStyle, nextInternalTextStyle);
+    // React-style pendingProps swap. If props are shallow-equal to last
+    // render, point this render's node at the previous props object so any
+    // identity-keyed cache downstream (layout, useMemo deps over parent ref,
+    // etc.) hits. Memo'd nodes use their custom comparator; everything else
+    // pays one shallowEqualProps call per render.
+    if (fiber.lastProps !== undefined && fiber.lastProps !== node.props) {
+      const propsEqual =
+        node.memo !== undefined
+          ? node.memo.areEqual(fiber.lastProps, node.props)
+          : shallowEqualProps(fiber.lastProps, node.props);
+      if (propsEqual) {
+        (node as { props: unknown }).props = fiber.lastProps;
+      }
+    }
     if (memoInfo) {
       const trace = memoTraceState();
       const bail =
+        internalInputsEqual &&
         !fiber.dirty &&
         fiber.cache !== null &&
         fiber.lastProps !== undefined &&
@@ -1328,20 +1539,22 @@ function renderNode(
           trace.propsDump.set(dn, {
             last,
             next,
-            lastKeys:
-              typeof last === 'object' && last !== null ? Object.keys(last as object) : [],
-            nextKeys:
-              typeof next === 'object' && next !== null ? Object.keys(next as object) : [],
+            lastKeys: typeof last === 'object' && last !== null ? Object.keys(last as object) : [],
+            nextKeys: typeof next === 'object' && next !== null ? Object.keys(next as object) : [],
           });
         }
       }
       if (bail) {
         recordFiberCacheStatus(fiber, 'hit', false);
         queueInto(target, fiber.cache as CommandBuffer, undefined, undefined);
+        if (fiber.cachedHitTargets && fiber.cachedHitTargets.length > 0) {
+          replayHitTargets(fiber.cachedHitTargets);
+        }
         RenderStats.recordCacheHit();
         return;
       }
     }
+    fiber.layoutCache = undefined; // body re-ran; any derived layout is stale
 
     const prevCtx = g_ctx;
     const myCtx: RenderCtx = {
@@ -1359,6 +1572,11 @@ function renderNode(
     const prevSignalTracking = beginFiberSignalTracking(ensureFiberDebugMetadata(fiber).id);
     let produced: Node | null = null;
     let thrown: unknown = null;
+    // Push framework-internal state onto the fiber so the body's
+    // useInternalLayout/useInternalTextStyle hooks see the parent's
+    // commit values for this render.
+    fiber.internalLayout = nextInternalLayout;
+    fiber.internalTextStyle = nextInternalTextStyle;
     try {
       produced = node.render(node.props);
     } catch (e) {
@@ -1375,10 +1593,12 @@ function renderNode(
       endFiberSignalTracking(prevSignalTracking);
     }
     if (thrown !== null) throw thrown;
-    produced = propagateInternalComponentProps(node, produced);
+    produced = propagateInternalToProduced(node, produced);
+    fiber.lastProducedNode = produced;
     if (!produced) {
       fiber.cache = memoInfo ? new CommandBuffer() : fiber.cache;
-      fiber.lastProps = memoInfo ? node.props : fiber.lastProps;
+      if (memoInfo) fiber.cachedHitTargets = null;
+      fiber.lastProps = node.props;
       fiber.dirty = false;
       recordFiberCacheStatus(fiber, 'miss', true);
       return;
@@ -1389,7 +1609,9 @@ function renderNode(
       RenderStats.recordCacheMiss();
       RenderStats.recordRebuild();
       const fresh = new CommandBuffer();
+      const hitStart = hitTargetCount();
       renderNodeList(fiber, [produced], fresh, ctx);
+      fiber.cachedHitTargets = captureHitTargetsSince(hitStart);
       fiber.cache = fresh;
       fiber.cacheAtlasEpoch = epoch;
       fiber.lastProps = node.props;
@@ -1397,6 +1619,7 @@ function renderNode(
       queueInto(target, fresh, undefined, undefined);
     } else {
       renderNodeList(fiber, [produced], target, ctx);
+      fiber.lastProps = node.props;
       recordFiberCacheStatus(fiber, 'miss', true);
       fiber.dirty = false;
     }
@@ -1411,9 +1634,14 @@ function renderNode(
     // (1800 Text consumers × full root walk per frame) that previously
     // dominated the profile at ~37%. shallowEqual catches the common case
     // and falls back to inequality for primitives / different shapes.
+    // A provider mounting for the first time must not dirty the context's
+    // global consumer set: those consumers belong to other provider scopes,
+    // while this provider's own children read the pushed value below.
+    const hadProvidedContext = fiber.providedContext !== null;
     const valueChanged =
-      fiber.providedContext !== providerCtx ||
-      !shallowEqualProps(fiber.providedValue, node.props.value);
+      hadProvidedContext &&
+      (fiber.providedContext !== providerCtx ||
+        !shallowEqualProps(fiber.providedValue, node.props.value));
     fiber.providedContext = providerCtx;
     fiber.providedValue = node.props.value;
     if (valueChanged) {

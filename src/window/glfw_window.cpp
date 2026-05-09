@@ -984,7 +984,16 @@ namespace fxe {
       glfwGetFramebufferSize(handle_, &w, &h);
       return {w, h};
     }
-    void set_vsync(bool) override {}
+    void set_vsync(bool enabled) override {
+#if defined(__APPLE__) && FXE_HAS_WGPU
+      if (metal_layer_) {
+        CAMetalLayer* layer = (__bridge CAMetalLayer*)metal_layer_;
+        layer.displaySyncEnabled = enabled ? YES : NO;
+      }
+#else
+      (void)enabled;
+#endif
+    }
 
     void* native_handle() const override {
 #if defined(__APPLE__)

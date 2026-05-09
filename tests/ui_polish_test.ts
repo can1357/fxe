@@ -15,6 +15,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useInternalLayout,
 } from 'fxe-ui';
 
 import { assert, assertEqual, assertThrows, run, test } from './ts_harness.ts';
@@ -42,6 +43,25 @@ function point(cb: CommandBuffer, count = 1): void {
 
 function root(key: string, children: readonly Node[]): Node {
   return Layer({ key, children });
+}
+
+function layoutResult(width: number, height: number) {
+  return {
+    x: 0,
+    y: 0,
+    width,
+    height,
+    paddingLeft: 0,
+    paddingTop: 0,
+    paddingRight: 0,
+    paddingBottom: 0,
+    children: [],
+  };
+}
+
+function withInternalLayout(node: Node, width: number, height: number): Node {
+  if (node.type !== 'component') throw new Error('expected component node');
+  return { ...node, internalLayout: layoutResult(width, height) } as Node;
 }
 
 test('memo skips stable props and re-renders after state updates', () => {
@@ -74,6 +94,28 @@ test('memo skips stable props and re-renders after state updates', () => {
   render(root('memo-root', [Probe(stableProps)]), third);
   assertEqual(renders, 2);
   assertEqual(third.vertexCount(), 2);
+});
+
+test('memo re-renders when parent internal layout changes', () => {
+  let renders = 0;
+  const Probe = memo(
+    Component(() => {
+      ++renders;
+      const layout = useInternalLayout();
+      return Draw((cb: CommandBuffer) => point(cb, layout?.width ?? 1));
+    }, 'InternalLayoutMemoProbe'),
+  );
+  const stableProps = { key: 'probe' };
+
+  const first = new CommandBuffer();
+  render(root('internal-layout-root', [withInternalLayout(Probe(stableProps), 1, 1)]), first);
+  assertEqual(renders, 1);
+  assertEqual(first.vertexCount(), 1);
+
+  const second = new CommandBuffer();
+  render(root('internal-layout-root', [withInternalLayout(Probe(stableProps), 3, 1)]), second);
+  assertEqual(renders, 2);
+  assertEqual(second.vertexCount(), 3);
 });
 
 test('useReducer dispatch updates state and requests redraw', () => {
@@ -146,6 +188,43 @@ test('createContext and useContext propagate changed values through memo boundar
   );
 
   assertEqual(seen.join(','), 'a,b');
+});
+
+test('mounting a sibling provider does not dirty existing memo consumers', () => {
+  const TextContext = createContext('default');
+  const renders: Record<string, number> = { a: 0, b: 0 };
+  const Consumer = memo(
+    Component((props: { id: 'a' | 'b' }) => {
+      renders[props.id] += 1;
+      useContext(TextContext);
+      return Draw((cb: CommandBuffer) => point(cb));
+    }, 'ScopedContextConsumer'),
+  );
+
+  const providerA = (): Node =>
+    TextContext.Provider({
+      key: 'provider-a',
+      value: 'a',
+      children: Consumer({ key: 'consumer-a', id: 'a' }),
+    });
+  const providerB = (): Node =>
+    TextContext.Provider({
+      key: 'provider-b',
+      value: 'b',
+      children: Consumer({ key: 'consumer-b', id: 'b' }),
+    });
+
+  render(root('provider-scope-root', [providerA()]), new CommandBuffer());
+  assertEqual(renders.a, 1);
+  assertEqual(renders.b, 0);
+
+  render(root('provider-scope-root', [providerA(), providerB()]), new CommandBuffer());
+  assertEqual(renders.a, 1);
+  assertEqual(renders.b, 1);
+
+  render(root('provider-scope-root', [providerA(), providerB()]), new CommandBuffer());
+  assertEqual(renders.a, 1);
+  assertEqual(renders.b, 1);
 });
 
 test('useRef preserves object identity across renders', () => {

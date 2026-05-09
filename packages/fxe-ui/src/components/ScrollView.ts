@@ -1,14 +1,19 @@
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
-import { type BoundaryChild, Component, type Node, useState } from '../reconciler/fiber.ts';
+import {
+  type BoundaryChild,
+  Component,
+  type Node,
+  useInternalLayout,
+  useState,
+} from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
-import { type InternalLayoutProps, rectFromStyle } from './common.ts';
+import { rectFromStyle } from './common.ts';
 import { View } from './View.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
-export interface ScrollViewProps extends InternalLayoutProps, AccessibilityProps {
+export interface ScrollViewProps extends AccessibilityProps {
   key?: string;
   style?: StyleValue;
   contentStyle?: StyleValue;
@@ -18,7 +23,7 @@ export interface ScrollViewProps extends InternalLayoutProps, AccessibilityProps
 
 export const ScrollView = Component((props: ScrollViewProps): Node => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const rect = rectFromStyle(splitStyle(props.style).layout, props[INTERNAL_LAYOUT]);
+  const rect = rectFromStyle(splitStyle(props.style).layout, useInternalLayout() ?? undefined);
   registerHitTarget({
     id: `scroll:${rect.x}:${rect.y}`,
     rect,

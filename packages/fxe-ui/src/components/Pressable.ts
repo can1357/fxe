@@ -1,19 +1,25 @@
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
-import { type BoundaryChild, Component, type Node, useId, useState } from '../reconciler/fiber.ts';
+import {
+  type BoundaryChild,
+  Component,
+  type Node,
+  useId,
+  useInternalLayout,
+  useState,
+} from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
-import { type InternalLayoutProps, rectFromStyle } from './common.ts';
+import { rectFromStyle } from './common.ts';
 import { View, type ViewProps } from './View.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
 export interface PressableState {
   hovered: boolean;
   pressed: boolean;
   focused: boolean;
 }
-export interface PressableProps extends InternalLayoutProps, AccessibilityProps {
+export interface PressableProps extends AccessibilityProps {
   key?: string;
   style?: StyleValue | ((state: PressableState) => StyleValue);
   children?: BoundaryChild | ((state: PressableState) => BoundaryChild);
@@ -62,7 +68,13 @@ export const Pressable = Component((props: PressableProps): Node => {
   currentPressableState = state;
   const style = typeof props.style === 'function' ? props.style(state) : props.style;
   const resolved = splitStyle(style);
-  const rect = rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
+  const rect = rectFromStyle(resolved.layout, useInternalLayout() ?? undefined);
+  if (rect.width === 0 && typeof resolved.layout.minWidth === 'number') {
+    rect.width = resolved.layout.minWidth;
+  }
+  if (rect.height === 0 && typeof resolved.layout.minHeight === 'number') {
+    rect.height = resolved.layout.minHeight;
+  }
   const cursor =
     resolved.paint.cursor ?? (props.disabled ? 'notAllowed' : props.onPress ? 'hand' : 'arrow');
   const componentType = internalProps.__componentType ?? 'Pressable';
@@ -112,7 +124,8 @@ export const Pressable = Component((props: PressableProps): Node => {
     });
   }
   const children = typeof props.children === 'function' ? props.children(state) : props.children;
-  return View({ ...props, style, children, __skipA11yHitTarget: true } as ViewProps & {
+  const view = View({ ...props, style, children, __skipA11yHitTarget: true } as ViewProps & {
     __skipA11yHitTarget: true;
   });
+  return view.type === 'component' ? { ...view, internalLayout: rect } : view;
 }, 'Pressable');

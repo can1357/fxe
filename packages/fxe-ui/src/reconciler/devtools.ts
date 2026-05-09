@@ -94,9 +94,7 @@ function emptyMemoSlot(): MemoTraceSlot {
 let memoTrace: MemoTraceState | null = null;
 
 export function setMemoTrace(enabled: boolean): void {
-  memoTrace = enabled
-    ? { totals: emptyMemoSlot(), byName: new Map(), propsDump: new Map() }
-    : null;
+  memoTrace = enabled ? { totals: emptyMemoSlot(), byName: new Map(), propsDump: new Map() } : null;
 }
 
 export function resetMemoTrace(): void {

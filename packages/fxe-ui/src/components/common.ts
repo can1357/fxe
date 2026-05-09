@@ -5,15 +5,7 @@ import { type BoundaryChild, Draw, Layer, type Node } from '../reconciler/fiber.
 import { flattenStyle, splitStyle } from '../style/resolve.ts';
 import type { Style, StyleValue, TextStyle } from '../style/types.ts';
 
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
-export { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE };
-
-export interface InternalLayoutProps {
-  [INTERNAL_LAYOUT]?: LayoutResult;
-  [INTERNAL_TEXT_STYLE]?: TextStyle;
-}
-
-export interface UIBaseProps extends InternalLayoutProps {
+export interface UIBaseProps {
   key?: string;
   style?: StyleValue;
   children?: BoundaryChild;
@@ -40,7 +32,12 @@ export function childText(node: Node): string | undefined {
   return undefined;
 }
 
-export function cloneWithInternal(
+// Attach framework-internal layout / inherited-text-style state to a child
+// component node so the reconciler can forward it to the child fiber's
+// `internalLayout` / `internalTextStyle` slots before the child's body
+// runs. The data lives outside `props`, so user-visible memo bail
+// comparisons never see it.
+export function attachInternalLayout(
   node: Node,
   layoutResult: LayoutResult,
   textStyle?: TextStyle,
@@ -48,11 +45,8 @@ export function cloneWithInternal(
   if (node.type !== 'component') return node;
   return {
     ...node,
-    props: {
-      ...(node.props as Record<string, unknown>),
-      [INTERNAL_LAYOUT]: layoutResult,
-      [INTERNAL_TEXT_STYLE]: textStyle,
-    },
+    internalLayout: layoutResult,
+    internalTextStyle: textStyle,
   };
 }
 

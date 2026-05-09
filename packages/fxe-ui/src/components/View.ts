@@ -13,34 +13,34 @@ import {
   Component,
   type ContextFrameSnapshot,
   currentContextFrames,
+  type Fiber,
+  findVisibleChildFiber,
+  getCurrentRenderFiber,
   type Node,
   Portal,
+  requestRenderTargetRedraw,
+  shallowEqualProps,
   useId,
-  withContextFrames,
+  useInternalLayout,
+  useInternalTextStyle,
 } from '../reconciler/fiber.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { wrapText } from '../text/wrap.ts';
 import { TextStyleContext } from '../theme/text_context.ts';
-import {
-  cloneWithInternal,
-  type InternalLayoutProps,
-  normalizeChildren,
-  rectFromStyle,
-} from './common.ts';
+import { attachInternalLayout, normalizeChildren, rectFromStyle } from './common.ts';
 
-export interface ViewProps extends InternalLayoutProps, AccessibilityProps {
+export interface ViewProps extends AccessibilityProps {
   key?: string;
   style?: StyleValue;
   children?: BoundaryChild;
+  __traceTag?: string;
 }
 type ViewInternalProps = ViewProps & { __skipA11yHitTarget?: boolean };
 
 type ComponentProps = {
   style?: StyleValue;
   children?: unknown;
-  [INTERNAL_TEXT_STYLE]?: TextStyle;
 };
 function isDisplayNone(node: Node): boolean {
   if (node.type !== 'component') return false;
@@ -117,6 +117,7 @@ function clipChildHitTargets(start: number, clip: LayoutResult): void {
 // when callers reuse the same style ref across renders.
 const kStyleMeta = Symbol('fxe-ui.styleMeta');
 const kLayoutStyleSig = Symbol('fxe-ui.layoutStyleSig');
+const kTextStyleSig = Symbol('fxe-ui.textStyleSig');
 
 // Content-derived signature for a LayoutStyle. We cache by ref first so
 // stable StyleSheet.create() refs hit immediately; on a fresh ref (e.g.
@@ -127,7 +128,7 @@ const kLayoutStyleSig = Symbol('fxe-ui.layoutStyleSig');
 //
 // Field list mirrors the LayoutStyle keys in style/resolve.ts. Adding
 // a layout-affecting field there requires adding it here too.
-const LAYOUT_SIG_FIELDS: readonly (keyof LayoutStyle)[] = [
+const LAYOUT_SIG_FIELDS = new Set([
   'display',
   'width',
   'height',
@@ -169,22 +170,20 @@ const LAYOUT_SIG_FIELDS: readonly (keyof LayoutStyle)[] = [
   'left',
   'aspectRatio',
   'overflow',
-];
+]);
 
 function layoutStyleSig(style: LayoutStyle | undefined): string {
   if (style === undefined) return '0';
   const cached = Reflect.get(style, kLayoutStyleSig);
   if (cached !== undefined) return cached as string;
   let sig = '';
-  for (let i = 0; i < LAYOUT_SIG_FIELDS.length; ++i) {
-    const k = LAYOUT_SIG_FIELDS[i];
-    const v = style[k];
-    if (v === undefined) continue;
-    sig += `${i}:${typeof v === 'object' ? JSON.stringify(v) : String(v)};`;
+  for (const k in style) {
+    const v = style[k as keyof LayoutStyle];
+    if (!v) continue;
+    if (LAYOUT_SIG_FIELDS.has(k as keyof LayoutStyle)) {
+      sig += `${k}:${typeof v === 'object' ? JSON.stringify(v) : String(v)};`;
+    }
   }
-  // Memoize so repeat refs don't re-walk. New ref with identical content
-  // pays the walk once but still produces an interned string V8 will
-  // canonicalize.
   const id = sig === '' ? '0' : sig;
   Reflect.set(style, kLayoutStyleSig, id);
   return id;
@@ -193,24 +192,42 @@ function layoutStyleSig(style: LayoutStyle | undefined): string {
 function resolveStyleMeta(style: StyleValue): {
   resolved: ReturnType<typeof splitStyle>;
   layoutSig: string;
+  paintSig: string;
 } {
   if (style !== null && typeof style === 'object') {
     const cached = Reflect.get(style, kStyleMeta) as
-      | { resolved: ReturnType<typeof splitStyle>; layoutSig: string }
+      | { resolved: ReturnType<typeof splitStyle>; layoutSig: string; paintSig: string }
       | undefined;
     if (cached !== undefined) return cached;
     const resolved = splitStyle(style);
-    const meta = { resolved, layoutSig: layoutStyleSig(resolved.layout) };
+    const layoutSig = layoutStyleSig(resolved.layout);
+    // Paint sig captures the fields paintView reads. Stringify to a
+    // stable primitive so the Layer deps array compares by value, not
+    // object reference. Cached on the (potentially short-lived) style
+    // object via Reflect.set; canonical StyleSheet objects keep this
+    // hot across all renders, inline `{...}` objects pay the hash once.
+    const p = resolved.paint as Record<string, unknown>;
+    const paintSig = `${p.backgroundColor ?? ''}|${p.borderColor ?? ''}|${p.borderWidth ?? ''}|${p.borderRadius ?? ''}|${p.borderTopLeftRadius ?? ''}|${p.borderTopRightRadius ?? ''}|${p.borderBottomLeftRadius ?? ''}|${p.borderBottomRightRadius ?? ''}|${p.opacity ?? ''}|${p.tint ?? ''}|${p.shadowColor ?? ''}|${p.shadowOffset ?? ''}|${p.shadowRadius ?? ''}|${p.shadowOpacity ?? ''}`;
+    const meta = { resolved, layoutSig, paintSig };
     Reflect.set(style, kStyleMeta, meta);
     return meta;
   }
   const resolved = splitStyle(style);
-  return { resolved, layoutSig: layoutStyleSig(resolved.layout) };
+  return {
+    resolved,
+    layoutSig: layoutStyleSig(resolved.layout),
+    paintSig: '',
+  };
 }
 
 function textStyleSig(style: TextStyle): string {
   // Only the layout-affecting fields. Color etc. don't change layout.
-  return `${style.fontSize ?? 16}|${style.letterSpacing ?? 0}|${style.lineHeight ?? -1}|${style.fontFamily ?? ''}|${style.fontWeight ?? ''}`;
+  if (!style || typeof style !== 'object') return '';
+  const cached = Reflect.get(style, kTextStyleSig);
+  if (cached !== undefined) return cached as string;
+  const sig = `${style.fontSize ?? 16}|${style.letterSpacing ?? 0}|${style.lineHeight ?? -1}|${style.fontFamily ?? ''}|${style.fontWeight ?? ''}`;
+  Reflect.set(style, kTextStyleSig, sig);
+  return sig;
 }
 
 const DIRECT_LAYOUT_COMPONENTS = new Set([
@@ -232,15 +249,19 @@ function isDirectLayoutComponent(displayName: string | undefined): boolean {
 }
 
 // Layout-side memo. The render-time memo bail saves paint, but layoutNodeFor
-// still walks every non-direct component to derive layout. We cache the
-// produced JSX as a symbol property on `node.props` — the props object is
-// reused across renders by `memo()` (per-factory LRU) when the input is
-// shallow-equal to a recent call, so this single Reflect.get hop hits.
+// still walks every non-direct component to derive layout. The stable cache
+// now lives on the child fiber; the symbol on `node.props` remains a same-pass
+// fallback when the same props object is revisited within one layout walk.
 interface LayoutMemoEntry {
   values: unknown[];
   produced: Node;
 }
 const kLayoutMemo = Symbol('fxe-ui.layoutMemo');
+
+function firstChildFiber(parent: Fiber): Fiber | null {
+  if (parent.childOrder.length === 0) return null;
+  return parent.children.get(parent.childOrder[0]) ?? null;
+}
 
 function snapshotContextValues(frames: readonly ContextFrameSnapshot[]): unknown[] {
   const out: unknown[] = new Array(frames.length);
@@ -248,10 +269,7 @@ function snapshotContextValues(frames: readonly ContextFrameSnapshot[]): unknown
   return out;
 }
 
-function contextValuesMatch(
-  cached: unknown[],
-  frames: readonly ContextFrameSnapshot[],
-): boolean {
+function contextValuesMatch(cached: unknown[], frames: readonly ContextFrameSnapshot[]): boolean {
   if (cached.length !== frames.length) return false;
   for (let i = 0; i < cached.length; ++i) {
     if (cached[i] !== frames[i].value) return false;
@@ -259,40 +277,148 @@ function contextValuesMatch(
   return true;
 }
 
+function layoutNodeListSig(nodes: readonly LayoutNode[]): { sig: string; complete: boolean } {
+  let sig = '';
+  let complete = true;
+  for (let i = 0; i < nodes.length; ++i) {
+    const childSig = nodes[i]._sig;
+    if (childSig === undefined) complete = false;
+    sig += i === 0 ? (childSig ?? '?') : `~${childSig ?? '?'}`;
+  }
+  return { sig, complete };
+}
+
+function layoutResultSig(result: LayoutResult): string {
+  let sig = `${result.x},${result.y},${result.width},${result.height},${result.paddingLeft},${result.paddingTop},${result.paddingRight},${result.paddingBottom}`;
+  for (let i = 0; i < result.children.length; ++i) {
+    sig += `|${layoutResultSig(result.children[i])}`;
+  }
+  return sig;
+}
+
+const kLayoutComplete = Symbol('fxe-ui.layoutComplete');
+
+function isLayoutComplete(result: LayoutResult | null | undefined): boolean {
+  return result === null || result === undefined || Reflect.get(result, kLayoutComplete) !== false;
+}
+
+function markLayoutCompleteness(result: LayoutResult, node: LayoutNode): boolean {
+  const childNodes = node.children ?? [];
+  let complete = node._sig !== undefined;
+  for (let i = 0; i < result.children.length; ++i) {
+    const childNode = childNodes[i];
+    if (childNode !== undefined && !markLayoutCompleteness(result.children[i], childNode)) {
+      complete = false;
+    }
+  }
+  Reflect.set(result, kLayoutComplete, complete);
+  return complete;
+}
+
+function absoluteLayoutResult(result: LayoutResult, x: number, y: number): LayoutResult {
+  const out = { ...result, x, y };
+  Reflect.set(out, kLayoutComplete, isLayoutComplete(result));
+  return out;
+}
+
 function layoutNodeFor(
   node: Node,
   inheritedTextStyle: TextStyle,
   contextFrames: readonly ContextFrameSnapshot[] = currentContextFrames(),
+  parentFiber: Fiber | null = null,
 ): LayoutNode {
   if (node.type === 'component') {
     if (!isDirectLayoutComponent(node.displayName)) {
-      const memoCacheKey =
-        node.memo !== undefined && typeof node.props === 'object' && node.props !== null
-          ? (node.props as object)
-          : null;
+      // Stabilise props identity ahead of the reconciler's own swap.
+      // The reconciler's `pendingProps` swap fires when it descends to
+      // this fiber later in the frame; at this point the layout walk is
+      // RUNNING ahead of the reconciler, so without a local swap the
+      // identity-keyed caches below would always miss against
+      // last-frame's `lastProps` even when the props are shallow-equal.
+      if (
+        parentFiber !== null &&
+        parentFiber.lastProps !== undefined &&
+        parentFiber.lastProps !== node.props
+      ) {
+        const eq =
+          node.memo !== undefined
+            ? node.memo.areEqual(parentFiber.lastProps, node.props)
+            : shallowEqualProps(parentFiber.lastProps, node.props);
+        if (eq) (node as { props: unknown }).props = parentFiber.lastProps;
+      }
+      const cachedLayout = parentFiber?.layoutCache;
+      if (
+        cachedLayout !== undefined &&
+        cachedLayout.props === node.props &&
+        contextValuesMatch(cachedLayout.values, contextFrames)
+      ) {
+        return cachedLayout.layoutNode as LayoutNode;
+      }
       let produced: Node | null = null;
-      if (memoCacheKey !== null) {
-        const entry = Reflect.get(memoCacheKey, kLayoutMemo) as LayoutMemoEntry | undefined;
-        if (entry !== undefined && contextValuesMatch(entry.values, contextFrames)) {
-          produced = entry.produced;
-        }
+      // Primary cache: previous render stored produced JSX on the child
+      // fiber. After the swap above, `parentFiber.lastProps === node.props`
+      // when shallow-equal so we use it directly.
+      if (
+        parentFiber !== null &&
+        parentFiber.lastProducedNode !== null &&
+        parentFiber.lastProps === node.props &&
+        !parentFiber.dirty
+      ) {
+        produced = parentFiber.lastProducedNode;
       }
+      // Within-pass dedupe (same props ref hit twice in one pass).
       if (produced === null) {
-        produced = withContextFrames(contextFrames, () => node.render(node.props));
+        const memoCacheKey =
+          typeof node.props === 'object' && node.props !== null ? (node.props as object) : null;
         if (memoCacheKey !== null) {
-          Reflect.set(memoCacheKey, kLayoutMemo, {
-            values: snapshotContextValues(contextFrames),
-            produced,
-          });
+          const entry = Reflect.get(memoCacheKey, kLayoutMemo) as LayoutMemoEntry | undefined;
+          if (entry !== undefined && contextValuesMatch(entry.values, contextFrames)) {
+            produced = entry.produced;
+          }
         }
       }
-      return layoutNodeFor(produced, inheritedTextStyle, contextFrames);
+      // No cached produced node. We deliberately do NOT run the body here:
+      // doing so during a layout walk either (a) corrupts the parent fiber's
+      // hook state, or (b) requires a sandbox fiber whose useMemo cache is
+      // empty — which forces every memoised computation (e.g. tree-sitter
+      // highlight) to recompute on every layout walk. Both are catastrophic.
+      //
+      // Instead, return an unresolved LayoutNode until this component has
+      // rendered once. If the component already rendered to null for the
+      // current props, treat that as a resolved empty subtree so static
+      // null components do not force an endless redraw loop.
+      if (produced === null) {
+        if (
+          parentFiber !== null &&
+          parentFiber.lastProps === node.props &&
+          !parentFiber.dirty &&
+          parentFiber.lastProducedNode === null
+        ) {
+          return { _sig: `C0|${node.displayName ?? ''}` };
+        }
+        return {};
+      }
+      // Walk into produced through the existing fiber subtree so the
+      // recursion keeps hitting cache. parentFiber's reconciled child
+      // (created by previous render) corresponds to `produced`.
+      const innerFiber =
+        parentFiber !== null
+          ? (findVisibleChildFiber(parentFiber, produced, 0) ?? firstChildFiber(parentFiber))
+          : null;
+      const result = layoutNodeFor(produced, inheritedTextStyle, contextFrames, innerFiber);
+      if (parentFiber) {
+        parentFiber.layoutCache = {
+          props: node.props,
+          values: snapshotContextValues(contextFrames),
+          layoutNode: result,
+        };
+      }
+      return result;
     }
     const childProps = node.props as ComponentProps;
     const { resolved, layoutSig } = resolveStyleMeta(childProps.style);
     const textStyle = {
       ...inheritedTextStyle,
-      ...(childProps[INTERNAL_TEXT_STYLE] ?? {}),
       ...resolved.text,
     };
     if (node.displayName === 'Text') {
@@ -306,60 +432,83 @@ function layoutNodeFor(
         _sig: `T|${layoutSig}|${textStyleSig(textStyle)}|${text}`,
       };
     }
-    const childLayoutNodes = normalizeLayoutChildren(childProps.children).map((child) =>
-      layoutNodeFor(child, textStyle, contextFrames),
+    const childLayoutNodes = normalizeLayoutChildren(childProps.children).map((child, index) =>
+      layoutNodeFor(
+        child,
+        textStyle,
+        contextFrames,
+        parentFiber ? findVisibleChildFiber(parentFiber, child, index) : null,
+      ),
     );
-    let allChildSigs = '';
-    let anyMissing = false;
-    for (let i = 0; i < childLayoutNodes.length; ++i) {
-      const cs = childLayoutNodes[i]._sig;
-      if (cs === undefined) {
-        anyMissing = true;
-        break;
-      }
-      allChildSigs += i === 0 ? cs : `~${cs}`;
-    }
+    const childSig = layoutNodeListSig(childLayoutNodes);
     return {
       style: resolved.layout,
       children: childLayoutNodes,
       // Only emit a sig when every child contributed one; otherwise it
       // wouldn't be safe to memoize against.
-      _sig: anyMissing ? undefined : `V|${layoutSig}|${allChildSigs}`,
+      _sig: childSig.complete ? `V|${layoutSig}|${childSig.sig}` : undefined,
     };
   }
 
   if (node.type === 'provider') {
-    const nextFrames = [...contextFrames, { ctx: node.props.ctx, value: node.props.value }];
+    const nextFrames: readonly ContextFrameSnapshot[] = [
+      ...contextFrames,
+      { ctx: node.props.ctx as ContextFrameSnapshot['ctx'], value: node.props.value },
+    ];
     const children = normalizeChildren(node.props.children);
+    const childLayoutNodes = children.map((child, index) =>
+      layoutNodeFor(
+        child,
+        inheritedTextStyle,
+        nextFrames,
+        parentFiber ? findVisibleChildFiber(parentFiber, child, index) : null,
+      ),
+    );
+    const childSig = layoutNodeListSig(childLayoutNodes);
     return children.length
-      ? { children: children.map((child) => layoutNodeFor(child, inheritedTextStyle, nextFrames)) }
-      : {};
+      ? {
+          children: childLayoutNodes,
+          _sig: childSig.complete ? `P|${childSig.sig}` : undefined,
+        }
+      : { _sig: 'P|' };
   }
 
   const children = childrenOf(node);
+  const childLayoutNodes = children.map((child, index) =>
+    layoutNodeFor(
+      child,
+      inheritedTextStyle,
+      contextFrames,
+      parentFiber ? findVisibleChildFiber(parentFiber, child, index) : null,
+    ),
+  );
+  const childSig = layoutNodeListSig(childLayoutNodes);
   return children.length
-    ? { children: children.map((child) => layoutNodeFor(child, inheritedTextStyle, contextFrames)) }
-    : {};
+    ? {
+        children: childLayoutNodes,
+        _sig: childSig.complete ? `${node.type}|${childSig.sig}` : undefined,
+      }
+    : { _sig: `${node.type}|` };
 }
 
 export const View = Component((props: ViewProps): Node => {
   const internalProps = props as ViewInternalProps;
   const id = useId();
-  const { resolved } = resolveStyleMeta(props.style);
-  const rect = props[INTERNAL_LAYOUT]
-    ? { ...props[INTERNAL_LAYOUT] }
-    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
-  if (!props[INTERNAL_LAYOUT] && (rect.width === 0 || rect.height === 0)) {
+  const { resolved, layoutSig, paintSig } = resolveStyleMeta(props.style);
+  const inheritedLayout = useInternalLayout();
+  const inheritedTextStyle = useInternalTextStyle();
+  const rect = inheritedLayout ? { ...inheritedLayout } : rectFromStyle(resolved.layout, undefined);
+  if (!inheritedLayout && (rect.width === 0 || rect.height === 0)) {
     rect.width = typeof resolved.layout.width === 'number' ? resolved.layout.width : 0;
     rect.height = typeof resolved.layout.height === 'number' ? resolved.layout.height : 0;
   }
   recordLayout({
     component: 'View',
     rect: { ...rect },
-    hasParentLayout: !!props[INTERNAL_LAYOUT],
+    hasParentLayout: !!inheritedLayout,
     styleWidth: resolved.layout.width,
     styleHeight: resolved.layout.height,
-    tag: (props as { __traceTag?: string }).__traceTag,
+    tag: props.__traceTag,
   });
   if (!internalProps.__skipA11yHitTarget) {
     registerHitTarget({
@@ -372,18 +521,47 @@ export const View = Component((props: ViewProps): Node => {
     });
   }
   const rawChildren = normalizeChildren(props.children);
-  const textStyle = { ...(props[INTERNAL_TEXT_STYLE] ?? {}), ...resolved.text };
+  const textStyle = { ...(inheritedTextStyle ?? {}), ...resolved.text };
   const visibleChildren = rawChildren.filter((child) => !isDisplayNone(child));
-  const childTree =
-    props[INTERNAL_LAYOUT] && props[INTERNAL_LAYOUT].children.length === visibleChildren.length
-      ? props[INTERNAL_LAYOUT]
-      : layout(
-          {
-            style: { ...resolved.layout, width: rect.width, height: rect.height },
-            children: visibleChildren.map((child) => layoutNodeFor(child, textStyle)),
-          },
-          { width: rect.width, height: rect.height },
-        );
+  const viewFiber = getCurrentRenderFiber();
+  let childLayoutNodes: LayoutNode[] | null = null;
+  let childLayoutSig = '';
+  let childLayoutComplete = true;
+  const buildChildLayoutNodes = (): LayoutNode[] => {
+    if (childLayoutNodes !== null) return childLayoutNodes;
+    childLayoutNodes = visibleChildren.map((child, index) =>
+      layoutNodeFor(
+        child,
+        textStyle,
+        currentContextFrames(),
+        viewFiber ? findVisibleChildFiber(viewFiber, child, index) : null,
+      ),
+    );
+    const sig = layoutNodeListSig(childLayoutNodes);
+    childLayoutSig = sig.sig;
+    childLayoutComplete = sig.complete;
+    return childLayoutNodes;
+  };
+  const useInheritedLayout =
+    inheritedLayout &&
+    inheritedLayout.children.length === visibleChildren.length &&
+    isLayoutComplete(inheritedLayout);
+  const childTree = useInheritedLayout
+    ? inheritedLayout
+    : (() => {
+        const rootLayoutNode = {
+          style: { ...resolved.layout, width: rect.width, height: rect.height },
+          children: buildChildLayoutNodes(),
+          _sig: childLayoutComplete ? `R|${childLayoutSig}` : undefined,
+        };
+        const computed = layout(rootLayoutNode, { width: rect.width, height: rect.height });
+        childLayoutComplete = markLayoutCompleteness(computed, rootLayoutNode);
+        return computed;
+      })();
+  if (!useInheritedLayout && !childLayoutComplete) requestRenderTargetRedraw();
+  const resolvedLayoutSig = useInheritedLayout
+    ? `I|${layoutResultSig(childTree)}`
+    : `L|${childLayoutSig}|${layoutResultSig(childTree)}`;
   const children = visibleChildren.map((child, idx) => {
     const childRect = childTree.children[idx] ?? {
       x: 0,
@@ -396,9 +574,9 @@ export const View = Component((props: ViewProps): Node => {
       paddingBottom: 0,
       children: [],
     };
-    return cloneWithInternal(
+    return attachInternalLayout(
       child,
-      { ...childRect, x: rect.x + childRect.x, y: rect.y + childRect.y },
+      absoluteLayoutResult(childRect, rect.x + childRect.x, rect.y + childRect.y),
       textStyle,
     );
   });
@@ -412,7 +590,8 @@ export const View = Component((props: ViewProps): Node => {
           screenHeight: targetSize.height,
         }),
       deps: [
-        props.style,
+        layoutSig,
+        paintSig,
         rect.x,
         rect.y,
         rect.width,
@@ -434,7 +613,8 @@ export const View = Component((props: ViewProps): Node => {
           hitTargetStart = hitTargets().length;
         },
         deps: [
-          props.style,
+          layoutSig,
+          paintSig,
           rect.x,
           rect.y,
           rect.width,
@@ -453,7 +633,8 @@ export const View = Component((props: ViewProps): Node => {
           if (!clipped.isEmpty()) cb.queue(clipped);
         },
         deps: [
-          props.style,
+          layoutSig,
+          paintSig,
           rect.x,
           rect.y,
           rect.width,
@@ -472,18 +653,25 @@ export const View = Component((props: ViewProps): Node => {
     layerChildren.push(childNode);
   }
 
-  const layer = {
-    type: 'layer' as const,
-    props: {
-      deps: [
-        props.style,
+
+  const layerDeps = childLayoutComplete
+    ? [
+        layoutSig,
+        paintSig,
         rect.x,
         rect.y,
         rect.width,
         rect.height,
         targetSize.width,
         targetSize.height,
-      ],
+        resolvedLayoutSig,
+      ]
+    : undefined;
+
+  const layer = {
+    type: 'layer' as const,
+    props: {
+      deps: layerDeps,
       children: layerChildren,
     },
   } satisfies Node;

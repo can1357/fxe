@@ -6,6 +6,7 @@ import type { TextInputProps } from './components/TextInput.ts';
 import type { ViewProps } from './components/View.ts';
 import type { Node } from './index.ts';
 import { Image, Pressable, ScrollView, Text, TextInput, View } from './index.ts';
+import { getComponentMeta, getMemoMeta } from './reconciler/fiber.ts';
 
 export type JSXChild = Node | string | number | readonly JSXChild[] | null | undefined | boolean;
 export type JSXNode = Node;
@@ -103,6 +104,34 @@ function createElement<P extends ElementProps>(
   if (typeof type === 'function') {
     const componentProps =
       elementKey === undefined ? normalizedProps : { ...normalizedProps, key: elementKey };
+    // memo() factory: build a single-fiber memo Node directly from the
+    // factory's metadata. Skips the outer JSX wrapper that would
+    // otherwise force a second fiber for every memo'd boundary.
+    const memoMeta = getMemoMeta(type);
+    if (memoMeta) {
+      return {
+        type: 'component',
+        componentType: memoMeta.componentType,
+        render: memoMeta.render,
+        props: componentProps,
+        displayName: memoMeta.displayName ?? (type.name || 'JSXMemoComponent'),
+        key: elementKey,
+        memo: { areEqual: memoMeta.areEqual },
+      };
+    }
+    // Component() factory: collapse the JSX wrapper into the underlying
+    // component Node so we don't double-fiber every component instance.
+    const compMeta = getComponentMeta(type);
+    if (compMeta) {
+      return {
+        type: 'component',
+        componentType: compMeta.componentType,
+        render: compMeta.render,
+        props: componentProps,
+        displayName: compMeta.displayName ?? (type.name || 'JSXComponent'),
+        key: elementKey,
+      };
+    }
     if (isClassComponent(type)) {
       const classType = type as unknown as ClassComponentType<P>;
       return {

@@ -19,13 +19,20 @@
 import type { ComposeEvent, KeyEvent } from 'fxe';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
-import { Component, type Node, useEffect, useId, useRef, useState } from '../reconciler/fiber.ts';
+import {
+  Component,
+  type Node,
+  useEffect,
+  useId,
+  useInternalLayout,
+  useRef,
+  useState,
+} from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { isPrimaryModifier, MOD_SHIFT } from '../text/edit_model.ts';
-import { type InternalLayoutProps, rectFromStyle } from './common.ts';
+import { rectFromStyle } from './common.ts';
 import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
 const KEY_ENTER = 257;
 const KEY_TAB = 258;
@@ -50,7 +57,7 @@ interface EditDispatcher {
   breakCoalescing?(): void;
 }
 
-export interface EditableAreaProps extends InternalLayoutProps {
+export interface EditableAreaProps {
   key?: string;
   style?: StyleValue;
   document: TextDocument;
@@ -74,14 +81,13 @@ export interface EditableAreaProps extends InternalLayoutProps {
 
 export const EditableArea = Component((props: EditableAreaProps): Node => {
   const id = useId();
+  const internalLayout = useInternalLayout();
   const resolved = splitStyle(props.style);
-  const rect = props[INTERNAL_LAYOUT]
-    ? { ...props[INTERNAL_LAYOUT] }
-    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
+  const rect = internalLayout ? { ...internalLayout } : rectFromStyle(resolved.layout, undefined);
   recordLayout({
     component: 'EditableArea',
     rect,
-    hasParentLayout: props[INTERNAL_LAYOUT] !== undefined,
+    hasParentLayout: internalLayout !== null,
     styleWidth: resolved.layout.width,
     styleHeight: resolved.layout.height,
   });
@@ -306,7 +312,6 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
       wantedCol.current = col;
       if (props.onCursorChange) props.onCursorChange(line, col);
     },
-    [INTERNAL_LAYOUT]: props[INTERNAL_LAYOUT],
   });
 }, 'EditableArea');
 

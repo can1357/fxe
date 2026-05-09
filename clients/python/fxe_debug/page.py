@@ -94,8 +94,14 @@ class Mouse:
         )
 
     async def click(self, x: float, y: float, button: str | MouseButton = "left") -> None:
+        await self.move(x, y)
+        await asyncio.sleep(0.1)
+        await self.move(x, y)
+        await asyncio.sleep(0.1)
         await self.down(x, y, button)
+        await asyncio.sleep(0.02)
         await self.up(x, y, button)
+        await asyncio.sleep(0.3)
 
     async def wheel(self, dx: float, dy: float, x: float = 0.0, y: float = 0.0) -> None:
         await self._page._client.call(

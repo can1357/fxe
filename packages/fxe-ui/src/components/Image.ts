@@ -2,13 +2,12 @@ import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
 import { paintImage } from '../paint/image_painter.ts';
-import { Component, type Node, useId } from '../reconciler/fiber.ts';
+import { Component, type Node, useId, useInternalLayout } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
-import { type InternalLayoutProps, rectFromStyle } from './common.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
+import { rectFromStyle } from './common.ts';
 
-export interface ImageProps extends InternalLayoutProps, AccessibilityProps {
+export interface ImageProps extends AccessibilityProps {
   key?: string;
   style?: StyleValue;
   source?: unknown;
@@ -21,7 +20,7 @@ export const Image = Component((props: ImageProps): Node => {
   const id = useId();
   const resolved = splitStyle([{ width: props.width, height: props.height }, props.style]);
   if (props.tint !== undefined) resolved.paint.tint = props.tint;
-  const rect = rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
+  const rect = rectFromStyle(resolved.layout, useInternalLayout() ?? undefined);
   registerHitTarget({
     id,
     rect,

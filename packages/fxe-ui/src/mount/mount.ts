@@ -9,7 +9,6 @@ import {
   startFrameLoop,
   useFrame,
 } from '../reconciler/fiber.ts';
-import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { type Theme, ThemeProvider } from '../theme/index.ts';
 import {
   dispatchCompose,
@@ -89,28 +88,24 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
     window.setBackgroundColor(opts.backgroundColor);
   }
 
-  // Inject the framebuffer rect into the user root. The reconciler now
-  // propagates internal `__layout` / `__textStyle` props from wrapper
-  // components to the first produced component node, so top-level user
-  // components that return a `View`/`Text` subtree receive truthful root
-  // constraints instead of collapsing to zero-sized placeholder layout.
+  // Inject the framebuffer rect onto the user root component node so the
+  // reconciler can copy it into the root fiber's `internalLayout` slot
+  // before the body runs. Lives outside `props` so memo / shallow-equal
+  // comparisons in user code never see it.
   const withRootLayout = (node: Node, width: number, height: number): Node =>
     node.type === 'component'
       ? {
           ...node,
-          props: {
-            ...(node.props as Record<string, unknown>),
-            [INTERNAL_LAYOUT]: {
-              x: 0,
-              y: 0,
-              width,
-              height,
-              paddingLeft: 0,
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              children: [],
-            },
+          internalLayout: {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            paddingLeft: 0,
+            paddingTop: 0,
+            paddingRight: 0,
+            paddingBottom: 0,
+            children: [],
           },
         }
       : node;
