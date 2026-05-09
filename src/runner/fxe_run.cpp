@@ -89,6 +89,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -624,6 +625,46 @@ namespace {
   };
 })();
 )JS";
+
+  constexpr const char* kFrameStatsScript = R"JS(
+(() => {
+  if (globalThis.__fxeRunnerFrameStatsInstalled) return;
+  globalThis.__fxeRunnerFrameStatsInstalled = true;
+  const Renderer = globalThis.Renderer;
+  if (!Renderer || !Renderer.prototype) return;
+  const originalEndFrame = Renderer.prototype.endFrame;
+  if (typeof originalEndFrame !== 'function') return;
+  const stats = {
+    frames: 0,
+    intervals: 0,
+    minMs: 0,
+    maxMs: 0,
+    totalMs: 0,
+    lastMs: 0,
+  };
+  globalThis.__fxeRunnerFrameStats = stats;
+  const nowMs = () => {
+    const perf = globalThis.performance;
+    return perf && typeof perf.now === 'function' ? perf.now() : Date.now();
+  };
+  Renderer.prototype.endFrame = function fxeRunnerFrameStatsEndFrame(...args) {
+    const result = originalEndFrame.apply(this, args);
+    const now = nowMs();
+    if (stats.lastMs > 0) {
+      const dt = now - stats.lastMs;
+      if (Number.isFinite(dt) && dt > 0) {
+        stats.intervals += 1;
+        stats.totalMs += dt;
+        if (stats.minMs === 0 || dt < stats.minMs) stats.minMs = dt;
+        if (dt > stats.maxMs) stats.maxMs = dt;
+      }
+    }
+    stats.lastMs = now;
+    stats.frames += 1;
+    return result;
+  };
+})();
+)JS";
   // Combined trampoline: drains the debug server (if any) and then steps the
   // screenshot watchdog. Both attach through the host's single pump slot.
   struct combined_pump {
@@ -646,6 +687,40 @@ namespace {
   bool combined_paused_trampoline(void* user) {
     auto* cp = static_cast<combined_pump*>(user);
     return cp->srv ? cp->srv->is_paused() : false;
+  }
+
+  fxe::runner::frame_fps_stats read_frame_fps_stats(fxe::js::host& host) {
+    fxe::runner::frame_fps_stats out;
+    auto er = host.debug_evaluate(R"JS(
+(() => {
+  const s = globalThis.__fxeRunnerFrameStats;
+  if (!s || !s.intervals || !s.totalMs || !s.minMs || !s.maxMs) return null;
+  return {
+    frames: s.frames || 0,
+    intervals: s.intervals || 0,
+    minFps: 1000 / s.maxMs,
+    maxFps: 1000 / s.minMs,
+    avgFps: (s.intervals * 1000) / s.totalMs,
+  };
+})()
+)JS",
+                                  true);
+    if (!er.exception.empty() || er.json_value.empty())
+      return out;
+    try {
+      auto j = nlohmann::json::parse(er.json_value);
+      if (!j.is_object())
+        return out;
+      out.frames = j.value("frames", 0ull);
+      out.intervals = j.value("intervals", 0ull);
+      out.min_fps = j.value("minFps", 0.0);
+      out.max_fps = j.value("maxFps", 0.0);
+      out.avg_fps = j.value("avgFps", 0.0);
+      out.valid = out.intervals > 0 && out.min_fps > 0.0 && out.max_fps > 0.0 && out.avg_fps > 0.0;
+    } catch (...) {
+      out = {};
+    }
+    return out;
   }
 } // namespace
 
@@ -827,6 +902,15 @@ int main(int argc, char** argv) {
       std::fflush(stderr);
     }
 
+    if (status == 0 && opts.cpu_prof_md) {
+      auto r = host.run_script(kFrameStatsScript, "<fxe-runner-frame-stats>");
+      if (!r.ok) {
+        std::fprintf(stderr, "fxe_run: --cpu-prof-md: frame stats install failed: %s\n",
+                     r.message.c_str());
+        status = 1;
+      }
+    }
+
     if (opts.render_overrides.show_fps_counter) {
       auto r = host.run_script(kFpsCounterScript, "<fxe-runner-fps-counter>");
       if (!r.ok) {
@@ -921,7 +1005,8 @@ int main(int argc, char** argv) {
           else
             md_path += ".md";
         }
-        auto md = fxe::runner::render_markdown(merged);
+        auto fps = read_frame_fps_stats(host);
+        auto md = fxe::runner::render_markdown(merged, fps.valid ? &fps : nullptr);
         if (auto* f = std::fopen(md_path.c_str(), "wb")) {
           std::fwrite(md.data(), 1, md.size(), f);
           std::fclose(f);

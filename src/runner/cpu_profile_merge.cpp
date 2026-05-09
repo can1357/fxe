@@ -316,7 +316,13 @@ namespace fxe::runner {
                     100.0 * static_cast<double>(num) / static_cast<double>(den));
       return buf;
     }
-
+    std::string format_fps(double fps) {
+      if (fps <= 0.0)
+        return "0.00 fps";
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%.2f fps", fps);
+      return buf;
+    }
     std::string md_escape(std::string_view s) {
       std::string out;
       out.reserve(s.size());
@@ -342,7 +348,7 @@ namespace fxe::runner {
 
   } // namespace
 
-  std::string render_markdown(const profile_data& p, int top_n) {
+  std::string render_markdown(const profile_data& p, const frame_fps_stats* fps, int top_n) {
     // Sampling interval is the average gap between consecutive samples.
     // We treat each sample as accounting for one interval of self time on
     // its leaf node. timeDeltas[i] gives the gap *between* sample i and
@@ -504,6 +510,7 @@ namespace fxe::runner {
     {
       i64 period = p.sample_period_us > 0 ? p.sample_period_us : (p.samples.empty() ? 0 : 1000);
       double hz = period > 0 ? 1e6 / static_cast<double>(period) : 0.0;
+
       char buf[512];
       std::snprintf(buf, sizeof(buf),
                     "- duration: %s\n"
@@ -515,6 +522,13 @@ namespace fxe::runner {
                       static_cast<long long>(period));
         out.append(buf);
       }
+      if (fps && fps->valid) {
+        std::snprintf(buf, sizeof(buf), "\n- fps min|max|avg: %s | %s | %s (%llu frames)",
+                      format_fps(fps->min_fps).c_str(), format_fps(fps->max_fps).c_str(),
+                      format_fps(fps->avg_fps).c_str(),
+                      static_cast<unsigned long long>(fps->frames));
+        out.append(buf);
+      }
       out.append("\n");
       std::snprintf(buf, sizeof(buf),
                     "- nodes: %zu\n"
@@ -524,7 +538,6 @@ namespace fxe::runner {
                     format_us(total_us).c_str());
       out.append(buf);
     }
-
     // ---- Time breakdown by top-level subtree / synthetic frame ----------
     //
     // The merger plants two named subtree headers under the synthetic root

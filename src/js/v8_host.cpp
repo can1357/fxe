@@ -419,9 +419,14 @@ namespace fxe::js {
       //                          every frame; keep bytecode resident so the
       //                          existing code cache + ICs stay hot.
       //   --harmony-import-attributes: modern import-attribute syntax for TS.
-      v8::V8::SetFlagsFromString("--expose_gc"
-                                 " --no-flush-bytecode"
-                                 " --harmony-import-attributes");
+      std::string flags = "--expose_gc"
+                          " --no-flush-bytecode"
+                          " --harmony-import-attributes";
+      if (const char* extra = std::getenv("FXE_V8_FLAGS"); extra && *extra) {
+        flags.push_back(' ');
+        flags.append(extra);
+      }
+      v8::V8::SetFlagsFromString(flags.c_str());
       // Platform thread pool. Default (0) picks hardware_concurrency()-1, which
       // is wasteful on high-core machines (16+ idle threads contending with
       // render/audio). 4 workers cover compile + GC tasks comfortably.
