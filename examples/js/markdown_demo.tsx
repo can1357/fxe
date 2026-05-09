@@ -19,6 +19,7 @@ import {
   type Theme,
   ThemeProvider,
   type Node as UiNode,
+  useMemo,
   useState,
   useTheme,
   View,
@@ -367,8 +368,11 @@ interface InlineRunsProps {
 }
 function InlineRuns(props: InlineRunsProps): UiNode {
   const t = useTheme() as MarkdownTheme;
-  const runs: Inline[] = [];
-  for (const c of props.children) flatten(c, runs);
+  const runs = useMemo(() => {
+    const acc: Inline[] = [];
+    for (const c of props.children) flatten(c, acc);
+    return acc;
+  }, [props.children]);
   const baseSize = props.baseSize ?? t.fontSizes.md;
   const baseColor = props.baseColor ?? t.colors.text;
   // Render: each run becomes its own <Text>; siblings inside one <Text>
@@ -633,11 +637,14 @@ function splitLines(spans: CodeSpan[]): CodeSpan[][] {
 
 function MdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlockNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
-  const text = props.node.children.map((c) => c.text).join('');
-  const lang = props.node.lang;
-  const hl = lang ? Markdown.highlight(text, lang) : null;
-  const spans = hl ? buildSpans(text, hl.tokens) : [{ text }];
-  const lines = splitLines(spans);
+  const node = props.node;
+  const lang = node.lang;
+  const { lines, hasHighlighter } = useMemo(() => {
+    const text = node.children.map((c) => c.text).join('');
+    const hl = lang ? Markdown.highlight(text, lang) : null;
+    const spans = hl ? buildSpans(text, hl.tokens) : [{ text }];
+    return { lines: splitLines(spans), hasHighlighter: !!hl };
+  }, [node, lang]);
   const codeFontSize = t.fontSizes.sm + 1;
   return (
     <View
@@ -653,7 +660,7 @@ function MdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlock
     >
       {lang ? (
         <Text style={{ color: t.colors.mutedText, fontSize: t.fontSizes.sm }}>
-          {hl ? lang : `${lang} (no highlighter)`}
+          {hasHighlighter ? lang : `${lang} (no highlighter)`}
         </Text>
       ) : null}
       {lines.map((line, li) => (
@@ -815,7 +822,7 @@ function MdBlock(props: { key?: string | number; node: MdNode; depth?: number })
 
 function MarkdownRenderer(props: { key?: string | number; source: string }): UiNode {
   const t = useTheme() as MarkdownTheme;
-  const doc = Markdown.parse(props.source);
+  const doc = useMemo(() => Markdown.parse(props.source), [props.source]);
   return (
     <View
       style={{
