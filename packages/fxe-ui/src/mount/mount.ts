@@ -40,6 +40,17 @@ export interface MountOptions {
    * `lazy: false` if you genuinely need every frame.
    */
   lazy?: boolean;
+  /**
+   * Backdrop colour shown by the platform compositor for any region of the
+   * window not yet covered by a freshly presented frame. Set this to your
+   * app's body / root background to suppress the brief flash visible during
+   * live resize where the layer bounds grow on one compositor transaction
+   * but the new frame lands on the next.
+   *
+   * Accepts a packed `0xRRGGBBAA` integer. Omit to leave the platform
+   * default (transparent on macOS Metal, which presents as black).
+   */
+  backgroundColor?: number;
 }
 
 let nextMountId = 0;
@@ -73,6 +84,9 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
   renderTargetOwner = owner;
   setCurrentRenderTargetSize(window);
   setRenderTarget(window);
+  if (opts.backgroundColor !== undefined && typeof window.setBackgroundColor === 'function') {
+    window.setBackgroundColor(opts.backgroundColor);
+  }
 
   // Inject the framebuffer rect into the user root. The reconciler now
   // propagates internal `__layout` / `__textStyle` props from wrapper

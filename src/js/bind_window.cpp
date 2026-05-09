@@ -1075,6 +1075,33 @@ namespace fxe::js {
         return;
       w->set_opacity(static_cast<float>(info[0]->NumberValue(ctx).FromMaybe(1.0)));
     }
+    // Window.setBackgroundColor(0xRRGGBBAA) | (r,g,b,a) where each is 0..1.
+    // Sets the platform compositor's backdrop colour for any region of the
+    // surface not yet covered by a freshly presented frame. Use to suppress
+    // the brief flash during live resize where the layer bounds grow on one
+    // CATransaction but the new frame lands on the next. No-op on platforms
+    // without an equivalent surface property.
+    void win_set_background_color(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* w = unwrap_win(info.This());
+      if (!w || info.Length() < 1)
+        return;
+      float r = 0, g = 0, b = 0, a = 1;
+      if (info.Length() >= 4) {
+        r = static_cast<float>(info[0]->NumberValue(ctx).FromMaybe(0.0));
+        g = static_cast<float>(info[1]->NumberValue(ctx).FromMaybe(0.0));
+        b = static_cast<float>(info[2]->NumberValue(ctx).FromMaybe(0.0));
+        a = static_cast<float>(info[3]->NumberValue(ctx).FromMaybe(1.0));
+      } else {
+        const auto packed = static_cast<uint32_t>(info[0]->IntegerValue(ctx).FromMaybe(0));
+        r = static_cast<float>((packed >> 24) & 0xFF) / 255.0f;
+        g = static_cast<float>((packed >> 16) & 0xFF) / 255.0f;
+        b = static_cast<float>((packed >> 8) & 0xFF) / 255.0f;
+        a = static_cast<float>(packed & 0xFF) / 255.0f;
+      }
+      w->set_surface_background_color(r, g, b, a);
+    }
     void win_opacity(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* w = unwrap_win(info.This());
@@ -2221,6 +2248,7 @@ namespace fxe::js {
     proto->Set(iso, "maxSize", FunctionTemplate::New(iso, win_max_size));
     proto->Set(iso, "getMaxSize", FunctionTemplate::New(iso, win_max_size));
     proto->Set(iso, "setOpacity", FunctionTemplate::New(iso, win_set_opacity));
+    proto->Set(iso, "setBackgroundColor", FunctionTemplate::New(iso, win_set_background_color));
     proto->Set(iso, "opacity", FunctionTemplate::New(iso, win_opacity));
     proto->Set(iso, "setAlwaysOnTop", FunctionTemplate::New(iso, win_set_always_on_top));
     proto->Set(iso, "isAlwaysOnTop", FunctionTemplate::New(iso, win_is_always_on_top));

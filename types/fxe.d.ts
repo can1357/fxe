@@ -473,6 +473,18 @@ declare namespace FXE {
     maxSize(): [number, number] | null;
     getMaxSize(): [number, number] | null;
     setOpacity(alpha: number): void;
+    /**
+     * Sets the platform compositor's backdrop colour for any region of the
+     * surface not yet covered by a freshly presented frame. Use to suppress
+     * the brief flash during live resize where the layer bounds grow on one
+     * compositor transaction but the new frame lands on the next.
+     *
+     * Pass either a packed `0xRRGGBBAA` integer or four 0..1 RGBA floats.
+     * Maps to `CAMetalLayer.backgroundColor` on macOS; no-op on platforms
+     * without an equivalent surface property.
+     */
+    setBackgroundColor(rgba: number): void;
+    setBackgroundColor(r: number, g: number, b: number, a: number): void;
     opacity(): number;
     setAlwaysOnTop(enabled: boolean): void;
     isAlwaysOnTop(): boolean;

@@ -75,6 +75,7 @@
 #import <objc/runtime.h>
 #if FXE_HAS_WGPU
 #import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/CATransaction.h>
 #endif
 
 namespace fxe {
@@ -1003,6 +1004,38 @@ namespace fxe {
     GLFWwindow* native() const noexcept {
       return handle_;
     }
+
+#if defined(__APPLE__) && FXE_HAS_WGPU
+    // Cache the CAMetalLayer* created in make_wgpu_surface so we can update its
+    // backgroundColor (the colour shown by Core Animation for any layer pixels
+    // not yet covered by a freshly presented frame, which is what causes a
+    // brief flash during live resize).
+    void set_metal_layer_handle(void* layer) noexcept {
+      metal_layer_ = layer;
+    }
+    void* metal_layer_handle() const noexcept {
+      return metal_layer_;
+    }
+    void set_surface_background_color(float r, float g, float b, float a) override {
+      if (!metal_layer_)
+        return;
+      CAMetalLayer* layer = (__bridge CAMetalLayer*)metal_layer_;
+      CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+      CGFloat comps[4] = {static_cast<CGFloat>(r), static_cast<CGFloat>(g), static_cast<CGFloat>(b),
+                          static_cast<CGFloat>(a)};
+      CGColorRef col = CGColorCreate(cs, comps);
+      // The bounds-change animation has zero duration on Metal layers, but the
+      // backgroundColor change itself can be implicitly animated. Wrap in a
+      // CATransaction with actions disabled so the new colour is visible
+      // synchronously, before the next compositor commit.
+      [CATransaction begin];
+      [CATransaction setDisableActions:YES];
+      layer.backgroundColor = col;
+      [CATransaction commit];
+      CGColorRelease(col);
+      CGColorSpaceRelease(cs);
+    }
+#endif
 
     // -------- new API --------
     void set_title(std::string_view t) override {
@@ -2528,6 +2561,7 @@ namespace fxe {
 #endif
 #if defined(__APPLE__)
     void* wrap_view_ = nullptr;
+    void* metal_layer_ = nullptr; // CAMetalLayer*, retained by NSView; we cache the raw ptr.
     void* visual_effect_view_ = nullptr;
     std::vector<math::ivec4> pending_drag_rects_;
 #elif defined(_WIN32)
@@ -2609,7 +2643,12 @@ namespace fxe {
 
 #if defined(__APPLE__)
     wgpu::SurfaceSourceMetalLayer chain{};
-    chain.layer = fxe_wgpu_metal_layer_for_window(native, w.is_transparent());
+    void* metal = fxe_wgpu_metal_layer_for_window(native, w.is_transparent());
+    chain.layer = metal;
+#if FXE_HAS_GLFW
+    if (auto* gw = dynamic_cast<glfw_window*>(&w))
+      gw->set_metal_layer_handle(metal);
+#endif
     desc.nextInChain = &chain;
     return const_cast<wgpu::Instance&>(instance).CreateSurface(&desc);
 #elif defined(_WIN32)

@@ -154,7 +154,8 @@ export function timing(
     running = false;
     disposeFrame?.();
     disposeFrame = null;
-    if (Reflect.get(value, kActiveAnimation) === animation) Reflect.deleteProperty(value, kActiveAnimation);
+    if (Reflect.get(value, kActiveAnimation) === animation)
+      Reflect.deleteProperty(value, kActiveAnimation);
     callback?.({ finished });
     callback = undefined;
   };
@@ -186,7 +187,8 @@ export function clearActiveAnimation(
   value: AnimatedValue<number>,
   animation: ActiveAnimation,
 ): void {
-  if (Reflect.get(value, kActiveAnimation) === animation) Reflect.deleteProperty(value, kActiveAnimation);
+  if (Reflect.get(value, kActiveAnimation) === animation)
+    Reflect.deleteProperty(value, kActiveAnimation);
 }
 
 function stopActiveAnimation(value: AnimatedValue<number>, finished: boolean): void {

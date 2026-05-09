@@ -375,6 +375,20 @@ namespace fxe {
     using redraw_handler = std::function<void()>;
     virtual void set_redraw_handler(redraw_handler /*handler*/) {}
 
+    // Backdrop colour shown by the platform compositor for any region of the
+    // surface that is not yet covered by a freshly presented frame. On macOS
+    // this maps to `CAMetalLayer.backgroundColor`; on platforms that do not
+    // expose an equivalent it is a no-op. Set it to your app's body
+    // background to avoid a brief flash during live resize, where the layer
+    // bounds grow on one CATransaction but the new frame lands on the next.
+    // Components are linear-space 0..1 RGBA.
+    virtual void set_surface_background_color(float r, float g, float b, float a) {
+      (void)r;
+      (void)g;
+      (void)b;
+      (void)a;
+    }
+
     virtual ~window() = default;
 
   protected:
