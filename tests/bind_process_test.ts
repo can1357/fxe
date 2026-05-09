@@ -140,3 +140,68 @@ test('process on and off accept supported events and are chainable', () => {
     'off(unhandledRejection) should be chainable',
   );
 });
+
+test('process emits unhandledRejection for unhandled promise rejections', async () => {
+  const captured: unknown[] = [];
+  const handler = (reason: unknown, promise: unknown) => {
+    captured.push({ reason, isPromise: promise instanceof Promise });
+  };
+  process.on('unhandledRejection', handler);
+  try {
+    // Reject without attaching a handler so V8 fires
+    // kPromiseRejectWithNoHandler at the next microtask checkpoint.
+    Promise.reject(new Error('boom-unhandled'));
+    // Drain microtasks so the reject callback runs.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    assertEqual(captured.length, 1, 'one unhandledRejection should fire');
+    const entry = captured[0] as { reason: Error; isPromise: boolean };
+    assertEqual(entry.isPromise, true, 'second arg should be the Promise');
+    assert(entry.reason instanceof Error, 'reason should be the rejection value');
+    assertEqual((entry.reason as Error).message, 'boom-unhandled');
+  } finally {
+    process.off('unhandledRejection', handler);
+  }
+});
+
+test('process emits rejectionHandled when a late .catch attaches', async () => {
+  const unhandled: unknown[] = [];
+  const handled: unknown[] = [];
+  const onUnhandled = (_reason: unknown, _promise: unknown) => {
+    unhandled.push(_promise);
+  };
+  const onHandled = (promise: unknown) => {
+    handled.push(promise);
+  };
+  process.on('unhandledRejection', onUnhandled);
+  process.on('rejectionHandled', onHandled);
+  try {
+    const p = Promise.reject(new Error('boom-late'));
+    // Force the unhandled-rejection event to fire first.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    assertEqual(unhandled.length, 1, 'unhandledRejection should fire first');
+    // Now attach a late handler — V8 should fire kPromiseHandlerAddedAfterReject.
+    p.catch(() => {});
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    assertEqual(handled.length, 1, 'rejectionHandled should fire once');
+    assertEqual(handled[0], unhandled[0], 'rejectionHandled receives the same promise');
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+    process.off('rejectionHandled', onHandled);
+  }
+});
+
+test('process.off prevents subsequent unhandledRejection delivery', async () => {
+  let count = 0;
+  const handler = () => {
+    count += 1;
+  };
+  process.on('unhandledRejection', handler);
+  process.off('unhandledRejection', handler);
+  Promise.reject(new Error('boom-detached')).catch(() => {});
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  assertEqual(count, 0, 'detached handler must not fire');
+});

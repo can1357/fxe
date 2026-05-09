@@ -25,6 +25,15 @@ namespace fxe::js {
   void initialize(std::string_view argv0 = {}, std::string_view icudtl_path = {});
   void shutdown() noexcept;
 
+  // Free-standing helpers callable from any thread that already holds the
+  // isolate. `idle_notification` gives V8 a deadline (seconds, monotonic) to
+  // perform incremental GC work; call from frame-loop slack time. `notify_*`
+  // forward to v8::Isolate::MemoryPressureNotification — invoke when the
+  // window is hidden / minimised so V8 trims the heap.
+  void idle_notification(double budget_seconds);
+  void notify_memory_pressure_moderate();
+  void notify_memory_pressure_critical();
+
   // ----- Debug protocol surface ---------------------------------------------
   // These run on the same thread as the rest of the host API (the render
   // thread). Provided here so the fxe_debug library can poke V8 state without

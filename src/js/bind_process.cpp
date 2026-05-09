@@ -269,17 +269,8 @@ namespace fxe::js {
       {
         HandleScope hs(iso);
         auto ctx = iso->GetCurrentContext();
-        auto& reg = listeners_for(iso);
-        auto it = reg.events.find("exit");
-        if (it != reg.events.end()) {
-          Local<Value> argv[1] = {Integer::New(iso, code)};
-          for (auto& g : it->second) {
-            if (!g)
-              continue;
-            auto fn = g->Get(iso);
-            (void)fn->Call(ctx, ctx->Global(), 1, argv);
-          }
-        }
+        Local<Value> argv[1] = {Integer::New(iso, code)};
+        (void)emit_process_event(iso, ctx, "exit", 1, argv);
       }
       // Pump microtasks once so any scheduled work runs.
       iso->PerformMicrotaskCheckpoint();
@@ -870,6 +861,80 @@ namespace fxe::js {
   void set_host_argv(std::vector<std::string> argv) {
     std::lock_guard<std::mutex> lk(g_argv_mu);
     g_argv = std::move(argv);
+  }
+
+  int emit_process_event(Isolate* iso, Local<Context> ctx, std::string_view event, int argc,
+                         Local<Value> argv[]) {
+    HandleScope hs(iso);
+    // Snapshot live listener handles under the registry mutex so that a
+    // listener that calls process.on/off during dispatch can mutate the
+    // registry without invalidating our iteration.
+    std::vector<Global<Function>*> snapshot;
+    {
+      std::lock_guard<std::mutex> lk(g_listeners_mu);
+      auto reg_it = g_listeners.find(iso);
+      if (reg_it == g_listeners.end() || !reg_it->second)
+        return 0;
+      auto event_it = reg_it->second->events.find(std::string(event));
+      if (event_it == reg_it->second->events.end())
+        return 0;
+      snapshot.reserve(event_it->second.size());
+      for (auto& g : event_it->second) {
+        if (g)
+          snapshot.push_back(g.get());
+      }
+    }
+    Local<Object> recv;
+    {
+      Local<Value> proc_value;
+      if (ctx->Global()->Get(ctx, "process"_v8(iso)).ToLocal(&proc_value) &&
+          proc_value->IsObject()) {
+        recv = proc_value.As<Object>();
+      } else {
+        recv = ctx->Global();
+      }
+    }
+    int invoked = 0;
+    for (auto* g : snapshot) {
+      // Re-check the slot after every dispatch — a previous listener may have
+      // detached this one via process.off, in which case the unique_ptr was
+      // reset (see process_on_off_impl above).
+      if (!g || g->IsEmpty())
+        continue;
+      auto fn = g->Get(iso);
+      Local<Value> ignored;
+      TryCatch tc(iso);
+      if (!fn->Call(ctx, recv, argc, argv).ToLocal(&ignored)) {
+        // Surface listener exceptions to stderr so they don't silently swallow
+        // unhandledRejection / exit hooks. We can't rethrow — the caller (e.g.
+        // promise_reject_callback) is in a context where throwing is unsafe.
+        if (tc.HasCaught()) {
+          String::Utf8Value u(iso, tc.Exception());
+          if (*u)
+            std::fprintf(stderr, "process listener for '%.*s' threw: %s\n",
+                         static_cast<int>(event.size()), event.data(), *u);
+          tc.Reset();
+        }
+      }
+      ++invoked;
+    }
+    return invoked;
+  }
+
+  void clear_process_listeners(Isolate* iso) {
+    std::lock_guard<std::mutex> lk(g_listeners_mu);
+    auto it = g_listeners.find(iso);
+    if (it == g_listeners.end())
+      return;
+    if (it->second) {
+      for (auto& [_event, vec] : it->second->events) {
+        for (auto& g : vec) {
+          if (g)
+            g->Reset();
+        }
+      }
+    }
+    g_listeners.erase(it);
   }
 
   void install_process_global(Isolate* iso, Local<ObjectTemplate> global) {

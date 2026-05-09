@@ -2064,6 +2064,12 @@ namespace fxe::js {
           if (w->take_redraw_request())
             (void)invoke_on_frame(w);
         }
+        // Slack between paint completion and the next wait_events. Hand V8
+        // ~2 ms to chew on incremental GC / sweeping; this keeps the heap
+        // walking steadily instead of taking a stop-the-world hit mid-frame.
+        // Budget is intentionally small relative to a 16.6 ms frame so we
+        // never starve real input/redraw work.
+        fxe::js::idle_notification(0.002);
         pump_debug_for_isolate(iso);
         while (is_paused_for_isolate(iso)) {
           pump_debug_for_isolate(iso);

@@ -182,6 +182,21 @@ ctest --preset release --output-on-failure
 - **Errors:** Bindings throw Node-shaped errors `{code, errno, syscall, path}`
   where applicable (`EAUDIO_DECODE`, `ERR_FXE_UPDATE_*`, etc.). Async fs
   surfaces `AbortError` for AbortSignal cancellation.
+- **Logging (`<fxe/log.hpp>`):** All C++ diagnostics **MUST** route through
+  the `FXE_TRACE` / `FXE_DEBUG` / `FXE_INFO` / `FXE_WARN` / `FXE_ERROR` /
+  `FXE_CRITICAL` macros. Do **not** use `printf`, `fprintf(stderr, …)`,
+  `std::cout` / `std::cerr`, `std::clog`, or raw `spdlog::*` calls in new
+  code — they bypass the per-category level gate and the SPDLOG_LEVEL /
+  FXE_LOG_LEVELS env-var routing. Pick a dotted category that matches the
+  subsystem (`font.atlas`, `font.cache`, `wgpu.renderer`, `js.host`,
+  `debug.dispatch`, …) and reuse existing categories rather than coining
+  new ones for the same area. Hot-loop diagnostics go at `trace`; opt-in
+  per-frame streams at `debug`; one-shot startup messages at `info`;
+  unexpected-but-recoverable states at `warn`; failures at `err`. The
+  `category` argument **MUST** be a string literal so the call-site
+  cache collapses to a single static logger handle. When the level is
+  off, argument formatting is skipped — write `FXE_TRACE("font.cache",
+  "miss gid={}", gid)` rather than pre-building strings.
 - **V8 binding helpers (`<fxe/v8_helpers.hpp>`):** Bindings **MUST** route
   through these instead of hand-rolled equivalents. The header is the
   single source of truth for the four most-repeated V8 patterns; mixing

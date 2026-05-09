@@ -502,8 +502,7 @@ namespace fxe::runner {
     std::string out;
     out.append("# CPU profile\n\n");
     {
-      i64 period =
-          p.sample_period_us > 0 ? p.sample_period_us : (p.samples.empty() ? 0 : 1000);
+      i64 period = p.sample_period_us > 0 ? p.sample_period_us : (p.samples.empty() ? 0 : 1000);
       double hz = period > 0 ? 1e6 / static_cast<double>(period) : 0.0;
       char buf[512];
       std::snprintf(buf, sizeof(buf),

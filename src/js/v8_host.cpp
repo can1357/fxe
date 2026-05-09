@@ -79,6 +79,14 @@
 #include <unordered_set>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#elif defined(__linux__)
+#include <sys/sysinfo.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include <libplatform/libplatform.h>
 #include <v8-profiler.h>
 #include <v8.h>
@@ -107,6 +115,133 @@ namespace fxe::js {
     std::unordered_set<template_reset_fn>& template_resetter_set() {
       static std::unordered_set<template_reset_fn> s;
       return s;
+    }
+
+    // Total physical RAM in bytes; 0 if unavailable. Used to size V8's
+    // ResourceConstraints. fxe::runtime exposes a similar helper to JS via
+    // os.totalmem, but we don't want a header dep here just for a sysctl.
+    uint64_t physical_memory_bytes() {
+#if defined(__APPLE__)
+      uint64_t mem = 0;
+      size_t size = sizeof(mem);
+      return sysctlbyname("hw.memsize", &mem, &size, nullptr, 0) == 0 ? mem : 0;
+#elif defined(__linux__)
+      struct sysinfo info{};
+      if (sysinfo(&info) != 0)
+        return 0;
+      return static_cast<uint64_t>(info.totalram) * static_cast<uint64_t>(info.mem_unit);
+#elif defined(_WIN32)
+      MEMORYSTATUSEX status{};
+      status.dwLength = sizeof(status);
+      return GlobalMemoryStatusEx(&status) ? static_cast<uint64_t>(status.ullTotalPhys) : 0;
+#else
+      return 0;
+#endif
+    }
+
+    // Per-isolate map of unhandled-rejected promises. Populated by
+    // promise_reject_callback when V8 fires kPromiseRejectWithNoHandler so we
+    // can pair up a later kPromiseHandlerAddedAfterReject and dispatch the
+    // matching `rejectionHandled` event (Node semantics). Stored as a vector
+    // of (promise, reason) pairs because identity hashing on v8::Promise is
+    // not collision-free; linear search is fine for the realistic count of
+    // outstanding rejections.
+    struct pending_rejection {
+      v8::Global<v8::Promise> promise;
+      v8::Global<v8::Value> reason;
+    };
+    std::mutex g_pending_rejections_mu;
+    std::unordered_map<v8::Isolate*, std::vector<pending_rejection>> g_pending_rejections;
+
+    std::vector<pending_rejection>& pending_rejections_for(v8::Isolate* iso) {
+      // Caller MUST hold g_pending_rejections_mu.
+      return g_pending_rejections[iso];
+    }
+
+    // Visibility for unhandled promise rejections. Without this, a rejected
+    // promise that is never `.catch()`-ed disappears silently. Routes through
+    // process.emit('unhandledRejection', reason, promise) and
+    // process.emit('rejectionHandled', promise) so user code can install
+    // handlers exactly like Node.js. Falls back to the host's console sink
+    // when no listener is registered.
+    void promise_reject_callback(v8::PromiseRejectMessage msg) {
+      auto* iso = v8::Isolate::GetCurrent();
+      if (!iso)
+        return;
+      v8::HandleScope hs(iso);
+      auto promise = msg.GetPromise();
+      auto ctx = iso->GetCurrentContext();
+      if (ctx.IsEmpty())
+        return;
+      switch (msg.GetEvent()) {
+      case v8::kPromiseRejectWithNoHandler: {
+        auto value = msg.GetValue();
+        if (value.IsEmpty())
+          value = v8::Undefined(iso);
+        {
+          std::lock_guard<std::mutex> lk(g_pending_rejections_mu);
+          auto& pending = pending_rejections_for(iso);
+          pending.push_back(
+              {v8::Global<v8::Promise>(iso, promise), v8::Global<v8::Value>(iso, value)});
+        }
+        v8::Local<v8::Value> argv[2] = {value, promise};
+        const int invoked = emit_process_event(iso, ctx, "unhandledRejection", 2, argv);
+        if (invoked == 0) {
+          // No listener — preserve the previous behavior of warning through
+          // the console sink so dropped rejections aren't silently lost.
+          v8::String::Utf8Value utf8(iso, value);
+          const char* text = (*utf8 != nullptr) ? *utf8 : "<non-stringifiable rejection>";
+          char buf[1024];
+          const int n = std::snprintf(buf, sizeof(buf), "Unhandled promise rejection: %s", text);
+          dispatch_console_sink(iso, "error",
+                                std::string_view(buf, n > 0 ? static_cast<size_t>(n) : 0));
+        }
+        break;
+      }
+      case v8::kPromiseHandlerAddedAfterReject: {
+        bool found = false;
+        {
+          std::lock_guard<std::mutex> lk(g_pending_rejections_mu);
+          auto it = g_pending_rejections.find(iso);
+          if (it != g_pending_rejections.end()) {
+            auto& pending = it->second;
+            for (auto p_it = pending.begin(); p_it != pending.end(); ++p_it) {
+              if (p_it->promise.Get(iso) == promise) {
+                p_it->promise.Reset();
+                p_it->reason.Reset();
+                pending.erase(p_it);
+                found = true;
+                break;
+              }
+            }
+          }
+        }
+        if (found) {
+          v8::Local<v8::Value> argv[1] = {promise};
+          (void)emit_process_event(iso, ctx, "rejectionHandled", 1, argv);
+        }
+        break;
+      }
+      case v8::kPromiseRejectAfterResolved:
+      case v8::kPromiseResolveAfterResolved:
+        // V8 emits these for double-settle bugs. They're not part of the
+        // Node unhandledRejection/rejectionHandled contract; ignore here so
+        // user listeners aren't triggered for what is purely an internal
+        // misuse signal.
+        break;
+      }
+    }
+
+    void clear_pending_rejections(v8::Isolate* iso) {
+      std::lock_guard<std::mutex> lk(g_pending_rejections_mu);
+      auto it = g_pending_rejections.find(iso);
+      if (it == g_pending_rejections.end())
+        return;
+      for (auto& p : it->second) {
+        p.promise.Reset();
+        p.reason.Reset();
+      }
+      g_pending_rejections.erase(it);
     }
   } // namespace
 
@@ -275,11 +410,24 @@ namespace fxe::js {
         v8::V8::InitializeICUDefaultLocation(g_argv0.c_str());
         v8::V8::InitializeExternalStartupData(g_argv0.c_str());
       }
-      // HeapProfiler.collectGarbage uses RequestGarbageCollectionForTesting,
-      // which V8 documents as valid only when --expose_gc is set. Set it before
-      // V8 initialisation; LowMemoryNotification remains the fallback signal.
-      v8::V8::SetFlagsFromString("--expose_gc");
-      g_platform = v8::platform::NewDefaultPlatform();
+      // Flag block. Must precede V8::Initialize() — flags are baked at init.
+      //   --expose_gc:           HeapProfiler.collectGarbage relies on
+      //                          RequestGarbageCollectionForTesting, which V8
+      //                          documents as valid only with this flag.
+      //                          LowMemoryNotification is the fallback signal.
+      //   --no-flush-bytecode:   long-running app revisits the same code paths
+      //                          every frame; keep bytecode resident so the
+      //                          existing code cache + ICs stay hot.
+      //   --harmony-import-attributes: modern import-attribute syntax for TS.
+      v8::V8::SetFlagsFromString("--expose_gc"
+                                 " --no-flush-bytecode"
+                                 " --harmony-import-attributes");
+      // Platform thread pool. Default (0) picks hardware_concurrency()-1, which
+      // is wasteful on high-core machines (16+ idle threads contending with
+      // render/audio). 4 workers cover compile + GC tasks comfortably.
+      constexpr int kV8WorkerThreads = 4;
+      g_platform = v8::platform::NewDefaultPlatform(kV8WorkerThreads,
+                                                    v8::platform::IdleTaskSupport::kEnabled);
       v8::V8::InitializePlatform(g_platform.get());
       v8::V8::Initialize();
       g_initialized = true;
@@ -296,6 +444,27 @@ namespace fxe::js {
     // is the safe choice — the OS reclaims it.
     g_platform.release();
     g_initialized = false;
+  }
+
+  void idle_notification(double budget_seconds) {
+    if (!g_initialized || !g_platform)
+      return;
+    auto* iso = v8::Isolate::GetCurrent();
+    if (!iso)
+      return;
+    // Drains V8-posted idle tasks (incremental marking, sweeping) up to the
+    // given budget. Requires IdleTaskSupport::kEnabled at platform creation.
+    v8::platform::RunIdleTasks(g_platform.get(), iso, budget_seconds);
+  }
+
+  void notify_memory_pressure_moderate() {
+    if (auto* iso = v8::Isolate::GetCurrent())
+      iso->MemoryPressureNotification(v8::MemoryPressureLevel::kModerate);
+  }
+
+  void notify_memory_pressure_critical() {
+    if (auto* iso = v8::Isolate::GetCurrent())
+      iso->MemoryPressureNotification(v8::MemoryPressureLevel::kCritical);
   }
   namespace {
     struct cpu_profiler_deleter {
@@ -1821,11 +1990,35 @@ Error.prepareStackTrace = function(err, frames) {
     v8::Isolate::CreateParams params;
     allocator.reset(v8::ArrayBuffer::Allocator::NewDefaultAllocator());
     params.array_buffer_allocator = allocator.get();
+
+    // Size the heap based on the host machine rather than V8's embedded-device
+    // defaults. ConfigureDefaults takes physical memory and a virtual-memory
+    // ceiling (0 = no limit beyond the OS); V8 picks young/old generation
+    // sizes from there.
+    {
+      const uint64_t physical = physical_memory_bytes();
+      params.constraints.ConfigureDefaults(physical, 0);
+    }
+
     isolate = v8::Isolate::New(params);
 
     isolate->SetData(kIsolateSlotHostImpl, this);
     isolate->SetData(kIsolateSlotRuntimeId,
                      reinterpret_cast<void*>(static_cast<uintptr_t>(runtime_id)));
+
+    // Explicit microtask draining. We already call PerformMicrotaskCheckpoint
+    // at frame boundaries and inside the libuv loop; auto policy would re-drain
+    // after every binding callback (slower, and re-enters JS at surprising
+    // points inside C++ callbacks).
+    isolate->SetMicrotasksPolicy(v8::MicrotasksPolicy::kExplicit);
+
+    // Async stacks through TS -> binding -> TS get long fast. 32 frames is a
+    // good ceiling for debugging without runaway capture cost.
+    isolate->SetCaptureStackTraceForUncaughtExceptions(true, 32, v8::StackTrace::kDetailed);
+
+    // Surface unhandled rejections to the console sink so they don't vanish.
+    isolate->SetPromiseRejectCallback(&promise_reject_callback);
+
     v8::Isolate::Scope iscope(isolate);
     v8::HandleScope hscope(isolate);
 
@@ -2064,6 +2257,10 @@ Error.prepareStackTrace = function(err, frames) {
         // Drop the `_v8` literal cache while the isolate + a HandleScope are
         // still alive; Eternal handles cannot outlive the isolate.
         fxe::js::uninstall_string_cache(isolate);
+        // Drop process.on listener Globals + any tracked unhandled rejections
+        // while the isolate is alive — both keep v8::Globals tied to it.
+        clear_process_listeners(isolate);
+        clear_pending_rejections(isolate);
       }
       isolate->Dispose();
       isolate = nullptr;

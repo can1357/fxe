@@ -1846,7 +1846,7 @@ declare const path: {
   readonly delimiter: string;
 };
 
-type FxeProcessEvent = 'exit' | 'unhandledRejection';
+type FxeProcessEvent = 'exit' | 'unhandledRejection' | 'rejectionHandled';
 type FxeStdinEvent = 'data' | 'end' | 'error';
 
 type FxeStdin = {

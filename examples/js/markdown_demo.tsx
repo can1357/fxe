@@ -480,10 +480,7 @@ function mdHeading(props: { key?: string | number; node: FXEMarkdown.HeadingNode
 }
 const MdHeading = memo(mdHeading);
 
-function mdParagraph(props: {
-  key?: string | number;
-  node: FXEMarkdown.ParagraphNode;
-}): UiNode {
+function mdParagraph(props: { key?: string | number; node: FXEMarkdown.ParagraphNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
   return (
     <View style={{ marginBottom: t.spacing.sm }}>
@@ -493,10 +490,7 @@ function mdParagraph(props: {
 }
 const MdParagraph = memo(mdParagraph);
 
-function mdBlockquote(props: {
-  key?: string | number;
-  node: FXEMarkdown.BlockquoteNode;
-}): UiNode {
+function mdBlockquote(props: { key?: string | number; node: FXEMarkdown.BlockquoteNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
   return (
     <View
@@ -648,10 +642,7 @@ function splitLines(spans: CodeSpan[]): CodeSpan[][] {
   return lines;
 }
 
-function mdCodeBlock(props: {
-  key?: string | number;
-  node: FXEMarkdown.CodeBlockNode;
-}): UiNode {
+function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlockNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
   const node = props.node;
   const lang = node.lang;
@@ -731,10 +722,7 @@ function mdThematicBreak(): UiNode {
 }
 const MdThematicBreak = memo(mdThematicBreak);
 
-function mdTable(props: {
-  key?: string | number;
-  node: FXEMarkdown.TableNode;
-}): UiNode {
+function mdTable(props: { key?: string | number; node: FXEMarkdown.TableNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
   const rows: Array<{ row: FXEMarkdown.TableRowNode; head: boolean }> = [];
   for (const sec of props.node.children) {
@@ -793,10 +781,7 @@ function mdTable(props: {
 }
 const MdTable = memo(mdTable);
 
-function mdHtmlBlock(props: {
-  key?: string | number;
-  node: FXEMarkdown.HtmlBlockNode;
-}): UiNode {
+function mdHtmlBlock(props: { key?: string | number; node: FXEMarkdown.HtmlBlockNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
   return (
     <View
@@ -815,11 +800,7 @@ function mdHtmlBlock(props: {
 }
 const MdHtmlBlock = memo(mdHtmlBlock);
 
-function mdBlock(props: {
-  key?: string | number;
-  node: MdNode;
-  depth?: number;
-}): UiNode {
+function mdBlock(props: { key?: string | number; node: MdNode; depth?: number }): UiNode {
   const depth = props.depth ?? 0;
   switch (props.node.type) {
     case 'paragraph':
