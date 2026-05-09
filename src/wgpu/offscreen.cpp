@@ -495,6 +495,19 @@ namespace fxe {
         queued_custom_draws_.push_back(std::move(draw));
       }
 
+      // Bind / unbind a user texture slot (0..3) on the offscreen, mirroring
+      // `renderer_dawn::bind_user_texture`. Surface-cache bakes copy the
+      // parent renderer's slot bindings into their offscreen before queueing
+      // the cached buffer so nested `drawTextureQuad(slot=k, ...)` references
+      // sample the actual bound texture instead of the offscreen's
+      // placeholder atlas. Empty view reverts the slot to atlas_view_.
+      void bind_user_texture(u32 slot, wgpu::TextureView view) override {
+        if (slot >= user_tex_views_.size())
+          return;
+        user_tex_views_[slot] = std::move(view);
+        atlas_dirty_ = true;
+      }
+
     private:
       static offscreen_options sanitize(offscreen_options options) {
         options.width = std::max<u32>(options.width, 1);
@@ -662,12 +675,14 @@ namespace fxe {
                                      : (blur_capture_view_ ? blur_capture_view_ : atlas_view_);
         entries[7].binding = 7;
         entries[7].sampler = mask_sampler_;
-        // User texture slots; offscreens default them to atlas_view_ since
-        // surface caching usually applies to the main pass. JS can still
-        // bind these via a future API extension if needed.
+        // User texture slots. By default these point at the offscreen's own
+        // atlas placeholder, but surface-cache bakes mirror the parent
+        // renderer's bindings via `bind_user_texture` so cached subtrees that
+        // sample nested surfaces (`drawTextureQuad(slot=k, …)`) hit the
+        // intended views instead of the placeholder.
         for (u32 i = 0; i < 4; ++i) {
           entries[8 + i].binding = 8 + i;
-          entries[8 + i].textureView = atlas_view_;
+          entries[8 + i].textureView = user_tex_views_[i] ? user_tex_views_[i] : atlas_view_;
         }
         wgpu::BindGroupDescriptor bg_desc{};
         bg_desc.label = label;
@@ -1114,6 +1129,10 @@ namespace fxe {
       bool blur_texture_failure_logged_ = false;
       wgpu::Texture atlas_texture_;
       wgpu::TextureView atlas_view_;
+      // Optional user-texture slot bindings. Empty entries fall back to
+      // atlas_view_ in the bind group. Surface-cache bakes populate these
+      // via bind_user_texture before queueing a parent's cached buffer.
+      std::array<wgpu::TextureView, 4> user_tex_views_{};
       wgpu::Sampler atlas_sampler_;
       wgpu::Sampler mask_sampler_;
       bool atlas_dirty_ = false;

@@ -214,6 +214,53 @@ namespace fxe::js {
         std::memcpy(ab->Data(), pixels.data(), pixels.size());
       info.GetReturnValue().Set(Uint8Array::New(ab, 0, pixels.size()));
     }
+
+    // bindUserTexture(slot, sourceOrNull)
+    //
+    // Mirrors `Renderer.bindUserTexture` on the offscreen so surface-cache
+    // bakes can replicate the parent renderer's slot bindings into their
+    // offscreen before queueing a cached subtree. Without this, cached
+    // `drawTextureQuad(slot=k, ...)` references baked into a parent surface
+    // would sample the offscreen's placeholder atlas instead of the actual
+    // nested surface, leaking garbage into the parent's bake.
+    void offscreen_bind_user_texture(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_offscreen(info.This());
+      if (!r)
+        return;
+      if (info.Length() < 2) {
+        (void)throw_type_error(iso, "bindUserTexture(slot, offscreenOrNull)");
+        return;
+      }
+      auto ctx = iso->GetCurrentContext();
+      const u32 slot = info[0]->Uint32Value(ctx).FromMaybe(0);
+#if FXE_HAS_WGPU
+      if (info[1]->IsNullOrUndefined()) {
+        r->bind_user_texture(slot, wgpu::TextureView{});
+        return;
+      }
+      if (!info[1]->IsObject()) {
+        (void)throw_type_error(iso, "bindUserTexture: source must be an OffscreenRenderer or null");
+        return;
+      }
+      auto* inner_r = static_cast<renderer*>(unwrap(info[1].As<Object>(), TAG_RENDERER));
+      auto* src = inner_r ? dynamic_cast<offscreen_renderer*>(inner_r) : nullptr;
+      if (!src) {
+        (void)throw_type_error(iso, "bindUserTexture: source must be an OffscreenRenderer");
+        return;
+      }
+      auto view = src->color_texture_view();
+      if (!view) {
+        (void)throw_error(iso, "bindUserTexture: source has no sampleable color attachment");
+        return;
+      }
+      r->bind_user_texture(slot, std::move(view));
+#else
+      (void)slot;
+      (void)throw_error(iso, "bindUserTexture: WGPU backend not enabled");
+#endif
+    }
   } // namespace
 
   void install_offscreen_template(Isolate* iso, Local<ObjectTemplate> global) {
@@ -228,6 +275,7 @@ namespace fxe::js {
     proto->Set(iso, "endFrame", FunctionTemplate::New(iso, offscreen_end_frame));
     proto->Set(iso, "setClearColor", FunctionTemplate::New(iso, offscreen_set_clear_color));
     proto->Set(iso, "readPixels", FunctionTemplate::New(iso, offscreen_read_pixels));
+    proto->Set(iso, "bindUserTexture", FunctionTemplate::New(iso, offscreen_bind_user_texture));
 
     global->Set(iso, "OffscreenRenderer", tpl);
     offscreen_tpl_table()[iso].Reset(iso, tpl);

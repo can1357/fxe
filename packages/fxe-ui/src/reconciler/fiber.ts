@@ -196,13 +196,24 @@ interface SurfaceCacheEntry {
 
 interface RendererSurfaceState {
   free: number[];
+  // Live slot → OffscreenRenderer bindings on this renderer, mirrored on
+  // every `bindRendererUserTexture` call. Surface-cache bakes copy these
+  // into the new offscreen before queueing the cached buffer so cached
+  // `drawTextureQuad(slot=k, …)` references baked into a parent surface
+  // sample the actual nested-surface texture instead of the offscreen's
+  // placeholder atlas (which would otherwise leak garbage into the parent
+  // bake — the bug surfaceCache had before this state was tracked).
+  bound: (OffscreenRenderer | null)[];
 }
 const kRendererSurfaceState = Symbol('fxe-ui.rendererSurfaceState');
 
 function rendererSurfaceState(r: Renderer): RendererSurfaceState {
   let s = Reflect.get(r, kRendererSurfaceState) as RendererSurfaceState | undefined;
   if (!s) {
-    s = { free: [0, 1, 2, 3].slice(0, SURFACE_SLOT_CAP) };
+    s = {
+      free: [0, 1, 2, 3].slice(0, SURFACE_SLOT_CAP),
+      bound: new Array(SURFACE_SLOT_CAP).fill(null),
+    };
     Reflect.set(r, kRendererSurfaceState, s);
   }
   return s;
@@ -216,6 +227,21 @@ function allocSurfaceSlot(r: Renderer): number | null {
 function freeSurfaceSlot(r: Renderer, slot: number): void {
   const s = rendererSurfaceState(r);
   if (!s.free.includes(slot)) s.free.push(slot);
+}
+
+// Single chokepoint for `Renderer.bindUserTexture` so the reconciler's
+// view of which slot holds which OffscreenRenderer stays in sync with
+// what the GPU actually has bound. `bakeFiberSurface` reads back this
+// table to mirror the parent's bindings into the new offscreen before
+// queueing the cached subtree.
+function bindRendererUserTexture(
+  r: Renderer,
+  slot: number,
+  source: OffscreenRenderer | null,
+): void {
+  r.bindUserTexture(slot, source);
+  const s = rendererSurfaceState(r);
+  if (slot >= 0 && slot < s.bound.length) s.bound[slot] = source;
 }
 
 function translateMat(tx: number, ty: number): Float32Array {
@@ -250,9 +276,19 @@ function bakeFiberSurface(cache: CommandBuffer, renderer: Renderer): SurfaceCach
   }
   off.beginFrame();
   off.setClearColor(0, 0, 0, 0);
+  // Mirror the parent renderer's currently-bound user textures into the
+  // offscreen so any cached `drawTextureQuad(slot=k, …)` baked into this
+  // subtree (i.e. nested surface-cached layers) samples the same view the
+  // parent would have at draw time. Without this, slots fall back to the
+  // offscreen's atlas placeholder and nested bakes turn into garbage.
+  const parentState = rendererSurfaceState(renderer);
+  for (let i = 0; i < parentState.bound.length; i++) {
+    const src = parentState.bound[i];
+    if (src !== null && src !== off) off.bindUserTexture(i, src);
+  }
   off.queue(cache, translateMat(-bb.x + pad, -bb.y + pad));
   off.endFrame();
-  renderer.bindUserTexture(slot, off);
+  bindRendererUserTexture(renderer, slot, off);
   return {
     off,
     slot,
@@ -268,7 +304,7 @@ function bakeFiberSurface(cache: CommandBuffer, renderer: Renderer): SurfaceCach
 
 function releaseSurface(entry: SurfaceCacheEntry): void {
   try {
-    entry.renderer.bindUserTexture(entry.slot, null);
+    bindRendererUserTexture(entry.renderer, entry.slot, null);
   } catch (_e) {
     /* renderer may already be torn down */
   }
