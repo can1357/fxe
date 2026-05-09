@@ -181,22 +181,48 @@ namespace fxe::font {
       }
 
     private:
-      // Cache substitute Faces keyed by CTFontRef pointer identity. CoreText
-      // returns the same CTFontRef for repeated cascade hits within a process,
-      // so a flat map is enough. We retain CTFonts to keep the keys valid;
-      // the wrapping Face also retains internally for glyph rendering.
+      // Cache substitute Faces keyed by the logical font identity, not
+      // CTFontRef pointer identity. CoreText creates a fresh CTFontRef on
+      // every cascade resolution even when the resolved logical font is
+      // identical, so caching by pointer never hit and every cascade
+      // emoji/symbol minted a new face_id — exhausting the glyph cache
+      // budget within a few hundred frames and triggering eviction +
+      // repack thrash that scrambled cached text UVs.
+      //
+      // Logical identity = (PostScript name, quantised pixel size). Two
+      // CTFontRefs that wrap the same physical font at the same size
+      // produce the same key, so we get one Face per (font, size) pair
+      // and the glyph cache deduplicates correctly.
       Face* resolve_substitute_face(CTFontRef ct) {
-        auto it = substitute_faces_.find(ct);
-        if (it != substitute_faces_.end()) return it->second.get();
         const float px = static_cast<float>(CTFontGetSize(ct));
+        std::string key;
+        if (CFStringRef ps = CTFontCopyPostScriptName(ct); ps) {
+          char buf[256] = {};
+          if (CFStringGetCString(ps, buf, sizeof(buf), kCFStringEncodingUTF8)) {
+            key.assign(buf);
+          }
+          CFRelease(ps);
+        }
+        // Append size so different sizes of the same font get separate Faces.
+        // (Glyph rendering depends on size; sharing a Face across sizes
+        // would produce wrong-sized atlas entries.)
+        key.push_back('@');
+        const u32 size_q = static_cast<u32>(std::lround(px * 64.0f));
+        char size_buf[16];
+        std::snprintf(size_buf, sizeof(size_buf), "%u", size_q);
+        key.append(size_buf);
+
+        auto it = substitute_faces_.find(key);
+        if (it != substitute_faces_.end()) return it->second.get();
         auto wrapped = make_face_from_ctfont(reinterpret_cast<void*>(const_cast<__CTFont*>(ct)), px);
         if (!wrapped) return nullptr;
         Face* raw = wrapped.get();
-        substitute_faces_.emplace(ct, std::move(wrapped));
+        substitute_faces_.emplace(std::move(key), std::move(wrapped));
         return raw;
       }
 
-      std::unordered_map<CTFontRef, std::unique_ptr<Face>> substitute_faces_;
+      std::unordered_map<std::string, std::unique_ptr<Face>> substitute_faces_;
+
     };
 
   } // namespace

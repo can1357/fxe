@@ -7,6 +7,8 @@
 
 #include "bind_font.hpp"
 #include <fxe/command_buffer.hpp>
+#include <fxe/font.hpp>
+#include <fxe/font/glyph.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/primitives.hpp>
 #include <fxe/types.hpp>
@@ -1112,8 +1114,7 @@ namespace fxe::js {
       auto paint = info.Length() >= 3 ? decode_paint(iso, ctx, info[2])
                                       : primitives::paint_value::solid(white);
       primitives::fill_rule rule = primitives::fill_rule::nonzero;
-      if (info.Length() >= 4 && info[3]->IsString() &&
-          info[3].As<String>() == "evenodd"_v8)
+      if (info.Length() >= 4 && info[3]->IsString() && info[3].As<String>() == "evenodd"_v8)
         rule = primitives::fill_rule::evenodd;
       float depth = info.Length() >= 5 ? float(num(ctx, info[4])) : 0.0f;
       primitives::fill_path(*cb, p->path, paint, rule, depth);
@@ -1687,6 +1688,22 @@ namespace fxe::js {
       vp[2] = make_vertex({at.x, at.y + size.y}, depth, {u0, v1}, spr.texture, tint);
       vp[3] = make_vertex({at.x + size.x, at.y + size.y}, depth, {u1, v1}, spr.texture, tint);
     }
+
+    // Primitives.atlasEpoch() — combined generation of the shared glyph
+    // atlases (mask + color). Caching layers stamp this value alongside any
+    // recorded vertex data that references atlas UVs (drawText, drawTextRun,
+    // …); a mismatch on replay means the atlas was repacked under them and
+    // the stale UVs would sample the wrong glyphs. Wraps to 0 after 2^53.
+    void p_atlasEpoch(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto& gc = font::shared_glyph_cache();
+      const u64 mask_gen = gc.generation(font::Format::grayscale);
+      const u64 color_gen = gc.generation(font::Format::bgra);
+      // Mix the two generations into one Number. Both fit comfortably in
+      // the safe integer range under realistic eviction rates.
+      const double combined = static_cast<double>(mask_gen) + static_cast<double>(color_gen) * 1e9;
+      info.GetReturnValue().Set(Number::New(iso, combined));
+    }
   } // namespace
 
   void install_primitives_namespace(Isolate* iso, Local<ObjectTemplate> global) {
@@ -1726,6 +1743,7 @@ namespace fxe::js {
     P("fillRectRounded", p_fillRectRounded);
     P("drawRectRounded", p_drawRectRounded);
     P("drawText", p_drawText);
+    P("atlasEpoch", p_atlasEpoch);
     P("drawTextSpans", p_drawTextSpans);
     P("drawSelectionRects", p_drawSelectionRects);
     P("drawDecorationUnderline", p_drawDecorationUnderline);

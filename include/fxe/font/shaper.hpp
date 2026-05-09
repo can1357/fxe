@@ -65,6 +65,12 @@ namespace fxe::font {
                                                       const ShapeOptions& opts) = 0;
   };
 
-  [[nodiscard]] std::unique_ptr<Shaper> default_shaper();
+  // Process-wide shaper singleton. The shaper holds backend-specific caches
+  // (most importantly the CoreText cascade fallback `substitute_faces_` map);
+  // returning a fresh instance per call would mint new face IDs for every
+  // shape() invocation, blow up the glyph cache, and corrupt cached text
+  // vertex UVs. Callers must NOT assume ownership; the returned pointer
+  // outlives every Face/CommandBuffer interaction.
+  [[nodiscard]] Shaper* default_shaper();
 
 } // namespace fxe::font

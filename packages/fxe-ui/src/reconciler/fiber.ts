@@ -161,6 +161,20 @@ const SURFACE_MIN_VERTS = 200;
 const SURFACE_SLOT_CAP = 4;
 const SURFACE_PAD = 1;
 
+// Disable surface caching when FXE_DISABLE_SURFACE_CACHE=1 (benchmark unbaked
+// path or work around cache bugs without rebuilding).
+const SURFACE_CACHE_DISABLED = process.env.FXE_DISABLE_SURFACE_CACHE === '1';
+
+// Glyph atlas generation snapshot. Bumped whenever the shared glyph cache
+// repacks (LRU eviction). Cached vertex data records the epoch it was
+// built against; if the live atlas has advanced since, replaying would
+// sample stale UVs and render scrambled glyphs, so we treat any mismatch
+// as a cache miss and rebuild. `Primitives.atlasEpoch` is a tiny native
+// hop returning a Number, safe to call once per cached fiber per frame.
+function atlasEpoch(): number {
+  return Primitives.atlasEpoch();
+}
+
 interface SurfaceCacheEntry {
   off: OffscreenRenderer;
   slot: number;
@@ -170,6 +184,14 @@ interface SurfaceCacheEntry {
   height: number;
   renderer: Renderer;
   bakedEpoch: number;
+  // Atlas generation observed at bake time. The bake itself produced the
+  // offscreen pixels under that atlas layout, so the offscreen texture
+  // contents are stable; we only need to invalidate when the *upstream*
+  // command buffer that fed the bake has been re-cached against a newer
+  // atlas (which forces a fresh bake anyway via cache rebuild). The field
+  // is here for symmetry with cacheAtlasEpoch + future cross-frame
+  // checking; the surface fast path itself does not gate on it.
+  atlasEpoch: number;
 }
 
 interface RendererSurfaceState {
@@ -240,6 +262,7 @@ function bakeFiberSurface(cache: CommandBuffer, renderer: Renderer): SurfaceCach
     height: h,
     renderer,
     bakedEpoch: cache.epoch(),
+    atlasEpoch: atlasEpoch(),
   };
 }
 
@@ -487,6 +510,16 @@ interface Fiber {
   // Layer-only:
   cache: CommandBuffer | null;
   lastDeps: ReadonlyArray<unknown> | undefined;
+  // Atlas generation observed when `cache` was last built. Glyph-rendering
+  // primitives (drawText, drawTextSpans, drawTextRun) bake atlas UVs into
+  // vertex data; if the shared glyph cache repacks (LRU eviction under
+  // pressure), those UVs go stale and replaying the cached buffer samples
+  // arbitrary glyph regions — visible as scrambled text. Stamping the
+  // atlas epoch at build time and treating any mismatch as a cache miss
+  // forces a clean rebuild against the current atlas layout. Same field
+  // serves Layer caches, Component memo caches, and the surface-bake
+  // fast path.
+  cacheAtlasEpoch: number;
   // Hit targets registered during this Layer's last rebuild. Replayed verbatim
   // when a subsequent frame hits the cached CommandBuffer so click / focus /
   // keyboard targets survive Layer caching (otherwise hit_test would clear and
@@ -711,6 +744,7 @@ function newFiber(key: string, parent: Fiber | null): Fiber {
     cache: null,
     cachedHitTargets: null,
     lastDeps: undefined,
+    cacheAtlasEpoch: 0,
     lastProps: undefined,
     hooks: [],
     providedContext: null,
@@ -1200,11 +1234,13 @@ function renderNode(
   }
   if (node.type === 'component') {
     const memoInfo = node.memo;
+    const epoch = atlasEpoch();
     if (
       memoInfo &&
       !fiber.dirty &&
       fiber.cache !== null &&
       fiber.lastProps !== undefined &&
+      fiber.cacheAtlasEpoch === epoch &&
       memoInfo.areEqual(fiber.lastProps, node.props)
     ) {
       recordFiberCacheStatus(fiber, 'hit', false);
@@ -1261,6 +1297,7 @@ function renderNode(
       const fresh = new CommandBuffer();
       renderNodeList(fiber, [produced], fresh, ctx);
       fiber.cache = fresh;
+      fiber.cacheAtlasEpoch = epoch;
       fiber.lastProps = node.props;
       fiber.dirty = false;
       queueInto(target, fresh, undefined, undefined);
@@ -1345,10 +1382,12 @@ function renderNode(
   // Layer.
   const props = node.props;
   const wantDeps = props.deps;
+  const layerEpoch = atlasEpoch();
   const cacheable =
     wantDeps !== undefined &&
     !fiber.dirty &&
     fiber.cache !== null &&
+    fiber.cacheAtlasEpoch === layerEpoch &&
     depsEqual(fiber.lastDeps, wantDeps);
 
   if (cacheable && fiber.cache) {
@@ -1359,6 +1398,7 @@ function renderNode(
     // stream. Falls back to the regular replay if the bake was discarded
     // (slot freed, parent transform mismatch, etc.).
     if (
+      !SURFACE_CACHE_DISABLED &&
       fiber.surface !== null &&
       fiber.surface.bakedEpoch === cached.epoch() &&
       target instanceof Renderer
@@ -1390,6 +1430,7 @@ function renderNode(
     // not already running a transform/tint (those would need per-frame
     // re-bake, defeating the purpose).
     if (
+      !SURFACE_CACHE_DISABLED &&
       fiber.surface === null &&
       ctx.rootRenderer !== null &&
       props.transform === undefined &&
@@ -1422,6 +1463,7 @@ function renderNode(
   const fresh = new CommandBuffer();
   renderNodeList(fiber, props.children, fresh, ctx);
   fiber.cache = fresh;
+  fiber.cacheAtlasEpoch = layerEpoch;
   fiber.lastDeps = wantDeps;
   fiber.cachedHitTargets = captureHitTargetsSince(hitStart);
   fiber.dirty = false;

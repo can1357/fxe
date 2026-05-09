@@ -12,16 +12,27 @@ namespace fxe::font {
   std::unique_ptr<Shaper> make_coretext_shaper();
 #endif
 
-  std::unique_ptr<Shaper> default_shaper() {
+  Shaper* default_shaper() {
+    // Built once on first use and leaked deliberately — the shaper's caches
+    // are valid for the entire process lifetime. Constructing a fresh
+    // shaper per text draw was the source of a glyph-cache thrash bug:
+    // CoreText's per-shaper substitute-face cache went away with the
+    // shaper, so every cascade fallback (e.g. emoji within Latin text)
+    // minted a new face_id, the glyph cache never deduplicated, and after
+    // ~250 frames the cache hit its 4096-entry budget and started
+    // evicting + repacking on every frame, scrambling cached text UVs.
+    static Shaper* const k_shaper = []() -> Shaper* {
 #if FXE_FONT_HAS_CORETEXT && !FXE_FONT_HAS_HARFBUZZ
-    return make_coretext_shaper();
+      return make_coretext_shaper().release();
 #elif FXE_FONT_HAS_HARFBUZZ
-    return make_harfbuzz_shaper();
+      return make_harfbuzz_shaper().release();
 #elif FXE_FONT_HAS_CORETEXT
-    return make_coretext_shaper();
+      return make_coretext_shaper().release();
 #else
-    return nullptr;
+      return nullptr;
 #endif
+    }();
+    return k_shaper;
   }
 
 } // namespace fxe::font

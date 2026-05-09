@@ -849,6 +849,13 @@ declare namespace FXE {
       color?: Color,
       thickness?: number,
     ): void;
+    /**
+     * Generation counter for the shared glyph atlas. Increments when the
+     * atlas repacks (for example after LRU eviction). Callers that cache
+     * vertex or UV data derived from text layout should record this value
+     * and treat a mismatch on replay as a cache miss.
+     */
+    atlasEpoch(): number;
     drawText(
       cb: CommandBuffer | Renderer,
       at: Vec2,
