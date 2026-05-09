@@ -224,12 +224,31 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await page.client.aclose()
         mouse_events = [e for e in events if e["kind"] == "mouse"]
-        self.assertEqual(len(mouse_events), 2)
-        self.assertEqual(mouse_events[0]["params"]["type"], "down")
-        self.assertEqual(mouse_events[1]["params"]["type"], "up")
-        self.assertEqual(mouse_events[0]["params"]["button"], "left")
+        self.assertEqual(
+            [e["params"]["type"] for e in mouse_events],
+            ["move", "move", "down", "up"],
+        )
+        self.assertEqual(mouse_events[2]["params"]["button"], "left")
         self.assertEqual(mouse_events[0]["params"]["x"], 10)
         self.assertEqual(mouse_events[0]["params"]["y"], 20)
+
+
+    async def test_mouse_wheel_uses_browser_pixel_deltas(self) -> None:
+        events: list[dict[str, Any]] = []
+        async with StubServer(make_default_handlers(events)) as srv:
+            page = await _connect_page(srv.port)
+            try:
+                await page.mouse.wheel(96, 600, 450, 400)
+            finally:
+                await page.client.aclose()
+        mouse_events = [e for e in events if e["kind"] == "mouse"]
+        self.assertEqual(len(mouse_events), 1)
+        params = mouse_events[0]["params"]
+        self.assertEqual(params["type"], "wheel")
+        self.assertEqual(params["x"], 450)
+        self.assertEqual(params["y"], 400)
+        self.assertEqual(params["dx"], 2)
+        self.assertEqual(params["dy"], -12.5)
 
     async def test_keyboard_type(self) -> None:
         events: list[dict[str, Any]] = []

@@ -64,6 +64,7 @@ def _default_console_formatter(msg: ConsoleMessage) -> str:
     return f"[fxe:{level}] {msg.text}"
 
 
+_WHEEL_LINE_PX = 48.0
 class Mouse:
     def __init__(self, page: "Page") -> None:
         self._page = page
@@ -104,9 +105,21 @@ class Mouse:
         await asyncio.sleep(0.3)
 
     async def wheel(self, dx: float, dy: float, x: float = 0.0, y: float = 0.0) -> None:
+        """Scroll by browser-style pixel deltas at x/y.
+
+        Positive dy scrolls down, matching Puppeteer/Chrome. The debug
+        protocol carries native GLFW-style wheel offsets where positive y
+        means scroll up, so convert pixels to FXE line units here.
+        """
         await self._page._client.call(
             "Input.dispatchMouseEvent",
-            {"type": "wheel", "x": x, "y": y, "dx": dx, "dy": dy},
+            {
+                "type": "wheel",
+                "x": x,
+                "y": y,
+                "dx": dx / _WHEEL_LINE_PX,
+                "dy": -dy / _WHEEL_LINE_PX,
+            },
         )
 
 
