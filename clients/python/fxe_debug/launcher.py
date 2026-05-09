@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-from typing import Any
 
 from .client import Client
 from .page import Page
@@ -156,6 +155,7 @@ async def launch(
     show_fps: bool = False,
     no_lazy: bool = False,
     watch: bool = False,
+    render_surface: str | None = "offscreen",
     env: dict[str, str] | None = None,
     args: list[str] | None = None,
     ready_timeout: float = 10.0,
@@ -171,6 +171,8 @@ async def launch(
       show_fps    Draw a top-left FPS counter overlay.
       no_lazy     Disable lazy frames; redraw every loop iteration.
       watch       Enable HMR file watcher.
+      render_surface  Renderer backing for new Renderer(win): "offscreen"
+                    (default, no native window surface) or "window".
     """
     binary = _resolve_fxe_run(fxe_run)
     script_path = Path(script)
@@ -198,6 +200,10 @@ async def launch(
         cmd.append("--no-lazy")
     if watch:
         cmd.append("--watch")
+    if render_surface is not None:
+        if render_surface not in {"window", "offscreen"}:
+            raise ValueError("render_surface must be 'window', 'offscreen', or None")
+        cmd.append(f"--render-surface={render_surface}")
     if args:
         cmd.extend(args)
     cmd.append(str(script_path))

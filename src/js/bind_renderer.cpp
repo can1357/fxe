@@ -14,6 +14,7 @@
 #include <fxe/v8_strings.hpp>
 #include <fxe/window.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <unordered_map>
 #include <v8.h>
@@ -93,7 +94,25 @@ namespace fxe::js {
         opts.enable_bloom = runner_overrides.enable_bloom;
       if (runner_overrides.override_vsync)
         opts.vsync = runner_overrides.vsync;
-      auto r = create_renderer(*win, opts);
+      std::unique_ptr<renderer> r;
+      if (runner_overrides.override_render_surface &&
+          runner_overrides.render_surface == runner_render_surface::offscreen) {
+        offscreen_options offscreen_opts;
+        auto size = win->framebuffer_size();
+        offscreen_opts.width = std::max<u32>(size.x, 1u);
+        offscreen_opts.height = std::max<u32>(size.y, 1u);
+        offscreen_opts.multisample = opts.multisample_count;
+        try {
+          r = offscreen_renderer::create(offscreen_opts);
+        } catch (const std::exception& e) {
+          (void)throw_error(iso, "create offscreen renderer failed: {}", e.what());
+          return;
+        }
+        if (r)
+          r->set_bloom_enabled(opts.enable_bloom);
+      } else {
+        r = create_renderer(*win, opts);
+      }
       if (!r) {
         (void)throw_error(iso, "create_renderer failed");
         return;

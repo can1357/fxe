@@ -3,8 +3,8 @@
 // Usage:
 //   fxe_run [--debug[=PORT]] [--debug-host=ADDR] [--debug-pause]
 //           [--debug-keepalive] [--watch] [--vsync|--no-vsync] [--fps-limit=N]
-//           [--msaa=N] [--bloom|--no-bloom] [--show-fps]
-//           [--screenshot[=PATH]] [--screenshot-delay=MS]
+//           [--msaa=N] [--bloom|--no-bloom] [--render-surface=window|offscreen]
+//           [--show-fps] [--screenshot[=PATH]] [--screenshot-delay=MS]
 //           [--screenshot-frames=N] [--screenshot-size=WxH]
 //           [--screenshot-format=png|jpeg] [--screenshot-quality=N]
 //           [--screenshot-stay] <script.js> [more.js ...]
@@ -27,6 +27,9 @@
 //                       when no input arrives. Alias: --continuous.
 // --msaa=N              Override Renderer multisampleCount (0/1 disable MSAA).
 // --bloom / --no-bloom  Override Renderer enableBloom.
+// --render-surface=MODE Select renderer backing for `new Renderer(win)`.
+//                       `window` uses the native swapchain; `offscreen`
+//                       uses OffscreenRenderer and keeps Window invisible.
 // --show-fps            Draw a small top-left FPS counter before each
 //                       Renderer.endFrame().
 // --screenshot[=PATH]  Render the script, capture the framebuffer once a
@@ -53,6 +56,7 @@
 //   FXE_FPS_LIMIT=N       Override fps limit.
 //   FXE_MSAA=N            Override multisampleCount.
 //   FXE_BLOOM=1|0         Override enableBloom.
+//   FXE_RENDER_SURFACE=window|offscreen  Override renderer backing.
 //   FXE_SHOW_FPS=1        Enable FPS counter overlay.
 //   FXE_NO_LAZY=1         Disable lazy frames (continuous redraw).
 //   FXE_WATCH=1           Enable HMR file watcher.
@@ -141,8 +145,9 @@ namespace {
   void usage(const char* argv0) {
     std::fprintf(stderr,
                  "usage: %s [--debug[=PORT]] [--debug-host=ADDR] [--debug-pause]\n"
-                 "          [--debug-keepalive] [--vsync|--no-vsync] [--fps-limit=N]\n"
-                 "          [--msaa=N] [--bloom|--no-bloom] [--show-fps] [--no-lazy]\n"
+                 "          [--debug-keepalive] [--watch] [--vsync|--no-vsync]\n"
+                 "          [--fps-limit=N] [--msaa=N] [--bloom|--no-bloom]\n"
+                 "          [--render-surface=window|offscreen] [--show-fps] [--no-lazy]\n"
                  "          [--screenshot[=PATH]] [--screenshot-delay=MS]\n"
                  "          [--screenshot-frames=N] [--screenshot-size=WxH]\n"
                  "          [--screenshot-format=png|jpeg] [--screenshot-quality=N]\n"
@@ -170,6 +175,9 @@ namespace {
                  "  --msaa=N              Override Renderer multisampleCount.\n"
                  "                          Use 0 or 1 to disable MSAA.\n"
                  "  --bloom / --no-bloom  Override Renderer enableBloom.\n"
+                 "  --render-surface=MODE Select renderer backing: window or offscreen.\n"
+                 "                          Offscreen keeps Window invisible and uses\n"
+                 "                          OffscreenRenderer for new Renderer(win).\n"
                  "  --show-fps            Draw a top-left FPS counter overlay.\n"
                  "\n"
                  "  --watch                Watch loaded file modules and fire global\n"
@@ -206,6 +214,7 @@ namespace {
                  "  FXE_FPS_LIMIT=N          Override fps limit.\n"
                  "  FXE_MSAA=N               Override multisampleCount.\n"
                  "  FXE_BLOOM=1|0            Override enableBloom (1=on, 0=off).\n"
+                 "  FXE_RENDER_SURFACE=MODE Override renderer backing (window/offscreen).\n"
                  "  FXE_SHOW_FPS=1           Enable FPS counter overlay.\n"
                  "  FXE_NO_LAZY=1            Disable lazy frames (continuous redraw).\n"
                  "  FXE_WATCH=1              Enable HMR file watcher.",
@@ -258,6 +267,29 @@ namespace {
     return false;
   }
 
+  bool apply_render_surface(cli_options& o, std::string_view value) {
+    std::string mode(value);
+    std::transform(mode.begin(), mode.end(), mode.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (mode == "window") {
+      o.render_overrides.override_render_surface = true;
+      o.render_overrides.render_surface = fxe::js::runner_render_surface::window;
+      o.render_overrides.override_window_visible = false;
+      o.render_overrides.window_visible = true;
+      return true;
+    }
+    if (mode == "offscreen") {
+      o.render_overrides.override_render_surface = true;
+      o.render_overrides.render_surface = fxe::js::runner_render_surface::offscreen;
+      // Offscreen mode still lets scripts construct Window objects for event
+      // loops/input dispatch, but those windows are only control surfaces.
+      o.render_overrides.override_window_visible = true;
+      o.render_overrides.window_visible = false;
+      return true;
+    }
+    return false;
+  }
+
   // Apply environment variables as defaults into `opts`.
   // CLI flags parsed later will override these values for any flag that
   // appears on the command line, because parse_args always writes the field
@@ -301,6 +333,8 @@ namespace {
       o.render_overrides.override_bloom = true;
       o.render_overrides.enable_bloom = (c == '1' || c == 't' || c == 'y');
     }
+    if (const char* v = std::getenv("FXE_RENDER_SURFACE"); v && *v)
+      (void)apply_render_surface(o, v);
     if (env_bool("FXE_SHOW_FPS"))
       o.render_overrides.show_fps_counter = true;
     if (env_bool("FXE_NO_LAZY"))
@@ -358,6 +392,13 @@ namespace {
         o.render_overrides.enable_bloom = false;
       } else if (a == "--show-fps") {
         o.render_overrides.show_fps_counter = true;
+      } else if (starts_with(a, "--render-surface=") || starts_with(a, "--surface=")) {
+        std::string_view value = starts_with(a, "--surface=") ? a.substr(10) : a.substr(17);
+        if (!apply_render_surface(o, value)) {
+          std::fprintf(stderr, "fxe_run: --render-surface must be 'window' or 'offscreen'\n");
+          o.show_usage = true;
+          return o;
+        }
       } else if (a == "--no-lazy" || a == "--continuous") {
         o.render_overrides.force_continuous = true;
       } else if (a == "--watch") {

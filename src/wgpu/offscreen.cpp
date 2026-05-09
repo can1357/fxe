@@ -100,6 +100,15 @@ namespace fxe {
         return pixels_;
       }
 
+      capture_result capture_frame() override {
+        capture_result result;
+        result.ok = true;
+        result.width = options_.width;
+        result.height = options_.height;
+        result.rgba = read_rgba8();
+        return result;
+      }
+
       window& get_window() override {
         return window_;
       }
@@ -446,6 +455,15 @@ namespace fxe {
         if (pixels_.size() != pixel_count())
           pixels_.assign(pixel_count(), 0);
         return pixels_;
+      }
+
+      capture_result capture_frame() override {
+        capture_result result;
+        result.ok = true;
+        result.width = options_.width;
+        result.height = options_.height;
+        result.rgba = read_rgba8();
+        return result;
       }
 
       wgpu::TextureView color_texture_view() const override {

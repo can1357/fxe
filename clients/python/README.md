@@ -19,6 +19,10 @@ async def main():
 asyncio.run(main())
 ```
 
+`launch()` defaults to `render_surface="offscreen"` so SDK-driven checks do
+not pop up an application window. Pass `render_surface="window"` when you
+specifically need the native window-backed renderer.
+
 ## Connect to an existing instance
 
 ```python

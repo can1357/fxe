@@ -20,6 +20,8 @@
 #include <vector>
 #ifdef FXE_HAS_V8
 #include <atomic>
+#include <fxe/js_bindings.hpp>
+#include <fxe/offscreen.hpp>
 #include <fxe/v8_host.hpp>
 #endif
 #if defined(_WIN32)
@@ -749,6 +751,55 @@ namespace {
     fs::remove_all(dir);
   }
 
+  void test_runner_render_surface_offscreen(fxe::js::host& host) {
+    namespace fs = std::filesystem;
+    auto previous = fxe::js::get_runner_render_overrides();
+    struct override_guard {
+      fxe::js::runner_render_overrides previous;
+      ~override_guard() {
+        fxe::js::set_runner_render_overrides(previous);
+      }
+    } guard{previous};
+
+    auto overrides = previous;
+    overrides.override_render_surface = true;
+    overrides.render_surface = fxe::js::runner_render_surface::offscreen;
+    overrides.override_window_visible = true;
+    overrides.window_visible = false;
+    fxe::js::set_runner_render_overrides(overrides);
+
+    auto dir = fs::temp_directory_path() / "fxe-render-surface-debug-test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    auto entry = dir / "entry.ts";
+    write_text(entry,
+               "import { Window, Renderer, Primitives } from 'fxe';\n"
+               "const win = new Window({ width: 32, height: 24, title: 'offscreen test' });\n"
+               "const r = new Renderer(win);\n"
+               "r.beginFrame();\n"
+               "Primitives.fillRect(r, 0, 0, 32, 24, 0, 0xff0000ff);\n"
+               "r.endFrame();\n"
+               "globalThis.__surfaceVisible = win.isVisible();\n");
+
+    auto loaded = host.run_module_file(entry);
+    CHECK(loaded.ok);
+    CHECK(dynamic_cast<fxe::offscreen_renderer*>(host.active_renderer()) != nullptr);
+    auto visible = host.debug_evaluate("globalThis.__surfaceVisible", true);
+    CHECK(visible.exception.empty());
+    CHECK(visible.json_value == "false");
+    auto* renderer = host.active_renderer();
+    CHECK(renderer != nullptr);
+    if (renderer) {
+      auto cap = renderer->capture_frame();
+      CHECK(cap.ok);
+      CHECK(cap.width == 32);
+      CHECK(cap.height == 24);
+      CHECK(cap.rgba.size() >= static_cast<usize>(32 * 24 * 4));
+    }
+
+    fs::remove_all(dir);
+  }
+
   void test_cpu_profiler_dispatch(fxe::js::host& host) {
     using namespace fxe::debug;
     dispatch_context cx{};
@@ -1018,6 +1069,10 @@ int main([[maybe_unused]] int argc, char** argv) {
     test_reconciler_snapshot_dispatch(host);
     test_ndjson_multiclient_routing_and_events(host);
     test_ndjson_session_cap_and_gap_reuse(host);
+  }
+  {
+    fxe::js::host host;
+    test_runner_render_surface_offscreen(host);
   }
 #endif
 

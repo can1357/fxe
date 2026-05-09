@@ -778,6 +778,9 @@ namespace fxe::js {
           return;
         }
       }
+      const auto& runner_overrides = get_runner_render_overrides();
+      if (runner_overrides.override_window_visible)
+        desc.visible = runner_overrides.window_visible;
       auto w = create_window(desc);
       if (!w) {
         delete h;
@@ -1997,8 +2000,6 @@ namespace fxe::js {
             (void)invoke_on_frame(w);
         }
       }
-
-
 
       while (true) {
         auto wins = h->windows();

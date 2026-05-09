@@ -29,6 +29,7 @@ namespace fxe::js {
   // Process-level overrides installed by fxe_run before user code executes.
   // Bindings apply only fields whose override_* bit is set so programmatic
   // options remain authoritative unless the runner explicitly requests a cutover.
+  enum class runner_render_surface : u8 { window = 0, offscreen };
   struct runner_render_overrides {
     bool override_vsync = false;
     bool vsync = true;
@@ -38,6 +39,10 @@ namespace fxe::js {
     bool enable_bloom = true;
     bool override_fps = false;
     double fps = 0.0;
+    bool override_render_surface = false;
+    runner_render_surface render_surface = runner_render_surface::window;
+    bool override_window_visible = false;
+    bool window_visible = true;
     bool show_fps_counter = false;
     // When set, the app run loop drives a redraw every iteration even
     // when no input events arrive. Vsync (when on) still gates actual

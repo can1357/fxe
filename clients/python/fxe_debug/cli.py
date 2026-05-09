@@ -7,11 +7,10 @@ import asyncio
 import json
 import signal
 import sys
-from pathlib import Path
 
+from .client import ProtocolError
 from .launcher import LaunchError, connect, launch
 from .page import Page
-from .client import ProtocolError
 
 
 async def _connect_existing(host: str, port: int) -> Page:
@@ -236,6 +235,7 @@ async def cmd_launch(ns: argparse.Namespace) -> int:
             show_fps=ns.show_fps,
             no_lazy=ns.no_lazy,
             watch=ns.watch,
+            render_surface=ns.render_surface,
         )
     except LaunchError as exc:
         print(f"launch failed: {exc}", file=sys.stderr)
@@ -352,6 +352,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="no_lazy",
         help="Disable lazy frames (continuous redraw)",
+    )
+    s.add_argument(
+        "--render-surface",
+        choices=["offscreen", "window"],
+        default="offscreen",
+        dest="render_surface",
+        help="Renderer backing for launched scripts (default: offscreen)",
     )
     s.add_argument(
         "--watch",
