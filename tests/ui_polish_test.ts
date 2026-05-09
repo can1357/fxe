@@ -190,6 +190,44 @@ test('createContext and useContext propagate changed values through memo boundar
   assertEqual(seen.join(','), 'a,b');
 });
 
+test('context-dirtied components redraw stable descendant layers', () => {
+  const CountContext = createContext(1);
+  const seen: number[] = [];
+  const Consumer = memo(
+    Component(() => {
+      const count = useContext(CountContext);
+      seen.push(count);
+      return Layer({
+        key: 'stable-layer',
+        deps: ['stable'],
+        children: [Draw((cb: CommandBuffer) => point(cb, count))],
+      });
+    }, 'LayeredContextConsumer'),
+  );
+
+  const tree = (count: number): Node =>
+    root('context-layer-root', [
+      CountContext.Provider({
+        key: 'provider',
+        value: count,
+        children: Consumer({ key: 'consumer' }),
+      }),
+    ]);
+
+  const first = new CommandBuffer();
+  render(tree(1), first);
+  assertEqual(first.vertexCount(), 1);
+
+  const second = new CommandBuffer();
+  render(tree(1), second);
+  assertEqual(second.vertexCount(), 1);
+
+  const third = new CommandBuffer();
+  render(tree(3), third);
+  assertEqual(third.vertexCount(), 3);
+  assertEqual(seen.join(','), '1,3');
+});
+
 test('mounting a sibling provider does not dirty existing memo consumers', () => {
   const TextContext = createContext('default');
   const renders: Record<string, number> = { a: 0, b: 0 };

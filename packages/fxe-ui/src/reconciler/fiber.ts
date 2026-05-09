@@ -1436,10 +1436,11 @@ function renderNodeList(
   nodes: readonly Node[],
   target: CommandBuffer | Renderer,
   ctx: RenderCtx,
+  forceTraversal = false,
 ): void {
   const children = reconcileChildren(owner, nodes);
   for (let i = 0; i < nodes.length; ++i) {
-    renderNode(nodes[i], children[i], target, ctx);
+    renderNode(nodes[i], children[i], target, ctx, forceTraversal);
   }
 }
 
@@ -1448,9 +1449,10 @@ function renderBoundaryFallback(
   child: BoundaryChild,
   target: CommandBuffer | Renderer,
   ctx: RenderCtx,
+  forceTraversal = false,
 ): void {
   const fallback = singleBoundaryNode(child);
-  renderNodeList(fiber, [fallback], target, ctx);
+  renderNodeList(fiber, [fallback], target, ctx, forceTraversal);
 }
 
 function renderNode(
@@ -1458,6 +1460,7 @@ function renderNode(
   fiber: Fiber,
   target: CommandBuffer | Renderer,
   ctx: RenderCtx,
+  forceTraversal = false,
 ): void {
   fiber.node = node;
   updateFiberDebugNode(fiber, node);
@@ -1475,6 +1478,7 @@ function renderNode(
   if (node.type === 'component') {
     const memoInfo = node.memo;
     const epoch = atlasEpoch();
+    const wasDirty = fiber.dirty;
     const nextInternalLayout = node.internalLayout ?? null;
     const nextInternalTextStyle = node.internalTextStyle ?? null;
     const internalInputsEqual =
@@ -1485,24 +1489,30 @@ function renderNode(
     // identity-keyed cache downstream (layout, useMemo deps over parent ref,
     // etc.) hits. Memo'd nodes use their custom comparator; everything else
     // pays one shallowEqualProps call per render.
-    if (fiber.lastProps !== undefined && fiber.lastProps !== node.props) {
-      const propsEqual =
+    const hadLastProps = fiber.lastProps !== undefined;
+    let propsEqualToLast = hadLastProps && Object.is(fiber.lastProps, node.props);
+    if (hadLastProps && !propsEqualToLast) {
+      propsEqualToLast =
         node.memo !== undefined
           ? node.memo.areEqual(fiber.lastProps, node.props)
           : shallowEqualProps(fiber.lastProps, node.props);
-      if (propsEqual) {
+      if (propsEqualToLast) {
         (node as { props: unknown }).props = fiber.lastProps;
       }
     }
+    // If this component's output may have changed, wrapper children below it
+    // must not replay stale layer caches before changed descendant props land.
+    const forceProducedTraversal =
+      wasDirty || !internalInputsEqual || !hadLastProps || !propsEqualToLast;
     if (memoInfo) {
       const trace = memoTraceState();
       const bail =
         internalInputsEqual &&
-        !fiber.dirty &&
+        !wasDirty &&
         fiber.cache !== null &&
-        fiber.lastProps !== undefined &&
+        hadLastProps &&
         fiber.cacheAtlasEpoch === epoch &&
-        memoInfo.areEqual(fiber.lastProps, node.props);
+        propsEqualToLast;
       if (trace) {
         const dn = node.displayName ?? 'anon';
         let slot = trace.byName.get(dn);
@@ -1518,15 +1528,15 @@ function renderNode(
           };
           trace.byName.set(dn, slot);
         }
-        const reason: keyof typeof slot = fiber.dirty
+        const reason: keyof typeof slot = wasDirty
           ? 'dirty'
           : fiber.cache === null
             ? 'noCache'
-            : fiber.lastProps === undefined
+            : !hadLastProps
               ? 'noLastProps'
               : fiber.cacheAtlasEpoch !== epoch
                 ? 'epoch'
-                : !memoInfo.areEqual(fiber.lastProps, node.props)
+                : !propsEqualToLast
                   ? 'propsDiff'
                   : 'hit';
         trace.totals.total++;
@@ -1610,7 +1620,7 @@ function renderNode(
       RenderStats.recordRebuild();
       const fresh = new CommandBuffer();
       const hitStart = hitTargetCount();
-      renderNodeList(fiber, [produced], fresh, ctx);
+      renderNodeList(fiber, [produced], fresh, ctx, forceProducedTraversal);
       fiber.cachedHitTargets = captureHitTargetsSince(hitStart);
       fiber.cache = fresh;
       fiber.cacheAtlasEpoch = epoch;
@@ -1618,7 +1628,7 @@ function renderNode(
       fiber.dirty = false;
       queueInto(target, fresh, undefined, undefined);
     } else {
-      renderNodeList(fiber, [produced], target, ctx);
+      renderNodeList(fiber, [produced], target, ctx, forceProducedTraversal);
       fiber.lastProps = node.props;
       recordFiberCacheStatus(fiber, 'miss', true);
       fiber.dirty = false;
@@ -1649,7 +1659,13 @@ function renderNode(
     }
     ctx.contextStack.push({ ctx: providerCtx, value: node.props.value });
     try {
-      renderNodeList(fiber, normalizeBoundaryChildren(node.props.children), target, ctx);
+      renderNodeList(
+        fiber,
+        normalizeBoundaryChildren(node.props.children),
+        target,
+        ctx,
+        forceTraversal,
+      );
       fiber.dirty = false;
       recordFiberCacheStatus(fiber, 'miss', true);
     } finally {
@@ -1658,7 +1674,13 @@ function renderNode(
     return;
   }
   if (node.type === 'portal') {
-    renderNodeList(fiber, normalizeBoundaryChildren(node.props.children), node.props.to, ctx);
+    renderNodeList(
+      fiber,
+      normalizeBoundaryChildren(node.props.children),
+      node.props.to,
+      ctx,
+      forceTraversal,
+    );
     recordFiberCacheStatus(fiber, 'miss', true);
     fiber.dirty = false;
     return;
@@ -1667,7 +1689,7 @@ function renderNode(
     const fresh = new CommandBuffer();
     const children = normalizeBoundaryChildren(node.props.children);
     try {
-      renderNodeList(fiber, children, fresh, ctx);
+      renderNodeList(fiber, children, fresh, ctx, forceTraversal);
       fiber.dirty = false;
       recordFiberCacheStatus(fiber, 'miss', true);
       queueInto(target, fresh, undefined, undefined);
@@ -1678,7 +1700,7 @@ function renderNode(
       node.props.onError?.(e);
       const fallback =
         typeof node.props.fallback === 'function' ? node.props.fallback(e) : node.props.fallback;
-      renderBoundaryFallback(fiber, fallback, target, ctx);
+      renderBoundaryFallback(fiber, fallback, target, ctx, forceTraversal);
       fiber.dirty = false;
       recordFiberCacheStatus(fiber, 'miss', true);
     }
@@ -1688,20 +1710,21 @@ function renderNode(
     const fresh = new CommandBuffer();
     const children = normalizeBoundaryChildren(node.props.children);
     try {
-      renderNodeList(fiber, children, fresh, ctx);
+      renderNodeList(fiber, children, fresh, ctx, forceTraversal);
       fiber.dirty = false;
       recordFiberCacheStatus(fiber, 'miss', true);
       queueInto(target, fresh, undefined, undefined);
     } catch (e) {
       if (!asThenable(e)) throw e;
       watchSuspenseWakeable(e);
-      renderBoundaryFallback(fiber, node.props.fallback, target, ctx);
+      renderBoundaryFallback(fiber, node.props.fallback, target, ctx, forceTraversal);
       fiber.dirty = false;
       recordFiberCacheStatus(fiber, 'miss', true);
     }
     return;
   }
   // Layer.
+  if (forceTraversal) fiber.dirty = true;
   const props = node.props;
   const wantDeps = props.deps;
   const layerEpoch = atlasEpoch();
@@ -1783,7 +1806,7 @@ function renderNode(
   recordFiberCacheStatus(fiber, 'miss', true);
   const hitStart = hitTargetCount();
   const fresh = new CommandBuffer();
-  renderNodeList(fiber, props.children, fresh, ctx);
+  renderNodeList(fiber, props.children, fresh, ctx, forceTraversal);
   fiber.cache = fresh;
   fiber.cacheAtlasEpoch = layerEpoch;
   fiber.lastDeps = wantDeps;

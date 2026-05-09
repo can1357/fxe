@@ -642,58 +642,59 @@ function splitLines(spans: CodeSpan[]): CodeSpan[][] {
   return lines;
 }
 
-function codeLineColumns(line: CodeSpan[]): number {
-  let columns = 0;
+const TAB_COLUMNS = 4;
+
+function expandCodeLineTabs(line: CodeSpan[]): CodeSpan[] {
+  const out: CodeSpan[] = [];
+  let column = 0;
   for (const span of line) {
-    for (const ch of span.text) columns += ch === '\t' ? 4 : 1;
+    let text = '';
+    for (const ch of span.text) {
+      if (ch === '\t') {
+        const spaces = TAB_COLUMNS - (column % TAB_COLUMNS);
+        text += ' '.repeat(spaces);
+        column += spaces;
+      } else {
+        text += ch;
+        column += 1;
+      }
+    }
+    if (text.length > 0) out.push({ text, name: span.name });
   }
-  return columns;
+  return out;
 }
 
-function renderCodeGlyphs(
+function codeLineText(line: CodeSpan[]): string {
+  return line.map((span) => span.text).join('');
+}
+
+function codeLineWidth(line: CodeSpan[], fontSize: number): number {
+  const text = codeLineText(line);
+  return text.length === 0 ? 0 : Primitives.calcText(text, fontSize)[0];
+}
+
+function renderCodeSpans(
   line: CodeSpan[],
   palette: SyntaxPalette,
   fallback: Color,
   monoFamily: string,
   fontSize: number,
-  cellWidth: number,
   lineHeight: number,
 ): UiNode[] {
-  const out: UiNode[] = [];
-  let col = 0;
-  for (let si = 0; si < line.length; si++) {
-    const span = line[si];
-    const color = span.name ? syntaxColor(palette, span.name, fallback) : fallback;
-    for (const ch of span.text) {
-      if (ch === '\t') {
-        col += 4;
-        continue;
-      }
-      if (ch === ' ') {
-        col += 1;
-        continue;
-      }
-      out.push(
-        <Text
-          key={`g-${si}-${col}`}
-          style={{
-            position: 'absolute',
-            left: col * cellWidth,
-            top: 0,
-            width: cellWidth,
-            height: lineHeight,
-            color,
-            fontFamily: monoFamily,
-            fontSize,
-          }}
-        >
-          {ch}
-        </Text>,
-      );
-      col += 1;
-    }
-  }
-  return out;
+  return line.map((span, si) => (
+    <Text
+      key={`s-${si}`}
+      style={{
+        height: lineHeight,
+        color: span.name ? syntaxColor(palette, span.name, fallback) : fallback,
+        fontFamily: monoFamily,
+        fontSize,
+        lineHeight,
+      }}
+    >
+      {span.text}
+    </Text>
+  ));
 }
 
 function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlockNode }): UiNode {
@@ -704,13 +705,14 @@ function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlock
     const text = node.children.map((c) => c.text).join('');
     const hl = lang ? Markdown.highlight(text, lang) : null;
     const spans = hl ? buildSpans(text, hl.tokens) : [{ text }];
-    return { lines: splitLines(spans), hasHighlighter: !!hl };
+    return { lines: splitLines(spans).map(expandCodeLineTabs), hasHighlighter: !!hl };
   }, [node, lang]);
   const codeFontSize = t.fontSizes.sm + 1;
-  const [cellWidth, codeLineHeight] = Primitives.calcText('M', codeFontSize);
-  const fixedCellWidth = Math.max(1, Math.ceil(cellWidth));
+  const codeLineHeight = Primitives.calcText('M', codeFontSize)[1];
   const fixedLineHeight = Math.max(codeFontSize + 4, Math.ceil(codeLineHeight));
-  const codeWidth = Math.max(1, ...lines.map(codeLineColumns)) * fixedCellWidth;
+  const codeWidth = Math.ceil(
+    Math.max(1, ...lines.map((line) => codeLineWidth(line, codeFontSize))),
+  );
   return (
     <View
       style={{
@@ -720,11 +722,18 @@ function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlock
         borderColor: t.colors.border,
         padding: t.spacing.md,
         marginY: t.spacing.sm,
-        gap: t.spacing.xs,
+        gap: 0,
       }}
     >
       {lang ? (
-        <Text style={{ color: t.colors.mutedText, fontSize: t.fontSizes.sm }}>
+        <Text
+          style={{
+            marginBottom: t.spacing.xs,
+            color: t.colors.mutedText,
+            fontSize: t.fontSizes.sm,
+            lineHeight: fixedLineHeight,
+          }}
+        >
           {hasHighlighter ? lang : `${lang} (no highlighter)`}
         </Text>
       ) : null}
@@ -732,18 +741,18 @@ function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlock
         <View
           key={`code-line-${li}`}
           style={{
-            position: 'relative',
+            flexDirection: 'row',
+            alignItems: 'flex-start',
             width: codeWidth,
             height: fixedLineHeight,
           }}
         >
-          {renderCodeGlyphs(
+          {renderCodeSpans(
             line,
             t.syntax,
             t.colors.text,
             t.fonts.mono,
             codeFontSize,
-            fixedCellWidth,
             fixedLineHeight,
           )}
         </View>
