@@ -276,7 +276,26 @@ namespace fxe::runner {
       std::string url;
       i64 self_us = 0;
       i64 total_us = 0;
+      // Best-effort representative source line for the function/url
+      // pair. Set on first non-empty contribution; reset to -1 if
+      // a subsequent node instance disagrees, so the column never
+      // misrepresents a single canonical location.
+      int line = -1;
+      bool line_set = false;
     };
+
+    // Synthetic CDP frames that represent V8/state, not user code:
+    // (root), (idle), (program), (garbage collector), (native), (js),
+    // (parser), (compiler), …  We keep them in the leaderboards (they
+    // explain idle vs. busy time) but exclude them from the JS-only
+    // and Hot files views.
+    bool is_synthetic_frame(std::string_view fn) {
+      return fn.size() >= 2 && fn.front() == '(' && fn.back() == ')';
+    }
+
+    bool is_native_frame(std::string_view fn) {
+      return fn.rfind("[native] ", 0) == 0;
+    }
 
     std::string format_us(i64 us) {
       char buf[64];
@@ -422,6 +441,17 @@ namespace fxe::runner {
       a.function_name = n.frame.function_name;
       a.url = n.frame.url;
       a.self_us += self_us_by_node[i];
+      // Capture a representative source line. CDP lineNumber is 0-based;
+      // we display 1-based so editors jump correctly. Reset to -1 if
+      // multiple nodes for the same key disagree.
+      if (n.frame.line_number >= 0) {
+        if (!a.line_set) {
+          a.line = n.frame.line_number + 1;
+          a.line_set = true;
+        } else if (a.line != n.frame.line_number + 1) {
+          a.line = -1;
+        }
+      }
       // Total time is summed inclusively; aggregating across multiple node
       // instances of the same fn would double-count if one fn appears as
       // an ancestor of itself (recursion). We sum total only over nodes
@@ -469,35 +499,96 @@ namespace fxe::runner {
     for (auto& [k, v] : by_fn)
       rows.push_back(v);
 
-    auto sort_self = [&] {
-      std::sort(rows.begin(), rows.end(),
-                [](const agg& a, const agg& b) { return a.self_us > b.self_us; });
-    };
-    auto sort_total = [&] {
-      std::sort(rows.begin(), rows.end(),
-                [](const agg& a, const agg& b) { return a.total_us > b.total_us; });
-    };
-
     std::string out;
-    char header[256];
-    std::snprintf(header, sizeof(header),
-                  "# CPU profile\n\n"
-                  "- duration: %s\n"
-                  "- samples: %zu\n"
-                  "- nodes: %zu\n"
-                  "- dropped (sampler overflow): %llu\n"
-                  "- accounted self-time: %s\n\n",
-                  format_us(p.end_time - p.start_time).c_str(), p.samples.size(), p.nodes.size(),
-                  static_cast<unsigned long long>(p.dropped_samples), format_us(total_us).c_str());
-    out.append(header);
+    out.append("# CPU profile\n\n");
+    {
+      i64 period =
+          p.sample_period_us > 0 ? p.sample_period_us : (p.samples.empty() ? 0 : 1000);
+      double hz = period > 0 ? 1e6 / static_cast<double>(period) : 0.0;
+      char buf[512];
+      std::snprintf(buf, sizeof(buf),
+                    "- duration: %s\n"
+                    "- samples: %zu",
+                    format_us(p.end_time - p.start_time).c_str(), p.samples.size());
+      out.append(buf);
+      if (period > 0) {
+        std::snprintf(buf, sizeof(buf), " @ ~%.0f Hz (period %lld µs)", hz,
+                      static_cast<long long>(period));
+        out.append(buf);
+      }
+      out.append("\n");
+      std::snprintf(buf, sizeof(buf),
+                    "- nodes: %zu\n"
+                    "- dropped (sampler overflow): %llu\n"
+                    "- accounted self-time: %s\n\n",
+                    p.nodes.size(), static_cast<unsigned long long>(p.dropped_samples),
+                    format_us(total_us).c_str());
+      out.append(buf);
+    }
 
-    auto emit_table = [&](const char* title) {
+    // ---- Time breakdown by top-level subtree / synthetic frame ----------
+    //
+    // The merger plants two named subtree headers under the synthetic root
+    // ((js) and (native)); V8 itself emits synthetic leaves like (program),
+    // (idle), (garbage collector). Surfacing both up-front lets readers
+    // sanity-check whether the run was JS-bound, native-bound, or just
+    // sleeping in mach_msg.
+    {
+      out.append("## Time breakdown\n\n");
+      out.append("| bucket | total | total% |\n");
+      out.append("|---|---:|---:|\n");
+      auto emit = [&](const char* label, i64 us) {
+        char line[256];
+        std::snprintf(line, sizeof(line), "| %s | %s | %s |\n", label, format_us(us).c_str(),
+                      format_pct(us, total_us).c_str());
+        out.append(line);
+      };
+      // Subtree headers: direct children of the (root) node.
+      if (!p.nodes.empty()) {
+        for (int cid : p.nodes.front().children) {
+          usize idx = static_cast<usize>(cid - 1);
+          if (idx >= p.nodes.size())
+            continue;
+          const auto& c = p.nodes[idx];
+          if (c.frame.function_name == "(js)" || c.frame.function_name == "(native)") {
+            char label[64];
+            std::snprintf(label, sizeof(label), "%s subtree", c.frame.function_name.c_str());
+            emit(label, total_us_by_node[idx]);
+          }
+        }
+      }
+      // Synthetic V8 buckets, summed across every node carrying that name.
+      static const char* kSynthetic[] = {"(program)", "(idle)", "(garbage collector)", "(parser)",
+                                         "(compiler)"};
+      for (const char* name : kSynthetic) {
+        i64 sum = 0;
+        for (usize i = 0; i < p.nodes.size(); ++i)
+          if (p.nodes[i].frame.function_name == name)
+            sum += self_us_by_node[i];
+        if (sum > 0)
+          emit(name, sum);
+      }
+      out.append("\n");
+    }
+
+    auto file_cell = [&](const agg& r) -> std::string {
+      std::string s = md_escape(short_url(r.url));
+      if (r.line > 0 && !r.url.empty()) {
+        char tail[32];
+        std::snprintf(tail, sizeof(tail), ":%d", r.line);
+        s.append(tail);
+      }
+      return s;
+    };
+
+    auto emit_table = [&](const char* title, const std::vector<const agg*>& view) {
       out.append("## ").append(title).append("\n\n");
       out.append("| # | self | self% | total | total% | function | file |\n");
       out.append("|---:|---:|---:|---:|---:|---|---|\n");
       int rank = 0;
-      int limit = top_n > 0 ? top_n : static_cast<int>(rows.size());
-      for (auto& r : rows) {
+      int limit = top_n > 0 ? top_n : static_cast<int>(view.size());
+      for (const auto* rp : view) {
+        const auto& r = *rp;
         if (r.self_us == 0 && r.total_us == 0)
           continue;
         if (++rank > limit)
@@ -507,16 +598,175 @@ namespace fxe::runner {
                       format_us(r.self_us).c_str(), format_pct(r.self_us, total_us).c_str(),
                       format_us(r.total_us).c_str(), format_pct(r.total_us, total_us).c_str(),
                       md_escape(r.function_name.empty() ? "(anonymous)" : r.function_name).c_str(),
-                      md_escape(short_url(r.url)).c_str());
+                      file_cell(r).c_str());
         out.append(line);
       }
       out.append("\n");
     };
 
-    sort_self();
-    emit_table("Top by self time");
-    sort_total();
-    emit_table("Top by total time");
+    auto view_all = [&](auto cmp) {
+      std::vector<const agg*> v;
+      v.reserve(rows.size());
+      for (const auto& r : rows)
+        v.push_back(&r);
+      std::sort(v.begin(), v.end(), [&](const agg* a, const agg* b) { return cmp(*a, *b); });
+      return v;
+    };
+
+    emit_table("Top by self time",
+               view_all([](const agg& a, const agg& b) { return a.self_us > b.self_us; }));
+    emit_table("Top by total time",
+               view_all([](const agg& a, const agg& b) { return a.total_us > b.total_us; }));
+
+    // JS-only view: drop synthetic and native frames so language-level
+    // hotspots aren't drowned in InterpreterEntryTrampoline / mach_msg.
+    {
+      std::vector<const agg*> v;
+      v.reserve(rows.size());
+      for (const auto& r : rows) {
+        if (is_synthetic_frame(r.function_name) || is_native_frame(r.function_name))
+          continue;
+        v.push_back(&r);
+      }
+      std::sort(v.begin(), v.end(),
+                [](const agg* a, const agg* b) { return a->self_us > b->self_us; });
+      emit_table("Top by self time (JS only)", v);
+    }
+
+    // ---- Hot files: aggregate self by url -------------------------------
+    {
+      std::unordered_map<std::string, i64> by_url;
+      by_url.reserve(rows.size());
+      for (const auto& r : rows) {
+        if (r.url.empty())
+          continue;
+        if (is_synthetic_frame(r.function_name))
+          continue;
+        by_url[r.url] += r.self_us;
+      }
+      std::vector<std::pair<std::string, i64>> ranked(by_url.begin(), by_url.end());
+      std::sort(ranked.begin(), ranked.end(),
+                [](const auto& a, const auto& b) { return a.second > b.second; });
+      out.append("## Hot files\n\n");
+      out.append("| # | self | self% | file |\n");
+      out.append("|---:|---:|---:|---|\n");
+      int rank = 0;
+      int limit = top_n > 0 ? top_n / 2 : static_cast<int>(ranked.size());
+      if (limit < 15)
+        limit = 15;
+      for (const auto& [url, us] : ranked) {
+        if (us == 0)
+          continue;
+        if (++rank > limit)
+          break;
+        char line[1024];
+        std::snprintf(line, sizeof(line), "| %d | %s | %s | %s |\n", rank, format_us(us).c_str(),
+                      format_pct(us, total_us).c_str(), md_escape(short_url(url)).c_str());
+        out.append(line);
+      }
+      out.append("\n");
+    }
+
+    // ---- Hot stacks: top leaf-rooted call stacks by sample weight -------
+    //
+    // Folds samples by their leaf->root frame signature (truncated to a
+    // fixed depth so deep ts-compiler stacks don't fragment the table) and
+    // ranks by aggregate µs. This is what `flamegraph --collapse` would
+    // call a folded-stacks view; the markdown form is just a list of the
+    // top N with their leaf-up frames inlined.
+    if (!p.samples.empty()) {
+      constexpr usize kStackDepth = 8;
+      std::vector<int> parent2(p.nodes.size(), 0);
+      for (usize i = 0; i < p.nodes.size(); ++i)
+        for (int c : p.nodes[i].children)
+          if (static_cast<usize>(c - 1) < parent2.size())
+            parent2[static_cast<usize>(c - 1)] = p.nodes[i].id;
+
+      struct stack_agg {
+        std::vector<std::string> frames; // "fn @ short_url[:line]" leaf-first
+        i64 weight_us = 0;
+        u64 hits = 0;
+      };
+      std::unordered_map<std::string, stack_agg> by_stack;
+      by_stack.reserve(p.samples.size() / 4 + 16);
+
+      for (usize si = 0; si < p.samples.size(); ++si) {
+        int leaf = p.samples[si];
+        i64 period = (si < p.time_deltas.size() && p.time_deltas[si] > 0)
+                         ? p.time_deltas[si]
+                         : (p.sample_period_us > 0 ? p.sample_period_us : 1000);
+
+        std::vector<std::string> frames;
+        std::string sig;
+        sig.reserve(128);
+        int cur = leaf;
+        usize hops = 0;
+        while (cur > 0 && static_cast<usize>(cur - 1) < p.nodes.size() && hops < kStackDepth) {
+          const auto& n = p.nodes[static_cast<usize>(cur - 1)];
+          // Skip the (root)/(js)/(native) headers so they don't dominate
+          // every stack signature.
+          bool skip = (n.frame.function_name == "(root)" || n.frame.function_name == "(js)" ||
+                       n.frame.function_name == "(native)");
+          if (!skip) {
+            std::string label =
+                n.frame.function_name.empty() ? "(anonymous)" : n.frame.function_name;
+            std::string url_short = short_url(n.frame.url);
+            std::string line;
+            line.append(label);
+            if (!n.frame.url.empty() || n.frame.line_number >= 0) {
+              line.append(" @ ").append(url_short);
+              if (n.frame.line_number >= 0) {
+                char tail[32];
+                std::snprintf(tail, sizeof(tail), ":%d", n.frame.line_number + 1);
+                line.append(tail);
+              }
+            }
+            sig.append(line).push_back('\x1f');
+            frames.push_back(std::move(line));
+            ++hops;
+          }
+          int pid = parent2[static_cast<usize>(cur - 1)];
+          if (pid == cur)
+            break;
+          cur = pid;
+        }
+        if (frames.empty())
+          continue;
+        auto& a = by_stack[sig];
+        if (a.frames.empty())
+          a.frames = std::move(frames);
+        a.weight_us += period;
+        a.hits += 1;
+      }
+
+      std::vector<const stack_agg*> ranked;
+      ranked.reserve(by_stack.size());
+      for (auto& [k, v] : by_stack)
+        ranked.push_back(&v);
+      std::sort(ranked.begin(), ranked.end(),
+                [](const stack_agg* a, const stack_agg* b) { return a->weight_us > b->weight_us; });
+
+      out.append("## Hot stacks\n\n");
+      out.append("Top leaf-rooted call stacks (depth ≤ ");
+      out.append(std::to_string(kStackDepth)).append(") aggregated by sample weight.\n\n");
+      int limit = 20;
+      if (top_n > 0 && top_n / 3 > limit)
+        limit = top_n / 3;
+      int rank = 0;
+      for (const auto* sp : ranked) {
+        if (++rank > limit)
+          break;
+        char head[128];
+        std::snprintf(head, sizeof(head), "%d. %s (%s, %llu samples)\n", rank,
+                      format_us(sp->weight_us).c_str(), format_pct(sp->weight_us, total_us).c_str(),
+                      static_cast<unsigned long long>(sp->hits));
+        out.append(head);
+        for (const auto& f : sp->frames)
+          out.append("   - `").append(md_escape(f)).append("`\n");
+      }
+      out.append("\n");
+    }
+
     return out;
   }
 

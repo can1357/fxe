@@ -29,6 +29,6 @@ namespace fxe::runner {
 
   // Markdown report aggregated by (functionName | url). top_n caps each
   // table's rows; pass <=0 for all rows.
-  std::string render_markdown(const profile_data& p, int top_n = 40);
+  std::string render_markdown(const profile_data& p, int top_n = 60);
 
 } // namespace fxe::runner
