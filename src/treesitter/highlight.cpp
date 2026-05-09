@@ -874,41 +874,67 @@ namespace fxe::highlight {
     // is matched against canonical names directly.
     std::string_view canonicalize(std::string_view name) {
       // typescript family
-      if (name == "ts") return "typescript";
-      if (name == "jsx") return "tsx";
-      if (name == "js" || name == "mjs" || name == "cjs") return "javascript";
+      if (name == "ts")
+        return "typescript";
+      if (name == "jsx")
+        return "tsx";
+      if (name == "js" || name == "mjs" || name == "cjs")
+        return "javascript";
       // c family
       if (name == "c++" || name == "cxx" || name == "cc" || name == "h" || name == "hpp")
         return "cpp";
-      if (name == "cs" || name == "csharp" || name == "c#") return "c_sharp";
-      if (name == "objective-c" || name == "objectivec" || name == "m") return "objc";
+      if (name == "cs" || name == "csharp" || name == "c#")
+        return "c_sharp";
+      if (name == "objective-c" || name == "objectivec" || name == "m")
+        return "objc";
       // shell
-      if (name == "sh" || name == "shell" || name == "zsh") return "bash";
+      if (name == "sh" || name == "shell" || name == "zsh")
+        return "bash";
       // scripting
-      if (name == "py") return "python";
-      if (name == "rb") return "ruby";
-      if (name == "rs") return "rust";
-      if (name == "kt" || name == "kts") return "kotlin";
-      if (name == "ps" || name == "ps1") return "powershell";
-      if (name == "pl") return "perl";
+      if (name == "py")
+        return "python";
+      if (name == "rb")
+        return "ruby";
+      if (name == "rs")
+        return "rust";
+      if (name == "kt" || name == "kts")
+        return "kotlin";
+      if (name == "ps" || name == "ps1")
+        return "powershell";
+      if (name == "pl")
+        return "perl";
       // data
-      if (name == "yml") return "yaml";
-      if (name == "jsonc" || name == "json5") return "json";
-      if (name == "dockerfile" || name == "containerfile") return "dockerfile";
-      if (name == "tf" || name == "terraform" || name == "hcl2") return "hcl";
+      if (name == "yml")
+        return "yaml";
+      if (name == "jsonc" || name == "json5")
+        return "json";
+      if (name == "dockerfile" || name == "containerfile")
+        return "dockerfile";
+      if (name == "tf" || name == "terraform" || name == "hcl2")
+        return "hcl";
       // web
-      if (name == "htm") return "html";
-      if (name == "scss" || name == "sass" || name == "less") return "css";
+      if (name == "htm")
+        return "html";
+      if (name == "scss" || name == "sass" || name == "less")
+        return "css";
       // markdown / docs
-      if (name == "md" || name == "markdown") return "markdown";
+      if (name == "md" || name == "markdown")
+        return "markdown";
       // misc
-      if (name == "make" || name == "makefile") return "make";
-      if (name == "tla") return "tlaplus";
-      if (name == "starlark" || name == "bzl" || name == "bazel") return "starlark";
-      if (name == "graphql" || name == "gql") return "graphql";
-      if (name == "proto" || name == "protobuf") return "proto";
-      if (name == "ml") return "ocaml";
-      if (name == "mli") return "ocaml_interface";
+      if (name == "make" || name == "makefile")
+        return "make";
+      if (name == "tla")
+        return "tlaplus";
+      if (name == "starlark" || name == "bzl" || name == "bazel")
+        return "starlark";
+      if (name == "graphql" || name == "gql")
+        return "graphql";
+      if (name == "proto" || name == "protobuf")
+        return "proto";
+      if (name == "ml")
+        return "ocaml";
+      if (name == "mli")
+        return "ocaml_interface";
       return name;
     }
 
@@ -975,14 +1001,13 @@ namespace fxe::highlight {
       std::string name;
     };
     std::vector<cap_record> caps;
-    q->run(parsed.root(), 0u, static_cast<u32>(source.size()),
-           [&](const ts::query::capture& c) {
-             u32 s = c.n.start_byte();
-             u32 e = c.n.end_byte();
-             if (e > s)
-               caps.push_back({s, e, std::string(c.name)});
-             return true;
-           });
+    q->run(parsed.root(), 0u, static_cast<u32>(source.size()), [&](const ts::query::capture& c) {
+      u32 s = c.n.start_byte();
+      u32 e = c.n.end_byte();
+      if (e > s)
+        caps.push_back({s, e, std::string(c.name)});
+      return true;
+    });
 
     if (caps.empty())
       return r;

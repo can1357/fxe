@@ -182,7 +182,6 @@ function layoutStyleSig(style: LayoutStyle | undefined): string {
   return id;
 }
 
-
 function textStyleSig(style: TextStyle): string {
   // Only the layout-affecting fields. Color etc. don't change layout.
   return `${style.fontSize ?? 16}|${style.letterSpacing ?? 0}|${style.lineHeight ?? -1}|${style.fontFamily ?? ''}|${style.fontWeight ?? ''}`;

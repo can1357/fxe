@@ -28,7 +28,8 @@
       "default-features": false,
       "features": ["json1", "fts5", "rtree", "math"]
     },
-    "tree-sitter"
+    "tree-sitter",
+    "yoga"
   ],
   "builtin-baseline": "6b07d2d37301e9e7c6fcf771536d2ff6585c5912"
 }

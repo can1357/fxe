@@ -205,8 +205,7 @@ namespace fxe::js {
       String::Utf8Value src(iso, info[0]);
       String::Utf8Value lang(iso, info[1]);
 #if FXE_HAS_TREESITTER
-      std::string_view src_view(*src ? *src : "",
-                                *src ? static_cast<size_t>(src.length()) : 0);
+      std::string_view src_view(*src ? *src : "", *src ? static_cast<size_t>(src.length()) : 0);
       std::string_view lang_view(*lang ? *lang : "",
                                  *lang ? static_cast<size_t>(lang.length()) : 0);
       auto r = fxe::highlight::tokenize(src_view, lang_view);

@@ -10,70 +10,70 @@
 #include <string_view>
 
 extern "C" {
-  // Single-language repos (alphabetical).
-  const struct TSLanguage* tree_sitter_astro(void);
-  const struct TSLanguage* tree_sitter_bash(void);
-  const struct TSLanguage* tree_sitter_c(void);
-  const struct TSLanguage* tree_sitter_clojure(void);
-  const struct TSLanguage* tree_sitter_cmake(void);
-  const struct TSLanguage* tree_sitter_c_sharp(void);
-  const struct TSLanguage* tree_sitter_cpp(void);
-  const struct TSLanguage* tree_sitter_css(void);
-  const struct TSLanguage* tree_sitter_dart(void);
-  const struct TSLanguage* tree_sitter_diff(void);
-  const struct TSLanguage* tree_sitter_dockerfile(void);
-  const struct TSLanguage* tree_sitter_elixir(void);
-  const struct TSLanguage* tree_sitter_erlang(void);
-  const struct TSLanguage* tree_sitter_go(void);
-  const struct TSLanguage* tree_sitter_graphql(void);
-  const struct TSLanguage* tree_sitter_haskell(void);
-  const struct TSLanguage* tree_sitter_hcl(void);
-  const struct TSLanguage* tree_sitter_html(void);
-  const struct TSLanguage* tree_sitter_ini(void);
-  const struct TSLanguage* tree_sitter_java(void);
-  const struct TSLanguage* tree_sitter_javascript(void);
-  const struct TSLanguage* tree_sitter_json(void);
-  const struct TSLanguage* tree_sitter_julia(void);
-  const struct TSLanguage* tree_sitter_just(void);
-  const struct TSLanguage* tree_sitter_kotlin(void);
-  const struct TSLanguage* tree_sitter_lua(void);
-  const struct TSLanguage* tree_sitter_make(void);
-  const struct TSLanguage* tree_sitter_nix(void);
-  const struct TSLanguage* tree_sitter_objc(void);
-  const struct TSLanguage* tree_sitter_odin(void);
-  const struct TSLanguage* tree_sitter_perl(void);
-  const struct TSLanguage* tree_sitter_powershell(void);
-  const struct TSLanguage* tree_sitter_proto(void);
-  const struct TSLanguage* tree_sitter_python(void);
-  const struct TSLanguage* tree_sitter_r(void);
-  const struct TSLanguage* tree_sitter_regex(void);
-  const struct TSLanguage* tree_sitter_ruby(void);
-  const struct TSLanguage* tree_sitter_rust(void);
-  const struct TSLanguage* tree_sitter_scala(void);
-  const struct TSLanguage* tree_sitter_solidity(void);
-  const struct TSLanguage* tree_sitter_sql(void);
-  const struct TSLanguage* tree_sitter_starlark(void);
-  const struct TSLanguage* tree_sitter_svelte(void);
-  const struct TSLanguage* tree_sitter_swift(void);
-  const struct TSLanguage* tree_sitter_tlaplus(void);
-  const struct TSLanguage* tree_sitter_toml(void);
-  const struct TSLanguage* tree_sitter_verilog(void);
-  const struct TSLanguage* tree_sitter_vue(void);
-  const struct TSLanguage* tree_sitter_yaml(void);
-  const struct TSLanguage* tree_sitter_zig(void);
+// Single-language repos (alphabetical).
+const struct TSLanguage* tree_sitter_astro(void);
+const struct TSLanguage* tree_sitter_bash(void);
+const struct TSLanguage* tree_sitter_c(void);
+const struct TSLanguage* tree_sitter_clojure(void);
+const struct TSLanguage* tree_sitter_cmake(void);
+const struct TSLanguage* tree_sitter_c_sharp(void);
+const struct TSLanguage* tree_sitter_cpp(void);
+const struct TSLanguage* tree_sitter_css(void);
+const struct TSLanguage* tree_sitter_dart(void);
+const struct TSLanguage* tree_sitter_diff(void);
+const struct TSLanguage* tree_sitter_dockerfile(void);
+const struct TSLanguage* tree_sitter_elixir(void);
+const struct TSLanguage* tree_sitter_erlang(void);
+const struct TSLanguage* tree_sitter_go(void);
+const struct TSLanguage* tree_sitter_graphql(void);
+const struct TSLanguage* tree_sitter_haskell(void);
+const struct TSLanguage* tree_sitter_hcl(void);
+const struct TSLanguage* tree_sitter_html(void);
+const struct TSLanguage* tree_sitter_ini(void);
+const struct TSLanguage* tree_sitter_java(void);
+const struct TSLanguage* tree_sitter_javascript(void);
+const struct TSLanguage* tree_sitter_json(void);
+const struct TSLanguage* tree_sitter_julia(void);
+const struct TSLanguage* tree_sitter_just(void);
+const struct TSLanguage* tree_sitter_kotlin(void);
+const struct TSLanguage* tree_sitter_lua(void);
+const struct TSLanguage* tree_sitter_make(void);
+const struct TSLanguage* tree_sitter_nix(void);
+const struct TSLanguage* tree_sitter_objc(void);
+const struct TSLanguage* tree_sitter_odin(void);
+const struct TSLanguage* tree_sitter_perl(void);
+const struct TSLanguage* tree_sitter_powershell(void);
+const struct TSLanguage* tree_sitter_proto(void);
+const struct TSLanguage* tree_sitter_python(void);
+const struct TSLanguage* tree_sitter_r(void);
+const struct TSLanguage* tree_sitter_regex(void);
+const struct TSLanguage* tree_sitter_ruby(void);
+const struct TSLanguage* tree_sitter_rust(void);
+const struct TSLanguage* tree_sitter_scala(void);
+const struct TSLanguage* tree_sitter_solidity(void);
+const struct TSLanguage* tree_sitter_sql(void);
+const struct TSLanguage* tree_sitter_starlark(void);
+const struct TSLanguage* tree_sitter_svelte(void);
+const struct TSLanguage* tree_sitter_swift(void);
+const struct TSLanguage* tree_sitter_tlaplus(void);
+const struct TSLanguage* tree_sitter_toml(void);
+const struct TSLanguage* tree_sitter_verilog(void);
+const struct TSLanguage* tree_sitter_vue(void);
+const struct TSLanguage* tree_sitter_yaml(void);
+const struct TSLanguage* tree_sitter_zig(void);
 
-  // Multi-grammar repos.
-  const struct TSLanguage* tree_sitter_typescript(void);
-  const struct TSLanguage* tree_sitter_tsx(void);
-  const struct TSLanguage* tree_sitter_markdown(void);
-  const struct TSLanguage* tree_sitter_markdown_inline(void);
-  const struct TSLanguage* tree_sitter_ocaml(void);
-  const struct TSLanguage* tree_sitter_ocaml_interface(void);
-  const struct TSLanguage* tree_sitter_ocaml_type(void);
-  const struct TSLanguage* tree_sitter_php(void);
-  const struct TSLanguage* tree_sitter_php_only(void);
-  const struct TSLanguage* tree_sitter_xml(void);
-  const struct TSLanguage* tree_sitter_dtd(void);
+// Multi-grammar repos.
+const struct TSLanguage* tree_sitter_typescript(void);
+const struct TSLanguage* tree_sitter_tsx(void);
+const struct TSLanguage* tree_sitter_markdown(void);
+const struct TSLanguage* tree_sitter_markdown_inline(void);
+const struct TSLanguage* tree_sitter_ocaml(void);
+const struct TSLanguage* tree_sitter_ocaml_interface(void);
+const struct TSLanguage* tree_sitter_ocaml_type(void);
+const struct TSLanguage* tree_sitter_php(void);
+const struct TSLanguage* tree_sitter_php_only(void);
+const struct TSLanguage* tree_sitter_xml(void);
+const struct TSLanguage* tree_sitter_dtd(void);
 }
 
 namespace fxe::treesitter {
@@ -153,7 +153,8 @@ namespace fxe::treesitter {
 
   const TSLanguage* language_by_name(std::string_view name) {
     for (const auto& r : kGrammars) {
-      if (r.name == name) return r.fn();
+      if (r.name == name)
+        return r.fn();
     }
     return nullptr;
   }
@@ -161,7 +162,8 @@ namespace fxe::treesitter {
   std::vector<std::string_view> available_languages() {
     std::vector<std::string_view> out;
     out.reserve(kGrammars.size());
-    for (const auto& r : kGrammars) out.push_back(r.name);
+    for (const auto& r : kGrammars)
+      out.push_back(r.name);
     return out;
   }
 

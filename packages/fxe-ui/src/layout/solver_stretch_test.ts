@@ -1,5 +1,5 @@
 import { assertEqual, run, test } from '../../../../tests/ts_harness.ts';
-import { solveLayout } from './solver.ts';
+import { solveLayout } from './index.ts';
 import type { LayoutNode } from './types.ts';
 
 function measuredNode(style: LayoutNode['style'] = {}): LayoutNode {

@@ -60,7 +60,9 @@ namespace fxe::js {
       reset(tpl_table<3>());
     }
     struct ts_resetter_register {
-      ts_resetter_register() { register_template_resetter(&reset_for_isolate); }
+      ts_resetter_register() {
+        register_template_resetter(&reset_for_isolate);
+      }
     };
     static ts_resetter_register s_resetter;
 
@@ -108,19 +110,23 @@ namespace fxe::js {
     }
 
     parser_holder* unwrap_parser(Local<Value> v) {
-      if (!v->IsObject()) return nullptr;
+      if (!v->IsObject())
+        return nullptr;
       return static_cast<parser_holder*>(unwrap(v.As<Object>(), TAG_TS_PARSER));
     }
     tree_holder* unwrap_tree(Local<Value> v) {
-      if (!v->IsObject()) return nullptr;
+      if (!v->IsObject())
+        return nullptr;
       return static_cast<tree_holder*>(unwrap(v.As<Object>(), TAG_TS_TREE));
     }
     query_holder* unwrap_query(Local<Value> v) {
-      if (!v->IsObject()) return nullptr;
+      if (!v->IsObject())
+        return nullptr;
       return static_cast<query_holder*>(unwrap(v.As<Object>(), TAG_TS_QUERY));
     }
     node_holder* unwrap_node(Local<Value> v) {
-      if (!v->IsObject()) return nullptr;
+      if (!v->IsObject())
+        return nullptr;
       return static_cast<node_holder*>(unwrap(v.As<Object>(), TAG_TS_NODE));
     }
 
@@ -161,7 +167,8 @@ namespace fxe::js {
     void parser_set_language(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_parser(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       if (info.Length() < 1 || !info[0]->IsString()) {
         (void)throw_type_error(iso, "setLanguage: expected (name)");
         return;
@@ -175,7 +182,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_parser(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       if (info.Length() < 1 || !info[0]->IsString()) {
         (void)throw_type_error(iso, "parse: expected (text, prevTree?)");
         return;
@@ -210,8 +218,7 @@ namespace fxe::js {
 
     // ---------------- Tree ----------------
     void tree_ctor(const FunctionCallbackInfo<Value>& info) {
-      (void)throw_type_error(info.GetIsolate(),
-                             "Treesitter.Tree is not directly constructible");
+      (void)throw_type_error(info.GetIsolate(), "Treesitter.Tree is not directly constructible");
     }
 
     void tree_root(const FunctionCallbackInfo<Value>& info) {
@@ -219,7 +226,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_tree(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       info.GetReturnValue().Set(wrap_node(iso, ctx, h->t.root(), info.This().As<Object>()));
     }
 
@@ -227,7 +235,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_tree(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       if (info.Length() < 1 || !info[0]->IsObject()) {
         (void)throw_type_error(iso, "edit: expected ({startByte, oldEndByte, newEndByte, "
                                     "startPoint, oldEndPoint, newEndPoint})");
@@ -240,7 +249,8 @@ namespace fxe::js {
       };
       auto get_point = [&](Local<Name> k) -> treesitter::point {
         Local<Value> v;
-        if (!o->Get(ctx, k).ToLocal(&v) || !v->IsObject()) return {};
+        if (!o->Get(ctx, k).ToLocal(&v) || !v->IsObject())
+          return {};
         auto p = v.As<Object>();
         Local<Value> r;
         Local<Value> c;
@@ -274,39 +284,40 @@ namespace fxe::js {
     }
 
     void node_ctor(const FunctionCallbackInfo<Value>& info) {
-      (void)throw_type_error(info.GetIsolate(),
-                             "Treesitter.Node is not directly constructible");
+      (void)throw_type_error(info.GetIsolate(), "Treesitter.Node is not directly constructible");
     }
 
     void node_kind(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       auto k = h->n.kind();
       info.GetReturnValue().Set(
-          String::NewFromUtf8(iso, k.data(), NewStringType::kNormal,
-                              static_cast<int>(k.size()))
+          String::NewFromUtf8(iso, k.data(), NewStringType::kNormal, static_cast<int>(k.size()))
               .ToLocalChecked());
     }
     void node_is_named(const FunctionCallbackInfo<Value>& info) {
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       info.GetReturnValue().Set(h->n.is_named());
     }
     void node_start_byte(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, h->n.start_byte()));
     }
     void node_end_byte(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, h->n.end_byte()));
     }
-    void node_point(Isolate* iso, Local<Context> ctx, Local<Object>& dst,
-                    treesitter::point p) {
+    void node_point(Isolate* iso, Local<Context> ctx, Local<Object>& dst, treesitter::point p) {
       auto o = Object::New(iso);
       (void)o->Set(ctx, "row"_v8(iso), Integer::NewFromUnsigned(iso, p.row));
       (void)o->Set(ctx, "column"_v8(iso), Integer::NewFromUnsigned(iso, p.column));
@@ -317,7 +328,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       Local<Object> o;
       node_point(iso, ctx, o, h->n.start_point());
       info.GetReturnValue().Set(o);
@@ -327,7 +339,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       Local<Object> o;
       node_point(iso, ctx, o, h->n.end_point());
       info.GetReturnValue().Set(o);
@@ -335,7 +348,8 @@ namespace fxe::js {
     void node_child_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, h->n.child_count()));
     }
     void node_child(const FunctionCallbackInfo<Value>& info) {
@@ -343,7 +357,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       const u32 i = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       auto child = h->n.child(i);
       if (child.is_null()) {
@@ -356,7 +371,8 @@ namespace fxe::js {
     void node_named_child_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, h->n.named_child_count()));
     }
     void node_named_child(const FunctionCallbackInfo<Value>& info) {
@@ -364,7 +380,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       const u32 i = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       auto child = h->n.named_child(i);
       if (child.is_null()) {
@@ -379,7 +396,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_node(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       auto p = h->n.parent();
       if (p.is_null()) {
         info.GetReturnValue().SetNull();
@@ -430,7 +448,8 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_query(info.This());
-      if (!h) return;
+      if (!h)
+        return;
       if (info.Length() < 1 || !info[0]->IsObject()) {
         (void)throw_type_error(iso, "captures: expected (node, opts?)");
         return;
@@ -446,42 +465,40 @@ namespace fxe::js {
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
         Local<Value> f;
-        if (o->Get(ctx, "startByte"_v8(iso)).ToLocal(&f)) start_byte = to_u32(ctx, f);
-        if (o->Get(ctx, "endByte"_v8(iso)).ToLocal(&f)) end_byte = to_u32(ctx, f, 0xFFFFFFFFu);
-        if (o->Get(ctx, "limit"_v8(iso)).ToLocal(&f)) limit = to_u32(ctx, f, 0xFFFFFFFFu);
+        if (o->Get(ctx, "startByte"_v8(iso)).ToLocal(&f))
+          start_byte = to_u32(ctx, f);
+        if (o->Get(ctx, "endByte"_v8(iso)).ToLocal(&f))
+          end_byte = to_u32(ctx, f, 0xFFFFFFFFu);
+        if (o->Get(ctx, "limit"_v8(iso)).ToLocal(&f))
+          limit = to_u32(ctx, f, 0xFFFFFFFFu);
       }
       auto out = Array::New(iso);
       u32 idx = 0;
       Local<Object> tree_ref = nh->tree_ref.Get(iso);
-      h->q->run(nh->n, start_byte, end_byte,
-                [&](const treesitter::query::capture& cap) {
-                  auto entry = Object::New(iso);
-                  (void)entry->Set(
-                      ctx, "name"_v8(iso),
-                      String::NewFromUtf8(iso, cap.name.data(), NewStringType::kNormal,
-                                          static_cast<int>(cap.name.size()))
-                          .ToLocalChecked());
-                  auto kind = cap.n.kind();
-                  (void)entry->Set(
-                      ctx, "kind"_v8(iso),
-                      String::NewFromUtf8(iso, kind.data(), NewStringType::kNormal,
-                                          static_cast<int>(kind.size()))
-                          .ToLocalChecked());
-                  (void)entry->Set(ctx, "startByte"_v8(iso),
-                                   Integer::NewFromUnsigned(iso, cap.n.start_byte()));
-                  (void)entry->Set(ctx, "endByte"_v8(iso),
-                                   Integer::NewFromUnsigned(iso, cap.n.end_byte()));
-                  Local<Object> sp;
-                  Local<Object> ep;
-                  node_point(iso, ctx, sp, cap.n.start_point());
-                  node_point(iso, ctx, ep, cap.n.end_point());
-                  (void)entry->Set(ctx, "startPoint"_v8(iso), sp);
-                  (void)entry->Set(ctx, "endPoint"_v8(iso), ep);
-                  (void)entry->Set(ctx, "node"_v8(iso),
-                                   wrap_node(iso, ctx, cap.n, tree_ref));
-                  (void)out->Set(ctx, idx++, entry);
-                  return idx < limit;
-                });
+      h->q->run(nh->n, start_byte, end_byte, [&](const treesitter::query::capture& cap) {
+        auto entry = Object::New(iso);
+        (void)entry->Set(ctx, "name"_v8(iso),
+                         String::NewFromUtf8(iso, cap.name.data(), NewStringType::kNormal,
+                                             static_cast<int>(cap.name.size()))
+                             .ToLocalChecked());
+        auto kind = cap.n.kind();
+        (void)entry->Set(ctx, "kind"_v8(iso),
+                         String::NewFromUtf8(iso, kind.data(), NewStringType::kNormal,
+                                             static_cast<int>(kind.size()))
+                             .ToLocalChecked());
+        (void)entry->Set(ctx, "startByte"_v8(iso),
+                         Integer::NewFromUnsigned(iso, cap.n.start_byte()));
+        (void)entry->Set(ctx, "endByte"_v8(iso), Integer::NewFromUnsigned(iso, cap.n.end_byte()));
+        Local<Object> sp;
+        Local<Object> ep;
+        node_point(iso, ctx, sp, cap.n.start_point());
+        node_point(iso, ctx, ep, cap.n.end_point());
+        (void)entry->Set(ctx, "startPoint"_v8(iso), sp);
+        (void)entry->Set(ctx, "endPoint"_v8(iso), ep);
+        (void)entry->Set(ctx, "node"_v8(iso), wrap_node(iso, ctx, cap.n, tree_ref));
+        (void)out->Set(ctx, idx++, entry);
+        return idx < limit;
+      });
       info.GetReturnValue().Set(out);
     }
 
@@ -494,11 +511,10 @@ namespace fxe::js {
       auto langs = treesitter::available_languages();
       auto out = Array::New(iso, static_cast<int>(langs.size()));
       for (u32 i = 0; i < langs.size(); ++i) {
-        (void)out->Set(
-            ctx, i,
-            String::NewFromUtf8(iso, langs[i].data(), NewStringType::kNormal,
-                                static_cast<int>(langs[i].size()))
-                .ToLocalChecked());
+        (void)out->Set(ctx, i,
+                       String::NewFromUtf8(iso, langs[i].data(), NewStringType::kNormal,
+                                           static_cast<int>(langs[i].size()))
+                           .ToLocalChecked());
       }
       info.GetReturnValue().Set(out);
     }
@@ -556,8 +572,7 @@ namespace fxe::js {
     ns->Set(iso, "Tree", tree_tpl);
     ns->Set(iso, "Node", node_tpl);
     ns->Set(iso, "Query", query_tpl);
-    ns->Set(iso, "availableLanguages",
-            FunctionTemplate::New(iso, ns_available_languages));
+    ns->Set(iso, "availableLanguages", FunctionTemplate::New(iso, ns_available_languages));
     global->Set(iso, "Treesitter", ns);
   }
 } // namespace fxe::js

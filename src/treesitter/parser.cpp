@@ -4,8 +4,8 @@
 #include <fxe/types.hpp>
 
 #include <cstring>
-#include <string>
 #include <stdexcept>
+#include <string>
 #include <tree_sitter/api.h>
 #include <utility>
 
@@ -41,7 +41,8 @@ namespace fxe::treesitter {
   }
   std::string_view node::kind() const noexcept {
     const TSNode n = to_ts_node(storage_);
-    if (ts_node_is_null(n)) return {};
+    if (ts_node_is_null(n))
+      return {};
     const char* k = ts_node_type(n);
     return k ? std::string_view{k} : std::string_view{};
   }
@@ -92,23 +93,27 @@ namespace fxe::treesitter {
   }
   tree& tree::operator=(tree&& other) noexcept {
     if (this != &other) {
-      if (ts_tree_) ts_tree_delete(ts_tree_);
+      if (ts_tree_)
+        ts_tree_delete(ts_tree_);
       ts_tree_ = other.ts_tree_;
       other.ts_tree_ = nullptr;
     }
     return *this;
   }
   tree::~tree() {
-    if (ts_tree_) ts_tree_delete(ts_tree_);
+    if (ts_tree_)
+      ts_tree_delete(ts_tree_);
   }
 
   node tree::root() const noexcept {
-    if (!ts_tree_) return {};
+    if (!ts_tree_)
+      return {};
     return from_ts_node(ts_tree_root_node(ts_tree_));
   }
 
   void tree::edit(const edit_descriptor& d) noexcept {
-    if (!ts_tree_) return;
+    if (!ts_tree_)
+      return;
     TSInputEdit e{};
     e.start_byte = d.start_byte;
     e.old_end_byte = d.old_end_byte;
@@ -130,7 +135,8 @@ namespace fxe::treesitter {
   }
   parser& parser::operator=(parser&& other) noexcept {
     if (this != &other) {
-      if (ts_parser_) ts_parser_delete(ts_parser_);
+      if (ts_parser_)
+        ts_parser_delete(ts_parser_);
       ts_parser_ = other.ts_parser_;
       language_ = other.language_;
       other.ts_parser_ = nullptr;
@@ -139,26 +145,30 @@ namespace fxe::treesitter {
     return *this;
   }
   parser::~parser() {
-    if (ts_parser_) ts_parser_delete(ts_parser_);
+    if (ts_parser_)
+      ts_parser_delete(ts_parser_);
   }
 
   bool parser::set_language_by_name(std::string_view name) {
     const TSLanguage* lang = language_by_name(name);
-    if (!lang) return false;
+    if (!lang)
+      return false;
     return set_language(lang);
   }
   bool parser::set_language(const TSLanguage* lang) {
-    if (!lang || !ts_parser_) return false;
-    if (!ts_parser_set_language(ts_parser_, lang)) return false;
+    if (!lang || !ts_parser_)
+      return false;
+    if (!ts_parser_set_language(ts_parser_, lang))
+      return false;
     language_ = lang;
     return true;
   }
 
   tree parser::parse(std::string_view text, const tree* previous) const {
-    if (!ts_parser_ || !language_) return {};
+    if (!ts_parser_ || !language_)
+      return {};
     TSTree* old = previous ? const_cast<TSTree*>(previous->raw()) : nullptr;
-    TSTree* t = ts_parser_parse_string(ts_parser_, old, text.data(),
-                                       static_cast<u32>(text.size()));
+    TSTree* t = ts_parser_parse_string(ts_parser_, old, text.data(), static_cast<u32>(text.size()));
     return tree{t};
   }
 
@@ -168,21 +178,34 @@ namespace fxe::treesitter {
   query::query(const TSLanguage* lang, std::string_view source) : language_(lang) {
     u32 error_offset = 0;
     TSQueryError error_type = TSQueryErrorNone;
-    ts_query_ = ts_query_new(lang, source.data(), static_cast<u32>(source.size()),
-                             &error_offset, &error_type);
+    ts_query_ = ts_query_new(lang, source.data(), static_cast<u32>(source.size()), &error_offset,
+                             &error_type);
     if (!ts_query_) {
       const char* kind = "unknown";
       switch (error_type) {
-      case TSQueryErrorSyntax: kind = "syntax"; break;
-      case TSQueryErrorNodeType: kind = "node type"; break;
-      case TSQueryErrorField: kind = "field"; break;
-      case TSQueryErrorCapture: kind = "capture"; break;
-      case TSQueryErrorStructure: kind = "structure"; break;
-      case TSQueryErrorLanguage: kind = "language"; break;
-      default: break;
+      case TSQueryErrorSyntax:
+        kind = "syntax";
+        break;
+      case TSQueryErrorNodeType:
+        kind = "node type";
+        break;
+      case TSQueryErrorField:
+        kind = "field";
+        break;
+      case TSQueryErrorCapture:
+        kind = "capture";
+        break;
+      case TSQueryErrorStructure:
+        kind = "structure";
+        break;
+      case TSQueryErrorLanguage:
+        kind = "language";
+        break;
+      default:
+        break;
       }
-      throw std::invalid_argument(std::string("tree-sitter query ") + kind +
-                                  " error at byte " + std::to_string(error_offset));
+      throw std::invalid_argument(std::string("tree-sitter query ") + kind + " error at byte " +
+                                  std::to_string(error_offset));
     }
     const u32 n = ts_query_capture_count(ts_query_);
     capture_names_.reserve(n);
@@ -194,15 +217,15 @@ namespace fxe::treesitter {
   }
 
   query::query(query&& other) noexcept
-      : ts_query_(other.ts_query_),
-        language_(other.language_),
+      : ts_query_(other.ts_query_), language_(other.language_),
         capture_names_(std::move(other.capture_names_)) {
     other.ts_query_ = nullptr;
     other.language_ = nullptr;
   }
   query& query::operator=(query&& other) noexcept {
     if (this != &other) {
-      if (ts_query_) ts_query_delete(ts_query_);
+      if (ts_query_)
+        ts_query_delete(ts_query_);
       ts_query_ = other.ts_query_;
       language_ = other.language_;
       capture_names_ = std::move(other.capture_names_);
@@ -212,12 +235,14 @@ namespace fxe::treesitter {
     return *this;
   }
   query::~query() {
-    if (ts_query_) ts_query_delete(ts_query_);
+    if (ts_query_)
+      ts_query_delete(ts_query_);
   }
 
   void query::run(const node& root, u32 start_byte, u32 end_byte,
                   const std::function<bool(const capture&)>& on_capture) const {
-    if (!ts_query_) return;
+    if (!ts_query_)
+      return;
     TSQueryCursor* cursor = ts_query_cursor_new();
     ts_query_cursor_set_byte_range(cursor, start_byte, end_byte);
     ts_query_cursor_exec(cursor, ts_query_, to_ts_node(root.raw()));

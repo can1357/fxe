@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-import { solveLayout } from './solver.ts';
+import { solveLayout } from './index.ts';
 import type { LayoutNode } from './types.ts';
 
 function textNode(width: number, height: number): LayoutNode {

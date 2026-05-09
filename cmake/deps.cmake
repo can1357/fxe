@@ -155,6 +155,32 @@ if(NOT TARGET md4c::md4c AND NOT TARGET md4c)
     endif()
 endif()
 
+# yoga — Facebook flexbox solver. Used by fxe_layout to back the JS
+# `Layout.solve` binding. Prefer the vcpkg config; fall back to FetchContent
+# when FXE_FETCH_DEPS is set.
+find_package(yoga CONFIG QUIET)
+if(NOT TARGET yoga::yogacore AND NOT TARGET yogacore)
+    if(FXE_FETCH_DEPS)
+        FetchContent_Declare(
+            yoga
+            GIT_REPOSITORY https://github.com/facebook/yoga.git
+            GIT_TAG v3.2.1
+            GIT_SHALLOW TRUE
+        )
+        set(BUILD_TESTING_SAVED ${BUILD_TESTING})
+        set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+        FetchContent_MakeAvailable(yoga)
+        if(DEFINED BUILD_TESTING_SAVED)
+            set(BUILD_TESTING ${BUILD_TESTING_SAVED} CACHE BOOL "" FORCE)
+        endif()
+        if(NOT TARGET yoga::yogacore AND TARGET yogacore)
+            add_library(yoga::yogacore ALIAS yogacore)
+        endif()
+    else()
+        message(FATAL_ERROR "yoga was not found. Re-run with -DFXE_FETCH_DEPS=ON or install yoga via vcpkg.")
+    endif()
+endif()
+
 if(_FXE_STB_WIRED)
     target_compile_definitions(fxe_deps INTERFACE FXE_HAS_STB=1)
 else()

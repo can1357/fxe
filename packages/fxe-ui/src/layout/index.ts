@@ -1,5 +1,5 @@
 export { measureImage, measureText } from './measure.ts';
-export { resolveLength, solveLayout as layout } from './solver.ts';
+export { layout, resolveLength, solveLayout } from './bridge.ts';
 export type {
   Align,
   Constraint,

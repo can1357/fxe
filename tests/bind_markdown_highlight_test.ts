@@ -13,10 +13,7 @@ test('highlightLanguages returns an array', () => {
 
 test('every supported language tokenizes some source', () => {
   for (const lang of supported) {
-    const sample =
-      lang === 'json'
-        ? '{"a": 1, "b": null}'
-        : 'const x: number = 1; // hi';
+    const sample = lang === 'json' ? '{"a": 1, "b": null}' : 'const x: number = 1; // hi';
     const r = Markdown.highlight(sample, lang);
     assert(r !== null, `highlight(${lang}) returned null`);
     assertEqual(typeof r!.language, 'string');

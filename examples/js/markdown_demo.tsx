@@ -857,9 +857,7 @@ function Demo(): UiNode {
             borderBottomColor: theme.colors.border,
           }}
         >
-          <Text
-            style={{ ...s.toolbarLabel, width: 56, color: theme.colors.mutedText }}
-          >
+          <Text style={{ ...s.toolbarLabel, width: 56, color: theme.colors.mutedText }}>
             Theme:
           </Text>
           {(Object.keys(themes) as ThemeId[]).map((id) => (

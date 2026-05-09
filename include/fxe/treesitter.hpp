@@ -70,7 +70,9 @@ namespace fxe::treesitter {
     [[nodiscard]] node prev_sibling() const noexcept;
 
     /** Opaque storage for the underlying TSNode. */
-    [[nodiscard]] const void* const* raw() const noexcept { return storage_; }
+    [[nodiscard]] const void* const* raw() const noexcept {
+      return storage_;
+    }
 
   private:
     const void* storage_[4]{};
@@ -85,14 +87,20 @@ namespace fxe::treesitter {
     tree& operator=(tree&& other) noexcept;
     ~tree();
 
-    [[nodiscard]] bool is_valid() const noexcept { return ts_tree_ != nullptr; }
+    [[nodiscard]] bool is_valid() const noexcept {
+      return ts_tree_ != nullptr;
+    }
     [[nodiscard]] node root() const noexcept;
     void edit(const edit_descriptor& d) noexcept;
 
     /** Implementation detail. */
     explicit tree(TSTree* raw) noexcept : ts_tree_(raw) {}
-    TSTree* raw() noexcept { return ts_tree_; }
-    const TSTree* raw() const noexcept { return ts_tree_; }
+    TSTree* raw() noexcept {
+      return ts_tree_;
+    }
+    const TSTree* raw() const noexcept {
+      return ts_tree_;
+    }
 
   private:
     TSTree* ts_tree_ = nullptr;
@@ -110,7 +118,9 @@ namespace fxe::treesitter {
     /** Switch to a baked-in grammar. Returns false if name is unknown. */
     bool set_language_by_name(std::string_view name);
     bool set_language(const TSLanguage* lang);
-    [[nodiscard]] const TSLanguage* language() const noexcept { return language_; }
+    [[nodiscard]] const TSLanguage* language() const noexcept {
+      return language_;
+    }
 
     /** Parse a string. `previous` enables incremental reparse — pass the
      *  prior tree (after `edit()`-ing it) to reuse unchanged subtrees. */
@@ -144,7 +154,9 @@ namespace fxe::treesitter {
     void run(const node& root, u32 start_byte, u32 end_byte,
              const std::function<bool(const capture&)>& on_capture) const;
 
-    [[nodiscard]] const TSQuery* raw() const noexcept { return ts_query_; }
+    [[nodiscard]] const TSQuery* raw() const noexcept {
+      return ts_query_;
+    }
 
   private:
     TSQuery* ts_query_ = nullptr;

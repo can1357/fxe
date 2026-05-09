@@ -1333,6 +1333,93 @@ declare const Monitors: FXE.MonitorsNamespace;
 declare const App: FXE.AppNamespace;
 declare const Print: typeof FXE.Print;
 declare const powerMonitor: FXE.PowerMonitor;
+
+declare namespace Layout {
+  type Length = number | `${number}%` | 'auto';
+  interface Constraint {
+    width?: number;
+    height?: number;
+  }
+  interface Style {
+    display?: 'flex' | 'none';
+    width?: Length;
+    height?: Length;
+    minWidth?: Length;
+    minHeight?: Length;
+    maxWidth?: Length;
+    maxHeight?: Length;
+    padding?: Length;
+    paddingX?: Length;
+    paddingY?: Length;
+    paddingTop?: Length;
+    paddingRight?: Length;
+    paddingBottom?: Length;
+    paddingLeft?: Length;
+    margin?: Length;
+    marginX?: Length;
+    marginY?: Length;
+    marginTop?: Length;
+    marginRight?: Length;
+    marginBottom?: Length;
+    marginLeft?: Length;
+    flexDirection?: 'row' | 'column' | 'row-reverse' | 'column-reverse';
+    flexWrap?: 'nowrap' | 'wrap' | 'wrap-reverse';
+    justifyContent?:
+      | 'flex-start'
+      | 'flex-end'
+      | 'center'
+      | 'space-between'
+      | 'space-around'
+      | 'space-evenly';
+    alignItems?: 'auto' | 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
+    alignSelf?: 'auto' | 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline';
+    alignContent?:
+      | 'auto'
+      | 'flex-start'
+      | 'flex-end'
+      | 'center'
+      | 'stretch'
+      | 'baseline'
+      | 'space-between'
+      | 'space-around'
+      | 'space-evenly';
+    flex?: number;
+    flexGrow?: number;
+    flexShrink?: number;
+    flexBasis?: Length;
+    gap?: number;
+    rowGap?: number;
+    columnGap?: number;
+    position?: 'relative' | 'absolute';
+    top?: Length;
+    right?: Length;
+    bottom?: Length;
+    left?: Length;
+    aspectRatio?: number;
+    overflow?: 'visible' | 'hidden' | 'scroll';
+  }
+  type MeasureDescriptor =
+    | { kind: 'text'; text: string; fontSize: number }
+    | { kind: 'image'; width: number; height: number }
+    | { kind: 'js'; fn: (c: Constraint) => { width: number; height: number } };
+  interface NodeDescriptor {
+    style?: Style;
+    children?: NodeDescriptor[];
+    measure?: MeasureDescriptor;
+  }
+  interface Result {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    paddingLeft: number;
+    paddingTop: number;
+    paddingRight: number;
+    paddingBottom: number;
+    children: Result[];
+  }
+  function solve(root: NodeDescriptor, constraint?: Constraint): Result;
+}
 declare var localStorage: Storage;
 declare var sessionStorage: Storage;
 
@@ -4381,10 +4468,7 @@ declare const Markdown: {
    * was configured without tree-sitter. Aliases: `ts`/`js` → `typescript`,
    * `jsx` → `tsx`, `jsonc` → `json`.
    */
-  highlight(
-    source: string,
-    language: string,
-  ): FXEMarkdown.HighlightResult | null;
+  highlight(source: string, language: string): FXEMarkdown.HighlightResult | null;
   /** Languages with a built-in highlights query. */
   highlightLanguages(): readonly string[];
 };

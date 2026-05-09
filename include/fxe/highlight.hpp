@@ -31,8 +31,8 @@ namespace fxe::highlight {
   };
 
   struct result {
-    std::string language;        // canonical grammar name actually used
-    std::vector<token> tokens;   // sorted by `start`, non-overlapping
+    std::string language;      // canonical grammar name actually used
+    std::vector<token> tokens; // sorted by `start`, non-overlapping
   };
 
   /** Highlight `source` using the built-in query for `language`. Returns

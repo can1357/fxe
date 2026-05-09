@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { solveLayout } from './solver.ts';
+import { solveLayout } from './index.ts';
 import type { LayoutNode } from './types.ts';
 
 test('clamps column child main axis to minHeight after intrinsic sizing', () => {

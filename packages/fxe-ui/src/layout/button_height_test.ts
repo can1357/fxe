@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { solveLayout } from './solver.ts';
+import { solveLayout } from './index.ts';
 import type { LayoutNode } from './types.ts';
 
 function textNode(): LayoutNode {
