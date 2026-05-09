@@ -398,15 +398,21 @@ namespace fxe::js {
                                            out.justify_content) ||
           !parse_optional_string_enum_prop(
               iso, ctx, obj, "alignItems"_v8(iso),
-              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) { return parse_align(i, s, out_align, "alignItems", true); },
+              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) {
+                return parse_align(i, s, out_align, "alignItems", true);
+              },
               out.align_items) ||
           !parse_optional_string_enum_prop(
               iso, ctx, obj, "alignSelf"_v8(iso),
-              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) { return parse_align(i, s, out_align, "alignSelf", true); },
+              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) {
+                return parse_align(i, s, out_align, "alignSelf", true);
+              },
               out.align_self) ||
           !parse_optional_string_enum_prop(
               iso, ctx, obj, "alignContent"_v8(iso),
-              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) { return parse_align(i, s, out_align, "alignContent", true); },
+              [](Isolate* i, Local<String> s, std::optional<layout::Align>& out_align) {
+                return parse_align(i, s, out_align, "alignContent", true);
+              },
               out.align_content) ||
           !parse_optional_number_prop(iso, ctx, obj, "flex"_v8(iso), "flex", out.flex) ||
           !parse_optional_number_prop(iso, ctx, obj, "flexGrow"_v8(iso), "flexGrow",

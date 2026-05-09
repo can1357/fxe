@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
-#include <fxe/types.hpp>
+#include <fxe/log.hpp>
 
 namespace fxe::font {
 
@@ -74,6 +74,8 @@ namespace fxe::font {
     height_ = new_h;
     pixels_ = std::move(grown);
     ++generation_;
+    FXE_DEBUG("font.atlas", "atlas_grow fmt={} w={} h={} gen={}",
+              format_ == Format::bgra ? "color" : "mask", new_w, new_h, generation_);
     return true;
   }
 
@@ -128,8 +130,11 @@ namespace fxe::font {
   }
 
   bool Atlas::rebuild_from_live(std::span<AtlasRepackItem> live) noexcept {
+    const u64 prev_gen = generation_;
     reset_empty_();
     ++generation_;
+    FXE_WARN("font.atlas", "atlas_rebuild fmt={} items={} gen={}->{}",
+             format_ == Format::bgra ? "color" : "mask", live.size(), prev_gen, generation_);
     for (auto& item : live) {
       if (!item.glyph)
         return false;

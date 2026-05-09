@@ -154,6 +154,11 @@ namespace fxe {
       return cbuf_;
     }
 
+    // Incremented once per `begin_frame` when backends call `update_constants()`.
+    [[nodiscard]] u64 frame_index() const noexcept {
+      return frame_index_;
+    }
+
     // Screen-pixel -> NDC. Mirrors `to_viewport` in the original gfw::renderer.
     [[nodiscard]] math::vec2 to_viewport(math::vec2 px) const noexcept {
       return px * s2v_scale_ + s2v_offset;
@@ -197,6 +202,7 @@ namespace fxe {
     // every backend at begin_frame.
     void update_constants(const math::vec3& eye_pos, const math::vec3& eye_dir,
                           const math::mat4x4& world_view_proj, float width, float height) noexcept {
+      ++frame_index_;
       v2s_scale_ = {width * +0.5f, height * -0.5f};
       s2v_scale_ = {1.0f / v2s_scale_.x, 1.0f / v2s_scale_.y};
       viewport_ = {math::vec2{0, 0}, math::vec2{width, height}, math::vec2{0.0f, 1.0f}};
@@ -225,6 +231,7 @@ namespace fxe {
     math::vec2 s2v_scale_{};
     vshader_cbuf cbuf_{};
     std::chrono::steady_clock::time_point init_time_{};
+    u64 frame_index_ = 0;
   };
 
   std::unique_ptr<renderer> create_renderer(window& win, const renderer_options& options = {});

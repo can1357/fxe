@@ -35,7 +35,7 @@ namespace fxe::js::v8_code_cache {
     struct dir_state {
       std::mutex mutex;
       bool resolved = false;
-      std::filesystem::path dir;  // empty => disabled
+      std::filesystem::path dir; // empty => disabled
     };
 
     dir_state& state() {
@@ -268,13 +268,13 @@ namespace fxe::js::v8_code_cache {
       std::vector<uint8_t> bytes;
       if (load_blob(path, cache_id, source, bytes)) {
         // V8 takes ownership of CachedData via ScriptCompiler::Source.
-        auto* cached = new v8::ScriptCompiler::CachedData(
-            bytes.data(), static_cast<int>(bytes.size()),
-            v8::ScriptCompiler::CachedData::BufferNotOwned);
+        auto* cached =
+            new v8::ScriptCompiler::CachedData(bytes.data(), static_cast<int>(bytes.size()),
+                                               v8::ScriptCompiler::CachedData::BufferNotOwned);
         v8::ScriptCompiler::Source v8src(src_str, origin, cached);
-        bool compiled = v8::ScriptCompiler::Compile(ctx, &v8src,
-                                                    v8::ScriptCompiler::kConsumeCodeCache)
-                            .ToLocal(&script);
+        bool compiled =
+            v8::ScriptCompiler::Compile(ctx, &v8src, v8::ScriptCompiler::kConsumeCodeCache)
+                .ToLocal(&script);
         const auto* post = v8src.GetCachedData();
         if (compiled && (!post || !post->rejected))
           return script;
@@ -293,8 +293,7 @@ namespace fxe::js::v8_code_cache {
       std::unique_ptr<v8::ScriptCompiler::CachedData> produced(
           v8::ScriptCompiler::CreateCodeCache(script->GetUnboundScript()));
       if (produced && produced->data && produced->length > 0) {
-        store_blob(path, cache_id, source, produced->data,
-                   static_cast<size_t>(produced->length));
+        store_blob(path, cache_id, source, produced->data, static_cast<size_t>(produced->length));
       }
     }
     return script;
@@ -309,13 +308,13 @@ namespace fxe::js::v8_code_cache {
     if (!path.empty()) {
       std::vector<uint8_t> bytes;
       if (load_blob(path, cache_id, source, bytes)) {
-        auto* cached = new v8::ScriptCompiler::CachedData(
-            bytes.data(), static_cast<int>(bytes.size()),
-            v8::ScriptCompiler::CachedData::BufferNotOwned);
+        auto* cached =
+            new v8::ScriptCompiler::CachedData(bytes.data(), static_cast<int>(bytes.size()),
+                                               v8::ScriptCompiler::CachedData::BufferNotOwned);
         v8::ScriptCompiler::Source v8src(src_str, origin, cached);
-        bool compiled = v8::ScriptCompiler::CompileModule(iso, &v8src,
-                                                          v8::ScriptCompiler::kConsumeCodeCache)
-                            .ToLocal(&mod);
+        bool compiled =
+            v8::ScriptCompiler::CompileModule(iso, &v8src, v8::ScriptCompiler::kConsumeCodeCache)
+                .ToLocal(&mod);
         const auto* post = v8src.GetCachedData();
         if (compiled && (!post || !post->rejected))
           return mod;
@@ -332,8 +331,7 @@ namespace fxe::js::v8_code_cache {
       std::unique_ptr<v8::ScriptCompiler::CachedData> produced(
           v8::ScriptCompiler::CreateCodeCache(mod->GetUnboundModuleScript()));
       if (produced && produced->data && produced->length > 0) {
-        store_blob(path, cache_id, source, produced->data,
-                   static_cast<size_t>(produced->length));
+        store_blob(path, cache_id, source, produced->data, static_cast<size_t>(produced->length));
       }
     }
     return mod;

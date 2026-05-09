@@ -97,8 +97,7 @@ namespace fxe::js {
         return false;
       if (!rd(&src_hash, 8) || !rd(&src_len, 8))
         return false;
-      if (src_len != source.size() ||
-          src_hash != fnv1a_append(0xcbf29ce484222325ULL, source))
+      if (src_len != source.size() || src_hash != fnv1a_append(0xcbf29ce484222325ULL, source))
         return false;
       if (!rd(&origin_n, 4) || origin_n > (16u * 1024u))
         return false;
@@ -161,8 +160,8 @@ namespace fxe::js {
     }
   } // namespace
 
-  bool transpile_cache_lookup(std::string_view origin, std::string_view source, std::string& emitted,
-                              int& source_map_line_offset) {
+  bool transpile_cache_lookup(std::string_view origin, std::string_view source,
+                              std::string& emitted, int& source_map_line_offset) {
     auto& cache = state();
     const uint64_t key = cache_key(origin, source);
     {
@@ -190,9 +189,8 @@ namespace fxe::js {
     // Promote to in-memory cache.
     {
       std::lock_guard lock(cache.mutex);
-      cache.entries.emplace(key,
-                            cache_entry{std::string(origin), std::string(source), disk_emitted,
-                                        disk_line});
+      cache.entries.emplace(
+          key, cache_entry{std::string(origin), std::string(source), disk_emitted, disk_line});
     }
     emitted = std::move(disk_emitted);
     source_map_line_offset = disk_line;

@@ -27,9 +27,8 @@ namespace fxe::js {
   // The resolved directory is suffixed with `/v8-<V8::GetVersion()>` so cache
   // entries never cross V8 builds.
   namespace v8_code_cache {
-    v8::MaybeLocal<v8::Script> compile_script(v8::Local<v8::Context> ctx,
-                                              std::string_view cache_id, std::string_view source,
-                                              v8::ScriptOrigin& origin);
+    v8::MaybeLocal<v8::Script> compile_script(v8::Local<v8::Context> ctx, std::string_view cache_id,
+                                              std::string_view source, v8::ScriptOrigin& origin);
 
     v8::MaybeLocal<v8::Module> compile_module(v8::Isolate* iso, std::string_view cache_id,
                                               std::string_view source, v8::ScriptOrigin& origin);

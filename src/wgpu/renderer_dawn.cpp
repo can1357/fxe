@@ -27,6 +27,7 @@
 
 #include "pipeline.hpp"
 #include <fxe/fxe_shaders.hpp>
+#include <fxe/log.hpp>
 
 #include <algorithm>
 #include <array>
@@ -34,6 +35,7 @@
 #include <bit>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -44,6 +46,7 @@
 
 namespace fxe {
   namespace {
+
     // UBO must be aligned to 256 bytes for Dawn's uniform binding rules.
     constexpr u64 kUboBytes = (sizeof(vshader_cbuf) + 255ull) & ~static_cast<u64>(255ull);
 
@@ -75,7 +78,7 @@ namespace fxe {
               adapter = std::move(a);
             } else {
               std::string m(msg.data, msg.length);
-              std::fprintf(stderr, "fxe: RequestAdapter failed: %s\n", m.c_str());
+              FXE_ERROR("wgpu.renderer", "RequestAdapter failed: {}", m);
             }
           });
       wait_future(instance, fut);
@@ -95,15 +98,14 @@ namespace fxe {
       wgpu::Device device;
       wgpu::DeviceDescriptor desc{};
       desc.label = "fxe-device";
-      desc.SetUncapturedErrorCallback(
-          [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message) {
-            std::string m(message.data, message.length);
-            std::fprintf(stderr, "fxe: device error (type=%u): %s\n", static_cast<unsigned>(type),
-                         m.c_str());
-          });
+      desc.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType type,
+                                         wgpu::StringView message) {
+        std::string m(message.data, message.length);
+        FXE_ERROR("wgpu.renderer", "device error (type={}): {}", static_cast<unsigned>(type), m);
+      });
 #ifndef NDEBUG
       const unsigned request_count = debug_device_request_count().fetch_add(1) + 1;
-      std::fprintf(stderr, "fxe.wgpu: RequestDevice count=%u\n", request_count);
+      FXE_DEBUG("wgpu.renderer", "RequestDevice count={}", request_count);
 #endif
 
       auto fut = adapter.RequestDevice(
@@ -113,7 +115,7 @@ namespace fxe {
               device = std::move(d);
             } else {
               std::string m(msg.data, msg.length);
-              std::fprintf(stderr, "fxe: RequestDevice failed: %s\n", m.c_str());
+              FXE_ERROR("wgpu.renderer", "RequestDevice failed: {}", m);
             }
           });
       wait_future(instance, fut);
@@ -260,8 +262,8 @@ namespace fxe {
             }
           }
           if (!found) {
-            std::fprintf(stderr, "fxe.wgpu: surface does not advertise Premultiplied alpha; "
-                                 "transparency may not work\n");
+            FXE_WARN("wgpu.renderer",
+                     "surface does not advertise Premultiplied alpha; transparency may not work");
           }
           // Default to fully transparent clear unless the user overrides.
           if (!clear_color_set_)
@@ -273,9 +275,8 @@ namespace fxe {
         bloom_enabled_ = opts.enable_bloom;
         present_mode_ = choose_present_mode(caps, opts.vsync);
         if (!opts.vsync && present_mode_ == wgpu::PresentMode::Fifo) {
-          std::fprintf(stderr,
-                       "fxe.wgpu: --no-vsync requested, but surface only supports FIFO present; "
-                       "presentation remains display-paced\n");
+          FXE_WARN("wgpu.renderer", "--no-vsync requested, but surface only supports FIFO present; "
+                                    "presentation remains display-paced");
         }
 
         build_resources();
@@ -304,6 +305,13 @@ namespace fxe {
           refresh_pipelines();
         update_constants(eye_pos, eye_dir, world_view_proj, fb.x ? float(fb.x) : 1.0f,
                          fb.y ? float(fb.y) : 1.0f);
+        {
+          auto& gc = font::shared_glyph_cache();
+          FXE_TRACE("wgpu.renderer", "frame_begin mask_gen={} color_gen={} evicted={}/{}",
+                    gc.generation(font::Format::grayscale), gc.generation(font::Format::bgra),
+                    gc.eviction_count(font::Format::grayscale),
+                    gc.eviction_count(font::Format::bgra));
+        }
         queue_.WriteBuffer(ubo_, 0, &cbuf_, sizeof(cbuf_));
         clear();
         queued_dev_draws_.clear();
@@ -312,6 +320,11 @@ namespace fxe {
       }
 
       void end_frame() override {
+        {
+          auto& gc = font::shared_glyph_cache();
+          FXE_TRACE("wgpu.renderer", "frame_end mask_gen={} color_gen={}",
+                    gc.generation(font::Format::grayscale), gc.generation(font::Format::bgra));
+        }
         instance_.ProcessEvents();
         // 1. Acquire the next surface texture.
         wgpu::SurfaceTexture surf_tex{};
@@ -428,8 +441,8 @@ namespace fxe {
         const bool blur_ready = blur_capture_texture_ && blur_capture_view_ && blur_ping_texture_ &&
                                 blur_ping_view_ && blur_pong_texture_ && blur_pong_view_;
         if (has_blur && !blur_ready && !blur_texture_failure_logged_) {
-          std::fprintf(stderr, "fxe.wgpu: blur intermediate texture allocation failed; "
-                               "falling back to unblurred base\n");
+          FXE_WARN("wgpu.renderer",
+                   "blur intermediate texture allocation failed; falling back to unblurred base");
           blur_texture_failure_logged_ = true;
         }
 

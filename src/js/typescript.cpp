@@ -5,8 +5,8 @@
 #include <fxe/generated/fxe_types.hpp>
 #include <fxe/generated/typescript_compiler.hpp>
 
-#include "v8_code_cache.hpp"
 #include "transpile_cache.hpp"
+#include "v8_code_cache.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -27,7 +27,6 @@ namespace fxe::js {
       v8::Global<v8::Function> bridge;
     };
 
-
     std::string to_std_string(v8::Isolate* iso, v8::Local<v8::Value> value) {
       if (value.IsEmpty())
         return {};
@@ -40,7 +39,6 @@ namespace fxe::js {
                                      static_cast<int>(value.size()))
           .ToLocalChecked();
     }
-
 
     std::string exception_message(v8::Isolate* iso, v8::Local<v8::Context> ctx,
                                   v8::TryCatch& try_catch, std::string_view prefix) {

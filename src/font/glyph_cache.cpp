@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <fxe/log.hpp>
 #include <fxe/types.hpp>
 #include <iterator>
 #include <list>
@@ -139,6 +140,10 @@ namespace fxe::font {
         lru.erase(list_it);
         --counts[format_index(format)];
         ++evictions[format_index(format)];
+        FXE_DEBUG(
+            "font.cache", "evict fmt={} face={} gid={} size_q={} remaining={} evicted_total={}",
+            format == Format::bgra ? "color" : "mask", victim.face_id, victim.glyph_id,
+            victim.pixel_size_q, counts[format_index(format)], evictions[format_index(format)]);
         return true;
       }
       return false;
@@ -183,6 +188,10 @@ namespace fxe::font {
     [[nodiscard]] bool recover_space_for_pack(Format format, const GlyphKey& protected_key) {
       const usize before = counts[format_index(format)];
       usize to_evict = std::max<usize>(1, before / 4);
+      FXE_WARN("font.cache",
+               "recover_space fmt={} protected_face={} protected_gid={} before={} plan_evict={}",
+               format == Format::bgra ? "color" : "mask", protected_key.face_id,
+               protected_key.glyph_id, before, to_evict);
       bool evicted = false;
       while (to_evict-- > 0 && evict_one_lru(format, &protected_key))
         evicted = true;
@@ -214,11 +223,9 @@ namespace fxe::font {
       const u64 wk = warning_key(key);
       if (!oversize_warnings.insert(wk).second)
         return;
-      std::fprintf(stderr,
-                   "fxe.font: glyph atlas cannot fit glyphs for face=%llu size_q=%u format=%u; "
-                   "using missing-glyph fallback\n",
-                   static_cast<unsigned long long>(key.face_id), key.pixel_size_q,
-                   static_cast<unsigned>(format));
+      FXE_WARN("font.cache",
+               "glyph atlas cannot fit face={} size_q={} format={}; using missing-glyph fallback",
+               key.face_id, key.pixel_size_q, static_cast<unsigned>(format));
     }
 
     GlyphCacheBudget budget{};
@@ -306,6 +313,10 @@ namespace fxe::font {
     if (!inserted)
       return it->second.glyph;
     ++impl_->counts[format_index(format)];
+    FXE_TRACE(
+        "font.cache", "new_glyph fmt={} face={} gid={} size_q={} count={} atlas_x={} atlas_y={}",
+        format == Format::bgra ? "color" : "mask", k.face_id, glyph_id, k.pixel_size_q,
+        impl_->counts[format_index(format)], it->second.glyph.atlas_x, it->second.glyph.atlas_y);
 
     if (!impl_->enforce_budget(format, k)) {
       auto live = impl_->cache.find(k);

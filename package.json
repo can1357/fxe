@@ -21,12 +21,12 @@
 		"pycli": "cd clients/python && python3 -m fxe_debug.cli",
 
 		"typecheck": "tsc --noEmit -p tsconfig.json",
-		"fmt": "biome format --write examples/js tests packages types",
+		"fmt": "biome format --write examples/js tests packages types && bun run fmt:cpp",
 		"fmt:check": "biome format examples/js tests packages types",
 		"fmt:cpp": "bun scripts/cpp-fmt.ts",
 		"fmt:cpp:check": "bun scripts/cpp-fmt.ts --check",
 		"lint": "biome lint examples/js tests packages types",
-		"fix": "biome check --write examples/js tests packages types",
+		"fix": "biome check --write examples/js tests packages types && bun run fmt:cpp",
 
 		"check": "bun run fmt:check && bun run fmt:cpp:check && bun run typecheck && bun run lint",
 		"ci": "bun run check && bun run test",

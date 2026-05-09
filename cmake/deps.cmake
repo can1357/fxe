@@ -64,6 +64,35 @@ if(ZLIB_FOUND)
     target_link_libraries(fxe_deps INTERFACE ZLIB::ZLIB)
 endif()
 
+# spdlog — fast structured logger. Used by `fxe::log` (include/fxe/log.hpp)
+# for category-gated logging across the engine. Always fetched (vs. relying
+# on system spdlog) so the bundled-fmt build is consistent across machines
+# and we don't accidentally inherit a system spdlog built against external
+# fmt that we don't ship.
+if(NOT TARGET spdlog::spdlog)
+    if(FXE_FETCH_DEPS)
+        set(SPDLOG_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_INSTALL OFF CACHE BOOL "" FORCE)
+        set(SPDLOG_FMT_EXTERNAL OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            spdlog
+            GIT_REPOSITORY https://github.com/gabime/spdlog.git
+            GIT_TAG v1.15.3
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(spdlog)
+    else()
+        find_package(spdlog QUIET CONFIG)
+        if(NOT TARGET spdlog::spdlog)
+            message(
+                FATAL_ERROR
+                "spdlog was not found. Re-run with -DFXE_FETCH_DEPS=ON or install spdlog."
+            )
+        endif()
+    endif()
+endif()
+target_link_libraries(fxe_deps INTERFACE spdlog::spdlog)
+
 # Dawn and V8 are intentionally opt-in because both are heavyweight vendor flows.
 # FXE_ENABLE_WGPU expects Dawn's C++ WebGPU headers/library to be supplied by
 # the caller (for example via Dawn_DIR/CMAKE_PREFIX_PATH).
