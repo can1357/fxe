@@ -297,6 +297,10 @@ namespace fxe::runner {
       return fn.rfind("[native] ", 0) == 0;
     }
 
+    bool is_internal_script_url(std::string_view url) {
+      return url.size() >= 2 && url.front() == '<' && url.back() == '>';
+    }
+
     std::string format_us(i64 us) {
       char buf[64];
       if (us >= 1'000'000)
@@ -349,6 +353,14 @@ namespace fxe::runner {
   } // namespace
 
   std::string render_markdown(const profile_data& p, const frame_fps_stats* fps, int top_n) {
+    std::unordered_map<int, usize> node_index;
+    node_index.reserve(p.nodes.size());
+    for (usize i = 0; i < p.nodes.size(); ++i)
+      node_index.emplace(p.nodes[i].id, i);
+    auto idx_of = [&](int id) -> usize {
+      auto it = node_index.find(id);
+      return it == node_index.end() ? p.nodes.size() : it->second;
+    };
     // Sampling interval is the average gap between consecutive samples.
     // We treat each sample as accounting for one interval of self time on
     // its leaf node. timeDeltas[i] gives the gap *between* sample i and
@@ -371,7 +383,7 @@ namespace fxe::runner {
         i64 d = (i < p.time_deltas.size()) ? p.time_deltas[i] : mean;
         if (d <= 0)
           d = mean;
-        usize idx = static_cast<usize>(id - 1);
+        usize idx = idx_of(id);
         if (idx < self_us_by_node.size())
           self_us_by_node[idx] += d;
       }
@@ -388,18 +400,14 @@ namespace fxe::runner {
     std::vector<int> order;
     order.reserve(p.nodes.size());
     {
-      std::vector<int> stack;
       std::vector<char> visited(p.nodes.size(), 0);
-      if (!p.nodes.empty())
-        stack.push_back(p.nodes.front().id);
-      // Iterative post-order: push twice, second visit emits.
       std::vector<std::pair<int, bool>> wk;
       if (!p.nodes.empty())
         wk.push_back({p.nodes.front().id, false});
       while (!wk.empty()) {
         auto [id, done] = wk.back();
         wk.pop_back();
-        usize idx = static_cast<usize>(id - 1);
+        usize idx = idx_of(id);
         if (idx >= p.nodes.size())
           continue;
         if (done) {
@@ -414,10 +422,12 @@ namespace fxe::runner {
           wk.push_back({c, false});
       }
       for (int id : order) {
-        usize idx = static_cast<usize>(id - 1);
+        usize idx = idx_of(id);
+        if (idx >= p.nodes.size())
+          continue;
         i64 t = self_us_by_node[idx];
         for (int c : p.nodes[idx].children) {
-          usize cidx = static_cast<usize>(c - 1);
+          usize cidx = idx_of(c);
           if (cidx < total_us_by_node.size())
             t += total_us_by_node[cidx];
         }
@@ -474,9 +484,11 @@ namespace fxe::runner {
     {
       std::vector<int> parent(p.nodes.size(), 0);
       for (usize i = 0; i < p.nodes.size(); ++i)
-        for (int c : p.nodes[i].children)
-          if (static_cast<usize>(c - 1) < parent.size())
-            parent[static_cast<usize>(c - 1)] = p.nodes[i].id;
+        for (int c : p.nodes[i].children) {
+          usize cidx = idx_of(c);
+          if (cidx < parent.size())
+            parent[cidx] = p.nodes[i].id;
+        }
 
       std::unordered_map<key_t, char, key_hash> seen;
       seen.reserve(64);
@@ -487,12 +499,15 @@ namespace fxe::runner {
                          : (p.sample_period_us > 0 ? p.sample_period_us : 1000);
         seen.clear();
         int cur = leaf;
-        while (cur > 0 && static_cast<usize>(cur - 1) < p.nodes.size()) {
-          const auto& n = p.nodes[static_cast<usize>(cur - 1)];
+        while (cur > 0) {
+          usize cur_idx = idx_of(cur);
+          if (cur_idx >= p.nodes.size())
+            break;
+          const auto& n = p.nodes[cur_idx];
           key_t k{n.frame.function_name, n.frame.url};
           if (seen.emplace(k, 1).second)
             by_fn[k].total_us += period;
-          int pid = parent[static_cast<usize>(cur - 1)];
+          int pid = parent[cur_idx];
           if (pid == cur)
             break;
           cur = pid;
@@ -558,7 +573,7 @@ namespace fxe::runner {
       // Subtree headers: direct children of the (root) node.
       if (!p.nodes.empty()) {
         for (int cid : p.nodes.front().children) {
-          usize idx = static_cast<usize>(cid - 1);
+          usize idx = idx_of(cid);
           if (idx >= p.nodes.size())
             continue;
           const auto& c = p.nodes[idx];
@@ -636,8 +651,10 @@ namespace fxe::runner {
       std::vector<const agg*> v;
       v.reserve(rows.size());
       for (const auto& r : rows) {
-        if (is_synthetic_frame(r.function_name) || is_native_frame(r.function_name))
+        if (is_synthetic_frame(r.function_name) || is_native_frame(r.function_name) ||
+            r.url.empty() || is_internal_script_url(r.url)) {
           continue;
+        }
         v.push_back(&r);
       }
       std::sort(v.begin(), v.end(),
@@ -650,9 +667,9 @@ namespace fxe::runner {
       std::unordered_map<std::string, i64> by_url;
       by_url.reserve(rows.size());
       for (const auto& r : rows) {
-        if (r.url.empty())
+        if (r.url.empty() || is_internal_script_url(r.url))
           continue;
-        if (is_synthetic_frame(r.function_name))
+        if (is_synthetic_frame(r.function_name) || is_native_frame(r.function_name))
           continue;
         by_url[r.url] += r.self_us;
       }
@@ -690,9 +707,11 @@ namespace fxe::runner {
       constexpr usize kStackDepth = 8;
       std::vector<int> parent2(p.nodes.size(), 0);
       for (usize i = 0; i < p.nodes.size(); ++i)
-        for (int c : p.nodes[i].children)
-          if (static_cast<usize>(c - 1) < parent2.size())
-            parent2[static_cast<usize>(c - 1)] = p.nodes[i].id;
+        for (int c : p.nodes[i].children) {
+          usize cidx = idx_of(c);
+          if (cidx < parent2.size())
+            parent2[cidx] = p.nodes[i].id;
+        }
 
       struct stack_agg {
         std::vector<std::string> frames; // "fn @ short_url[:line]" leaf-first
@@ -713,8 +732,11 @@ namespace fxe::runner {
         sig.reserve(128);
         int cur = leaf;
         usize hops = 0;
-        while (cur > 0 && static_cast<usize>(cur - 1) < p.nodes.size() && hops < kStackDepth) {
-          const auto& n = p.nodes[static_cast<usize>(cur - 1)];
+        while (cur > 0 && hops < kStackDepth) {
+          usize cur_idx = idx_of(cur);
+          if (cur_idx >= p.nodes.size())
+            break;
+          const auto& n = p.nodes[cur_idx];
           // Skip the (root)/(js)/(native) headers so they don't dominate
           // every stack signature.
           bool skip = (n.frame.function_name == "(root)" || n.frame.function_name == "(js)" ||
@@ -737,7 +759,7 @@ namespace fxe::runner {
             frames.push_back(std::move(line));
             ++hops;
           }
-          int pid = parent2[static_cast<usize>(cur - 1)];
+          int pid = parent2[cur_idx];
           if (pid == cur)
             break;
           cur = pid;

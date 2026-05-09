@@ -254,6 +254,8 @@ test('snapshotFiberTree exposes rendered fibers for devtools', () => {
   const snapshot = snapshotFiberTree();
   assert(snapshot.tree.length > 0, 'snapshot should include the rendered root child');
   assert(snapshot.tree[0].children.length > 0, 'snapshot should preserve child fibers');
+  assertEqual(snapshot.tree[0].type, 'layer');
+  assertEqual(snapshot.tree[0].children[0].displayName, 'SnapshotProbe');
   assertEqual(snapshot.tree[0].dirty, false);
 });
 
@@ -284,6 +286,18 @@ test('paint flash adds a one-frame outline for rebuilt layers', () => {
   } finally {
     setPaintFlash(false);
   }
+});
+
+test('single-child reconciliation drops stale siblings', () => {
+  const A = Component(() => Draw(() => undefined), 'SingleFastPathA');
+  const B = Component(() => Draw(() => undefined), 'SingleFastPathB');
+
+  render(Layer({ children: [A({ key: 'a' }), B({ key: 'b' })] }), new CommandBuffer());
+  render(Layer({ children: [B({ key: 'b' })] }), new CommandBuffer());
+
+  const snapshot = snapshotFiberTree();
+  assertEqual(snapshot.tree[0].children.length, 1);
+  assertEqual(snapshot.tree[0].children[0].displayName, 'SingleFastPathB');
 });
 
 await run();

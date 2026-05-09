@@ -174,6 +174,14 @@ const SURFACE_PAD = 1;
 // path or work around cache bugs without rebuilding).
 const SURFACE_CACHE_DISABLED = process.env.FXE_DISABLE_SURFACE_CACHE === '1';
 
+const kCommandBufferKnownEmpty = Symbol('fxe-ui.commandBufferKnownEmpty');
+
+function markCommandBufferEmptyState(buf: CommandBuffer): boolean {
+  const empty = buf.isEmpty();
+  Reflect.set(buf, kCommandBufferKnownEmpty, empty);
+  return empty;
+}
+
 // Glyph atlas UV-layout epoch. Bumped only when atlas growth/repack can make
 // previously-emitted glyph UVs stale; pure append-only glyph uploads keep the
 // same epoch so memo/layer caches do not thrash while new text arrives.
@@ -397,12 +405,17 @@ export function shallowEqualProps(prev: unknown, next: unknown): boolean {
   return true;
 }
 
+const kLayoutDescSig = Symbol.for('fxe-ui.layoutDescSig');
 function layoutResultEqual(prev: LayoutResult | null, next: LayoutResult | null): boolean {
   if (prev === next) return true;
   if (prev === null || next === null) return false;
+  if (prev.x !== next.x || prev.y !== next.y) return false;
+  const prevDescSig = Reflect.get(prev, kLayoutDescSig);
+  const nextDescSig = Reflect.get(next, kLayoutDescSig);
+  if (prevDescSig !== undefined && nextDescSig !== undefined) {
+    return prevDescSig === nextDescSig;
+  }
   if (
-    prev.x !== next.x ||
-    prev.y !== next.y ||
     prev.width !== next.width ||
     prev.height !== next.height ||
     prev.paddingLeft !== next.paddingLeft ||
@@ -494,6 +507,10 @@ function propagateInternalToProduced(node: Node, produced: Node | null): Node | 
   const text = produced.internalTextStyle ?? node.internalTextStyle;
   if (layout === produced.internalLayout && text === produced.internalTextStyle) return produced;
   return { ...produced, internalLayout: layout, internalTextStyle: text };
+}
+
+function shouldTraverseMemoProduced(node: Node): boolean {
+  return node.type === 'layer' || node.type === 'provider' || node.type === 'portal';
 }
 
 export function ErrorBoundary(props: ErrorBoundaryProps): Node {
@@ -794,18 +811,9 @@ function ensureFiberDebugMetadata(fiber: Fiber): FiberDebugMetadata {
   return metadata;
 }
 
-function updateFiberDebugNode(fiber: Fiber, node: Node): void {
-  if (!devMode()) return;
-  // Hot path: only refresh the cheap descriptive fields. The heavy
-  // summarizeProps/depsForNode work is deferred to reconcilerSnapshot,
-  // which is the only consumer of metadata.props/propsSummary/deps and
-  // is called only when devtools actually request a tree snapshot.
-  // Eager summarization here used to dominate the render profile (~28%
-  // of frame time on the markdown demo) for data nothing was reading.
-  const metadata = ensureFiberDebugMetadata(fiber);
-  metadata.type = node.type;
-  metadata.displayName = displayNameForNode(node);
-}
+// Fiber type/displayName are derived from `fiber.node` in reconcilerSnapshot().
+// Keeping them out of the render hot path avoids touching devtools metadata
+// for every node on every frame when no devtools snapshot is being read.
 function recordFiberCacheStatus(
   fiber: Fiber,
   cacheHitMiss: FiberCacheHitMiss,
@@ -842,8 +850,8 @@ export function reconcilerSnapshot(): { tree: FiberNode[] } {
     }
     return {
       id: metadata.id,
-      type: metadata.type,
-      displayName: metadata.displayName,
+      type: fiber.node.type,
+      displayName: displayNameForNode(fiber.node),
       key: fiber.key,
       props: summarizeProps(propsForNode(fiber.node)),
       propsSummary: summarizeProps(propsForNode(fiber.node)),
@@ -1319,6 +1327,44 @@ function sameNodeIdentity(prev: Node | null, next: Node): boolean {
   return true;
 }
 
+function isWrapperNode(node: Node): boolean {
+  return node.type === 'layer' || node.type === 'provider' || node.type === 'portal';
+}
+
+function reconcileSingleChild(parent: Fiber, node: Node): Fiber {
+  const k = childKey(node, 0);
+  let f = parent.children.get(k);
+  if (f && !sameNodeIdentity(f.node, node)) {
+    unmountFiber(f);
+    f = newFiber(k, parent);
+    parent.children.set(k, f);
+  }
+  if (!f) {
+    f = newFiber(k, parent);
+    parent.children.set(k, f);
+  }
+  for (const [existingKey, child] of parent.children) {
+    if (existingKey === k) continue;
+    unmountFiber(child);
+    parent.children.delete(existingKey);
+  }
+  if (parent.childOrder.length !== 1 || parent.childOrder[0] !== k) {
+    parent.childOrder = [k];
+  }
+  if (isWrapperNode(node)) {
+    if (
+      parent.wrapperChildren === null ||
+      parent.wrapperChildren.length !== 1 ||
+      parent.wrapperChildren[0] !== f
+    ) {
+      parent.wrapperChildren = [f];
+    }
+  } else {
+    parent.wrapperChildren = null;
+  }
+  return f;
+}
+
 function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
   const liveKeys = new Set<string>();
   const ordered: Fiber[] = [];
@@ -1341,8 +1387,7 @@ function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
     }
     ordered.push(f);
     order.push(k);
-    const t = node.type;
-    if (t === 'layer' || t === 'provider' || t === 'portal') {
+    if (isWrapperNode(node)) {
       if (wrappers === null) wrappers = [];
       wrappers.push(f);
     }
@@ -1438,6 +1483,11 @@ function renderNodeList(
   ctx: RenderCtx,
   forceTraversal = false,
 ): void {
+  if (nodes.length === 1) {
+    const node = nodes[0];
+    renderNode(node, reconcileSingleChild(owner, node), target, ctx, forceTraversal);
+    return;
+  }
   const children = reconcileChildren(owner, nodes);
   for (let i = 0; i < nodes.length; ++i) {
     renderNode(nodes[i], children[i], target, ctx, forceTraversal);
@@ -1463,7 +1513,6 @@ function renderNode(
   forceTraversal = false,
 ): void {
   fiber.node = node;
-  updateFiberDebugNode(fiber, node);
   if (node.type === 'draw') {
     recordFiberCacheStatus(fiber, 'miss', true);
     fiber.dirty = false;
@@ -1477,7 +1526,7 @@ function renderNode(
   }
   if (node.type === 'component') {
     const memoInfo = node.memo;
-    const epoch = atlasEpoch();
+    const epoch = memoInfo ? atlasEpoch() : 0;
     const wasDirty = fiber.dirty;
     const nextInternalLayout = node.internalLayout ?? null;
     const nextInternalTextStyle = node.internalTextStyle ?? null;
@@ -1555,6 +1604,14 @@ function renderNode(
         }
       }
       if (bail) {
+        const produced = fiber.lastProducedNode;
+        if (produced && shouldTraverseMemoProduced(produced)) {
+          recordFiberCacheStatus(fiber, 'hit', false);
+          RenderStats.recordCacheHit();
+          renderNodeList(fiber, [produced], target, ctx, false);
+          fiber.dirty = false;
+          return;
+        }
         recordFiberCacheStatus(fiber, 'hit', false);
         queueInto(target, fiber.cache as CommandBuffer, undefined, undefined);
         if (fiber.cachedHitTargets && fiber.cachedHitTargets.length > 0) {
@@ -1607,7 +1664,10 @@ function renderNode(
     fiber.lastProducedNode = produced;
     if (!produced) {
       fiber.cache = memoInfo ? new CommandBuffer() : fiber.cache;
-      if (memoInfo) fiber.cachedHitTargets = null;
+      if (memoInfo) {
+        markCommandBufferEmptyState(fiber.cache as CommandBuffer);
+        fiber.cachedHitTargets = null;
+      }
       fiber.lastProps = node.props;
       fiber.dirty = false;
       recordFiberCacheStatus(fiber, 'miss', true);
@@ -1618,15 +1678,27 @@ function renderNode(
       recordFiberCacheStatus(fiber, 'miss', true);
       RenderStats.recordCacheMiss();
       RenderStats.recordRebuild();
-      const fresh = new CommandBuffer();
-      const hitStart = hitTargetCount();
-      renderNodeList(fiber, [produced], fresh, ctx, forceProducedTraversal);
-      fiber.cachedHitTargets = captureHitTargetsSince(hitStart);
-      fiber.cache = fresh;
-      fiber.cacheAtlasEpoch = epoch;
-      fiber.lastProps = node.props;
-      fiber.dirty = false;
-      queueInto(target, fresh, undefined, undefined);
+      if (shouldTraverseMemoProduced(produced)) {
+        const empty = new CommandBuffer();
+        markCommandBufferEmptyState(empty);
+        fiber.cachedHitTargets = null;
+        fiber.cache = empty;
+        fiber.cacheAtlasEpoch = epoch;
+        renderNodeList(fiber, [produced], target, ctx, forceProducedTraversal);
+        fiber.lastProps = node.props;
+        fiber.dirty = false;
+      } else {
+        const fresh = new CommandBuffer();
+        const hitStart = hitTargetCount();
+        renderNodeList(fiber, [produced], fresh, ctx, forceProducedTraversal);
+        markCommandBufferEmptyState(fresh);
+        fiber.cachedHitTargets = captureHitTargetsSince(hitStart);
+        fiber.cache = fresh;
+        fiber.cacheAtlasEpoch = epoch;
+        fiber.lastProps = node.props;
+        fiber.dirty = false;
+        queueInto(target, fresh, undefined, undefined);
+      }
     } else {
       renderNodeList(fiber, [produced], target, ctx, forceProducedTraversal);
       fiber.lastProps = node.props;
@@ -1807,6 +1879,7 @@ function renderNode(
   const hitStart = hitTargetCount();
   const fresh = new CommandBuffer();
   renderNodeList(fiber, props.children, fresh, ctx, forceTraversal);
+  markCommandBufferEmptyState(fresh);
   fiber.cache = fresh;
   fiber.cacheAtlasEpoch = layerEpoch;
   fiber.lastDeps = wantDeps;
@@ -1822,7 +1895,9 @@ function queueInto(
   transform: Mat4 | undefined,
   tint: Vec4 | undefined,
 ): void {
-  if (src.isEmpty()) return;
+  const knownEmpty = Reflect.get(src, kCommandBufferKnownEmpty) as boolean | undefined;
+  if (knownEmpty === true) return;
+  if (knownEmpty !== false && src.isEmpty()) return;
   if (transform && tint) target.queue(src, transform, tint);
   else if (transform) target.queue(src, transform);
   else target.queue(src);

@@ -25,10 +25,15 @@ function containsTarget(target: HitTarget, x: number, y: number): boolean {
 }
 
 function wheelTargetAt(x: number, y: number): HitTarget | null {
-  for (const target of [...hitTargets()].sort((a, b) => b.z - a.z)) {
-    if (target.onWheel && containsTarget(target, x, y)) return target;
+  let best: HitTarget | null = null;
+  const targets = hitTargets();
+  for (let i = 0; i < targets.length; ++i) {
+    const target = targets[i];
+    if (target.onWheel && containsTarget(target, x, y) && (best === null || target.z > best.z)) {
+      best = target;
+    }
   }
-  return null;
+  return best;
 }
 function orderedFocusableTargets(): HitTarget[] {
   const scoped = hitTargets().filter(

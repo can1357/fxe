@@ -82,6 +82,15 @@ export function coarseClip(
     const b = readVertex(triangleIndices[i + 1]);
     const c = readVertex(triangleIndices[i + 2]);
     if (!a || !b || !c || !isScreenPrimitive(a, b, c)) continue;
+    const minX = Math.min(a.x, b.x, c.x);
+    const maxX = Math.max(a.x, b.x, c.x);
+    const minY = Math.min(a.y, b.y, c.y);
+    const maxY = Math.max(a.y, b.y, c.y);
+    if (outsideRect(minX, minY, maxX, maxY, clip)) continue;
+    if (insideRect(minX, minY, maxX, maxY, clip)) {
+      triangles.push(a, b, c);
+      continue;
+    }
     const polygon = clipPolygon([a, b, c], clip);
     for (let j = 1; j + 1 < polygon.length; ++j) {
       triangles.push(polygon[0], polygon[j], polygon[j + 1]);
@@ -95,6 +104,15 @@ export function coarseClip(
     const a = readVertex(lineIndices[i]);
     const b = readVertex(lineIndices[i + 1]);
     if (!a || !b || !isScreenPrimitive(a, b)) continue;
+    const minX = Math.min(a.x, b.x);
+    const maxX = Math.max(a.x, b.x);
+    const minY = Math.min(a.y, b.y);
+    const maxY = Math.max(a.y, b.y);
+    if (outsideRect(minX, minY, maxX, maxY, clip)) continue;
+    if (insideRect(minX, minY, maxX, maxY, clip)) {
+      lines.push(a, b);
+      continue;
+    }
     const segment = clipLine(a, b, clip);
     if (segment) lines.push(segment[0], segment[1]);
   }
@@ -123,6 +141,26 @@ function normalizeRect(rect: LayoutResult): ClipRect | null {
 
 function isScreenPrimitive(...vertices: ClipVertex[]): boolean {
   return vertices.every((vertex) => vertex.isWorld === 0);
+}
+
+function outsideRect(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  rect: ClipRect,
+): boolean {
+  return maxX < rect.left || minX > rect.right || maxY < rect.top || minY > rect.bottom;
+}
+
+function insideRect(
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  rect: ClipRect,
+): boolean {
+  return minX >= rect.left && maxX <= rect.right && minY >= rect.top && maxY <= rect.bottom;
 }
 
 function clipPolygon(vertices: ClipVertex[], rect: ClipRect): ClipVertex[] {

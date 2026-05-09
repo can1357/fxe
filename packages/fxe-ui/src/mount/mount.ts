@@ -153,15 +153,20 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
       frameLoopDispose = null;
     }
   } else {
-    // Lazy mode: drive frames on demand from window redraw acks. setState
+    // Lazy mode: drive frames on demand from real redraw requests. setState
     // / signals call window.requestRedraw() via requestRenderTargetRedraw;
     // the OS event loop (App.run / Window.run) consumes that flag and
-    // invokes the per-window onFrame we register here. Test stubs may not
-    // expose this method, so we feature-detect rather than hard-require.
+    // invokes the per-window onFrame we register here. The initial synchronous
+    // frame above already painted the tree, so clear the window's constructor
+    // dirty bit instead of scheduling a duplicate startup frame.
     if (typeof window.setFrameCallback === 'function') {
       window.setFrameCallback(frame);
+      if (typeof window.takeRedrawRequest === 'function') {
+        window.takeRedrawRequest();
+      }
+    } else {
+      window.requestRedraw();
     }
-    window.requestRedraw();
   }
 
   return () => {

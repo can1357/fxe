@@ -4,7 +4,12 @@ import type { AccessibilityProps } from '../a11y/types.ts';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { layout } from '../layout/index.ts';
 import type { LayoutNode, LayoutResult, LayoutStyle } from '../layout/types.ts';
-import { type HitTarget, hitTargets, registerHitTarget } from '../mount/hit_test.ts';
+import {
+  type HitTarget,
+  hitTargets,
+  materializeHitTarget,
+  registerHitTarget,
+} from '../mount/hit_test.ts';
 import { currentRenderTargetSize } from '../mount/mount.ts';
 import { coarseClip } from '../paint/clip.ts';
 import { paintView } from '../paint/view_painter.ts';
@@ -110,7 +115,7 @@ function clipChildHitTargets(start: number, clip: LayoutResult): void {
     if (right <= left || bottom <= top) {
       targets.splice(i, 1);
     } else {
-      target.rect = {
+      materializeHitTarget(targets, i).rect = {
         ...target.rect,
         x: left,
         y: top,
@@ -297,14 +302,23 @@ function layoutNodeListSig(nodes: readonly LayoutNode[]): { sig: string; complet
   return { sig: parts.join('~'), complete };
 }
 
-function layoutResultSig(result: LayoutResult): string {
-  let sig = `${result.x},${result.y},${result.width},${result.height},${result.paddingLeft},${result.paddingTop},${result.paddingRight},${result.paddingBottom}`;
+function layoutResultDescSig(result: LayoutResult): string {
+  const cached = Reflect.get(result, kLayoutDescSig);
+  if (cached !== undefined) return cached as string;
+  let sig = `${result.width},${result.height},${result.paddingLeft},${result.paddingTop},${result.paddingRight},${result.paddingBottom}`;
   for (let i = 0; i < result.children.length; ++i) {
-    sig += `|${layoutResultSig(result.children[i])}`;
+    const child = result.children[i];
+    sig += `|${child.x},${child.y}|${layoutResultDescSig(child)}`;
   }
+  Reflect.set(result, kLayoutDescSig, sig);
   return sig;
 }
 
+function layoutResultSig(result: LayoutResult): string {
+  return `${result.x},${result.y}|${layoutResultDescSig(result)}`;
+}
+
+const kLayoutDescSig = Symbol.for('fxe-ui.layoutDescSig');
 const kLayoutComplete = Symbol('fxe-ui.layoutComplete');
 
 function isLayoutComplete(result: LayoutResult | null | undefined): boolean {
@@ -327,6 +341,8 @@ function markLayoutCompleteness(result: LayoutResult, node: LayoutNode): boolean
 function absoluteLayoutResult(result: LayoutResult, x: number, y: number): LayoutResult {
   const out = { ...result, x, y };
   Reflect.set(out, kLayoutComplete, isLayoutComplete(result));
+  const descSig = Reflect.get(result, kLayoutDescSig);
+  if (descSig !== undefined) Reflect.set(out, kLayoutDescSig, descSig);
   return out;
 }
 

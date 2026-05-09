@@ -66,6 +66,9 @@ function isInteractiveTarget(target: HitTarget): boolean {
 const targets: HitTarget[] = [];
 let nextZ = 0;
 
+const kSharedReplayHitTarget = Symbol('fxe-ui.sharedReplayHitTarget');
+type ReplayHitTarget = HitTarget & { [kSharedReplayHitTarget]?: boolean };
+
 export function clearHitTargets(): void {
   targets.length = 0;
   nextZ = 0;
@@ -77,6 +80,15 @@ export function registerHitTarget(target: Omit<HitTarget, 'z'> & { z?: number })
 
 export function hitTargets(): readonly HitTarget[] {
   return targets;
+}
+
+export function materializeHitTarget(targets: HitTarget[], index: number): HitTarget {
+  const target = targets[index] as ReplayHitTarget;
+  if (target[kSharedReplayHitTarget] !== true) return target;
+  const clone = { ...target };
+  clone[kSharedReplayHitTarget] = false;
+  targets[index] = clone;
+  return clone;
 }
 
 // Snapshot helpers used by the Layer cache to re-emit hit targets that were
@@ -91,29 +103,58 @@ export function hitTargetCount(): number {
 }
 
 export function captureHitTargetsSince(start: number): HitTarget[] {
-  return targets.slice(start);
+  const captured = targets.slice(start);
+  for (let i = 0; i < captured.length; ++i) {
+    (captured[i] as ReplayHitTarget)[kSharedReplayHitTarget] = true;
+  }
+  return captured;
 }
 
-// Re-push a previously captured slice. We allocate fresh z values so the
-// replay slots into the current frame's painter ordering.
+// Re-push a previously captured slice. Cached frames keep the original target
+// objects alive and only refresh z-order when the slice moved relative to
+// earlier targets. Rect clipping does copy-on-write via
+// `materializeHitTarget()` so replay itself stays allocation-free.
 export function replayHitTargets(captured: readonly HitTarget[]): void {
-  for (const t of captured) {
-    targets.push({ ...t, z: nextZ++ });
+  const count = captured.length;
+  if (count === 0) return;
+  const zStart = nextZ;
+  nextZ += count;
+  const zEnd = zStart + count - 1;
+  if (captured[0].z !== zStart || captured[count - 1].z !== zEnd) {
+    for (let i = 0; i < count; ++i) {
+      captured[i].z = zStart + i;
+    }
+  }
+  if (count < 8192) {
+    targets.push(...captured);
+    return;
+  }
+  for (let i = 0; i < count; ++i) {
+    targets.push(captured[i]);
   }
 }
 
 export function hitTest(x: number, y: number): HitTarget | null {
-  let passive: HitTarget | null = null;
-  let blockedByPassive: HitTarget | null = null;
-  for (const target of [...targets].sort((a, b) => b.z - a.z)) {
+  let bestInteractive: HitTarget | null = null;
+  let bestPassive: HitTarget | null = null;
+  let bestBlockedByPassive: HitTarget | null = null;
+  for (let i = 0; i < targets.length; ++i) {
+    const target = targets[i];
     const r = target.rect;
     if (x < r.x || y < r.y || x > r.x + r.width || y > r.y + r.height) continue;
-    if (isInteractiveTarget(target)) return target;
-    passive ??= target;
-    if (target.componentType !== 'Text') blockedByPassive ??= target;
+    if (isInteractiveTarget(target)) {
+      if (bestInteractive === null || target.z > bestInteractive.z) bestInteractive = target;
+      continue;
+    }
+    if (bestPassive === null || target.z > bestPassive.z) bestPassive = target;
+    if (
+      target.componentType !== 'Text' &&
+      (bestBlockedByPassive === null || target.z > bestBlockedByPassive.z)
+    ) {
+      bestBlockedByPassive = target;
+    }
   }
-  if (blockedByPassive) return blockedByPassive;
-  return passive;
+  return bestInteractive ?? bestBlockedByPassive ?? bestPassive;
 }
 
 export function makeSyntheticEvent<T>(nativeEvent: T, x: number, y: number): SyntheticEvent<T> {

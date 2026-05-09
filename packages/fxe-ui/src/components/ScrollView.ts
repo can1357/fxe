@@ -2,7 +2,12 @@ import { type CommandBuffer, Primitives } from 'fxe';
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import type { LayoutResult, LayoutStyle } from '../layout/types.ts';
-import { type HitTarget, hitTargets, registerHitTarget } from '../mount/hit_test.ts';
+import {
+  type HitTarget,
+  hitTargets,
+  materializeHitTarget,
+  registerHitTarget,
+} from '../mount/hit_test.ts';
 import { coarseClip } from '../paint/clip.ts';
 import {
   type BoundaryChild,
@@ -101,7 +106,7 @@ function clipChildHitTargets(start: number, clip: LayoutResult, offset: Offset):
     if (right <= left || bottom <= top) {
       targets.splice(i, 1);
     } else {
-      target.rect = {
+      materializeHitTarget(targets, i).rect = {
         ...shifted,
         x: left,
         y: top,
