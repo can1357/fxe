@@ -2,7 +2,7 @@
 //
 // Usage:
 //   fxe_run [--debug[=PORT]] [--debug-host=ADDR] [--debug-pause]
-//           [--debug-keepalive] [--vsync|--no-vsync] [--fps-limit=N]
+//           [--debug-keepalive] [--watch] [--vsync|--no-vsync] [--fps-limit=N]
 //           [--msaa=N] [--bloom|--no-bloom] [--show-fps]
 //           [--screenshot[=PATH]] [--screenshot-delay=MS]
 //           [--screenshot-frames=N] [--screenshot-size=WxH]
@@ -44,6 +44,19 @@
 // --screenshot-quality=N JPEG quality 1-100 (default 90).
 // --screenshot-stay     Don't auto-close the window after capture.
 //
+// Environment variables (applied before CLI flags; CLI takes precedence):
+//   FXE_DEBUG=PORT        Enable debug server on PORT (default 9333).
+//   FXE_DEBUG_HOST=ADDR   Bind address (default 127.0.0.1).
+//   FXE_DEBUG_PAUSE=1     Pause before the first instruction.
+//   FXE_DEBUG_KEEPALIVE=1 Keep debug server alive after script exit.
+//   FXE_VSYNC=1|0         Override Renderer vsync (1=on, 0=off).
+//   FXE_FPS_LIMIT=N       Override fps limit.
+//   FXE_MSAA=N            Override multisampleCount.
+//   FXE_BLOOM=1|0         Override enableBloom.
+//   FXE_SHOW_FPS=1        Enable FPS counter overlay.
+//   FXE_NO_LAZY=1         Disable lazy frames (continuous redraw).
+//   FXE_WATCH=1           Enable HMR file watcher.
+//
 // Detection between classic-script and ES-module is automatic based on a top-
 // level `import` / `export` scan. The synthetic `fxe` specifier exports
 // `Window`, `Renderer`, `Primitives`, and `CommandBuffer`, so the canonical
@@ -56,7 +69,7 @@
 //   Primitives.fillRect(r, 10, 10, 200, 80, 0, 0xffffffff);
 //   r.endFrame();
 //
-// Environment overrides:
+// Other environment variables:
 //   FXE_V8_ICUDTL — explicit path to icudtl.dat (used when V8 was not built
 //                    with embedded ICU data). Falls back to argv[0]-relative
 //                    lookup; finally falls back to the build-time discovered
@@ -74,6 +87,7 @@
 
 #include "../js/bind_process.hpp"
 #include "../runtime/bundle_loader.hpp"
+#include "../runtime/v8/fs_watcher.hpp"
 
 #include "../runtime/updater.hpp"
 #include "cpu_profile.hpp"
@@ -81,6 +95,7 @@
 #include "cpu_profile_native.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -89,11 +104,14 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifndef FXE_V8_ICUDTL_PATH
@@ -154,8 +172,8 @@ namespace {
                  "  --bloom / --no-bloom  Override Renderer enableBloom.\n"
                  "  --show-fps            Draw a top-left FPS counter overlay.\n"
                  "\n"
-                 "  --watch                Watch the entry script's directory and\n"
-                 "                          re-eval changed .ts/.js/.json modules.\n"
+                 "  --watch                Watch loaded file modules and fire global\n"
+                 "                          HMR on changed TS/JS/JSON sources.\n"
                  "  --screenshot[=PATH]    Capture the framebuffer once a frame has\n"
                  "                          rendered and write it to PATH (default\n"
                  "                          screenshot.png), then exit. Format is\n"
@@ -178,7 +196,19 @@ namespace {
                  "                          report (default: PATH with .md ext).\n"
                  "  --cpu-prof-hz=N        Native sampling rate (default 1000).\n"
                  "  --cpu-prof-js-only     Skip the native sampler.\n"
-                 "  --cpu-prof-native-only Skip V8's CPU profiler.\n",
+                 "  --cpu-prof-native-only Skip V8's CPU profiler.\n"
+                 "Environment variables (applied before CLI flags; CLI takes precedence):\n"
+                 "  FXE_DEBUG=PORT          Enable debug server on PORT (0 = OS-assigned).\n"
+                 "  FXE_DEBUG_HOST=ADDR      Bind address (default 127.0.0.1).\n"
+                 "  FXE_DEBUG_PAUSE=1        Pause before the first instruction.\n"
+                 "  FXE_DEBUG_KEEPALIVE=1     Keep debug server alive after script exit.\n"
+                 "  FXE_VSYNC=1|0            Override Renderer vsync (1=on, 0=off).\n"
+                 "  FXE_FPS_LIMIT=N          Override fps limit.\n"
+                 "  FXE_MSAA=N               Override multisampleCount.\n"
+                 "  FXE_BLOOM=1|0            Override enableBloom (1=on, 0=off).\n"
+                 "  FXE_SHOW_FPS=1           Enable FPS counter overlay.\n"
+                 "  FXE_NO_LAZY=1            Disable lazy frames (continuous redraw).\n"
+                 "  FXE_WATCH=1              Enable HMR file watcher.",
                  argv0 ? argv0 : "fxe_run");
   }
 
@@ -219,8 +249,68 @@ namespace {
     return s.size() >= p.size() && s.compare(0, p.size(), p) == 0;
   }
 
-  cli_options parse_args(int argc, char** argv) {
-    cli_options o;
+  // Read boolean env var: "1" / "true" / "yes" (case-insensitive) → true.
+  bool env_bool(const char* name) {
+    if (const char* v = std::getenv(name); v && *v) {
+      char c = static_cast<char>(std::tolower(static_cast<unsigned char>(v[0])));
+      return c == '1' || c == 't' || c == 'y';
+    }
+    return false;
+  }
+
+  // Apply environment variables as defaults into `opts`.
+  // CLI flags parsed later will override these values for any flag that
+  // appears on the command line, because parse_args always writes the field
+  // when it encounters the corresponding --flag.
+  void apply_env_overrides(cli_options& o) {
+    if (const char* v = std::getenv("FXE_DEBUG"); v && *v) {
+      o.debug = true;
+      try {
+        o.debug_port = static_cast<u16>(std::stoi(v));
+      } catch (...) {
+      }
+    }
+    if (const char* v = std::getenv("FXE_DEBUG_HOST"); v && *v) {
+      o.debug_host = v;
+    }
+    if (env_bool("FXE_DEBUG_PAUSE"))
+      o.debug_pause = true;
+    if (env_bool("FXE_DEBUG_KEEPALIVE"))
+      o.debug_keepalive = true;
+    if (const char* v = std::getenv("FXE_VSYNC"); v && *v) {
+      char c = static_cast<char>(std::tolower(static_cast<unsigned char>(v[0])));
+      o.render_overrides.override_vsync = true;
+      o.render_overrides.vsync = (c == '1' || c == 't' || c == 'y');
+    }
+    if (const char* v = std::getenv("FXE_FPS_LIMIT"); v && *v) {
+      o.render_overrides.override_fps = true;
+      try {
+        o.render_overrides.fps = std::stod(v);
+      } catch (...) {
+      }
+    }
+    if (const char* v = std::getenv("FXE_MSAA"); v && *v) {
+      o.render_overrides.override_multisample_count = true;
+      try {
+        o.render_overrides.multisample_count = static_cast<u32>(std::stoul(v));
+      } catch (...) {
+      }
+    }
+    if (const char* v = std::getenv("FXE_BLOOM"); v && *v) {
+      char c = static_cast<char>(std::tolower(static_cast<unsigned char>(v[0])));
+      o.render_overrides.override_bloom = true;
+      o.render_overrides.enable_bloom = (c == '1' || c == 't' || c == 'y');
+    }
+    if (env_bool("FXE_SHOW_FPS"))
+      o.render_overrides.show_fps_counter = true;
+    if (env_bool("FXE_NO_LAZY"))
+      o.render_overrides.force_continuous = true;
+    if (env_bool("FXE_WATCH"))
+      o.watch = true;
+  }
+
+  cli_options parse_args(int argc, char** argv, cli_options base = {}) {
+    cli_options o = base;
     for (int i = 1; i < argc; ++i) {
       std::string_view a = argv[i];
       if (a == "-h" || a == "--help") {
@@ -519,75 +609,112 @@ namespace {
 
   // ---- HMR watcher ------------------------------------------------------
   //
-  // Polls the entry-script directory once per pump for mtime changes on
-  // .ts/.js/.json files. On change, asks the host to re-evaluate the changed
-  // module via run_module_file(). The host's module cache is purged for the
-  // affected path before re-evaluation; an HMR registry on globalThis
-  // (`__fxe_hmr_handlers`) gives modules a chance to preserve top-level
-  // state.
-  //
-  // Polling cadence is gated to ~250 ms wall-clock so we don't burn CPU
-  // stat()ing the directory every frame.
+  // Platform file-watch backed HMR. Rather than polling a whole directory tree,
+  // this attaches one watcher per file-backed module that is currently resident
+  // in the V8 module cache. Any change fires globalThis.__fxe_hmr.fire(path),
+  // which invalidates the changed module plus transitive importers and invokes
+  // both path-specific and global HMR handlers.
   struct hmr_watcher {
     fxe::js::host* host = nullptr;
-    std::filesystem::path root;
-    std::unordered_map<std::string, std::filesystem::file_time_type> mtimes;
-    std::chrono::steady_clock::time_point next_poll{};
+    std::unordered_map<std::string, std::unique_ptr<fxe::runtime::fs_watcher>> watchers;
+    std::unordered_set<std::string> failed_watch_paths;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> pending;
+    std::mutex pending_mutex;
+    std::chrono::steady_clock::time_point next_module_sync{};
 
-    void seed() {
+    static bool is_hmr_source_path(const std::string& path) {
+      auto ext = std::filesystem::path(path).extension().string();
+      std::transform(ext.begin(), ext.end(), ext.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      return ext == ".ts" || ext == ".tsx" || ext == ".mts" || ext == ".cts" || ext == ".js" ||
+             ext == ".jsx" || ext == ".mjs" || ext == ".cjs" || ext == ".json";
+    }
+
+    static std::string normalize_watch_path(const std::string& raw) {
       namespace fs = std::filesystem;
       std::error_code ec;
-      if (!fs::is_directory(root, ec))
+      auto path = fs::absolute(fs::path(raw), ec);
+      if (ec)
+        path = fs::path(raw);
+      return path.lexically_normal().generic_string();
+    }
+
+    void enqueue(const std::string& raw_path) {
+      if (!is_hmr_source_path(raw_path))
         return;
-      for (auto& e : fs::recursive_directory_iterator(root, ec)) {
-        if (ec)
-          break;
-        if (!e.is_regular_file(ec))
+
+      const auto path = normalize_watch_path(raw_path);
+      auto due = std::chrono::steady_clock::now() + std::chrono::milliseconds(60);
+      std::lock_guard lock(pending_mutex);
+      pending[path] = due;
+    }
+
+    void sync_loaded_modules() {
+      if (!host)
+        return;
+
+      for (const auto& path : host->loaded_module_paths()) {
+        if (!is_hmr_source_path(path) || watchers.contains(path) ||
+            failed_watch_paths.contains(path))
           continue;
-        auto ext = e.path().extension().string();
-        if (ext != ".ts" && ext != ".js" && ext != ".mjs" && ext != ".json")
+
+        fxe::runtime::fs_watch_error watch_error;
+        auto watcher = fxe::runtime::fs_watcher::create(
+            path, false,
+            [this](const fxe::runtime::fs_watch_event& event) {
+              if (event.k == fxe::runtime::fs_watch_event::kind::deleted)
+                return;
+              enqueue(event.path);
+            },
+            &watch_error);
+        if (!watcher) {
+          failed_watch_paths.insert(path);
+          std::string msg = watch_error.message;
+          if (msg.empty())
+            msg = "unknown watcher error";
+          std::fprintf(stderr, "fxe_run: --watch: cannot watch %s: %s\n", path.c_str(),
+                       msg.c_str());
           continue;
-        mtimes[e.path().string()] = fs::last_write_time(e.path(), ec);
+        }
+        watchers.emplace(path, std::move(watcher));
       }
     }
 
     void step() {
-      using namespace std::chrono;
-      auto now = steady_clock::now();
-      if (now < next_poll)
-        return;
-      next_poll = now + milliseconds(250);
+      using clock = std::chrono::steady_clock;
+      const auto now = clock::now();
+      if (now >= next_module_sync) {
+        sync_loaded_modules();
+        next_module_sync = now + std::chrono::milliseconds(500);
+      }
 
-      namespace fs = std::filesystem;
-      std::error_code ec;
-      if (!fs::is_directory(root, ec))
-        return;
-      for (auto& e : fs::recursive_directory_iterator(root, ec)) {
-        if (ec)
-          break;
-        if (!e.is_regular_file(ec))
-          continue;
-        auto ext = e.path().extension().string();
-        if (ext != ".ts" && ext != ".js" && ext != ".mjs" && ext != ".json")
-          continue;
-        auto path = e.path().string();
-        auto stamp = fs::last_write_time(e.path(), ec);
-        if (ec)
-          continue;
-        auto it = mtimes.find(path);
-        if (it == mtimes.end()) {
-          mtimes.emplace(path, stamp);
+      std::vector<std::string> ready;
+      {
+        std::lock_guard lock(pending_mutex);
+        for (auto it = pending.begin(); it != pending.end();) {
+          if (it->second > now) {
+            ++it;
+            continue;
+          }
+          ready.push_back(it->first);
+          it = pending.erase(it);
+        }
+      }
+
+      std::sort(ready.begin(), ready.end());
+      ready.erase(std::unique(ready.begin(), ready.end()), ready.end());
+
+      for (const auto& path : ready) {
+        int handlers_called = 0;
+        auto result = host->fire_hmr(path, handlers_called);
+        if (!result.ok) {
+          std::fprintf(stderr, "fxe_run: --watch: HMR failed for %s: %s\n", path.c_str(),
+                       result.message.c_str());
           continue;
         }
-
-        if (it->second == stamp)
-          continue;
-        it->second = stamp;
-        std::fprintf(stderr, "fxe_run: --watch: re-evaluating %s\n", path.c_str());
-        std::fflush(stderr);
-        auto r = host->run_module_file(path);
-        if (!r.ok)
-          std::fprintf(stderr, "fxe_run: --watch: %s: %s\n", path.c_str(), r.message.c_str());
+        std::fprintf(stderr, "fxe_run: --watch: HMR applied %s (%d handler%s)\n", path.c_str(),
+                     handlers_called, handlers_called == 1 ? "" : "s");
+        sync_loaded_modules();
       }
     }
   };
@@ -731,8 +858,9 @@ int main(int argc, char** argv) {
   fxe::js::set_host_argv(std::vector<std::string>(argv, argv + argc));
 
   cli_options opts;
+  apply_env_overrides(opts);
   try {
-    opts = parse_args(argc, argv);
+    opts = parse_args(argc, argv, opts);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "fxe_run: invalid flag value: %s\n", e.what());
     usage(argv[0]);
@@ -852,14 +980,10 @@ int main(int argc, char** argv) {
 
     // ----- HMR watcher ------------------------------------------------------
     hmr_watcher hmr;
-    if (opts.watch && !opts.scripts.empty()) {
+    if (opts.watch) {
       hmr.host = &host;
-      hmr.root = std::filesystem::path(opts.scripts.front()).parent_path();
-      if (hmr.root.empty())
-        hmr.root = std::filesystem::current_path();
-      hmr.seed();
       pump_state.hmr = &hmr;
-      std::fprintf(stderr, "fxe_run: --watch: watching %s\n", hmr.root.string().c_str());
+      std::fprintf(stderr, "fxe_run: --watch: HMR file watcher enabled\n");
       std::fflush(stderr);
     }
     host.attach_debug_pump(&combined_pump_trampoline, &combined_paused_trampoline, &pump_state);
@@ -1026,6 +1150,9 @@ int main(int argc, char** argv) {
       std::fflush(stderr);
       while (debug_srv->running()) {
         debug_srv->pump_tasks();
+        if (pump_state.hmr)
+          pump_state.hmr->step();
+        close_windows_for_signal(&host);
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
       }
     }

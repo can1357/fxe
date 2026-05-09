@@ -149,11 +149,29 @@ async def launch(
     host: str = "127.0.0.1",
     pause: bool = True,
     keepalive: bool = False,
+    vsync: bool | None = None,
+    fps_limit: float | None = None,
+    msaa: int | None = None,
+    bloom: bool | None = None,
+    show_fps: bool = False,
+    no_lazy: bool = False,
+    watch: bool = False,
     env: dict[str, str] | None = None,
     args: list[str] | None = None,
     ready_timeout: float = 10.0,
     mirror_console: bool = True,
 ) -> Page:
+    """Spawn fxe_run and connect to its debug server.
+
+    Runner flags (also settable via FXE_* environment variables):
+      vsync       Override Renderer vsync (True=on, False=off).
+      fps_limit   Override Window.run/App.run fps cadence.
+      msaa        Override Renderer multisampleCount.
+      bloom       Override Renderer enableBloom (True=on, False=off).
+      show_fps    Draw a top-left FPS counter overlay.
+      no_lazy     Disable lazy frames; redraw every loop iteration.
+      watch       Enable HMR file watcher.
+    """
     binary = _resolve_fxe_run(fxe_run)
     script_path = Path(script)
 
@@ -162,6 +180,24 @@ async def launch(
         cmd.append("--debug-pause")
     if keepalive:
         cmd.append("--debug-keepalive")
+    if vsync is True:
+        cmd.append("--vsync")
+    elif vsync is False:
+        cmd.append("--no-vsync")
+    if fps_limit is not None:
+        cmd.append(f"--fps-limit={fps_limit}")
+    if msaa is not None:
+        cmd.append(f"--msaa={msaa}")
+    if bloom is True:
+        cmd.append("--bloom")
+    elif bloom is False:
+        cmd.append("--no-bloom")
+    if show_fps:
+        cmd.append("--show-fps")
+    if no_lazy:
+        cmd.append("--no-lazy")
+    if watch:
+        cmd.append("--watch")
     if args:
         cmd.extend(args)
     cmd.append(str(script_path))

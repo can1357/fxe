@@ -19,6 +19,17 @@ function isFocusable(target: HitTarget): boolean {
   return Boolean(target.onFocus || target.onBlur || target.onKeyDown || target.onKeyPress);
 }
 
+function containsTarget(target: HitTarget, x: number, y: number): boolean {
+  const r = target.rect;
+  return x >= r.x && y >= r.y && x <= r.x + r.width && y <= r.y + r.height;
+}
+
+function wheelTargetAt(x: number, y: number): HitTarget | null {
+  for (const target of [...hitTargets()].sort((a, b) => b.z - a.z)) {
+    if (target.onWheel && containsTarget(target, x, y)) return target;
+  }
+  return null;
+}
 function orderedFocusableTargets(): HitTarget[] {
   const scoped = hitTargets().filter(
     (target) =>
@@ -142,7 +153,7 @@ export function dispatchMouseUp(ev: MouseButtonEvent): void {
 export function dispatchWheel(ev: WheelEvent & { x?: number; y?: number }): void {
   const x = ev.x ?? hovered?.rect.x ?? 0;
   const y = ev.y ?? hovered?.rect.y ?? 0;
-  const target = hitTest(x, y) ?? hovered;
+  const target = wheelTargetAt(x, y) ?? (hovered?.onWheel ? hovered : null);
   target?.onWheel?.({ ...makeSyntheticEvent(ev, x, y), dx: ev.dx, dy: ev.dy });
 }
 

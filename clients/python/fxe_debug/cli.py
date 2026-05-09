@@ -229,6 +229,13 @@ async def cmd_launch(ns: argparse.Namespace) -> int:
             ns.script,
             port=ns.port,
             pause=not ns.no_pause,
+            vsync=ns.vsync,
+            fps_limit=ns.fps_limit,
+            msaa=ns.msaa,
+            bloom=ns.bloom,
+            show_fps=ns.show_fps,
+            no_lazy=ns.no_lazy,
+            watch=ns.watch,
         )
     except LaunchError as exc:
         print(f"launch failed: {exc}", file=sys.stderr)
@@ -309,6 +316,48 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("script")
     s.add_argument("--port", type=int, default=0)
     s.add_argument("--no-pause", action="store_true")
+    s.add_argument(
+        "--vsync",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Override Renderer vsync (--vsync / --no-vsync)",
+    )
+    s.add_argument(
+        "--fps-limit",
+        type=float,
+        default=None,
+        dest="fps_limit",
+        help="Override fps limit",
+    )
+    s.add_argument(
+        "--msaa",
+        type=int,
+        default=None,
+        help="Override Renderer multisampleCount",
+    )
+    s.add_argument(
+        "--bloom",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Override Renderer enableBloom (--bloom / --no-bloom)",
+    )
+    s.add_argument(
+        "--show-fps",
+        action="store_true",
+        dest="show_fps",
+        help="Draw a top-left FPS counter overlay",
+    )
+    s.add_argument(
+        "--no-lazy",
+        action="store_true",
+        dest="no_lazy",
+        help="Disable lazy frames (continuous redraw)",
+    )
+    s.add_argument(
+        "--watch",
+        action="store_true",
+        help="Enable HMR file watcher",
+    )
     s.set_defaults(func=cmd_launch)
 
     return p

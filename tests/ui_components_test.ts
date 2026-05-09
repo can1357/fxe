@@ -1,5 +1,19 @@
 import { CommandBuffer } from 'fxe';
-import { Button, dispatchMouseDown, dispatchMouseUp, hitTest, Image, render, Text, View } from 'fxe-ui';
+import {
+  Button,
+  clearHitTargets,
+  dispatchMouseDown,
+  dispatchMouseMove,
+  dispatchMouseUp,
+  hitTest,
+  Image,
+  Pressable,
+  render,
+  resetEventPipeline,
+  setRenderTarget,
+  Text,
+  View,
+} from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 
@@ -60,6 +74,64 @@ test('Button composes pressable view and text', () => {
   dispatchMouseDown({ type: 'mousedown', x: 45, y: 18, button: 0, modifiers: 0 });
   dispatchMouseUp({ type: 'mouseup', x: 45, y: 18, button: 0, modifiers: 0 });
   assertEqual(presses, 1);
+});
+
+test('static Pressable does not request redraw for interaction state', () => {
+  clearHitTargets();
+  resetEventPipeline();
+  let redraws = 0;
+  setRenderTarget({ requestRedraw: () => ++redraws } as never);
+  try {
+    const cb = new CommandBuffer();
+    render(
+      Pressable({
+        key: 'static-pressable',
+        style: { width: 40, height: 20 },
+        onPress: () => undefined,
+        children: Text({ key: 'label', children: 'Static' }),
+      }),
+      cb,
+    );
+    dispatchMouseMove({ type: 'mousemove', x: 5, y: 5, dx: 0, dy: 0, modifiers: 0 });
+    dispatchMouseDown({ type: 'mousedown', x: 5, y: 5, button: 0, modifiers: 0 });
+    dispatchMouseUp({ type: 'mouseup', x: 5, y: 5, button: 0, modifiers: 0 });
+    assertEqual(redraws, 0);
+  } finally {
+    setRenderTarget(null);
+    clearHitTargets();
+    resetEventPipeline();
+  }
+});
+
+test('stateful Pressable requests redraw for interaction state', () => {
+  clearHitTargets();
+  resetEventPipeline();
+  let redraws = 0;
+  setRenderTarget({ requestRedraw: () => ++redraws } as never);
+  try {
+    const cb = new CommandBuffer();
+    render(
+      Pressable({
+        key: 'stateful-pressable',
+        style: (state) => ({
+          width: 40,
+          height: 20,
+          opacity: state.hovered ? 0.5 : 1,
+        }),
+        onPress: () => undefined,
+        children: Text({ key: 'label', children: 'Dynamic' }),
+      }),
+      cb,
+    );
+    dispatchMouseMove({ type: 'mousemove', x: 5, y: 5, dx: 0, dy: 0, modifiers: 0 });
+    dispatchMouseDown({ type: 'mousedown', x: 5, y: 5, button: 0, modifiers: 0 });
+    dispatchMouseUp({ type: 'mouseup', x: 5, y: 5, button: 0, modifiers: 0 });
+    assert(redraws >= 2, 'stateful pressable should request redraw on hover/press');
+  } finally {
+    setRenderTarget(null);
+    clearHitTargets();
+    resetEventPipeline();
+  }
 });
 
 await run();

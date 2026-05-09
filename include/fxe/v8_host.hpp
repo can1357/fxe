@@ -126,6 +126,10 @@ namespace fxe::js {
     // Invoke globalThis.__fxe_hmr.fire(path) and report the number of handlers
     // called. This is the native bridge for future file-watcher integration.
     run_result fire_hmr(std::string_view path, int& handlers_called);
+    // File-backed modules currently resident in the module cache. Used by the
+    // runner's --watch mode to attach platform file watchers only to modules
+    // that can actually participate in HMR.
+    [[nodiscard]] std::vector<std::string> loaded_module_paths() const;
 
     // Evict the module at `path` (and its transitive importers) from the module
     // cache. Returns the list of evicted normalized paths.

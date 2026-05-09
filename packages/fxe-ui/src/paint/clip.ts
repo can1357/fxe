@@ -49,7 +49,11 @@ interface ClipRect {
 // - Custom buffers that vary texture id across one primitive are clipped with
 //   the start vertex's texture id for generated edge vertices. FXE's built-in
 //   primitives do not do this.
-export function coarseClip(children: CommandBuffer, rect: LayoutResult): CommandBuffer {
+export function coarseClip(
+  children: CommandBuffer,
+  rect: LayoutResult,
+  translate: { x: number; y: number } = { x: 0, y: 0 },
+): CommandBuffer {
   const clip = normalizeRect(rect);
   const out = new CommandBuffer();
   if (clip === null || children.isEmpty()) return out;
@@ -60,8 +64,8 @@ export function coarseClip(children: CommandBuffer, rect: LayoutResult): Command
     const base = index * FLOATS_PER_VERTEX;
     if (base < 0 || base + TEXTURE >= verts.length) return null;
     return {
-      x: verts[base + X],
-      y: verts[base + Y],
+      x: verts[base + X] + translate.x,
+      y: verts[base + Y] + translate.y,
       z: verts[base + Z],
       isWorld: verts[base + IS_WORLD],
       color: words[base + COLOR],

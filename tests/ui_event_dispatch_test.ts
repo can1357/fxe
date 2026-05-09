@@ -124,4 +124,47 @@ test('primary-button drag is delivered to the captured mousedown target', () => 
   assertDeepEqual(calls, ['source:105,5', 'source:out']);
 });
 
+test('passive text targets do not shadow interactive targets', () => {
+  clearHitTargets();
+  let pressed = '';
+  registerHitTarget({
+    id: 'button',
+    z: 0,
+    componentType: 'Button',
+    rect: {
+      x: 0,
+      y: 0,
+      width: 40,
+      height: 20,
+      paddingLeft: 0,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      children: [],
+    },
+    onPress: () => {
+      pressed = 'button';
+    },
+  });
+  registerHitTarget({
+    id: 'text',
+    z: 1,
+    componentType: 'Text',
+    rect: {
+      x: 0,
+      y: 0,
+      width: 40,
+      height: 20,
+      paddingLeft: 0,
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      children: [],
+    },
+  });
+  dispatchMouseDown({ type: 'mousedown', x: 5, y: 5, button: 0, modifiers: 0 });
+  dispatchMouseUp({ type: 'mouseup', x: 5, y: 5, button: 0, modifiers: 0 });
+  assertEqual(pressed, 'button');
+});
+
 await run();

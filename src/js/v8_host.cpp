@@ -786,6 +786,19 @@ namespace fxe::js {
     return {true, {}};
   }
 
+  std::vector<std::string> host::loaded_module_paths() const {
+    std::vector<std::string> out;
+    out.reserve(p_->module_cache.size());
+    for (const auto& [path, entry] : p_->module_cache) {
+      if (entry.embedded || path.empty() || path.front() == '<')
+        continue;
+      out.push_back(path);
+    }
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
+  }
+
   std::vector<std::string> host::invalidate_module(std::string_view path) {
     auto* iso = p_->isolate;
     v8::Isolate::Scope is(iso);

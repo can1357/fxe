@@ -77,6 +77,8 @@ export const Pressable = Component((props: PressableProps): Node => {
   }
   const cursor =
     resolved.paint.cursor ?? (props.disabled ? 'notAllowed' : props.onPress ? 'hand' : 'arrow');
+  const tracksInteractionState =
+    typeof props.style === 'function' || typeof props.children === 'function';
   const componentType = internalProps.__componentType ?? 'Pressable';
   const a11y = pressableA11yProps(props, componentType);
   if (props.disabled) {
@@ -97,28 +99,28 @@ export const Pressable = Component((props: PressableProps): Node => {
       componentType,
       tabIndex: a11y.tabIndex,
       onHoverIn: (ev) => {
-        setState((s) => ({ ...s, hovered: true }));
+        if (tracksInteractionState) setState((s) => ({ ...s, hovered: true }));
         props.onHoverIn?.(ev);
       },
       onHoverOut: (ev) => {
-        setState((s) => ({ ...s, hovered: false, pressed: false }));
+        if (tracksInteractionState) setState((s) => ({ ...s, hovered: false, pressed: false }));
         props.onHoverOut?.(ev);
       },
       onPressIn: (ev) => {
-        setState((s) => ({ ...s, pressed: true }));
+        if (tracksInteractionState) setState((s) => ({ ...s, pressed: true }));
         props.onPressIn?.(ev);
       },
       onPressOut: (ev) => {
-        setState((s) => ({ ...s, pressed: false }));
+        if (tracksInteractionState) setState((s) => ({ ...s, pressed: false }));
         props.onPressOut?.(ev);
       },
       onPress: props.onPress,
       onFocus: () => {
-        setState((s) => ({ ...s, focused: true }));
+        if (tracksInteractionState) setState((s) => ({ ...s, focused: true }));
         props.onFocus?.();
       },
       onBlur: () => {
-        setState((s) => ({ ...s, focused: false, pressed: false }));
+        if (tracksInteractionState) setState((s) => ({ ...s, focused: false, pressed: false }));
         props.onBlur?.();
       },
     });

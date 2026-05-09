@@ -711,6 +711,22 @@ namespace {
 
     auto first = host.run_module_file(entry);
     CHECK(first.ok);
+    auto modules = host.loaded_module_paths();
+    std::error_code module_path_ec;
+    const auto dep_module_path = fs::weakly_canonical(dep, module_path_ec).string();
+    module_path_ec.clear();
+    const auto entry_module_path = fs::weakly_canonical(entry, module_path_ec).string();
+    bool saw_dep_module = false;
+    bool saw_entry_module = false;
+    for (const auto& module : modules) {
+      if (module == dep_module_path)
+        saw_dep_module = true;
+      if (module == entry_module_path)
+        saw_entry_module = true;
+    }
+    CHECK(saw_dep_module);
+    CHECK(saw_entry_module);
+
     auto before = host.debug_evaluate("globalThis.__hmrReloads.join(',')");
     CHECK(before.exception.empty());
     CHECK(before.json_value == "\"v1\"");
