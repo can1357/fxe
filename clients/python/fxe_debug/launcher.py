@@ -152,6 +152,7 @@ async def launch(
     env: dict[str, str] | None = None,
     args: list[str] | None = None,
     ready_timeout: float = 10.0,
+    mirror_console: bool = True,
 ) -> Page:
     binary = _resolve_fxe_run(fxe_run)
     script_path = Path(script)
@@ -206,11 +207,22 @@ async def launch(
 
     handshake_raw = await client.call("System.handshake")
     handshake = Handshake.from_dict(handshake_raw)
-    return _LaunchedPage(client, handshake, proc, stderr_sink, stderr_task)
+    page = _LaunchedPage(client, handshake, proc, stderr_sink, stderr_task)
+    if mirror_console:
+        await page.enable_console_mirror()
+    return page
 
 
-async def connect(*, host: str = "127.0.0.1", port: int) -> Page:
+async def connect(
+    *,
+    host: str = "127.0.0.1",
+    port: int,
+    mirror_console: bool = True,
+) -> Page:
     """Attach to an already-running fxe_run debug server."""
     client = await Client.connect(host, port)
     handshake_raw = await client.call("System.handshake")
-    return Page(client, Handshake.from_dict(handshake_raw))
+    page = Page(client, Handshake.from_dict(handshake_raw))
+    if mirror_console:
+        await page.enable_console_mirror()
+    return page

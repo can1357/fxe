@@ -301,6 +301,39 @@ class ProtocolTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 await page.client.aclose()
 
+    async def test_console_mirror_writes_to_stream(self) -> None:
+        import io
+
+        async with StubServer(make_default_handlers()) as srv:
+            page = await _connect_page(srv.port)
+            try:
+                buf = io.StringIO()
+                await page.enable_console_mirror(stream=buf)
+                await asyncio.sleep(0.02)
+                await srv.emit(
+                    "Console.messageAdded",
+                    {"level": "log", "text": "hello", "ts": 1.0},
+                )
+                await srv.emit(
+                    "Console.messageAdded",
+                    {"level": "error", "text": "boom", "ts": 2.0},
+                )
+                await asyncio.sleep(0.05)
+                lines = buf.getvalue().splitlines()
+                self.assertIn("[fxe:log] hello", lines)
+                self.assertIn("[fxe:error] boom", lines)
+                await page.disable_console_mirror()
+                buf.truncate(0)
+                buf.seek(0)
+                await srv.emit(
+                    "Console.messageAdded",
+                    {"level": "log", "text": "after", "ts": 3.0},
+                )
+                await asyncio.sleep(0.05)
+                self.assertEqual(buf.getvalue(), "")
+            finally:
+                await page.client.aclose()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import sys
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable, TextIO
 
 from .client import Client
 from .protocol import ConsoleMessage, Handshake
@@ -45,6 +46,22 @@ def _key_codepoint(key: str) -> int | None:
     if len(key) == 1:
         return ord(key)
     return None
+
+
+_CONSOLE_LEVEL_ALIASES = {
+    "log": "log",
+    "info": "info",
+    "debug": "debug",
+    "warn": "warn",
+    "warning": "warn",
+    "error": "error",
+    "trace": "trace",
+}
+
+
+def _default_console_formatter(msg: ConsoleMessage) -> str:
+    level = _CONSOLE_LEVEL_ALIASES.get(msg.level.lower(), msg.level)
+    return f"[fxe:{level}] {msg.text}"
 
 
 class Mouse:
@@ -213,6 +230,7 @@ class Page:
         self.webauthn = _WebAuthn(self)
         self._console_queue: asyncio.Queue[ConsoleMessage] | None = None
         self._console_enabled = False
+        self._console_mirror_handler: Callable[[dict[str, Any]], None] | None = None
         self._paused_event = asyncio.Event()
         self._resumed_event = asyncio.Event()
         self._client.on("Debugger.paused", lambda _p: self._on_paused())
@@ -372,6 +390,57 @@ class Page:
                 yield await queue.get()
         except asyncio.CancelledError:
             return
+
+    async def enable_console_mirror(
+        self,
+        *,
+        stream: TextIO | None = None,
+        formatter: Callable[[ConsoleMessage], str] | None = None,
+    ) -> None:
+        """Mirror target-app `console.*` messages to a local stream.
+
+        Subscribes to `Console.messageAdded` and prints each message as it
+        arrives. Idempotent — calling twice replaces the previous sink.
+        Defaults: stderr, ``[fxe:<level>] <text>`` formatter.
+        """
+        if self._console_mirror_handler is not None:
+            await self.disable_console_mirror()
+
+        out = stream if stream is not None else sys.stderr
+        fmt = formatter if formatter is not None else _default_console_formatter
+
+        def _emit(params: dict[str, Any]) -> None:
+            try:
+                msg = ConsoleMessage.from_dict(params)
+                line = fmt(msg)
+            except Exception:  # noqa: BLE001
+                return
+            try:
+                out.write(line)
+                if not line.endswith("\n"):
+                    out.write("\n")
+                out.flush()
+            except Exception:  # noqa: BLE001
+                pass
+
+        self._client.on("Console.messageAdded", _emit)
+        self._console_mirror_handler = _emit
+        if not self._console_enabled:
+            try:
+                await self._client.call("Console.enable")
+                self._console_enabled = True
+            except Exception:  # noqa: BLE001
+                # Server may not support Console domain; leave handler wired
+                # in case messages still arrive via another path.
+                pass
+
+    async def disable_console_mirror(self) -> None:
+        """Stop mirroring target-app console messages locally."""
+        h = self._console_mirror_handler
+        if h is None:
+            return
+        self._client.off("Console.messageAdded", h)
+        self._console_mirror_handler = None
 
     # ---- debugger -----------------------------------------------------------
     def _on_paused(self) -> None:
