@@ -59,6 +59,7 @@
 #include "bind_websocket.hpp"
 #include "os/os.hpp"
 #include "source_map.hpp"
+#include "v8_code_cache.hpp"
 
 #include <algorithm>
 #include <array>
@@ -842,14 +843,17 @@ namespace fxe::js {
     v8::Context::Scope cs(ctx);
 
     v8::TryCatch tc(iso);
-    auto src = str(iso, source);
     auto org = str(iso, origin);
     v8::ScriptOrigin sorigin(org, /*line_offset*/ 0, /*col*/ 0,
                              /*shared_cross_origin*/ false, /*script_id*/ -1,
                              source_map_url_value(iso, source));
 
+    std::string cache_id;
+    if (origin != "<inline>" && !origin.empty())
+      cache_id = "fxe-script:" + std::string(origin);
+
     v8::Local<v8::Script> script;
-    if (!v8::Script::Compile(ctx, src, &sorigin).ToLocal(&script)) {
+    if (!v8_code_cache::compile_script(ctx, cache_id, source, sorigin).ToLocal(&script)) {
       std::string msg = "compile error: " + to_std_string(iso, tc.Exception());
       if (auto m = tc.Message(); !m.IsEmpty()) {
         msg += " @ " + to_std_string(iso, m->Get());
@@ -1269,7 +1273,8 @@ Error.prepareStackTrace = function(err, frames) {
       v8::TryCatch tc(iso);
       v8::ScriptOrigin origin("<fxe-hmr-runtime>"_v8(iso));
       v8::Local<v8::Script> script;
-      if (!v8::Script::Compile(ctx, str(iso, k_fxe_hmr_runtime_js), &origin).ToLocal(&script)) {
+      if (!v8_code_cache::compile_script(ctx, "fxe:hmr-runtime", k_fxe_hmr_runtime_js, origin)
+               .ToLocal(&script)) {
         if (error)
           *error = to_std_string(iso, tc.Exception());
         return false;
@@ -1377,9 +1382,8 @@ Error.prepareStackTrace = function(err, frames) {
                               /*shared_cross_origin*/ false, /*script_id*/ -1,
                               source_map_url_value(iso, source), /*opaque*/ false,
                               /*is_wasm*/ false, /*is_module*/ true);
-      v8::ScriptCompiler::Source src(str(iso, source), origin);
       v8::Local<v8::Module> mod;
-      if (!v8::ScriptCompiler::CompileModule(iso, &src).ToLocal(&mod))
+      if (!v8_code_cache::compile_module(iso, "fxe-mod:" + path, source, origin).ToLocal(&mod))
         return v8::MaybeLocal<v8::Module>();
       p->module_cache[path] =
           host::impl::module_cache_entry{v8::Global<v8::Module>(iso, mod), current_mtime};
@@ -1422,9 +1426,9 @@ Error.prepareStackTrace = function(err, frames) {
                               /*shared_cross_origin*/ false, /*script_id*/ -1,
                               source_map_url_value(iso, source), /*opaque*/ false,
                               /*is_wasm*/ false, /*is_module*/ true);
-      v8::ScriptCompiler::Source src(str(iso, source), origin);
       v8::Local<v8::Module> mod;
-      if (!v8::ScriptCompiler::CompileModule(iso, &src).ToLocal(&mod))
+      if (!v8_code_cache::compile_module(iso, "fxe-embed:" + cache_key, source, origin)
+               .ToLocal(&mod))
         return v8::MaybeLocal<v8::Module>();
 
       p->module_cache[cache_key] = host::impl::module_cache_entry{
@@ -2100,10 +2104,12 @@ Error.prepareStackTrace = function(err, frames) {
                              /*shared_cross_origin*/ false, /*script_id*/ -1,
                              source_map_url_value(iso, source), /*opaque*/ false,
                              /*is_wasm*/ false, /*is_module*/ true);
-    v8::ScriptCompiler::Source src_obj(str(iso, source), sorigin);
+    std::string cache_id;
+    if (origin != "<inline>")
+      cache_id = "fxe-mod:" + std::string(origin);
 
     v8::Local<v8::Module> mod;
-    if (!v8::ScriptCompiler::CompileModule(iso, &src_obj).ToLocal(&mod)) {
+    if (!v8_code_cache::compile_module(iso, cache_id, source, sorigin).ToLocal(&mod)) {
       std::string msg = "module compile error: " + to_std_string(iso, tc.Exception());
       if (auto m = tc.Message(); !m.IsEmpty()) {
         msg += " @ " + to_std_string(iso, m->Get());

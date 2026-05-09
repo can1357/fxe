@@ -5,18 +5,28 @@
 #include <fxe/generated/fxe_types.hpp>
 #include <fxe/generated/typescript_compiler.hpp>
 
+#include "v8_code_cache.hpp"
+#include "transpile_cache.hpp"
+
 #include <algorithm>
-#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <string>
 #include <string_view>
-
 #include <v8.h>
 
 namespace fxe::js {
   namespace {
     constexpr u32 k_typescript_context_slot = 1;
+
+    struct typescript_isolate_cache {
+      explicit typescript_isolate_cache(v8::Isolate* iso, v8::Local<v8::Context> ctx)
+          : context(iso, ctx) {}
+
+      v8::Global<v8::Context> context;
+      v8::Global<v8::Function> bridge;
+    };
+
 
     std::string to_std_string(v8::Isolate* iso, v8::Local<v8::Value> value) {
       if (value.IsEmpty())
@@ -30,6 +40,7 @@ namespace fxe::js {
                                      static_cast<int>(value.size()))
           .ToLocalChecked();
     }
+
 
     std::string exception_message(v8::Isolate* iso, v8::Local<v8::Context> ctx,
                                   v8::TryCatch& try_catch, std::string_view prefix) {
@@ -49,8 +60,8 @@ namespace fxe::js {
     typescript_transpile_result get_compiler_context(v8::Isolate* iso,
                                                      v8::Local<v8::Context>& out) {
       if (auto* cached =
-              static_cast<v8::Global<v8::Context>*>(iso->GetData(k_typescript_context_slot))) {
-        out = cached->Get(iso);
+              static_cast<typescript_isolate_cache*>(iso->GetData(k_typescript_context_slot))) {
+        out = cached->context.Get(iso);
         return {true, {}, {}};
       }
 
@@ -58,16 +69,17 @@ namespace fxe::js {
       v8::Local<v8::Context> ctx = v8::Context::New(iso);
       v8::Context::Scope context_scope(ctx);
       v8::TryCatch try_catch(iso);
-
       v8::ScriptOrigin origin("<fxe-typescript-compiler>"_v8(iso));
       v8::Local<v8::Script> script;
-      if (!v8::Script::Compile(ctx, str(iso, k_typescript_compiler_source), &origin)
+      if (!v8_code_cache::compile_script(ctx, "fxe:embedded-typescript-compiler",
+                                         k_typescript_compiler_source, origin)
                .ToLocal(&script)) {
         return {false,
                 {},
                 exception_message(iso, ctx, try_catch,
                                   "failed to compile embedded TypeScript compiler: ")};
       }
+
       v8::Local<v8::Value> ignored;
       if (!script->Run(ctx).ToLocal(&ignored)) {
         return {false,
@@ -90,7 +102,7 @@ namespace fxe::js {
         return {false, {}, "embedded TypeScript compiler is missing required compiler APIs"};
       }
 
-      auto* cached = new v8::Global<v8::Context>(iso, ctx);
+      auto* cached = new typescript_isolate_cache(iso, ctx);
       iso->SetData(k_typescript_context_slot, cached);
       out = handle_scope.Escape(ctx);
       return {true, {}, {}};
@@ -171,6 +183,44 @@ namespace fxe::js {
 })
 )JS";
 
+    typescript_transpile_result get_transpile_bridge(v8::Isolate* iso,
+                                                     v8::Local<v8::Context> compiler_context,
+                                                     v8::Local<v8::Function>& out) {
+      auto* cached =
+          static_cast<typescript_isolate_cache*>(iso->GetData(k_typescript_context_slot));
+      if (cached && !cached->bridge.IsEmpty()) {
+        out = cached->bridge.Get(iso);
+        return {true, {}, {}};
+      }
+
+      v8::TryCatch try_catch(iso);
+      v8::ScriptOrigin function_origin("<fxe-typescript-transpile>"_v8(iso));
+      v8::Local<v8::Script> function_script;
+      if (!v8_code_cache::compile_script(compiler_context, "fxe:typescript-transpile-bridge",
+                                         k_transpile_function_source, function_origin)
+               .ToLocal(&function_script)) {
+        return {false,
+                {},
+                exception_message(iso, compiler_context, try_catch,
+                                  "failed to compile TypeScript transpile bridge: ")};
+      }
+
+      v8::Local<v8::Value> function_value;
+      if (!function_script->Run(compiler_context).ToLocal(&function_value) ||
+          !function_value->IsFunction()) {
+        return {false,
+                {},
+                exception_message(iso, compiler_context, try_catch,
+                                  "failed to initialize TypeScript transpile bridge: ")};
+      }
+
+      auto bridge = function_value.As<v8::Function>();
+      if (cached)
+        cached->bridge.Reset(iso, bridge);
+      out = bridge;
+      return {true, {}, {}};
+    }
+
     // Tiny prelude prepended to every transpiled TS module so user code can
     // call `import.meta.hot.accept(handler)` (or the lower-level
     // `globalThis.__fxe_hmr.accept(modulePath, handler)`) without checking
@@ -206,6 +256,13 @@ globalThis.__fxe_hmr ??= (() => {
     if (!iso)
       return {false, {}, "TypeScript transpile requested without a V8 isolate"};
 
+    {
+      std::string cached_emitted;
+      int cached_offset = 0;
+      if (transpile_cache_lookup(origin, source, cached_emitted, cached_offset))
+        return {true, std::move(cached_emitted), {}, cached_offset};
+    }
+
     v8::HandleScope handle_scope(iso);
     v8::Local<v8::Context> compiler_context;
     auto compiler = get_compiler_context(iso, compiler_context);
@@ -213,33 +270,16 @@ globalThis.__fxe_hmr ??= (() => {
       return compiler;
 
     v8::Context::Scope context_scope(compiler_context);
+    v8::Local<v8::Function> bridge;
+    auto bridge_result = get_transpile_bridge(iso, compiler_context, bridge);
+    if (!bridge_result.ok)
+      return bridge_result;
+
     v8::TryCatch try_catch(iso);
-
-    v8::ScriptOrigin function_origin("<fxe-typescript-transpile>"_v8(iso));
-    v8::Local<v8::Script> function_script;
-    if (!v8::Script::Compile(compiler_context, str(iso, k_transpile_function_source),
-                             &function_origin)
-             .ToLocal(&function_script)) {
-      return {false,
-              {},
-              exception_message(iso, compiler_context, try_catch,
-                                "failed to compile TypeScript transpile bridge: ")};
-    }
-
-    v8::Local<v8::Value> function_value;
-    if (!function_script->Run(compiler_context).ToLocal(&function_value) ||
-        !function_value->IsFunction()) {
-      return {false,
-              {},
-              exception_message(iso, compiler_context, try_catch,
-                                "failed to initialize TypeScript transpile bridge: ")};
-    }
-
     v8::Local<v8::Value> argv[] = {str(iso, source), str(iso, origin),
                                    str(iso, k_fxe_types_source)};
     v8::Local<v8::Value> result_value;
-    if (!function_value.As<v8::Function>()
-             ->Call(compiler_context, compiler_context->Global(), 3, argv)
+    if (!bridge->Call(compiler_context, compiler_context->Global(), 3, argv)
              .ToLocal(&result_value)) {
       return {false,
               {},
@@ -271,6 +311,7 @@ globalThis.__fxe_hmr ??= (() => {
     with_prelude.reserve(std::strlen(k_hmr_prelude) + emitted.size());
     with_prelude.append(k_hmr_prelude);
     with_prelude.append(emitted);
+    transpile_cache_store(origin, source, with_prelude, source_map_line_offset);
     return {true, std::move(with_prelude), {}, source_map_line_offset};
   }
 
@@ -331,11 +372,12 @@ globalThis.__fxe_hmr ??= (() => {
   void dispose_typescript_compiler(v8::Isolate* iso) noexcept {
     if (!iso)
       return;
-    auto* cached = static_cast<v8::Global<v8::Context>*>(iso->GetData(k_typescript_context_slot));
-    if (!cached)
-      return;
-    cached->Reset();
-    delete cached;
-    iso->SetData(k_typescript_context_slot, nullptr);
+    if (auto* cached =
+            static_cast<typescript_isolate_cache*>(iso->GetData(k_typescript_context_slot))) {
+      cached->bridge.Reset();
+      cached->context.Reset();
+      delete cached;
+      iso->SetData(k_typescript_context_slot, nullptr);
+    }
   }
 } // namespace fxe::js

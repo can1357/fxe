@@ -40,7 +40,7 @@ namespace {
     return pos == std::string_view::npos ? path : path.substr(pos + 1);
   }
 
-  void run_source_map_stack_test() {
+  void run_source_map_stack_test(fxe::js::host& host) {
     namespace fs = std::filesystem;
     const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
     fs::path path =
@@ -58,7 +58,6 @@ namespace {
     const auto canonical = fs::weakly_canonical(path, ec).lexically_normal().string();
     const std::string expected_frame = (ec ? path.lexically_normal().string() : canonical) + ":3:";
 
-    fxe::js::host host;
     auto result = host.run_module_file(path);
     CHECK(!result.ok);
     if (result.ok) {
@@ -83,44 +82,42 @@ int main(int argc, char** argv) {
   }
 
   fxe::js::initialize(argv[0], FXE_V8_ICUDTL_PATH);
-  std::string console;
+  std::string console_buffer;
   {
     fxe::js::host host;
-    host.set_console_sink(capture_console, &console);
+    host.set_console_sink(capture_console, &console_buffer);
+
+    const size_t smoke_mark = console_buffer.size();
     auto result = host.run_file(argv[1]);
     CHECK(result.ok);
     if (!result.ok)
       std::fprintf(stderr, "%s\n", result.message.c_str());
-  }
-  CHECK(console.find("ts-smoke=7:6") != std::string::npos);
+    CHECK(std::string_view(console_buffer).substr(smoke_mark).find("ts-smoke=7:6") !=
+          std::string_view::npos);
 
-  if (argc >= 3) {
-    std::string modules_console;
-    {
-      fxe::js::host host;
-      host.set_console_sink(capture_console, &modules_console);
-      auto result = host.run_module_file(argv[2]);
+    if (argc >= 3) {
+      const size_t modules_mark = console_buffer.size();
+      result = host.run_module_file(argv[2]);
       CHECK(result.ok);
       if (!result.ok)
         std::fprintf(stderr, "%s\n", result.message.c_str());
+      CHECK(std::string_view(console_buffer)
+                .substr(modules_mark)
+                .find("ts-modules=hi fxe-modules-aux|main=true|file=true") !=
+            std::string_view::npos);
     }
-    CHECK(modules_console.find("ts-modules=hi fxe-modules-aux|main=true|file=true") !=
-          std::string::npos);
-  }
 
-  run_source_map_stack_test();
+    run_source_map_stack_test(host);
 
-  for (int i = 3; i < argc; ++i) {
-    std::string module_console;
-    {
-      fxe::js::host host;
-      host.set_console_sink(capture_console, &module_console);
-      auto result = host.run_module_file(argv[i]);
+    for (int i = 3; i < argc; ++i) {
+      const size_t module_mark = console_buffer.size();
+      result = host.run_module_file(argv[i]);
       CHECK(result.ok);
       if (!result.ok)
         std::fprintf(stderr, "%s\n", result.message.c_str());
       if (basename(argv[i]) == "bind_all_tests.ts") {
-        CHECK(module_console.find("bind-tests=") != std::string::npos);
+        CHECK(std::string_view(console_buffer).substr(module_mark).find("bind-tests=") !=
+              std::string_view::npos);
         fxe::audio::shutdown();
         fxe::js::shutdown();
         std::cout << "fxe TypeScript tests: " << g_pass << " passed, " << g_fail << " failed\n";
