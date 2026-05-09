@@ -8,7 +8,16 @@ import { type HitTarget, hitTargets, registerHitTarget } from '../mount/hit_test
 import { currentRenderTargetSize } from '../mount/mount.ts';
 import { coarseClip } from '../paint/clip.ts';
 import { paintView } from '../paint/view_painter.ts';
-import { type BoundaryChild, Component, type Node, Portal, useId } from '../reconciler/fiber.ts';
+import {
+  currentContextFrames,
+  type BoundaryChild,
+  Component,
+  type ContextFrameSnapshot,
+  type Node,
+  Portal,
+  useId,
+  withContextFrames,
+} from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { wrapText } from '../text/wrap.ts';
@@ -205,10 +214,15 @@ function isDirectLayoutComponent(displayName: string | undefined): boolean {
   return displayName !== undefined && DIRECT_LAYOUT_COMPONENTS.has(displayName);
 }
 
-function layoutNodeFor(node: Node, inheritedTextStyle: TextStyle): LayoutNode {
+function layoutNodeFor(
+  node: Node,
+  inheritedTextStyle: TextStyle,
+  contextFrames: readonly ContextFrameSnapshot[] = currentContextFrames(),
+): LayoutNode {
   if (node.type === 'component') {
     if (!isDirectLayoutComponent(node.displayName)) {
-      return layoutNodeFor(node.render(node.props), inheritedTextStyle);
+      const produced = withContextFrames(contextFrames, () => node.render(node.props));
+      return layoutNodeFor(produced, inheritedTextStyle, contextFrames);
     }
     const childProps = node.props as ComponentProps;
     const resolved = splitStyle(childProps.style);
@@ -229,7 +243,7 @@ function layoutNodeFor(node: Node, inheritedTextStyle: TextStyle): LayoutNode {
       };
     }
     const childLayoutNodes = normalizeLayoutChildren(childProps.children).map((child) =>
-      layoutNodeFor(child, textStyle),
+      layoutNodeFor(child, textStyle, contextFrames),
     );
     let allChildSigs = '';
     let anyMissing = false;
@@ -250,9 +264,17 @@ function layoutNodeFor(node: Node, inheritedTextStyle: TextStyle): LayoutNode {
     };
   }
 
+  if (node.type === 'provider') {
+    const nextFrames = [...contextFrames, { ctx: node.props.ctx, value: node.props.value }];
+    const children = normalizeChildren(node.props.children);
+    return children.length
+      ? { children: children.map((child) => layoutNodeFor(child, inheritedTextStyle, nextFrames)) }
+      : {};
+  }
+
   const children = childrenOf(node);
   return children.length
-    ? { children: children.map((child) => layoutNodeFor(child, inheritedTextStyle)) }
+    ? { children: children.map((child) => layoutNodeFor(child, inheritedTextStyle, contextFrames)) }
     : {};
 }
 

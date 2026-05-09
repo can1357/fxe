@@ -463,6 +463,11 @@ interface ContextFrame {
   value: unknown;
 }
 
+export interface ContextFrameSnapshot {
+  ctx: Context<unknown>;
+  value: unknown;
+}
+
 // HookSlot is a structural marker only — we tag at runtime with `.kind` and
 // the `nextSlot` helper enforces that consecutive renders re-encounter the
 // same kind in the same slot. Variance gymnastics around StateSlot<S> /
@@ -790,6 +795,21 @@ interface RenderCtx {
 }
 
 let g_ctx: RenderCtx | null = null;
+let g_context_frame_probe: readonly ContextFrameSnapshot[] | null = null;
+
+export function currentContextFrames(): readonly ContextFrameSnapshot[] {
+  return g_ctx?.contextStack ?? g_context_frame_probe ?? [];
+}
+
+export function withContextFrames<T>(frames: readonly ContextFrameSnapshot[], fn: () => T): T {
+  const prev = g_context_frame_probe;
+  g_context_frame_probe = frames;
+  try {
+    return fn();
+  } finally {
+    g_context_frame_probe = prev;
+  }
+}
 
 function requireCtx(name: string): RenderCtx {
   if (!g_ctx) throw new Error(`${name}() called outside render`);
@@ -901,8 +921,16 @@ export function useId(): string {
 }
 
 export function useContext<T>(context: Context<T>): T {
-  const ctx = requireCtx('useContext');
   const impl = context as ContextImpl<T>;
+  const probeFrames = g_context_frame_probe;
+  if (probeFrames !== null) {
+    for (let i = probeFrames.length - 1; i >= 0; --i) {
+      const frame = probeFrames[i];
+      if (frame.ctx === impl) return frame.value as T;
+    }
+    return context.defaultValue;
+  }
+  const ctx = requireCtx('useContext');
   const slot = nextSlot<ContextSlot>('context', () => ({
     kind: 'context',
     ctx: impl as ContextImpl<unknown>,

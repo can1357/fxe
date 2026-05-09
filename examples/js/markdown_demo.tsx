@@ -552,13 +552,28 @@ function MdListItem(props: {
         {checkbox ?? props.marker}
       </Text>
       <View style={{ flex: 1, gap: t.spacing.xs }}>
-        {props.node.children.map((c, i) =>
-          isInline(c) ? (
-            <InlineRuns key={`il-${i}`}>{[c]}</InlineRuns>
-          ) : (
-            <MdBlock key={`b-${i}`} node={c} depth={props.depth + 1} />
-          ),
-        )}
+        {(() => {
+          // Group consecutive inline siblings into one InlineRuns so they
+          // wrap as a single line. A bare list item often emits inline
+          // children directly (tight list); loose lists wrap in paragraphs.
+          const out: UiNode[] = [];
+          let inlineGroup: MdNode[] = [];
+          const flush = () => {
+            if (inlineGroup.length) {
+              out.push(<InlineRuns key={`il-${out.length}`}>{inlineGroup}</InlineRuns>);
+              inlineGroup = [];
+            }
+          };
+          for (const c of props.node.children) {
+            if (isInline(c)) inlineGroup.push(c);
+            else {
+              flush();
+              out.push(<MdBlock key={`b-${out.length}`} node={c} depth={props.depth + 1} />);
+            }
+          }
+          flush();
+          return out;
+        })()}
       </View>
     </View>
   );
@@ -840,15 +855,15 @@ function Demo(): UiNode {
   const [themeId, setThemeId] = useState<ThemeId>('dark');
   const theme = themes[themeId];
   return (
-    <View
-      style={{
-        width: WINDOW_WIDTH,
-        height: WINDOW_HEIGHT,
-        backgroundColor: theme.colors.background,
-        alignItems: 'stretch',
-      }}
-    >
-      <ThemeProvider value={theme}>
+    <ThemeProvider value={theme}>
+      <View
+        style={{
+          width: WINDOW_WIDTH,
+          height: WINDOW_HEIGHT,
+          backgroundColor: theme.colors.background,
+          alignItems: 'stretch',
+        }}
+      >
         <View
           style={{
             ...s.toolbar,
@@ -888,8 +903,8 @@ function Demo(): UiNode {
             <MarkdownRenderer source={SAMPLE_MD} />
           </View>
         </ScrollView>
-      </ThemeProvider>
-    </View>
+      </View>
+    </ThemeProvider>
   );
 }
 
