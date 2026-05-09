@@ -358,13 +358,24 @@ export function memo<P>(
   areEqual?: PropsEqual<P & { key?: string }>,
 ): (props: P & { key?: string }) => Node {
   const compare = (areEqual ?? shallowEqualProps) as (prev: unknown, next: unknown) => boolean;
-  return (props: P & { key?: string }) => {
-    const node = component(props);
-    if (node.type !== 'component') {
-      throw new TypeError('memo() expects a fxe-ui Component');
-    }
-    return { ...node, memo: { areEqual: compare } };
-  };
+  // Stable identity for this memo factory so the reconciler can match fibers
+  // across renders. We deliberately do NOT call `component` eagerly: doing so
+  // would always run the user's body, defeating the bail. Defer it to render()
+  // time so a memo bail (props identity unchanged + fiber not dirty) skips the
+  // component body entirely. Works for both `memo(fn)` and `memo(Component(fn))`.
+  const componentType: ComponentIdentity = {};
+  const displayName = component.name || 'MemoComponent';
+  const factory = (props: P & { key?: string }): Node => ({
+    type: 'component',
+    componentType,
+    render: (raw: unknown) => component(raw as P & { key?: string }),
+    props,
+    displayName,
+    key: props.key,
+    memo: { areEqual: compare },
+  });
+  Object.defineProperty(factory, 'name', { value: displayName, configurable: true });
+  return factory;
 }
 
 export type BoundaryChild = Node | readonly BoundaryChild[] | null | undefined | boolean;

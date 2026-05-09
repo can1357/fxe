@@ -11,6 +11,7 @@ import { App, Window } from 'fxe';
 import {
   Button,
   type Color,
+  memo,
   mount,
   Pressable,
   ScrollView,
@@ -366,7 +367,7 @@ interface InlineRunsProps {
   baseColor?: Color;
   bold?: boolean;
 }
-function InlineRuns(props: InlineRunsProps): UiNode {
+function inlineRuns(props: InlineRunsProps): UiNode {
   const t = useTheme() as MarkdownTheme;
   const runs = useMemo(() => {
     const acc: Inline[] = [];
@@ -447,8 +448,9 @@ function InlineRuns(props: InlineRunsProps): UiNode {
     </View>
   );
 }
+const InlineRuns = memo(inlineRuns);
 
-function MdHeading(props: { key?: string | number; node: FXEMarkdown.HeadingNode }): UiNode {
+function mdHeading(props: { key?: string | number; node: FXEMarkdown.HeadingNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
   const level = props.node.level;
   const sizeMap: Record<1 | 2 | 3 | 4 | 5 | 6, number> = {
@@ -476,8 +478,12 @@ function MdHeading(props: { key?: string | number; node: FXEMarkdown.HeadingNode
     </View>
   );
 }
+const MdHeading = memo(mdHeading);
 
-function MdParagraph(props: { key?: string | number; node: FXEMarkdown.ParagraphNode }): UiNode {
+function mdParagraph(props: {
+  key?: string | number;
+  node: FXEMarkdown.ParagraphNode;
+}): UiNode {
   const t = useTheme() as MarkdownTheme;
   return (
     <View style={{ marginBottom: t.spacing.sm }}>
@@ -485,8 +491,12 @@ function MdParagraph(props: { key?: string | number; node: FXEMarkdown.Paragraph
     </View>
   );
 }
+const MdParagraph = memo(mdParagraph);
 
-function MdBlockquote(props: { key?: string | number; node: FXEMarkdown.BlockquoteNode }): UiNode {
+function mdBlockquote(props: {
+  key?: string | number;
+  node: FXEMarkdown.BlockquoteNode;
+}): UiNode {
   const t = useTheme() as MarkdownTheme;
   return (
     <View
@@ -505,8 +515,9 @@ function MdBlockquote(props: { key?: string | number; node: FXEMarkdown.Blockquo
     </View>
   );
 }
+const MdBlockquote = memo(mdBlockquote);
 
-function MdList(props: {
+function mdList(props: {
   key?: string | number;
   node: FXEMarkdown.ListNode;
   depth: number;
@@ -533,8 +544,9 @@ function MdList(props: {
     </View>
   );
 }
+const MdList = memo(mdList);
 
-function MdListItem(props: {
+function mdListItem(props: {
   key?: string | number;
   node: FXEMarkdown.ListItemNode;
   ordered: boolean;
@@ -582,6 +594,7 @@ function MdListItem(props: {
     </View>
   );
 }
+const MdListItem = memo(mdListItem);
 
 // Walk the syntax palette to color a tree-sitter capture name. The
 // queries we ship emit names without dotted refinements (`comment`,
@@ -635,7 +648,10 @@ function splitLines(spans: CodeSpan[]): CodeSpan[][] {
   return lines;
 }
 
-function MdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlockNode }): UiNode {
+function mdCodeBlock(props: {
+  key?: string | number;
+  node: FXEMarkdown.CodeBlockNode;
+}): UiNode {
   const t = useTheme() as MarkdownTheme;
   const node = props.node;
   const lang = node.lang;
@@ -699,8 +715,9 @@ function MdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlock
     </View>
   );
 }
+const MdCodeBlock = memo(mdCodeBlock);
 
-function MdThematicBreak(): UiNode {
+function mdThematicBreak(): UiNode {
   const t = useTheme() as MarkdownTheme;
   return (
     <View
@@ -712,8 +729,12 @@ function MdThematicBreak(): UiNode {
     />
   );
 }
+const MdThematicBreak = memo(mdThematicBreak);
 
-function MdTable(props: { key?: string | number; node: FXEMarkdown.TableNode }): UiNode {
+function mdTable(props: {
+  key?: string | number;
+  node: FXEMarkdown.TableNode;
+}): UiNode {
   const t = useTheme() as MarkdownTheme;
   const rows: Array<{ row: FXEMarkdown.TableRowNode; head: boolean }> = [];
   for (const sec of props.node.children) {
@@ -770,8 +791,12 @@ function MdTable(props: { key?: string | number; node: FXEMarkdown.TableNode }):
     </View>
   );
 }
+const MdTable = memo(mdTable);
 
-function MdHtmlBlock(props: { key?: string | number; node: FXEMarkdown.HtmlBlockNode }): UiNode {
+function mdHtmlBlock(props: {
+  key?: string | number;
+  node: FXEMarkdown.HtmlBlockNode;
+}): UiNode {
   const t = useTheme() as MarkdownTheme;
   return (
     <View
@@ -788,8 +813,13 @@ function MdHtmlBlock(props: { key?: string | number; node: FXEMarkdown.HtmlBlock
     </View>
   );
 }
+const MdHtmlBlock = memo(mdHtmlBlock);
 
-function MdBlock(props: { key?: string | number; node: MdNode; depth?: number }): UiNode {
+function mdBlock(props: {
+  key?: string | number;
+  node: MdNode;
+  depth?: number;
+}): UiNode {
   const depth = props.depth ?? 0;
   switch (props.node.type) {
     case 'paragraph':
@@ -819,8 +849,9 @@ function MdBlock(props: { key?: string | number; node: MdNode; depth?: number })
       return null as unknown as UiNode;
   }
 }
+const MdBlock = memo(mdBlock);
 
-function MarkdownRenderer(props: { key?: string | number; source: string }): UiNode {
+function markdownRenderer(props: { key?: string | number; source: string }): UiNode {
   const t = useTheme() as MarkdownTheme;
   const doc = useMemo(() => Markdown.parse(props.source), [props.source]);
   return (
@@ -837,6 +868,7 @@ function MarkdownRenderer(props: { key?: string | number; source: string }): UiN
     </View>
   );
 }
+const MarkdownRenderer = memo(markdownRenderer);
 
 // ---------------------------------------------------------------------------
 // Demo shell.
