@@ -13,6 +13,10 @@
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_strings.hpp>
 
+#if FXE_HAS_TREESITTER
+#include <fxe/highlight.hpp>
+#endif
+
 #include <string>
 #include <string_view>
 #include <v8.h>
@@ -183,12 +187,76 @@ namespace fxe::js {
       add("DIALECT_GITHUB", md::dialect_github);
     }
 
+    // Markdown.highlight(source, language) — returns a non-overlapping list
+    // of `{start, end, name}` token spans produced by the built-in
+    // tree-sitter highlight query for `language`. Returns null when the
+    // language is unsupported (or when the build was configured without
+    // tree-sitter). Capture names are tree-sitter style ("comment",
+    // "string", "number", "constant", "keyword", "type", "function",
+    // "property"); the renderer maps these to theme colors.
+    void md_highlight(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
+        (void)throw_type_error(iso, "Markdown.highlight(source: string, language: string)");
+        return;
+      }
+      String::Utf8Value src(iso, info[0]);
+      String::Utf8Value lang(iso, info[1]);
+#if FXE_HAS_TREESITTER
+      std::string_view src_view(*src ? *src : "",
+                                *src ? static_cast<size_t>(src.length()) : 0);
+      std::string_view lang_view(*lang ? *lang : "",
+                                 *lang ? static_cast<size_t>(lang.length()) : 0);
+      auto r = fxe::highlight::tokenize(src_view, lang_view);
+      if (!r) {
+        info.GetReturnValue().SetNull();
+        return;
+      }
+      auto out = Object::New(iso);
+      (void)out->Set(ctx, "language"_v8(iso), v8_str(iso, r->language));
+      auto arr = Array::New(iso, static_cast<int>(r->tokens.size()));
+      for (uint32_t i = 0; i < r->tokens.size(); ++i) {
+        auto t = Object::New(iso);
+        (void)t->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, r->tokens[i].start));
+        (void)t->Set(ctx, "end"_v8(iso), Integer::NewFromUnsigned(iso, r->tokens[i].end));
+        (void)t->Set(ctx, "name"_v8(iso), v8_str(iso, r->tokens[i].name));
+        (void)arr->Set(ctx, i, t);
+      }
+      (void)out->Set(ctx, "tokens"_v8(iso), arr);
+      info.GetReturnValue().Set(out);
+#else
+      (void)src;
+      (void)lang;
+      info.GetReturnValue().SetNull();
+#endif
+    }
+
+    void md_highlight_languages(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+#if FXE_HAS_TREESITTER
+      auto langs = fxe::highlight::supported_languages();
+      auto arr = Array::New(iso, static_cast<int>(langs.size()));
+      for (uint32_t i = 0; i < langs.size(); ++i)
+        (void)arr->Set(ctx, i, v8_str(iso, langs[i]));
+      info.GetReturnValue().Set(arr);
+#else
+      (void)ctx;
+      info.GetReturnValue().Set(Array::New(iso, 0));
+#endif
+    }
+
   } // namespace
 
   void install_markdown_global(Isolate* iso, Local<ObjectTemplate> global) {
     HandleScope hs(iso);
     auto ns = ObjectTemplate::New(iso);
     ns->Set(iso, "parse", FunctionTemplate::New(iso, md_parse));
+    ns->Set(iso, "highlight", FunctionTemplate::New(iso, md_highlight));
+    ns->Set(iso, "highlightLanguages", FunctionTemplate::New(iso, md_highlight_languages));
     install_flag_constants(iso, ns);
     global->Set(iso, "Markdown", ns);
   }

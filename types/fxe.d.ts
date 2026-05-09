@@ -4333,6 +4333,28 @@ declare namespace FXEMarkdown {
     /** Bitmask of `Markdown.FLAG_*` constants. Overrides `dialect`. */
     flags?: number;
   }
+
+  /** A non-overlapping byte range tagged with a tree-sitter capture name
+   *  (e.g. "keyword", "string", "type"). Bytes between adjacent tokens, or
+   *  before/after the first/last token, are unhighlighted plain text. */
+  interface HighlightToken {
+    /** Byte offset into the source string where this token begins. */
+    start: number;
+    /** Byte offset (exclusive) where this token ends. */
+    end: number;
+    /** Tree-sitter capture name. Common values produced by the built-in
+     *  queries: `comment`, `string`, `number`, `constant`, `keyword`,
+     *  `type`, `function`, `property`. */
+    name: string;
+  }
+
+  interface HighlightResult {
+    /** Canonical grammar name actually used (after alias resolution, e.g.
+     *  `'ts'` → `'typescript'`). */
+    language: string;
+    /** Tokens sorted by `start`, non-overlapping. */
+    tokens: HighlightToken[];
+  }
 }
 
 declare const Markdown: {
@@ -4353,4 +4375,16 @@ declare const Markdown: {
   readonly FLAG_UNDERLINE: number;
   readonly DIALECT_COMMONMARK: number;
   readonly DIALECT_GITHUB: number;
+  /**
+   * Run the built-in tree-sitter highlight query for `language` over
+   * `source`. Returns `null` for unsupported languages, or when the build
+   * was configured without tree-sitter. Aliases: `ts`/`js` → `typescript`,
+   * `jsx` → `tsx`, `jsonc` → `json`.
+   */
+  highlight(
+    source: string,
+    language: string,
+  ): FXEMarkdown.HighlightResult | null;
+  /** Languages with a built-in highlights query. */
+  highlightLanguages(): readonly string[];
 };

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(fxe VERSION 0.1.0 LANGUAGES CXX)
+project(fxe VERSION 0.1.0 LANGUAGES C CXX)
 
 # Touch CMAKE_TOOLCHAIN_FILE so passing it via preset/-D doesn't trigger
 # CMake's "manually-specified variable not used" warning when vcpkg has
@@ -25,4 +25,5 @@ include(cmake/targets/FxeExamples.cmake)
 include(cmake/targets/FxeWebauthn.cmake)
 include(cmake/targets/FxeMarkdown.cmake)
 include(cmake/targets/FxePack.cmake)
+include(cmake/targets/FxeTreesitter.cmake)
 include(cmake/targets/FxeTests.cmake)
