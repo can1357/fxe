@@ -1,4 +1,4 @@
-import { parseColor, StyleSheet, splitStyle } from 'fxe-ui';
+import { parseColor, STYLE_SHEET_BRAND, StyleSheet, splitStyle } from 'fxe-ui';
 
 import { assert, assertDeepEqual, assertEqual, assertThrows, run, test } from './ts_harness.ts';
 
@@ -78,14 +78,15 @@ test('splitStyle rejects unsupported properties loudly', () => {
   assertThrows(() => splitStyle({ unknown: 1 } as never), /unsupported/);
 });
 
-test('StyleSheet.create freezes styles and preserves identity', () => {
+test('StyleSheet.create brands styles, preserves identity, and memoizes splitStyle', () => {
   const styles = StyleSheet.create({ card: { width: 10, backgroundColor: 0x01020304 } });
-  assert(Object.isFrozen(styles));
-  assert(Object.isFrozen(styles.card));
+  assertEqual(STYLE_SHEET_BRAND in styles.card, true);
+  assert(!Object.isFrozen(styles), 'sheet map extensible for engine use');
+  assert(!Object.isFrozen(styles.card), 'entries extensible for symbol side tables');
   assertEqual(styles.card, styles.card);
-  assertThrows(() => {
-    (styles.card as { width: number }).width = 20;
-  });
+  const r1 = splitStyle(styles.card);
+  const r2 = splitStyle(styles.card);
+  assert(r1 === r2, 'splitStyle returns cached result for sheet style ref');
 });
 
 await run();

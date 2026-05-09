@@ -35,7 +35,7 @@ export interface CompositeAnimation {
 type FrameStep = (dtMs: number) => void;
 
 const g_animated_frame_steps = new Set<FrameStep>();
-const g_active_animations = new WeakMap<AnimatedValue<number>, ActiveAnimation>();
+const kActiveAnimation = Symbol('fxe-ui.activeTimingAnimation');
 
 export interface ActiveAnimation {
   stopFromOwner(finished: boolean): void;
@@ -112,7 +112,7 @@ export function timing(
       settled = false;
       elapsedMs = 0;
       from = value.getValue();
-      g_active_animations.set(value, animation);
+      Reflect.set(value, kActiveAnimation, animation);
 
       if (durationMs === 0 && delayMs === 0) {
         value.setValue(config.to);
@@ -154,7 +154,7 @@ export function timing(
     running = false;
     disposeFrame?.();
     disposeFrame = null;
-    if (g_active_animations.get(value) === animation) g_active_animations.delete(value);
+    if (Reflect.get(value, kActiveAnimation) === animation) Reflect.deleteProperty(value, kActiveAnimation);
     callback?.({ finished });
     callback = undefined;
   };
@@ -179,18 +179,18 @@ export function replaceActiveAnimation(
   animation: ActiveAnimation,
 ): void {
   stopActiveAnimation(value, false);
-  g_active_animations.set(value, animation);
+  Reflect.set(value, kActiveAnimation, animation);
 }
 
 export function clearActiveAnimation(
   value: AnimatedValue<number>,
   animation: ActiveAnimation,
 ): void {
-  if (g_active_animations.get(value) === animation) g_active_animations.delete(value);
+  if (Reflect.get(value, kActiveAnimation) === animation) Reflect.deleteProperty(value, kActiveAnimation);
 }
 
 function stopActiveAnimation(value: AnimatedValue<number>, finished: boolean): void {
-  const active = g_active_animations.get(value);
+  const active = Reflect.get(value, kActiveAnimation) as ActiveAnimation | undefined;
   if (!active) return;
   active.stopFromOwner(finished);
 }

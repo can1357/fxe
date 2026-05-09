@@ -197,13 +197,13 @@ interface SurfaceCacheEntry {
 interface RendererSurfaceState {
   free: number[];
 }
-const g_renderer_surface_state = new WeakMap<Renderer, RendererSurfaceState>();
+const kRendererSurfaceState = Symbol('fxe-ui.rendererSurfaceState');
 
 function rendererSurfaceState(r: Renderer): RendererSurfaceState {
-  let s = g_renderer_surface_state.get(r);
+  let s = Reflect.get(r, kRendererSurfaceState) as RendererSurfaceState | undefined;
   if (!s) {
     s = { free: [0, 1, 2, 3].slice(0, SURFACE_SLOT_CAP) };
-    g_renderer_surface_state.set(r, s);
+    Reflect.set(r, kRendererSurfaceState, s);
   }
   return s;
 }
@@ -570,7 +570,7 @@ type ReconcilerDebugGlobal = typeof globalThis & {
 
 let g_next_fiber_debug_id = 1;
 let g_tick_frame_counter = 0;
-const g_fiber_debug_metadata = new WeakMap<Fiber, FiberDebugMetadata>();
+const kFiberDebugMetadata = Symbol('fxe-ui.fiberDebugMetadata');
 
 function summarizeDebugValue(value: unknown): unknown {
   if (value === null) return null;
@@ -642,7 +642,7 @@ function propsForNode(node: Node): unknown {
 }
 
 function ensureFiberDebugMetadata(fiber: Fiber): FiberDebugMetadata {
-  let metadata = g_fiber_debug_metadata.get(fiber);
+  let metadata = Reflect.get(fiber, kFiberDebugMetadata) as FiberDebugMetadata | undefined;
   if (!metadata) {
     metadata = {
       id: g_next_fiber_debug_id++,
@@ -658,7 +658,7 @@ function ensureFiberDebugMetadata(fiber: Fiber): FiberDebugMetadata {
       cacheHitMiss: null,
       children: [],
     };
-    g_fiber_debug_metadata.set(fiber, metadata);
+    Reflect.set(fiber, kFiberDebugMetadata, metadata);
   }
   return metadata;
 }

@@ -89,16 +89,14 @@ export function flattenStyle(value: StyleValue): Style {
   return value;
 }
 
-// Memo cache for splitStyle. StyleSheet.create() returns frozen, stable
-// object refs that flow through every component render; splitting them
-// into layout/paint/text buckets is deterministic per ref. WeakMap so
-// transient style objects can still be GC'd.
+// Memo cache for splitStyle. StyleSheet.create() returns stable object refs
+// (not frozen — see stylesheet.ts) so we can stash split output on the ref.
 //
 // Hot in scenes with many identical components (stress grid: 900 cells
 // × splitStyle on render = 900 splits per frame, all identical inputs).
 // Cache hits skip the Object.entries walk + Set lookups + 3 output objects.
 type SplitResult = { layout: LayoutStyle; paint: PaintStyle; text: TextStyle };
-const SPLIT_CACHE = new WeakMap<object, SplitResult>();
+const kSplitStyle = Symbol('fxe-ui.splitStyle');
 
 export function splitStyle(value: StyleValue): {
   layout: LayoutStyle;
@@ -108,7 +106,7 @@ export function splitStyle(value: StyleValue): {
   // Fast path: cached result for stable object refs (the StyleSheet.create()
   // case). Arrays of styles or fresh literals every render skip this.
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    const cached = SPLIT_CACHE.get(value as object);
+    const cached = Reflect.get(value, kSplitStyle) as SplitResult | undefined;
     if (cached !== undefined) return cached;
   }
   const flat = flattenStyle(value);
@@ -136,7 +134,7 @@ export function splitStyle(value: StyleValue): {
   validateLayout(layout);
   const result: SplitResult = { layout, paint, text };
   if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    SPLIT_CACHE.set(value as object, result);
+    Reflect.set(value, kSplitStyle, result);
   }
   return result;
 }

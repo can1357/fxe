@@ -43,7 +43,7 @@ type ComponentProps = {
 };
 function isDisplayNone(node: Node): boolean {
   if (node.type !== 'component') return false;
-  return splitStyle((node.props as ComponentProps).style).layout.display === 'none';
+  return resolveStyleMeta((node.props as ComponentProps).style).resolved.layout.display === 'none';
 }
 
 function textFromChildren(child: unknown): string {
@@ -111,12 +111,11 @@ function clipChildHitTargets(start: number, clip: LayoutResult): void {
   }
 }
 
-// Stable IDs for reference-equal objects so we can compose structural
-// signatures cheaply. Used by the solver's cross-frame layout cache:
-// LayoutNodes with identical _sig laid out under the same constraint
-// produce identical results.
-const g_obj_sig_cache = new WeakMap<object, string>();
-let g_next_sig = 0;
+// Stable per-style metadata keyed by the original style object identity. This
+// lets View/layoutNodeFor short-circuit splitStyle + layoutStyleSig together
+// when callers reuse the same style ref across renders.
+const kStyleMeta = Symbol('fxe-ui.styleMeta');
+const kLayoutStyleSig = Symbol('fxe-ui.layoutStyleSig');
 
 // Content-derived signature for a LayoutStyle. We cache by ref first so
 // stable StyleSheet.create() refs hit immediately; on a fresh ref (e.g.
@@ -173,8 +172,8 @@ const LAYOUT_SIG_FIELDS: readonly (keyof LayoutStyle)[] = [
 
 function layoutStyleSig(style: LayoutStyle | undefined): string {
   if (style === undefined) return '0';
-  const cached = g_obj_sig_cache.get(style);
-  if (cached !== undefined) return cached;
+  const cached = Reflect.get(style, kLayoutStyleSig);
+  if (cached !== undefined) return cached as string;
   let sig = '';
   for (let i = 0; i < LAYOUT_SIG_FIELDS.length; ++i) {
     const k = LAYOUT_SIG_FIELDS[i];
@@ -186,9 +185,26 @@ function layoutStyleSig(style: LayoutStyle | undefined): string {
   // pays the walk once but still produces an interned string V8 will
   // canonicalize.
   const id = sig === '' ? '0' : sig;
-  g_obj_sig_cache.set(style, id);
-  g_next_sig++;
+  Reflect.set(style, kLayoutStyleSig, id);
   return id;
+}
+
+function resolveStyleMeta(style: StyleValue): {
+  resolved: ReturnType<typeof splitStyle>;
+  layoutSig: string;
+} {
+  if (style !== null && typeof style === 'object') {
+    const cached = Reflect.get(style, kStyleMeta) as
+      | { resolved: ReturnType<typeof splitStyle>; layoutSig: string }
+      | undefined;
+    if (cached !== undefined) return cached;
+    const resolved = splitStyle(style);
+    const meta = { resolved, layoutSig: layoutStyleSig(resolved.layout) };
+    Reflect.set(style, kStyleMeta, meta);
+    return meta;
+  }
+  const resolved = splitStyle(style);
+  return { resolved, layoutSig: layoutStyleSig(resolved.layout) };
 }
 
 function textStyleSig(style: TextStyle): string {
@@ -225,7 +241,7 @@ function layoutNodeFor(
       return layoutNodeFor(produced, inheritedTextStyle, contextFrames);
     }
     const childProps = node.props as ComponentProps;
-    const resolved = splitStyle(childProps.style);
+    const { resolved, layoutSig } = resolveStyleMeta(childProps.style);
     const textStyle = {
       ...inheritedTextStyle,
       ...(childProps.__textStyle ?? {}),
@@ -237,9 +253,9 @@ function layoutNodeFor(
         style: resolved.layout,
         measure: measureText(text, textStyle),
         // Sig: leaf depends on layout style + text content + text-style
-        // fields that affect layout. resolved.layout is shared across
-        // renders via splitStyle's WeakMap, so refSig is stable.
-        _sig: `T|${layoutStyleSig(resolved.layout)}|${textStyleSig(textStyle)}|${text}`,
+        // fields that affect layout. resolveStyleMeta() memoizes both
+        // splitStyle() and layoutStyleSig() by the original style ref.
+        _sig: `T|${layoutSig}|${textStyleSig(textStyle)}|${text}`,
       };
     }
     const childLayoutNodes = normalizeLayoutChildren(childProps.children).map((child) =>
@@ -260,7 +276,7 @@ function layoutNodeFor(
       children: childLayoutNodes,
       // Only emit a sig when every child contributed one; otherwise it
       // wouldn't be safe to memoize against.
-      _sig: anyMissing ? undefined : `V|${layoutStyleSig(resolved.layout)}|${allChildSigs}`,
+      _sig: anyMissing ? undefined : `V|${layoutSig}|${allChildSigs}`,
     };
   }
 
@@ -281,7 +297,7 @@ function layoutNodeFor(
 export const View = Component((props: ViewProps): Node => {
   const internalProps = props as ViewInternalProps;
   const id = useId();
-  const resolved = splitStyle(props.style);
+  const { resolved } = resolveStyleMeta(props.style);
   const rect = props.__layout
     ? { ...props.__layout }
     : rectFromStyle(resolved.layout, props.__layout);

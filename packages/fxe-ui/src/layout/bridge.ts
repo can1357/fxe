@@ -1,8 +1,7 @@
 // Bridge from fxe-ui's LayoutNode tree to the native fxe::layout solver.
-// Builds a NodeDescriptor on each call (no caching — Yoga handles its own
-// dirtying internally; if reconciler-level memo is later needed, layer it
-// at the fiber boundary).
-
+// We still rebuild the recursive descriptor shape per solve, but pure
+// style-only descriptor fragments are memoized by LayoutStyle object identity
+// so repeated renders can skip part of buildDescriptor's allocation churn.
 import type { TaggedMeasureFn } from './measure.ts';
 import type { Constraint, LayoutNode, LayoutResult, LayoutStyle, Length } from './types.ts';
 
@@ -39,9 +38,19 @@ interface NodeDescriptor {
   measure?: MeasureDescriptor;
 }
 
+const kDescriptorStyleCache = Symbol('fxe-ui.descriptorStyleBase');
+
+function descriptorBaseFor(style: LayoutStyle | undefined): NodeDescriptor {
+  if (style === undefined) return {};
+  const cached = Reflect.get(style, kDescriptorStyleCache) as Readonly<NodeDescriptor> | undefined;
+  if (cached !== undefined) return { ...cached };
+  const base = Object.freeze({ style } satisfies NodeDescriptor);
+  Reflect.set(style, kDescriptorStyleCache, base);
+  return { ...base };
+}
+
 function buildDescriptor(node: LayoutNode): NodeDescriptor {
-  const out: NodeDescriptor = {};
-  if (node.style !== undefined) out.style = node.style;
+  const out = descriptorBaseFor(node.style);
   const kids = node.children;
   if (kids !== undefined && kids.length > 0) {
     const arr: NodeDescriptor[] = new Array(kids.length);

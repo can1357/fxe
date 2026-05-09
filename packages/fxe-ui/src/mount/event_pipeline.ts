@@ -99,12 +99,18 @@ export function dispatchMouseMove(
     if (dragStarted) return;
   }
   const next = hitTest(ev.x, ev.y);
-  if (next !== hovered) {
-    if (hovered?.onHoverOut) hovered.onHoverOut(makeSyntheticEvent(ev, ev.x, ev.y));
-    hovered = next;
-    if (hovered?.onHoverIn) hovered.onHoverIn(makeSyntheticEvent(ev, ev.x, ev.y));
-    cursorSink?.setCursor?.(hovered?.cursor ?? 'arrow');
+  const previousHover = hovered;
+  const sameHoverTarget = next?.id === previousHover?.id;
+  hovered = next;
+  if (sameHoverTarget) {
+    if ((hovered?.cursor ?? 'arrow') !== (previousHover?.cursor ?? 'arrow')) {
+      cursorSink?.setCursor?.(hovered?.cursor ?? 'arrow');
+    }
+    return;
   }
+  if (previousHover?.onHoverOut) previousHover.onHoverOut(makeSyntheticEvent(ev, ev.x, ev.y));
+  if (hovered?.onHoverIn) hovered.onHoverIn(makeSyntheticEvent(ev, ev.x, ev.y));
+  cursorSink?.setCursor?.(hovered?.cursor ?? 'arrow');
 }
 
 export function dispatchMouseDown(ev: MouseButtonEvent): void {

@@ -9,19 +9,20 @@ export function create<T extends Record<string, Style>>(
 ): { readonly [K in keyof T]: FrozenStyle<T[K]> } {
   const out: Partial<Record<keyof T, FrozenStyle<Style>>> = {};
   for (const key of Object.keys(styles) as Array<keyof T>) {
-    out[key] = freezeStyle({ ...styles[key] }) as FrozenStyle<Style>;
+    out[key] = brandSheetStyle({ ...styles[key] }) as FrozenStyle<Style>;
   }
-  return Object.freeze(out) as { readonly [K in keyof T]: FrozenStyle<T[K]> };
+  return out as { readonly [K in keyof T]: FrozenStyle<T[K]> };
 }
 
-function freezeStyle<T extends Style>(style: T): FrozenStyle<T> {
+/** Tagged sheet style; intentionally not frozen so internal symbol caches can attach. */
+function brandSheetStyle<T extends Style>(style: T): FrozenStyle<T> {
   Object.defineProperty(style, STYLE_SHEET_BRAND, {
     value: true,
     enumerable: false,
     configurable: false,
     writable: false,
   });
-  return Object.freeze(style) as FrozenStyle<T>;
+  return style as FrozenStyle<T>;
 }
 
 export const StyleSheet = { create } as const;
