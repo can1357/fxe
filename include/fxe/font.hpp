@@ -56,6 +56,7 @@ namespace fxe::font {
     [[nodiscard]] usize eviction_count(Format format) const noexcept;
     [[nodiscard]] usize atlas_bytes(Format format) const noexcept;
     [[nodiscard]] u64 generation(Format format) const noexcept;
+    [[nodiscard]] u64 layout_generation(Format format) const noexcept;
     [[nodiscard]] bool debug_contains(const GlyphKey& key) const noexcept;
 
     // Drops every cached glyph. Used by tests; not needed in steady state.

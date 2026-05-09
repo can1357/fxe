@@ -361,6 +361,10 @@ namespace fxe::font {
     return impl_->atlas_for(format).generation();
   }
 
+  u64 GlyphCache::layout_generation(Format format) const noexcept {
+    return impl_->atlas_for(format).layout_generation();
+  }
+
   bool GlyphCache::debug_contains(const GlyphKey& key) const noexcept {
     return impl_->cache.find(key) != impl_->cache.end();
   }

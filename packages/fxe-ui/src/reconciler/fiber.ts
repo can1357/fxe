@@ -174,12 +174,11 @@ const SURFACE_PAD = 1;
 // path or work around cache bugs without rebuilding).
 const SURFACE_CACHE_DISABLED = process.env.FXE_DISABLE_SURFACE_CACHE === '1';
 
-// Glyph atlas generation snapshot. Bumped whenever the shared glyph cache
-// repacks (LRU eviction). Cached vertex data records the epoch it was
-// built against; if the live atlas has advanced since, replaying would
-// sample stale UVs and render scrambled glyphs, so we treat any mismatch
-// as a cache miss and rebuild. `Primitives.atlasEpoch` is a tiny native
-// hop returning a Number, safe to call once per cached fiber per frame.
+// Glyph atlas UV-layout epoch. Bumped only when atlas growth/repack can make
+// previously-emitted glyph UVs stale; pure append-only glyph uploads keep the
+// same epoch so memo/layer caches do not thrash while new text arrives.
+// `Primitives.atlasEpoch` is a tiny native hop returning a Number, safe to
+// call once per cached fiber per frame.
 function atlasEpoch(): number {
   return Primitives.atlasEpoch();
 }

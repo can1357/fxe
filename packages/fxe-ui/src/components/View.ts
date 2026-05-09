@@ -54,7 +54,7 @@ function textFromChildren(child: unknown): string {
   return '';
 }
 
-function normalizeLayoutChildren(child: unknown): Node[] {
+function appendLayoutChildren(child: unknown, out: Node[]): void {
   if (
     child === null ||
     child === undefined ||
@@ -62,10 +62,19 @@ function normalizeLayoutChildren(child: unknown): Node[] {
     typeof child === 'string' ||
     typeof child === 'number'
   ) {
-    return [];
+    return;
   }
-  if (Array.isArray(child)) return child.flatMap(normalizeLayoutChildren);
-  return typeof child === 'object' && 'type' in child ? [child as Node] : [];
+  if (Array.isArray(child)) {
+    for (let i = 0; i < child.length; ++i) appendLayoutChildren(child[i], out);
+    return;
+  }
+  if (typeof child === 'object' && 'type' in child) out.push(child as Node);
+}
+
+function normalizeLayoutChildren(child: unknown): Node[] {
+  const out: Node[] = [];
+  appendLayoutChildren(child, out);
+  return out;
 }
 
 // Ask the wrapping helper for a real measurement: when the parent constrains
@@ -278,14 +287,14 @@ function contextValuesMatch(cached: unknown[], frames: readonly ContextFrameSnap
 }
 
 function layoutNodeListSig(nodes: readonly LayoutNode[]): { sig: string; complete: boolean } {
-  let sig = '';
+  const parts = new Array<string>(nodes.length);
   let complete = true;
   for (let i = 0; i < nodes.length; ++i) {
     const childSig = nodes[i]._sig;
     if (childSig === undefined) complete = false;
-    sig += i === 0 ? (childSig ?? '?') : `~${childSig ?? '?'}`;
+    parts[i] = childSig ?? '?';
   }
-  return { sig, complete };
+  return { sig: parts.join('~'), complete };
 }
 
 function layoutResultSig(result: LayoutResult): string {
@@ -434,14 +443,17 @@ function layoutNodeFor(
         _sig: `T|${layoutSig}|${textStyleSig(textStyle)}|${text}`,
       };
     }
-    const childLayoutNodes = normalizeLayoutChildren(childProps.children).map((child, index) =>
-      layoutNodeFor(
+    const children = normalizeLayoutChildren(childProps.children);
+    const childLayoutNodes = new Array<LayoutNode>(children.length);
+    for (let i = 0; i < children.length; ++i) {
+      const child = children[i];
+      childLayoutNodes[i] = layoutNodeFor(
         child,
         textStyle,
         contextFrames,
-        parentFiber ? findVisibleChildFiber(parentFiber, child, index) : null,
-      ),
-    );
+        parentFiber ? findVisibleChildFiber(parentFiber, child, i) : null,
+      );
+    }
     const childSig = layoutNodeListSig(childLayoutNodes);
     return {
       style: resolved.layout,
@@ -458,14 +470,16 @@ function layoutNodeFor(
       { ctx: node.props.ctx as ContextFrameSnapshot['ctx'], value: node.props.value },
     ];
     const children = normalizeChildren(node.props.children);
-    const childLayoutNodes = children.map((child, index) =>
-      layoutNodeFor(
+    const childLayoutNodes = new Array<LayoutNode>(children.length);
+    for (let i = 0; i < children.length; ++i) {
+      const child = children[i];
+      childLayoutNodes[i] = layoutNodeFor(
         child,
         inheritedTextStyle,
         nextFrames,
-        parentFiber ? findVisibleChildFiber(parentFiber, child, index) : null,
-      ),
-    );
+        parentFiber ? findVisibleChildFiber(parentFiber, child, i) : null,
+      );
+    }
     const childSig = layoutNodeListSig(childLayoutNodes);
     return children.length
       ? {
@@ -476,14 +490,16 @@ function layoutNodeFor(
   }
 
   const children = childrenOf(node);
-  const childLayoutNodes = children.map((child, index) =>
-    layoutNodeFor(
+  const childLayoutNodes = new Array<LayoutNode>(children.length);
+  for (let i = 0; i < children.length; ++i) {
+    const child = children[i];
+    childLayoutNodes[i] = layoutNodeFor(
       child,
       inheritedTextStyle,
       contextFrames,
-      parentFiber ? findVisibleChildFiber(parentFiber, child, index) : null,
-    ),
-  );
+      parentFiber ? findVisibleChildFiber(parentFiber, child, i) : null,
+    );
+  }
   const childSig = layoutNodeListSig(childLayoutNodes);
   return children.length
     ? {
@@ -524,25 +540,33 @@ export const View = Component((props: ViewProps): Node => {
   }
   const rawChildren = normalizeChildren(props.children);
   const textStyle = { ...(inheritedTextStyle ?? {}), ...resolved.text };
-  const visibleChildren = rawChildren.filter((child) => !isDisplayNone(child));
+  const visibleChildren: Node[] = [];
+  for (let i = 0; i < rawChildren.length; ++i) {
+    const child = rawChildren[i];
+    if (!isDisplayNone(child)) visibleChildren.push(child);
+  }
   const viewFiber = getCurrentRenderFiber();
   let childLayoutNodes: LayoutNode[] | null = null;
   let childLayoutSig = '';
   let childLayoutComplete = true;
   const buildChildLayoutNodes = (): LayoutNode[] => {
     if (childLayoutNodes !== null) return childLayoutNodes;
-    childLayoutNodes = visibleChildren.map((child, index) =>
-      layoutNodeFor(
+    const contextFrames = currentContextFrames();
+    const built = new Array<LayoutNode>(visibleChildren.length);
+    for (let i = 0; i < visibleChildren.length; ++i) {
+      const child = visibleChildren[i];
+      built[i] = layoutNodeFor(
         child,
         textStyle,
-        currentContextFrames(),
-        viewFiber ? findVisibleChildFiber(viewFiber, child, index) : null,
-      ),
-    );
-    const sig = layoutNodeListSig(childLayoutNodes);
+        contextFrames,
+        viewFiber ? findVisibleChildFiber(viewFiber, child, i) : null,
+      );
+    }
+    childLayoutNodes = built;
+    const sig = layoutNodeListSig(built);
     childLayoutSig = sig.sig;
     childLayoutComplete = sig.complete;
-    return childLayoutNodes;
+    return built;
   };
   const useInheritedLayout =
     inheritedLayout &&
@@ -564,8 +588,10 @@ export const View = Component((props: ViewProps): Node => {
   const resolvedLayoutSig = useInheritedLayout
     ? `I|${layoutResultSig(childTree)}`
     : `L|${childLayoutSig}|${layoutResultSig(childTree)}`;
-  const children = visibleChildren.map((child, idx) => {
-    const childRect = childTree.children[idx] ?? {
+  const children = new Array<Node>(visibleChildren.length);
+  for (let i = 0; i < visibleChildren.length; ++i) {
+    const child = visibleChildren[i];
+    const childRect = childTree.children[i] ?? {
       x: 0,
       y: 0,
       width: 0,
@@ -576,12 +602,12 @@ export const View = Component((props: ViewProps): Node => {
       paddingBottom: 0,
       children: [],
     };
-    return attachInternalLayout(
+    children[i] = attachInternalLayout(
       child,
       absoluteLayoutResult(childRect, rect.x + childRect.x, rect.y + childRect.y),
       textStyle,
     );
-  });
+  }
   const targetSize = currentRenderTargetSize();
   const paintNode = {
     type: 'draw' as const,

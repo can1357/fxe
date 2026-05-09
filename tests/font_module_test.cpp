@@ -91,20 +91,26 @@ int main() {
     Atlas mask{Format::grayscale, 64, 1024};
     CHECK(mask.format() == Format::grayscale);
     CHECK(mask.size().x == 64 && mask.size().y == 64);
+    const u64 initial_layout_gen = mask.layout_generation();
+    const u64 initial_gen = mask.generation();
 
     std::vector<u8> blob(8 * 8, 200);
     AtlasRegion r1 = mask.pack(8, 8, blob.data());
     CHECK(r1.ok);
+    CHECK(mask.generation() > initial_gen);
+    CHECK(mask.layout_generation() == initial_layout_gen);
     AtlasRegion r2 = mask.pack(16, 16, blob.data());
     CHECK(r2.ok);
     CHECK(r2.x != r1.x || r2.y != r1.y);
+    CHECK(mask.layout_generation() == initial_layout_gen);
 
     // Force atlas growth by packing something larger than the initial size.
+    const u64 before_grow_layout_gen = mask.layout_generation();
     std::vector<u8> big(80 * 80, 1);
     AtlasRegion r3 = mask.pack(80, 80, big.data());
     CHECK(r3.ok);
     CHECK(mask.size().x >= 80);
-
+    CHECK(mask.layout_generation() > before_grow_layout_gen);
     Atlas color{Format::bgra, 32, 1024};
     CHECK(color.bytes_per_pixel() == 4);
     std::vector<u8> px(8 * 8 * 4, 0);

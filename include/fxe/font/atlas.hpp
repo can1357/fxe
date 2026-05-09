@@ -49,9 +49,15 @@ namespace fxe::font {
     }
     [[nodiscard]] u32 bytes_per_pixel() const noexcept;
     // Atlas pages are bounded and rebuildable under cache pressure; callers
-    // observe a generation counter to know when to re-upload to the GPU.
+    // observe `generation()` to know when to re-upload pixel contents to the GPU.
     [[nodiscard]] u64 generation() const noexcept {
       return generation_;
+    }
+    // UV-layout generation. Bumps only when previously-emitted glyph UVs may
+    // have become stale (grow/shrink/repack), so higher layers can keep caches
+    // hot across pure append-only glyph writes.
+    [[nodiscard]] u64 layout_generation() const noexcept {
+      return layout_generation_;
     }
 
     // Resets the atlas to an empty initial-size page. Used by tests/repack.
@@ -91,6 +97,7 @@ namespace fxe::font {
     u32 row_h_ = 0;
     u32 padding_ = 1;
     u64 generation_ = 0;
+    u64 layout_generation_ = 0;
     std::vector<u8> pixels_;
   };
 

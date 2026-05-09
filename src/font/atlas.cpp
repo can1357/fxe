@@ -20,6 +20,7 @@ namespace fxe::font {
         initial_size_(initial_size) {
     pixels_.assign(static_cast<usize>(width_) * height_ * bytes_per_pixel(), 0);
     ++generation_;
+    ++layout_generation_;
   }
 
   void Atlas::reset_empty_() {
@@ -44,6 +45,7 @@ namespace fxe::font {
   void Atlas::clear() {
     reset_empty_();
     ++generation_;
+    ++layout_generation_;
   }
 
   u8* Atlas::mutable_pixels() noexcept {
@@ -74,6 +76,7 @@ namespace fxe::font {
     height_ = new_h;
     pixels_ = std::move(grown);
     ++generation_;
+    ++layout_generation_;
     FXE_DEBUG("font.atlas", "atlas_grow fmt={} w={} h={} gen={}",
               format_ == Format::bgra ? "color" : "mask", new_w, new_h, generation_);
     return true;
@@ -133,6 +136,7 @@ namespace fxe::font {
     const u64 prev_gen = generation_;
     reset_empty_();
     ++generation_;
+    ++layout_generation_;
     FXE_WARN("font.atlas", "atlas_rebuild fmt={} items={} gen={}->{}",
              format_ == Format::bgra ? "color" : "mask", live.size(), prev_gen, generation_);
     for (auto& item : live) {

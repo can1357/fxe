@@ -1685,16 +1685,17 @@ namespace fxe::js {
       vp[3] = make_vertex({at.x + size.x, at.y + size.y}, depth, {u1, v1}, spr.texture, tint);
     }
 
-    // Primitives.atlasEpoch() — combined generation of the shared glyph
-    // atlases (mask + color). Caching layers stamp this value alongside any
-    // recorded vertex data that references atlas UVs (drawText, drawTextRun,
-    // …); a mismatch on replay means the atlas was repacked under them and
-    // the stale UVs would sample the wrong glyphs. Wraps to 0 after 2^53.
+    // Primitives.atlasEpoch() — combined UV-layout generation of the shared
+    // glyph atlases (mask + color). Caching layers stamp this value alongside
+    // any recorded vertex data that references text atlas UVs; a mismatch on
+    // replay means atlas growth or repack changed the UV mapping underneath the
+    // cache. Pure append-only glyph uploads do not advance this epoch. Wraps to
+    // 0 after 2^53.
     void p_atlasEpoch(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto& gc = font::shared_glyph_cache();
-      const u64 mask_gen = gc.generation(font::Format::grayscale);
-      const u64 color_gen = gc.generation(font::Format::bgra);
+      const u64 mask_gen = gc.layout_generation(font::Format::grayscale);
+      const u64 color_gen = gc.layout_generation(font::Format::bgra);
       // Mix the two generations into one Number. Both fit comfortably in
       // the safe integer range under realistic eviction rates.
       const double combined = static_cast<double>(mask_gen) + static_cast<double>(color_gen) * 1e9;

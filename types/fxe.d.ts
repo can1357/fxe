@@ -862,9 +862,9 @@ declare namespace FXE {
       thickness?: number,
     ): void;
     /**
-     * Generation counter for the shared glyph atlas. Increments when the
-     * atlas repacks (for example after LRU eviction). Callers that cache
-     * vertex or UV data derived from text layout should record this value
+     * UV-layout generation for the shared glyph atlas. Increments when atlas
+     * growth or repack can make previously emitted text UVs stale. Callers that
+     * cache vertex or UV data derived from text layout should record this value
      * and treat a mismatch on replay as a cache miss.
      */
     atlasEpoch(): number;
