@@ -568,7 +568,7 @@ function MdListItem(props: {
 // queries we ship emit names without dotted refinements (`comment`,
 // `string`, …); if a future grammar emits e.g. `string.escape`, fall
 // back to the prefix.
-function syntaxColor(palette: SyntaxPalette, name: string, fallback: number): number {
+function syntaxColor(palette: SyntaxPalette, name: string, fallback: Color): Color {
   const direct = (palette as unknown as Record<string, number | undefined>)[name];
   if (typeof direct === 'number') return direct;
   const dot = name.indexOf('.');

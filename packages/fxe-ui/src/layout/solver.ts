@@ -138,6 +138,7 @@ type Item = {
   basis: number;
   main: number;
   cross: number;
+  crossExplicit: boolean;
   grow: number;
   shrink: number;
   absolute: boolean;
@@ -228,6 +229,7 @@ export function solveLayout(root: LayoutNode, available: Constraint = {}): Layou
   return layoutNode(root, available, 0, 0);
 }
 
+
 function layoutNode(node: LayoutNode, available: Constraint, x: number, y: number): LayoutResult {
   const sig = node._sig;
   const cacheKey = sig === undefined ? '' : layoutCacheKey(sig, available.width, available.height);
@@ -269,6 +271,7 @@ function layoutNode(node: LayoutNode, available: Constraint, x: number, y: numbe
     if (Number.isNaN(width)) width = measured.width + padding.left + padding.right;
     if (Number.isNaN(height)) height = measured.height + padding.top + padding.bottom;
   }
+
 
   // Single pass: filter display:none, build items, partition into flex /
   // absolute. The previous pipeline allocated 4 intermediate arrays
@@ -476,7 +479,9 @@ function makeItem(
   let basis = explicitBasis;
   if (Number.isNaN(basis))
     basis = resolveLength(main === 'width' ? style.width : style.height, parentMain, NaN);
-  let crossSize = resolveLength(cross === 'width' ? style.width : style.height, parentCross, NaN);
+  const explicitCross = resolveLength(cross === 'width' ? style.width : style.height, parentCross, NaN);
+  let crossSize = explicitCross;
+  const crossExplicit = !Number.isNaN(explicitCross);
   if (Number.isNaN(basis) || Number.isNaN(crossSize)) {
     const measured = intrinsicSize(node, available, main);
     if (Number.isNaN(basis))
@@ -484,6 +489,7 @@ function makeItem(
     if (Number.isNaN(crossSize))
       crossSize = cross === 'width' ? (measured?.width ?? 0) : (measured?.height ?? 0);
   }
+
   if (style.aspectRatio && style.aspectRatio > 0) {
     if (main === 'width' && crossSize === 0 && basis > 0) crossSize = basis / style.aspectRatio;
     if (main === 'height' && crossSize === 0 && basis > 0) crossSize = basis * style.aspectRatio;
@@ -506,6 +512,7 @@ function makeItem(
     basis,
     main: basis,
     cross: crossSize,
+    crossExplicit,
     grow,
     shrink,
     absolute: style.position === 'absolute',
@@ -528,7 +535,6 @@ function intrinsicSize(
       : { width: available.width, height: undefined };
   const measured = layoutNode(node, constraint, 0, 0);
   return { width: measured.width, height: measured.height };
-}
 
 function resolveMin(
   style: LayoutStyle,
@@ -681,7 +687,7 @@ function positionLine(
     const cb = item.marginCrossBefore;
     const ca = item.marginCrossAfter;
     let childCross = item.cross;
-    if (align === 'stretch' && item.cross === 0) childCross = Math.max(0, lineCross - cb - ca);
+    if (align === 'stretch' && !item.crossExplicit) childCross = Math.max(0, lineCross - cb - ca);
     let crossPos = crossCursor + cb;
     const crossFree = lineCross - childCross - cb - ca;
     if (align === 'center') crossPos += crossFree / 2;
@@ -697,6 +703,7 @@ function positionLine(
       child.y = round(padding.top + crossPos);
       child.width = round(item.main);
       child.height = round(childCross);
+      child.width = clampSize(child.width, childStyle, 'width', width);
       child.height = clampSize(child.height, childStyle, 'height', height);
     } else {
       child.x = round(padding.left + crossPos);
@@ -704,6 +711,7 @@ function positionLine(
       child.width = round(childCross);
       child.height = round(item.main);
       child.width = clampSize(child.width, childStyle, 'width', width);
+      child.height = clampSize(child.height, childStyle, 'height', height);
     }
     out[item.index] = child;
   }

@@ -182,13 +182,35 @@ function layoutStyleSig(style: LayoutStyle | undefined): string {
   return id;
 }
 
+
 function textStyleSig(style: TextStyle): string {
   // Only the layout-affecting fields. Color etc. don't change layout.
   return `${style.fontSize ?? 16}|${style.letterSpacing ?? 0}|${style.lineHeight ?? -1}|${style.fontFamily ?? ''}|${style.fontWeight ?? ''}`;
 }
 
+const DIRECT_LAYOUT_COMPONENTS = new Set([
+  'EditableArea',
+  'Gutter',
+  'Image',
+  'LineViewport',
+  'Pressable',
+  'ScrollView',
+  'Text',
+  'TextArea',
+  'TextInput',
+  'View',
+  'VirtualList',
+]);
+
+function isDirectLayoutComponent(displayName: string | undefined): boolean {
+  return displayName !== undefined && DIRECT_LAYOUT_COMPONENTS.has(displayName);
+}
+
 function layoutNodeFor(node: Node, inheritedTextStyle: TextStyle): LayoutNode {
   if (node.type === 'component') {
+    if (!isDirectLayoutComponent(node.displayName)) {
+      return layoutNodeFor(node.render(node.props), inheritedTextStyle);
+    }
     const childProps = node.props as ComponentProps;
     const resolved = splitStyle(childProps.style);
     const textStyle = {
