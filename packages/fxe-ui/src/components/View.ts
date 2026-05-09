@@ -357,12 +357,15 @@ function layoutNodeFor(
       let produced: Node | null = null;
       // Primary cache: previous render stored produced JSX on the child
       // fiber. After the swap above, `parentFiber.lastProps === node.props`
-      // when shallow-equal so we use it directly.
+      // when shallow-equal so we use it directly. We intentionally allow
+      // a one-frame stale produced subtree while the current render is still
+      // rebuilding: that preserves the previous layout instead of collapsing
+      // composite children to 0x0 for a frame, and the next frame sees the
+      // updated produced tree.
       if (
         parentFiber !== null &&
         parentFiber.lastProducedNode !== null &&
-        parentFiber.lastProps === node.props &&
-        !parentFiber.dirty
+        parentFiber.lastProps === node.props
       ) {
         produced = parentFiber.lastProducedNode;
       }
@@ -391,7 +394,6 @@ function layoutNodeFor(
         if (
           parentFiber !== null &&
           parentFiber.lastProps === node.props &&
-          !parentFiber.dirty &&
           parentFiber.lastProducedNode === null
         ) {
           return { _sig: `C0|${node.displayName ?? ''}` };

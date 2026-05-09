@@ -7,7 +7,7 @@
 // reads from `useTheme()`, so swapping the theme via the toolbar buttons
 // re-renders the whole document in place.
 
-import { App, Window } from 'fxe';
+import { App, Primitives, Window } from 'fxe';
 import {
   Button,
   type Color,
@@ -611,8 +611,8 @@ interface CodeSpan {
   name?: string;
 }
 
-// Slice `source` into a flat list of spans where every byte is covered:
-// token bytes carry the capture name, gaps carry no name (default color).
+// Slice `source` into a flat list of spans where every code-unit index is
+// covered: token ranges carry the capture name, gaps carry no name.
 function buildSpans(source: string, tokens: FXEMarkdown.HighlightToken[]): CodeSpan[] {
   if (!tokens.length) return [{ text: source }];
   const out: CodeSpan[] = [];
@@ -642,6 +642,60 @@ function splitLines(spans: CodeSpan[]): CodeSpan[][] {
   return lines;
 }
 
+function codeLineColumns(line: CodeSpan[]): number {
+  let columns = 0;
+  for (const span of line) {
+    for (const ch of span.text) columns += ch === '\t' ? 4 : 1;
+  }
+  return columns;
+}
+
+function renderCodeGlyphs(
+  line: CodeSpan[],
+  palette: SyntaxPalette,
+  fallback: Color,
+  monoFamily: string,
+  fontSize: number,
+  cellWidth: number,
+  lineHeight: number,
+): UiNode[] {
+  const out: UiNode[] = [];
+  let col = 0;
+  for (let si = 0; si < line.length; si++) {
+    const span = line[si];
+    const color = span.name ? syntaxColor(palette, span.name, fallback) : fallback;
+    for (const ch of span.text) {
+      if (ch === '\t') {
+        col += 4;
+        continue;
+      }
+      if (ch === ' ') {
+        col += 1;
+        continue;
+      }
+      out.push(
+        <Text
+          key={`g-${si}-${col}`}
+          style={{
+            position: 'absolute',
+            left: col * cellWidth,
+            top: 0,
+            width: cellWidth,
+            height: lineHeight,
+            color,
+            fontFamily: monoFamily,
+            fontSize,
+          }}
+        >
+          {ch}
+        </Text>,
+      );
+      col += 1;
+    }
+  }
+  return out;
+}
+
 function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlockNode }): UiNode {
   const t = useTheme() as MarkdownTheme;
   const node = props.node;
@@ -653,6 +707,10 @@ function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlock
     return { lines: splitLines(spans), hasHighlighter: !!hl };
   }, [node, lang]);
   const codeFontSize = t.fontSizes.sm + 1;
+  const [cellWidth, codeLineHeight] = Primitives.calcText('M', codeFontSize);
+  const fixedCellWidth = Math.max(1, Math.ceil(cellWidth));
+  const fixedLineHeight = Math.max(codeFontSize + 4, Math.ceil(codeLineHeight));
+  const codeWidth = Math.max(1, ...lines.map(codeLineColumns)) * fixedCellWidth;
   return (
     <View
       style={{
@@ -673,33 +731,20 @@ function mdCodeBlock(props: { key?: string | number; node: FXEMarkdown.CodeBlock
       {lines.map((line, li) => (
         <View
           key={`code-line-${li}`}
-          style={{ flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'baseline' }}
+          style={{
+            position: 'relative',
+            width: codeWidth,
+            height: fixedLineHeight,
+          }}
         >
-          {line.length === 0 ? (
-            <Text
-              style={{
-                color: t.colors.text,
-                fontFamily: t.fonts.mono,
-                fontSize: codeFontSize,
-              }}
-            >
-              {' '}
-            </Text>
-          ) : (
-            line.map((span, si) => (
-              <Text
-                key={`code-${li}-${si}`}
-                style={{
-                  color: span.name
-                    ? syntaxColor(t.syntax, span.name, t.colors.text)
-                    : t.colors.text,
-                  fontFamily: t.fonts.mono,
-                  fontSize: codeFontSize,
-                }}
-              >
-                {span.text}
-              </Text>
-            ))
+          {renderCodeGlyphs(
+            line,
+            t.syntax,
+            t.colors.text,
+            t.fonts.mono,
+            codeFontSize,
+            fixedCellWidth,
+            fixedLineHeight,
           )}
         </View>
       ))}

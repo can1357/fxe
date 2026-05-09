@@ -4440,13 +4440,15 @@ declare namespace FXEMarkdown {
     flags?: number;
   }
 
-  /** A non-overlapping byte range tagged with a tree-sitter capture name
-   *  (e.g. "keyword", "string", "type"). Bytes between adjacent tokens, or
-   *  before/after the first/last token, are unhighlighted plain text. */
+  /** A non-overlapping range tagged with a tree-sitter capture name
+   *  (e.g. "keyword", "string", "type"). Offsets are JavaScript UTF-16
+   *  code-unit indices suitable for `source.slice(start, end)`. Text between
+   *  adjacent tokens, or before/after the first/last token, is unhighlighted
+   *  plain text. */
   interface HighlightToken {
-    /** Byte offset into the source string where this token begins. */
+    /** UTF-16 code-unit index where this token begins. */
     start: number;
-    /** Byte offset (exclusive) where this token ends. */
+    /** UTF-16 code-unit index (exclusive) where this token ends. */
     end: number;
     /** Tree-sitter capture name. Common values produced by the built-in
      *  queries: `comment`, `string`, `number`, `constant`, `keyword`,

@@ -42,6 +42,31 @@ test('typescript highlights pull keyword + string + number', () => {
   assert(names.has('number'), `expected number in ${[...names].join(',')}`);
 });
 
+test('typescript offsets are JavaScript string indices after unicode text', () => {
+  if (!supported.includes('typescript')) return;
+  const source = [
+    '// Greet the user — the comment uses a multibyte dash.',
+    'function greet(name: string): string {',
+    '  return `hello, ${name}!`;',
+    '}',
+    '',
+  ].join('\n');
+  const r = Markdown.highlight(source, 'ts');
+  assert(r);
+  const functionToken = r!.tokens.find(
+    (t) => t.name === 'keyword' && source.slice(t.start, t.end) === 'function',
+  );
+  assert(functionToken, `expected exact function token in ${JSON.stringify(r!.tokens)}`);
+  const greetToken = r!.tokens.find(
+    (t) => t.name === 'function' && source.slice(t.start, t.end) === 'greet',
+  );
+  assert(greetToken, `expected exact greet token in ${JSON.stringify(r!.tokens)}`);
+  const returnToken = r!.tokens.find(
+    (t) => t.name === 'keyword' && source.slice(t.start, t.end) === 'return',
+  );
+  assert(returnToken, `expected exact return token in ${JSON.stringify(r!.tokens)}`);
+});
+
 test('json highlights tag pair keys distinctly', () => {
   if (!supported.includes('json')) return;
   const r = Markdown.highlight('{"name": "fxe", "v": 1}', 'json');
@@ -57,6 +82,23 @@ test('aliases route to the canonical grammar', () => {
   const r = Markdown.highlight('const x = 1;', 'ts');
   assert(r);
   assertEqual(r!.language, 'typescript');
+});
+
+test('highlight offsets can rebuild source with whitespace gaps intact', () => {
+  if (!supported.includes('typescript')) return;
+  const source = "import { mount, View, Text } from 'fxe-ui';";
+  const r = Markdown.highlight(source, 'ts');
+  assert(r);
+  let cursor = 0;
+  let rebuilt = '';
+  for (const tok of r!.tokens) {
+    rebuilt += source.slice(cursor, tok.start);
+    rebuilt += source.slice(tok.start, tok.end);
+    cursor = tok.end;
+  }
+  rebuilt += source.slice(cursor);
+  assertEqual(rebuilt, source);
+  assert(rebuilt.includes(' '), 'rebuilt source should preserve spaces between highlighted tokens');
 });
 
 test('unknown languages return null', () => {

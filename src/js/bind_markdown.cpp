@@ -15,11 +15,14 @@
 
 #if FXE_HAS_TREESITTER
 #include <fxe/highlight.hpp>
+#include <fxe/types.hpp>
 #endif
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <v8.h>
+#include <vector>
 
 namespace fxe::js {
   namespace {
@@ -30,6 +33,39 @@ namespace fxe::js {
       return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
           .ToLocalChecked();
     }
+
+#if FXE_HAS_TREESITTER
+    std::vector<u32> utf8_byte_to_utf16_units(std::string_view s) {
+      std::vector<u32> out(s.size() + 1, 0);
+      u32 units = 0;
+      usize i = 0;
+      while (i < s.size()) {
+        out[i] = units;
+        const auto c0 = static_cast<unsigned char>(s[i]);
+        usize width = 1;
+        u32 cp = c0;
+        if ((c0 & 0xe0u) == 0xc0u && i + 1 < s.size()) {
+          width = 2;
+          cp = ((c0 & 0x1fu) << 6u) | (static_cast<unsigned char>(s[i + 1]) & 0x3fu);
+        } else if ((c0 & 0xf0u) == 0xe0u && i + 2 < s.size()) {
+          width = 3;
+          cp = ((c0 & 0x0fu) << 12u) | ((static_cast<unsigned char>(s[i + 1]) & 0x3fu) << 6u) |
+               (static_cast<unsigned char>(s[i + 2]) & 0x3fu);
+        } else if ((c0 & 0xf8u) == 0xf0u && i + 3 < s.size()) {
+          width = 4;
+          cp = ((c0 & 0x07u) << 18u) | ((static_cast<unsigned char>(s[i + 1]) & 0x3fu) << 12u) |
+               ((static_cast<unsigned char>(s[i + 2]) & 0x3fu) << 6u) |
+               (static_cast<unsigned char>(s[i + 3]) & 0x3fu);
+        }
+        for (usize j = 1; j < width && i + j < s.size(); ++j)
+          out[i + j] = units;
+        i += width;
+        units += cp > 0xffffu ? 2u : 1u;
+      }
+      out[s.size()] = units;
+      return out;
+    }
+#endif
 
     // Build a JS object for `n`, recursing into children. Container kinds
     // include a `children` array; leaf text kinds carry their `text` field.
@@ -189,11 +225,12 @@ namespace fxe::js {
 
     // Markdown.highlight(source, language) — returns a non-overlapping list
     // of `{start, end, name}` token spans produced by the built-in
-    // tree-sitter highlight query for `language`. Returns null when the
-    // language is unsupported (or when the build was configured without
-    // tree-sitter). Capture names are tree-sitter style ("comment",
-    // "string", "number", "constant", "keyword", "type", "function",
-    // "property"); the renderer maps these to theme colors.
+    // tree-sitter highlight query for `language`. Returned offsets are
+    // JavaScript UTF-16 code-unit indices, so callers can use `slice()` on the
+    // original string even when source contains non-ASCII text before a token.
+    // Capture names are tree-sitter style ("comment", "string", "number",
+    // "constant", "keyword", "type", "function", "property"); the renderer
+    // maps these to theme colors.
     void md_highlight(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -213,13 +250,16 @@ namespace fxe::js {
         info.GetReturnValue().SetNull();
         return;
       }
+      const auto byte_to_utf16 = utf8_byte_to_utf16_units(src_view);
       auto out = Object::New(iso);
       (void)out->Set(ctx, "language"_v8(iso), v8_str(iso, r->language));
       auto arr = Array::New(iso, static_cast<int>(r->tokens.size()));
       for (uint32_t i = 0; i < r->tokens.size(); ++i) {
         auto t = Object::New(iso);
-        (void)t->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, r->tokens[i].start));
-        (void)t->Set(ctx, "end"_v8(iso), Integer::NewFromUnsigned(iso, r->tokens[i].end));
+        const auto start = byte_to_utf16[std::min<usize>(r->tokens[i].start, src_view.size())];
+        const auto end = byte_to_utf16[std::min<usize>(r->tokens[i].end, src_view.size())];
+        (void)t->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, start));
+        (void)t->Set(ctx, "end"_v8(iso), Integer::NewFromUnsigned(iso, end));
         (void)t->Set(ctx, "name"_v8(iso), v8_str(iso, r->tokens[i].name));
         (void)arr->Set(ctx, i, t);
       }

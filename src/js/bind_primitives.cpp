@@ -1222,19 +1222,16 @@ namespace fxe::js {
           usize current_start = paragraph_start;
           usize i = 0;
           while (i < paragraph.size()) {
-            while (i < paragraph.size() && is_ascii_space(paragraph[i]))
+            const usize token_begin = i;
+            const bool is_space_run = is_ascii_space(paragraph[i]);
+            while (i < paragraph.size() && is_ascii_space(paragraph[i]) == is_space_run)
               ++i;
-            if (i >= paragraph.size())
-              break;
-            const usize word_begin = i;
-            while (i < paragraph.size() && !is_ascii_space(paragraph[i]))
-              ++i;
-            std::string word(paragraph.substr(word_begin, i - word_begin));
-            const usize word_start = paragraph_start + word_begin;
-            const std::string candidate = current.empty() ? word : current + " " + word;
+            std::string token(paragraph.substr(token_begin, i - token_begin));
+            const usize token_start = paragraph_start + token_begin;
+            const std::string candidate = current + token;
             if (measured_text_width(candidate, pt, letter_spacing) <= limit + 0.5f) {
               if (current.empty())
-                current_start = word_start;
+                current_start = token_start;
               current = candidate;
               continue;
             }
@@ -1242,21 +1239,21 @@ namespace fxe::js {
               push_wrapped_line(out, current, static_cast<u32>(current_start), pt, letter_spacing);
               current.clear();
             }
-            if (break_words && measured_text_width(word, pt, letter_spacing) > limit + 0.5f &&
-                word.size() > 1) {
-              auto pieces = break_long_word_native(word, pt, letter_spacing, limit);
-              usize piece_start = word_start;
+            if (!is_space_run && break_words &&
+                measured_text_width(token, pt, letter_spacing) > limit + 0.5f && token.size() > 1) {
+              auto pieces = break_long_word_native(token, pt, letter_spacing, limit);
+              usize piece_start = token_start;
               for (usize p = 0; p + 1 < pieces.size(); ++p) {
                 push_wrapped_line(out, pieces[p], static_cast<u32>(piece_start), pt,
                                   letter_spacing);
                 piece_start += pieces[p].size();
               }
-              word = pieces.empty() ? std::string{} : pieces.back();
+              token = pieces.empty() ? std::string{} : pieces.back();
               current_start = piece_start;
             } else {
-              current_start = word_start;
+              current_start = token_start;
             }
-            current = std::move(word);
+            current = std::move(token);
           }
           if (!current.empty()) {
             push_wrapped_line(out, current, static_cast<u32>(current_start), pt, letter_spacing);

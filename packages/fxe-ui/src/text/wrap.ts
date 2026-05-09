@@ -325,46 +325,49 @@ export function wrapText(text: string, style: TextStyle, options: WrapOptions = 
       paragraphStart += paragraph.length + 1;
       continue;
     }
-    // Tokenize on whitespace runs but preserve them as separators so we don't
-    // collapse intentional double-spaces inside a single line.
-    const words = paragraph.split(/\s+/).filter((w) => w.length > 0);
+    // Tokenize on whitespace runs and non-whitespace runs, preserving the
+    // separators. Markdown/code renderers depend on leading, trailing, and
+    // repeated spaces having measurable width; collapsing them makes adjacent
+    // styled Text runs visually concatenate.
+    const tokens = paragraph.match(/\S+|\s+/g) ?? [];
     let current = '';
     let currentStart = paragraphStart;
-    let searchFrom = paragraphStart;
-    for (let word of words) {
-      const wordStart = text.indexOf(word, searchFrom);
-      const safeWordStart = wordStart >= 0 ? wordStart : searchFrom;
-      const candidate = current.length === 0 ? word : `${current} ${word}`;
+    let tokenOffset = 0;
+    for (let token of tokens) {
+      const tokenStart = paragraphStart + tokenOffset;
+      tokenOffset += token.length;
+      const isSpaceRun = /^\s+$/.test(token);
+      const candidate = current + token;
       if (measureLineWidth(candidate, fontSize, letterSpacing) <= limit + FIT_EPS) {
-        if (current.length === 0) currentStart = safeWordStart;
+        if (current.length === 0) currentStart = tokenStart;
         current = candidate;
-        searchFrom = safeWordStart + word.length;
         continue;
       }
       if (current.length > 0) {
         pushLine(current, currentStart);
         current = '';
       }
-      // `word` is now alone on its line. If it overflows and breakWords is on,
-      // split it across multiple lines; otherwise let it overflow horizontally.
+      // `token` is now alone on its line. If it overflows and breakWords is on,
+      // split non-space tokens across multiple lines; otherwise let it overflow
+      // horizontally. Space runs stay intact so indentation remains visible.
       if (
+        !isSpaceRun &&
         options.breakWords &&
-        measureLineWidth(word, fontSize, letterSpacing) > limit + FIT_EPS &&
-        word.length > 1
+        measureLineWidth(token, fontSize, letterSpacing) > limit + FIT_EPS &&
+        token.length > 1
       ) {
-        const pieces = breakLongWord(word, fontSize, letterSpacing, limit);
-        let pieceStart = safeWordStart;
+        const pieces = breakLongWord(token, fontSize, letterSpacing, limit);
+        let pieceStart = tokenStart;
         for (let i = 0; i < pieces.length - 1; i++) {
           pushLine(pieces[i], pieceStart);
           pieceStart += pieces[i].length;
         }
-        word = pieces[pieces.length - 1] ?? '';
+        token = pieces[pieces.length - 1] ?? '';
         currentStart = pieceStart;
       } else {
-        currentStart = safeWordStart;
+        currentStart = tokenStart;
       }
-      current = word;
-      searchFrom = safeWordStart + word.length;
+      current = token;
     }
     if (current.length > 0) {
       pushLine(current, currentStart);

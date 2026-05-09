@@ -21,9 +21,10 @@
 namespace fxe::highlight {
 
   /** A non-overlapping byte range tagged with a tree-sitter capture name
-   *  (e.g. "keyword", "string", "type"). The caller maps the name to a
-   *  theme color. Bytes between adjacent tokens, or before/after the
-   *  first/last token, are unhighlighted plain text. */
+   *  (e.g. "keyword", "string", "type"). The C++ tokenizer reports UTF-8
+   *  byte offsets; JS bindings convert them to UTF-16 code-unit indices.
+   *  Bytes between adjacent tokens, or before/after the first/last token, are
+   *  unhighlighted plain text. */
   struct token {
     u32 start = 0;
     u32 end = 0;
