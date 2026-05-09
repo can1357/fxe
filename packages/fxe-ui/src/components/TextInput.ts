@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { popupEditMenu } from '../text/edit_menu.ts';
@@ -123,11 +124,11 @@ const CLICK_SLOP = 4;
 const TextInputText = Component((props: TextInputTextProps): Node => {
   const inherited = useTextStyle();
   const resolved = splitStyle(props.style);
-  const textStyle: TextStyle = { ...inherited, ...(props.__textStyle ?? {}), ...resolved.text };
+  const textStyle: TextStyle = { ...inherited, ...(props[INTERNAL_TEXT_STYLE] ?? {}), ...resolved.text };
   const text = props.children;
-  const rect = props.__layout
-    ? { ...props.__layout }
-    : rectFromStyle(resolved.layout, props.__layout);
+  const rect = props[INTERNAL_LAYOUT]
+    ? { ...props[INTERNAL_LAYOUT] }
+    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
   const wrapWidth = props.wrapWidth;
   if (rect.width === 0 || rect.height === 0) {
     const intrinsic = wrapText(text, textStyle, {
@@ -213,7 +214,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
   const pendingDragOut = useRef<{ x: number; y: number; text: string } | null>(null);
   const platform = useMemo(() => detectPlatform(), []);
 
-  const rect = rectFromStyle(resolved.layout, props.__layout);
+  const rect = rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
   const disabled = props.disabled === true;
   const readOnly = props.readOnly === true;
   const secure = props.secureTextEntry === true;

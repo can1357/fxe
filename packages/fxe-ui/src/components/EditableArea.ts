@@ -25,6 +25,7 @@ import type { StyleValue } from '../style/types.ts';
 import { isPrimaryModifier, MOD_SHIFT } from '../text/edit_model.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
 const KEY_ENTER = 257;
 const KEY_TAB = 258;
@@ -74,13 +75,13 @@ export interface EditableAreaProps extends InternalLayoutProps {
 export const EditableArea = Component((props: EditableAreaProps): Node => {
   const id = useId();
   const resolved = splitStyle(props.style);
-  const rect = props.__layout
-    ? { ...props.__layout }
-    : rectFromStyle(resolved.layout, props.__layout);
+  const rect = props[INTERNAL_LAYOUT]
+    ? { ...props[INTERNAL_LAYOUT] }
+    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
   recordLayout({
     component: 'EditableArea',
     rect,
-    hasParentLayout: props.__layout !== undefined,
+    hasParentLayout: props[INTERNAL_LAYOUT] !== undefined,
     styleWidth: resolved.layout.width,
     styleHeight: resolved.layout.height,
   });
@@ -305,7 +306,7 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
       wantedCol.current = col;
       if (props.onCursorChange) props.onCursorChange(line, col);
     },
-    __layout: props.__layout,
+    [INTERNAL_LAYOUT]: props[INTERNAL_LAYOUT],
   });
 }, 'EditableArea');
 

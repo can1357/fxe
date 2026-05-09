@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { glyphIndexAt, wrapText } from '../text/wrap.ts';
@@ -51,14 +52,14 @@ export const Text = Component((props: TextProps): Node => {
   const id = useId();
   const inherited = useTextStyle();
   const resolved = splitStyle(props.style);
-  const textStyle: TextStyle = { ...inherited, ...(props.__textStyle ?? {}), ...resolved.text };
+  const textStyle: TextStyle = { ...inherited, ...(props[INTERNAL_TEXT_STYLE] ?? {}), ...resolved.text };
   const text = textFromChildren(props.children);
   const [selectionStart, setSelectionStart] = useState(0);
   const [selectionEnd, setSelectionEnd] = useState(0);
   const dragAnchor = useRef(0);
-  const rect = props.__layout
-    ? { ...props.__layout }
-    : rectFromStyle(resolved.layout, props.__layout);
+  const rect = props[INTERNAL_LAYOUT]
+    ? { ...props[INTERNAL_LAYOUT] }
+    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
   // If the parent didn't size us and the style didn't either, fall back to
   // the unwrapped intrinsic measurement so single-line uses still work.
   if (rect.width === 0 || rect.height === 0) {

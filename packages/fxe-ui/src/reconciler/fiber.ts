@@ -20,6 +20,7 @@
 import type { Mat4, Vec4, Window, WindowDisposer, WindowEventMap, WindowEventName } from 'fxe';
 import { CommandBuffer, OffscreenRenderer, Primitives, Renderer } from 'fxe';
 import { tickAnimatedFrames } from '../animated/timing.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import {
   captureHitTargetsSince,
   type HitTarget,
@@ -413,14 +414,14 @@ function propagateInternalComponentProps(node: Node, produced: Node | null): Nod
   if (produced === null) return produced;
   if (node.type !== 'component') return produced;
   if (produced.type !== 'component') return produced;
-  const props = node.props as { __layout?: unknown; __textStyle?: unknown };
-  if (props.__layout === undefined && props.__textStyle === undefined) return produced;
+  const props = node.props as { [INTERNAL_LAYOUT]?: unknown; [INTERNAL_TEXT_STYLE]?: unknown };
+  if (props[INTERNAL_LAYOUT] === undefined && props[INTERNAL_TEXT_STYLE] === undefined) return produced;
   return {
     ...produced,
     props: {
       ...(produced.props as Record<string, unknown>),
-      ...(props.__layout === undefined ? {} : { __layout: props.__layout }),
-      ...(props.__textStyle === undefined ? {} : { __textStyle: props.__textStyle }),
+      ...(props[INTERNAL_LAYOUT] === undefined ? {} : { [INTERNAL_LAYOUT]: props[INTERNAL_LAYOUT] }),
+      ...(props[INTERNAL_TEXT_STYLE] === undefined ? {} : { [INTERNAL_TEXT_STYLE]: props[INTERNAL_TEXT_STYLE] }),
     },
   };
 }

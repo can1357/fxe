@@ -6,6 +6,7 @@ import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 import { View, type ViewProps } from './View.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
 export interface PressableState {
   hovered: boolean;
@@ -61,7 +62,7 @@ export const Pressable = Component((props: PressableProps): Node => {
   currentPressableState = state;
   const style = typeof props.style === 'function' ? props.style(state) : props.style;
   const resolved = splitStyle(style);
-  const rect = rectFromStyle(resolved.layout, props.__layout);
+  const rect = rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
   const cursor =
     resolved.paint.cursor ?? (props.disabled ? 'notAllowed' : props.onPress ? 'hand' : 'arrow');
   const componentType = internalProps.__componentType ?? 'Pressable';

@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
@@ -40,7 +41,7 @@ interface VirtualListRowProps extends InternalLayoutProps {
 }
 
 const VirtualListRow = Component((props: VirtualListRowProps): Node => {
-  const measuredHeight = props.__layout?.height;
+  const measuredHeight = props[INTERNAL_LAYOUT]?.height;
 
   useEffect(() => {
     if (props.onMeasure === undefined || measuredHeight === undefined || measuredHeight <= 0) {
@@ -192,7 +193,7 @@ export const VirtualList = Component(<T>(props: VirtualListProps<T>): Node => {
     measuredRef.current = { data: props.data, heights: new Map<number, number>() };
   }
 
-  const rect = rectFromStyle(splitStyle(props.style).layout, props.__layout);
+  const rect = rectFromStyle(splitStyle(props.style).layout, props[INTERNAL_LAYOUT]);
   const count = props.data.length;
   const overscan = cleanCount(props.overscan, 5);
   const fixedHeight =

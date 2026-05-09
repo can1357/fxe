@@ -6,6 +6,7 @@ import { Component, type Node, useId } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
 export interface ImageProps extends InternalLayoutProps, AccessibilityProps {
   key?: string;
@@ -20,7 +21,7 @@ export const Image = Component((props: ImageProps): Node => {
   const id = useId();
   const resolved = splitStyle([{ width: props.width, height: props.height }, props.style]);
   if (props.tint !== undefined) resolved.paint.tint = props.tint;
-  const rect = rectFromStyle(resolved.layout, props.__layout);
+  const rect = rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
   registerHitTarget({
     id,
     rect,

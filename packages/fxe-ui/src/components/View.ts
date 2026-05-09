@@ -18,6 +18,7 @@ import {
   useId,
   withContextFrames,
 } from '../reconciler/fiber.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { wrapText } from '../text/wrap.ts';
@@ -39,7 +40,7 @@ type ViewInternalProps = ViewProps & { __skipA11yHitTarget?: boolean };
 type ComponentProps = {
   style?: StyleValue;
   children?: unknown;
-  __textStyle?: TextStyle;
+  [INTERNAL_TEXT_STYLE]?: TextStyle;
 };
 function isDisplayNone(node: Node): boolean {
   if (node.type !== 'component') return false;
@@ -230,6 +231,35 @@ function isDirectLayoutComponent(displayName: string | undefined): boolean {
   return displayName !== undefined && DIRECT_LAYOUT_COMPONENTS.has(displayName);
 }
 
+// Layout-side memoization for memo'd components. The renderer's memo bail
+// only skips paint; layoutNodeFor still calls `node.render(node.props)` for
+// every non-direct component to derive its layout. For memo'd nodes whose
+// input props haven't changed, we can reuse the previously produced JSX —
+// keyed on `node.props` identity (stable for memo'd factories) and the
+// context-value snapshot (so theme/context changes invalidate naturally).
+interface LayoutMemoEntry {
+  values: unknown[];
+  produced: Node;
+}
+const kLayoutMemo = Symbol('fxe-ui.layoutMemo');
+
+function snapshotContextValues(frames: readonly ContextFrameSnapshot[]): unknown[] {
+  const out: unknown[] = new Array(frames.length);
+  for (let i = 0; i < frames.length; ++i) out[i] = frames[i].value;
+  return out;
+}
+
+function contextValuesMatch(
+  cached: unknown[],
+  frames: readonly ContextFrameSnapshot[],
+): boolean {
+  if (cached.length !== frames.length) return false;
+  for (let i = 0; i < cached.length; ++i) {
+    if (cached[i] !== frames[i].value) return false;
+  }
+  return true;
+}
+
 function layoutNodeFor(
   node: Node,
   inheritedTextStyle: TextStyle,
@@ -237,14 +267,33 @@ function layoutNodeFor(
 ): LayoutNode {
   if (node.type === 'component') {
     if (!isDirectLayoutComponent(node.displayName)) {
-      const produced = withContextFrames(contextFrames, () => node.render(node.props));
+      const memoCacheKey =
+        node.memo !== undefined && typeof node.props === 'object' && node.props !== null
+          ? (node.props as object)
+          : null;
+      let produced: Node | null = null;
+      if (memoCacheKey !== null) {
+        const entry = Reflect.get(memoCacheKey, kLayoutMemo) as LayoutMemoEntry | undefined;
+        if (entry !== undefined && contextValuesMatch(entry.values, contextFrames)) {
+          produced = entry.produced;
+        }
+      }
+      if (produced === null) {
+        produced = withContextFrames(contextFrames, () => node.render(node.props));
+        if (memoCacheKey !== null) {
+          Reflect.set(memoCacheKey, kLayoutMemo, {
+            values: snapshotContextValues(contextFrames),
+            produced,
+          });
+        }
+      }
       return layoutNodeFor(produced, inheritedTextStyle, contextFrames);
     }
     const childProps = node.props as ComponentProps;
     const { resolved, layoutSig } = resolveStyleMeta(childProps.style);
     const textStyle = {
       ...inheritedTextStyle,
-      ...(childProps.__textStyle ?? {}),
+      ...(childProps[INTERNAL_TEXT_STYLE] ?? {}),
       ...resolved.text,
     };
     if (node.displayName === 'Text') {
@@ -298,17 +347,17 @@ export const View = Component((props: ViewProps): Node => {
   const internalProps = props as ViewInternalProps;
   const id = useId();
   const { resolved } = resolveStyleMeta(props.style);
-  const rect = props.__layout
-    ? { ...props.__layout }
-    : rectFromStyle(resolved.layout, props.__layout);
-  if (!props.__layout && (rect.width === 0 || rect.height === 0)) {
+  const rect = props[INTERNAL_LAYOUT]
+    ? { ...props[INTERNAL_LAYOUT] }
+    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
+  if (!props[INTERNAL_LAYOUT] && (rect.width === 0 || rect.height === 0)) {
     rect.width = typeof resolved.layout.width === 'number' ? resolved.layout.width : 0;
     rect.height = typeof resolved.layout.height === 'number' ? resolved.layout.height : 0;
   }
   recordLayout({
     component: 'View',
     rect: { ...rect },
-    hasParentLayout: !!props.__layout,
+    hasParentLayout: !!props[INTERNAL_LAYOUT],
     styleWidth: resolved.layout.width,
     styleHeight: resolved.layout.height,
     tag: (props as { __traceTag?: string }).__traceTag,
@@ -324,11 +373,11 @@ export const View = Component((props: ViewProps): Node => {
     });
   }
   const rawChildren = normalizeChildren(props.children);
-  const textStyle = { ...(props.__textStyle ?? {}), ...resolved.text };
+  const textStyle = { ...(props[INTERNAL_TEXT_STYLE] ?? {}), ...resolved.text };
   const visibleChildren = rawChildren.filter((child) => !isDisplayNone(child));
   const childTree =
-    props.__layout && props.__layout.children.length === visibleChildren.length
-      ? props.__layout
+    props[INTERNAL_LAYOUT] && props[INTERNAL_LAYOUT].children.length === visibleChildren.length
+      ? props[INTERNAL_LAYOUT]
       : layout(
           {
             style: { ...resolved.layout, width: rect.width, height: rect.height },

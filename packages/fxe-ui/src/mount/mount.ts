@@ -9,6 +9,7 @@ import {
   startFrameLoop,
   useFrame,
 } from '../reconciler/fiber.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 import { type Theme, ThemeProvider } from '../theme/index.ts';
 import {
   dispatchCompose,
@@ -99,7 +100,7 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
           ...node,
           props: {
             ...(node.props as Record<string, unknown>),
-            __layout: {
+            [INTERNAL_LAYOUT]: {
               x: 0,
               y: 0,
               width,

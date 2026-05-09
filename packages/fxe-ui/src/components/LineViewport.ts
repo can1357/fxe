@@ -20,6 +20,7 @@ import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue, TextStyle } from '../style/types.ts';
 import { useTextStyle } from '../theme/text_context.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
 /** A single styled run on one line. Cols are UTF-16 code-unit indices. */
 export interface LineSpan {
@@ -85,16 +86,16 @@ export const LineViewport = Component((props: LineViewportProps): Node => {
   const resolved = splitStyle(props.style);
   const textStyle: TextStyle = {
     ...inheritedText,
-    ...(props.__textStyle ?? {}),
+    ...(props[INTERNAL_TEXT_STYLE] ?? {}),
     ...resolved.text,
   };
-  const rect = props.__layout
-    ? { ...props.__layout }
-    : rectFromStyle(resolved.layout, props.__layout);
+  const rect = props[INTERNAL_LAYOUT]
+    ? { ...props[INTERNAL_LAYOUT] }
+    : rectFromStyle(resolved.layout, props[INTERNAL_LAYOUT]);
   recordLayout({
     component: 'LineViewport',
     rect,
-    hasParentLayout: props.__layout !== undefined,
+    hasParentLayout: props[INTERNAL_LAYOUT] !== undefined,
     styleWidth: resolved.layout.width,
     styleHeight: resolved.layout.height,
   });

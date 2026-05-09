@@ -5,9 +5,12 @@ import { type BoundaryChild, Draw, Layer, type Node } from '../reconciler/fiber.
 import { flattenStyle, splitStyle } from '../style/resolve.ts';
 import type { Style, StyleValue, TextStyle } from '../style/types.ts';
 
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
+export { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE };
+
 export interface InternalLayoutProps {
-  __layout?: LayoutResult;
-  __textStyle?: TextStyle;
+  [INTERNAL_LAYOUT]?: LayoutResult;
+  [INTERNAL_TEXT_STYLE]?: TextStyle;
 }
 
 export interface UIBaseProps extends InternalLayoutProps {
@@ -47,8 +50,8 @@ export function cloneWithInternal(
     ...node,
     props: {
       ...(node.props as Record<string, unknown>),
-      __layout: layoutResult,
-      __textStyle: textStyle,
+      [INTERNAL_LAYOUT]: layoutResult,
+      [INTERNAL_TEXT_STYLE]: textStyle,
     },
   };
 }

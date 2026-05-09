@@ -6,6 +6,7 @@ import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { type InternalLayoutProps, rectFromStyle } from './common.ts';
 import { View } from './View.ts';
+import { INTERNAL_LAYOUT, INTERNAL_TEXT_STYLE } from '../internal_keys.ts';
 
 export interface ScrollViewProps extends InternalLayoutProps, AccessibilityProps {
   key?: string;
@@ -17,7 +18,7 @@ export interface ScrollViewProps extends InternalLayoutProps, AccessibilityProps
 
 export const ScrollView = Component((props: ScrollViewProps): Node => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const rect = rectFromStyle(splitStyle(props.style).layout, props.__layout);
+  const rect = rectFromStyle(splitStyle(props.style).layout, props[INTERNAL_LAYOUT]);
   registerHitTarget({
     id: `scroll:${rect.x}:${rect.y}`,
     rect,
