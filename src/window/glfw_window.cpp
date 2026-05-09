@@ -194,6 +194,12 @@ namespace fxe {
     CAMetalLayer* metal = [CAMetalLayer layer];
     metal.pixelFormat = MTLPixelFormatBGRA8Unorm;
     metal.framebufferOnly = YES;
+    // Avoid the default kCAGravityResize, which stretches the previous frame's
+    // pixels across the new layer bounds during a Cocoa live-resize until our
+    // framebuffer-size callback drives a fresh frame. Anchoring to the top-left
+    // leaves uncovered edge pixels for at most one tick instead of a visible
+    // scale-and-snap.
+    metal.contentsGravity = kCAGravityTopLeft;
     if (transparent) {
       metal.opaque = NO;
     }
