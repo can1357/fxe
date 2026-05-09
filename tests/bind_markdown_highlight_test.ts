@@ -16,12 +16,14 @@ test('every supported language tokenizes some source', () => {
     const sample = lang === 'json' ? '{"a": 1, "b": null}' : 'const x: number = 1; // hi';
     const r = Markdown.highlight(sample, lang);
     assert(r !== null, `highlight(${lang}) returned null`);
-    assertEqual(typeof r!.language, 'string');
-    assert(Array.isArray(r!.tokens));
-    assert(r!.tokens.length > 0, `${lang} produced no tokens`);
+    const language = r.language;
+    const tokens = r.tokens;
+    assertEqual(typeof language, 'string');
+    assert(Array.isArray(tokens));
+    assert(tokens.length > 0, `${lang} produced no tokens`);
     // Tokens must be sorted, non-overlapping, in-bounds.
     let cursor = 0;
-    for (const tok of r!.tokens) {
+    for (const tok of tokens) {
       assert(tok.end > tok.start, 'empty token');
       assert(tok.start >= cursor, 'overlapping or unsorted token');
       assert(tok.end <= sample.length, 'token end out of bounds');
@@ -36,7 +38,8 @@ test('typescript highlights pull keyword + string + number', () => {
   if (!supported.includes('typescript')) return;
   const r = Markdown.highlight('const s = "hello"; const n = 42;', 'typescript');
   assert(r);
-  const names = new Set(r!.tokens.map((t) => t.name));
+  const { tokens } = r;
+  const names = new Set(tokens.map((t) => t.name));
   assert(names.has('keyword'), `expected keyword in ${[...names].join(',')}`);
   assert(names.has('string'), `expected string in ${[...names].join(',')}`);
   assert(names.has('number'), `expected number in ${[...names].join(',')}`);
@@ -47,31 +50,33 @@ test('typescript offsets are JavaScript string indices after unicode text', () =
   const source = [
     '// Greet the user — the comment uses a multibyte dash.',
     'function greet(name: string): string {',
-    '  return `hello, ${name}!`;',
+    '  return `hello, ' + '${' + 'name}!`;',
     '}',
     '',
   ].join('\n');
   const r = Markdown.highlight(source, 'ts');
   assert(r);
-  const functionToken = r!.tokens.find(
+  const { tokens } = r;
+  const functionToken = tokens.find(
     (t) => t.name === 'keyword' && source.slice(t.start, t.end) === 'function',
   );
-  assert(functionToken, `expected exact function token in ${JSON.stringify(r!.tokens)}`);
-  const greetToken = r!.tokens.find(
+  assert(functionToken, `expected exact function token in ${JSON.stringify(tokens)}`);
+  const greetToken = tokens.find(
     (t) => t.name === 'function' && source.slice(t.start, t.end) === 'greet',
   );
-  assert(greetToken, `expected exact greet token in ${JSON.stringify(r!.tokens)}`);
-  const returnToken = r!.tokens.find(
+  assert(greetToken, `expected exact greet token in ${JSON.stringify(tokens)}`);
+  const returnToken = tokens.find(
     (t) => t.name === 'keyword' && source.slice(t.start, t.end) === 'return',
   );
-  assert(returnToken, `expected exact return token in ${JSON.stringify(r!.tokens)}`);
+  assert(returnToken, `expected exact return token in ${JSON.stringify(tokens)}`);
 });
 
 test('json highlights tag pair keys distinctly', () => {
   if (!supported.includes('json')) return;
   const r = Markdown.highlight('{"name": "fxe", "v": 1}', 'json');
   assert(r);
-  const names = new Set(r!.tokens.map((t) => t.name));
+  const { tokens } = r;
+  const names = new Set(tokens.map((t) => t.name));
   assert(names.has('property'));
   assert(names.has('string'));
   assert(names.has('number'));
@@ -81,7 +86,8 @@ test('aliases route to the canonical grammar', () => {
   if (!supported.includes('typescript')) return;
   const r = Markdown.highlight('const x = 1;', 'ts');
   assert(r);
-  assertEqual(r!.language, 'typescript');
+  const { language } = r;
+  assertEqual(language, 'typescript');
 });
 
 test('highlight offsets can rebuild source with whitespace gaps intact', () => {
@@ -89,9 +95,10 @@ test('highlight offsets can rebuild source with whitespace gaps intact', () => {
   const source = "import { mount, View, Text } from 'fxe-ui';";
   const r = Markdown.highlight(source, 'ts');
   assert(r);
+  const { tokens } = r;
   let cursor = 0;
   let rebuilt = '';
-  for (const tok of r!.tokens) {
+  for (const tok of tokens) {
     rebuilt += source.slice(cursor, tok.start);
     rebuilt += source.slice(tok.start, tok.end);
     cursor = tok.end;

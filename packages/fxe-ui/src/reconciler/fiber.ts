@@ -1344,7 +1344,8 @@ function reconcileChildren(parent: Fiber, nodes: readonly Node[]): Fiber[] {
     order.push(k);
     const t = node.type;
     if (t === 'layer' || t === 'provider' || t === 'portal') {
-      (wrappers ??= []).push(f);
+      if (wrappers === null) wrappers = [];
+      wrappers.push(f);
     }
   }
   // Drop fibers that disappeared this frame; run their cleanups.

@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 
-import { assert, assertEqual, run, test } from './ts_harness.ts';
+import { assertEqual, run, test } from './ts_harness.ts';
 
 type FetchStub = (url: string, opts?: unknown) => Promise<unknown> | unknown;
 
@@ -57,8 +57,8 @@ test('App.installUpdate stages a fetched artifact from a checked manifest', asyn
   const bundlePath = join(dir, 'bundle.bin');
   writeFileSync(bundlePath, bundleBytes);
 
-  const manifestUrl = 'file://' + join(dir, 'manifest.json');
-  const artifactUrl = 'file://' + bundlePath;
+  const manifestUrl = `file://${join(dir, 'manifest.json')}`;
+  const artifactUrl = `file://${bundlePath}`;
   const manifest = {
     version: '99.99.99',
     url: artifactUrl,
@@ -97,12 +97,12 @@ test('App.installUpdate stages a fetched artifact from a checked manifest', asyn
 
     const installed = await App.installUpdate();
     assertEqual(installed.installed, true);
-    assert(
-      typeof installed.pendingPath === 'string' && installed.pendingPath.length > 0,
-      'installUpdate should return pendingPath',
-    );
-    assertEqual(existsSync(installed.pendingPath!), true);
-    assertEqual(readFileSync(installed.pendingPath!, 'utf8'), 'fxe staged bundle bytes');
+    const pendingPath = installed.pendingPath;
+    if (typeof pendingPath !== 'string' || pendingPath.length === 0) {
+      throw new Error('installUpdate should return pendingPath');
+    }
+    assertEqual(existsSync(pendingPath), true);
+    assertEqual(readFileSync(pendingPath, 'utf8'), 'fxe staged bundle bytes');
   } finally {
     globalThis.fetch = originalFetch;
     restoreUpdateSignatureVerifier();

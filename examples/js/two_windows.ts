@@ -2,7 +2,7 @@
 // smoke suite (no GPU on CI). Demonstrates the multi-window event loop:
 // every registered window's onFrame is driven from a single App.run.
 
-import { App, Primitives, Renderer, Window } from 'fxe';
+import { Primitives, Renderer, Window } from 'fxe';
 
 const w1 = new Window({ width: 320, height: 200, title: 'left', x: 80, y: 80 });
 const w2 = new Window({ width: 320, height: 200, title: 'right', x: 440, y: 80 });

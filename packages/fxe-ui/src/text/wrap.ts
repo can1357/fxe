@@ -194,17 +194,6 @@ function breakLongWord(
 // We swap-evict instead of LRU: when `g_cache` reaches MAX, demote it to
 // `g_old` and start fresh. Lookups check the new cache first, then fall
 // back to the old one (and promote on hit). Memory is bounded to 2*MAX.
-// Diagnostic counters; observable via globalThis.__fxeWrapStats() so we
-// can verify the cache is actually firing in production.
-let g_wrap_hits = 0;
-let g_wrap_misses = 0;
-// biome-ignore lint/suspicious/noExplicitAny: dev-only diagnostic shim.
-(globalThis as any).__fxeWrapStats = () => ({
-  hits: g_wrap_hits,
-  misses: g_wrap_misses,
-  size: g_wrap_cache.size,
-  oldSize: g_wrap_cache_old.size,
-});
 const WRAP_CACHE_MAX = 4096;
 let g_wrap_cache = new Map<string, WrappedText>();
 let g_wrap_cache_old = new Map<string, WrappedText>();
@@ -268,10 +257,8 @@ export function wrapText(text: string, style: TextStyle, options: WrapOptions = 
   );
   const cached = cachedWrap(key);
   if (cached !== undefined) {
-    g_wrap_hits++;
     return cached;
   }
-  g_wrap_misses++;
   const native = nativeWrapText(
     text,
     fontSize,

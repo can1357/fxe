@@ -11,6 +11,7 @@ import { App, Primitives, Window } from 'fxe';
 import {
   Button,
   type Color,
+  Layer,
   memo,
   mount,
   Pressable,
@@ -172,6 +173,7 @@ const themes = {
 } as const;
 
 type ThemeId = keyof typeof themes;
+const themeIds = Object.keys(themes) as ThemeId[];
 
 // ---------------------------------------------------------------------------
 // Sample document — exercises every kind the renderer supports.
@@ -928,6 +930,51 @@ const s = StyleSheet.create({
 function Demo(): UiNode {
   const [themeId, setThemeId] = useState<ThemeId>('dark');
   const theme = themes[themeId];
+  const toolbarDeps = useMemo(() => [themeId, 'toolbar'], [themeId]);
+  const documentDeps = useMemo(() => [themeId, 'document'], [themeId]);
+  const toolbar = Layer({
+    key: 'toolbar-layer',
+    deps: toolbarDeps,
+    children: [
+      <View
+        style={{
+          ...s.toolbar,
+          width: WINDOW_WIDTH,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.colors.border,
+        }}
+      >
+        <Text style={{ ...s.toolbarLabel, width: 56, color: theme.colors.mutedText }}>
+          Theme:
+        </Text>
+        {themeIds.map((id) => (
+          <View key={`t-${id}`} style={s.themeButton}>
+            <Button title={id} onPress={() => setThemeId(id)} />
+          </View>
+        ))}
+        <View style={{ flex: 1 }} />
+        <Text
+          style={{
+            ...s.toolbarLabel,
+            width: 200,
+            textAlign: 'right',
+            color: theme.colors.mutedText,
+          }}
+        >
+          md4c + fxe-ui
+        </Text>
+      </View>,
+    ],
+  });
+  const document = Layer({
+    key: 'document-layer',
+    deps: documentDeps,
+    children: [
+      <View style={{ width: WINDOW_WIDTH, padding: theme.spacing.lg }}>
+        <MarkdownRenderer source={SAMPLE_MD} />
+      </View>,
+    ],
+  });
   return (
     <ThemeProvider value={theme}>
       <View
@@ -938,34 +985,7 @@ function Demo(): UiNode {
           alignItems: 'stretch',
         }}
       >
-        <View
-          style={{
-            ...s.toolbar,
-            width: WINDOW_WIDTH,
-            borderBottomWidth: 1,
-            borderBottomColor: theme.colors.border,
-          }}
-        >
-          <Text style={{ ...s.toolbarLabel, width: 56, color: theme.colors.mutedText }}>
-            Theme:
-          </Text>
-          {(Object.keys(themes) as ThemeId[]).map((id) => (
-            <View key={`t-${id}`} style={s.themeButton}>
-              <Button title={id} onPress={() => setThemeId(id)} />
-            </View>
-          ))}
-          <View style={{ flex: 1 }} />
-          <Text
-            style={{
-              ...s.toolbarLabel,
-              width: 200,
-              textAlign: 'right',
-              color: theme.colors.mutedText,
-            }}
-          >
-            md4c + fxe-ui
-          </Text>
-        </View>
+        {toolbar}
         <ScrollView
           style={{
             width: WINDOW_WIDTH,
@@ -973,9 +993,7 @@ function Demo(): UiNode {
             backgroundColor: theme.colors.background,
           }}
         >
-          <View style={{ width: WINDOW_WIDTH, padding: theme.spacing.lg }}>
-            <MarkdownRenderer source={SAMPLE_MD} />
-          </View>
+          {document}
         </ScrollView>
       </View>
     </ThemeProvider>

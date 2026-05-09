@@ -70,10 +70,10 @@ function fragmentFromChildren(child: JSXChild): Node {
 
 const kClassComponent = Symbol('fxe-ui.isClassComponent');
 
-function isClassComponent(type: Function): boolean {
+function isClassComponent(type: (...args: never[]) => unknown): boolean {
   const cached = Reflect.get(type, kClassComponent);
   if (cached !== undefined) return cached as boolean;
-  const source = Function.prototype.toString.call(type);
+  const source = type.toString();
   const prototype = type.prototype as { render?: unknown } | undefined;
   const result = /^class\s/.test(source) || typeof prototype?.render === 'function';
   Reflect.set(type, kClassComponent, result);
@@ -184,7 +184,7 @@ export function jsxs<P extends ElementProps>(
 export namespace JSX {
   export type Element = JSXNode;
   export interface ElementChildrenAttribute {
-    children: {};
+    children: object;
   }
   export interface IntrinsicElements {
     view: ViewProps;
