@@ -20,8 +20,11 @@
 //
 // --vsync / --no-vsync  Override Renderer(..., { vsync }) for every renderer
 //                       created by the script.
-// --fps-limit=N         Override Window.run/App.run fps. N <= 0 forces the
-//                       loop to stay event-driven.
+// --fps-limit=N         Override Window.run/App.run fps. N <= 0 leaves the
+//                       loop event-driven unless --no-lazy is set.
+// --no-lazy             Disable lazy frames: drive a redraw every loop
+//                       iteration so animated overlays keep ticking even
+//                       when no input arrives. Alias: --continuous.
 // --msaa=N              Override Renderer multisampleCount (0/1 disable MSAA).
 // --bloom / --no-bloom  Override Renderer enableBloom.
 // --show-fps            Draw a small top-left FPS counter before each
@@ -120,7 +123,7 @@ namespace {
     std::fprintf(stderr,
                  "usage: %s [--debug[=PORT]] [--debug-host=ADDR] [--debug-pause]\n"
                  "          [--debug-keepalive] [--vsync|--no-vsync] [--fps-limit=N]\n"
-                 "          [--msaa=N] [--bloom|--no-bloom] [--show-fps]\n"
+                 "          [--msaa=N] [--bloom|--no-bloom] [--show-fps] [--no-lazy]\n"
                  "          [--screenshot[=PATH]] [--screenshot-delay=MS]\n"
                  "          [--screenshot-frames=N] [--screenshot-size=WxH]\n"
                  "          [--screenshot-format=png|jpeg] [--screenshot-quality=N]\n"
@@ -138,7 +141,13 @@ namespace {
                  "\n"
                  "  --vsync / --no-vsync  Override Renderer vsync for all renderers.\n"
                  "  --fps-limit=N         Override Window.run/App.run cadence.\n"
-                 "                          N <= 0 leaves the loop event-driven.\n"
+                 "                          N <= 0 leaves the loop event-driven\n"
+                 "                          unless --no-lazy is also set.\n"
+                 "  --no-lazy             Disable lazy frames: drive a redraw on\n"
+                 "                          every loop iteration so animations\n"
+                 "                          (e.g. --show-fps) keep ticking when\n"
+                 "                          no input arrives. Vsync still paces\n"
+                 "                          actual presents. Alias: --continuous.\n"
                  "  --msaa=N              Override Renderer multisampleCount.\n"
                  "                          Use 0 or 1 to disable MSAA.\n"
                  "  --bloom / --no-bloom  Override Renderer enableBloom.\n"
@@ -258,6 +267,8 @@ namespace {
         o.render_overrides.enable_bloom = false;
       } else if (a == "--show-fps") {
         o.render_overrides.show_fps_counter = true;
+      } else if (a == "--no-lazy" || a == "--continuous") {
+        o.render_overrides.force_continuous = true;
       } else if (a == "--watch") {
         o.watch = true;
       } else if (a == "--screenshot") {

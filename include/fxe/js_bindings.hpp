@@ -39,6 +39,13 @@ namespace fxe::js {
     bool override_fps = false;
     double fps = 0.0;
     bool show_fps_counter = false;
+    // When set, the app run loop drives a redraw every iteration even
+    // when no input events arrive. Vsync (when on) still gates actual
+    // present cadence; the only cost is one extra `post_redraw` per
+    // wake-up. Mutually compatible with `override_fps`: an explicit
+    // non-zero `fps` wins, otherwise the loop wakes at ~1 kHz so vsync
+    // can pace it.
+    bool force_continuous = false;
   };
 
   void set_runner_render_overrides(const runner_render_overrides& overrides) noexcept;

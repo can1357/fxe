@@ -4,9 +4,9 @@
 	"type": "module",
 	"scripts": {
 		"js": "bun scripts/js.ts",
+		"prof:js": "bun scripts/js.ts --rebuild --show-fps --no-vsync --cpu-prof --cpu-prof-md --no-lazy",
 		"watch": "watchexec --restart --exts ts,tsx,cpp,hpp,wgsl,h -- bun scripts/js.ts --dev",
 		"dev": "bun run fmt && bun run typecheck && bun scripts/js.ts --dev",
-
 		"bootstrap": "[ -x vcpkg/vcpkg ] || { [ -d vcpkg/.git ] || git clone --depth=1 https://github.com/microsoft/vcpkg.git vcpkg; ./vcpkg/bootstrap-vcpkg.sh -disableMetrics; }",
 		"configure": "cmake --preset dev",
 		"configure:release": "cmake --preset release",

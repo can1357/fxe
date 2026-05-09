@@ -144,6 +144,14 @@ ctest --preset release --output-on-failure
   heritage (`fillRect`, `command_buffer`, `texture_info`); JS bindings expose
   `camelCase` (`fillRect`, `beginFrame`). Opcode constants are
   `OP_FILL_RECT`-style.
+- **JS/TS object-identity caches:** Prefer a module-scope `Symbol('…')` with
+  `Reflect.get` / `Reflect.set` on the carrier object rather than `WeakMap`
+  keyed by that object (examples: class-component tagging in
+  `packages/fxe-ui/src/jsx-runtime.ts`, layout memo attachment in
+  `packages/fxe-ui/src/components/View.ts`). Symbol keys stay off
+  `Object.keys`, avoid a separate GC-managed table, and keep the cache on the
+  key; use ordinary maps when carriers may be sealed, frozen, or
+  non-extensible, or when you must not touch user-owned instances.
 - **Headers:** `include/fxe/*.hpp` is the only stable surface; everything in
   `src/` is internal.
 - **Dependencies:** `fxe_core` links only `glm`/`glfw`/`stb`/`fxe_font`. Do
@@ -275,6 +283,10 @@ timing/spring helpers.
   `useTransition`.
 - `mount(root, window)` wires layout, paint, hit-testing, hover/press/focus,
   cursor, and keyboard dispatch. It returns a disposer for listener cleanup.
+- Object-identity memoization (layouts keyed on props object identity, AST
+  handles in demos/tests, etc.) should use `Symbol` + `Reflect.get` /
+  `Reflect.set`, not `WeakMap` — see **JS/TS object-identity caches** under
+  [Code Conventions](#code-conventions--common-patterns).
 - Layout primitives push entries to a built-in `recordLayout` sink when
   layout tracing is enabled — see the SDK's `page.layout_trace_*` helpers.
 

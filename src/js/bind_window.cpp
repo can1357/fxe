@@ -1829,8 +1829,18 @@ namespace fxe::js {
     bool parse_run_opts(Isolate* iso, Local<Context> ctx, Local<Value> v, run_opts& out) {
       out = {};
       const auto& runner_overrides = get_runner_render_overrides();
+      // Floor used when --no-lazy is set without an explicit --fps. 1 ms
+      // wakeups let vsync pace actual presents; on machines with vsync
+      // disabled this is the effective fps cap.
+      constexpr double kContinuousFloorPeriod = 1.0 / 1000.0;
       if (runner_overrides.override_fps) {
         out.frame_period = runner_overrides.fps > 0.0 ? 1.0 / runner_overrides.fps : 0.0;
+        if (out.frame_period <= 0.0 && runner_overrides.force_continuous)
+          out.frame_period = kContinuousFloorPeriod;
+        return true;
+      }
+      if (runner_overrides.force_continuous) {
+        out.frame_period = kContinuousFloorPeriod;
         return true;
       }
       if (!v->IsObject())
