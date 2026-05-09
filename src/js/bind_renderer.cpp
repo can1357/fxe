@@ -11,7 +11,7 @@
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <fxe/window.hpp>
 
 #include <algorithm>

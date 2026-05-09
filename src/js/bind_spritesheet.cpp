@@ -5,15 +5,14 @@
 #include "bind_spritesheet.hpp"
 #include "bind_image.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <fxe/js_bindings.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>

@@ -11,16 +11,15 @@
 #include "../debug/dispatch.hpp"
 #include "../net/http_client.hpp"
 #include "runtime/capabilities.hpp"
-#include <fxe/js_bindings.hpp>
-#include <fxe/types.hpp>
-#include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <fxe/js_bindings.hpp>
+#include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <mutex>
 #include <string>

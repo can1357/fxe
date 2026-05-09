@@ -5,8 +5,7 @@
 #include <fxe/debug.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_host.hpp>
-#include <fxe/v8_strings.hpp>
-
+#include <fxe/v8_literals.hpp>
 #include <nlohmann/json.hpp>
 
 #include <memory>

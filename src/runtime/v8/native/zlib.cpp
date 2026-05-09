@@ -1,7 +1,7 @@
 #include "runtime/v8/native/zlib.hpp"
 
 #include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <zlib.h>
 
 #include <algorithm>

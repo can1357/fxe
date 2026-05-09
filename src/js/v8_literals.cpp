@@ -1,10 +1,7 @@
 // Per-isolate internalized-string cache backing the `_v8` user-defined
-// literal declared in <fxe/types.hpp>. See <fxe/v8_strings.hpp> for the
-// public API and rationale.
+// literals declared in <fxe/v8_literals.hpp>.
 
-#include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
-
+#include <fxe/v8_literals.hpp>
 #include <unordered_map>
 
 namespace fxe::js {

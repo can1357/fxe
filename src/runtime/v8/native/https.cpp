@@ -11,7 +11,7 @@
 #include <cstdint>
 #include <deque>
 #include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <map>
 #include <memory>
 #include <mutex>

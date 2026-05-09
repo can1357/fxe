@@ -1,7 +1,7 @@
 #include "runtime/uv_loop.hpp"
 
 #include <fxe/v8_host.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <v8.h>
 
 #include <cstdio>

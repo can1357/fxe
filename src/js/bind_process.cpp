@@ -1,8 +1,7 @@
+#include "bind_process.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include "bind_process.hpp"
+#include <fxe/v8_literals.hpp>
 
 #include <chrono>
 #include <csignal>
@@ -973,7 +972,7 @@ namespace fxe::js {
     auto serr = ObjectTemplate::New(iso);
     serr->Set(iso, "write", FunctionTemplate::New(iso, stderr_write));
     auto sin = ObjectTemplate::New(iso);
-    sin->Set(iso, "fd", Integer::New(iso, 0));
+    sin->Set(iso, "fd", 0_v8(iso));
     sin->Set(iso, "isTTY", Boolean::New(iso, false));
     sin->Set(iso, "readable", Boolean::New(iso, true));
     sin->Set(iso, "readableEncoding", Null(iso));

@@ -8,15 +8,14 @@
 
 #include "bind_font.hpp"
 
+#include <cmath>
+#include <cstdint>
+#include <fstream>
 #include <fxe/font.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include <cmath>
-#include <cstdint>
-#include <fstream>
+#include <fxe/v8_literals.hpp>
 #include <span>
 #include <string>
 #include <vector>
@@ -71,14 +70,14 @@ namespace fxe::js {
         throw_type(iso, e.what());
         return;
       }
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, 0));
+      info.GetReturnValue().Set(0_v8(iso));
     }
 
     void s_builtin(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsString() || utf8(iso, info[0]) != "default")
         return throw_type(iso, "Font.builtin(name): expected 'default'");
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, 0));
+      info.GetReturnValue().Set(0_v8(iso));
     }
 
     void s_dispose(const FunctionCallbackInfo<Value>& info) {
@@ -133,7 +132,7 @@ namespace fxe::js {
         throw_type(iso, e.what());
         return;
       }
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, 0));
+      info.GetReturnValue().Set(0_v8(iso));
     }
   } // namespace
 

@@ -11,8 +11,7 @@
 #include "fxe/single_instance.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
+#include <fxe/v8_literals.hpp>
 // FXE_APP_NAME and FXE_APP_VERSION may be injected by the build as quoted
 // string-literal compile definitions; keep local defaults for unbranded builds.
 #ifndef FXE_APP_NAME

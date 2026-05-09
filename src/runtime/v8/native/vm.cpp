@@ -1,9 +1,8 @@
 #include "vm.hpp"
 
-#include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include "../../../js/weak_holder.hpp"
+#include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 
 #include <cstdint>
 #include <string>

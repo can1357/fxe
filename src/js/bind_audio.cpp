@@ -22,16 +22,15 @@
 #include "bind_timers.hpp"
 #include "weak_holder.hpp"
 
-#include <fxe/js_bindings.hpp>
-#include <fxe/types.hpp>
-#include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <fxe/js_bindings.hpp>
+#include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 #include <limits>
 #include <memory>
 #include <mutex>

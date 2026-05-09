@@ -6,6 +6,10 @@
 // RGBA8 number (0xRRGGBBAA) or a 4-tuple of floats in [0,1].
 
 #include "bind_font.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
 #include <fxe/command_buffer.hpp>
 #include <fxe/font.hpp>
 #include <fxe/font/glyph.hpp>
@@ -13,12 +17,7 @@
 #include <fxe/primitives.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstdint>
+#include <fxe/v8_literals.hpp>
 #include <limits>
 #include <string>
 #include <v8.h>
@@ -1350,7 +1349,7 @@ namespace fxe::js {
       const float letter_spacing = info.Length() >= 3 ? float(num(ctx, info[2], 0.0)) : 0.0f;
       const double x = info.Length() >= 4 ? num(ctx, info[3], 0.0) : 0.0;
       if (text.empty() || x <= 0.0) {
-        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, 0));
+        info.GetReturnValue().Set(0_v8(iso));
         return;
       }
       if (!std::isfinite(x)) {

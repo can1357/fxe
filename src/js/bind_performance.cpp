@@ -6,11 +6,10 @@
 // open begin is dropped after a once-per-label warning).
 
 #include "bind_performance.hpp"
-#include <fxe/v8_strings.hpp>
-
 #include <chrono>
 #include <cstdio>
 #include <fxe/types.hpp>
+#include <fxe/v8_literals.hpp>
 #include <limits>
 #include <mutex>
 #include <optional>

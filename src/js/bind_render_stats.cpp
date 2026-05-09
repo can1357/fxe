@@ -2,11 +2,10 @@
 // `RenderStats` object on the global with bumpers used by the JS reactive
 // reconciler and a snapshot() reader for diagnostics.
 
+#include "bind_render_stats.hpp"
 #include <fxe/command_buffer.hpp>
 #include <fxe/render_stats.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include "bind_render_stats.hpp"
+#include <fxe/v8_literals.hpp>
 
 #include <cstdint>
 #include <fxe/types.hpp>

@@ -6,12 +6,6 @@
 // the module path: Module::Evaluate returns a Promise that we drain by
 // pumping microtasks.
 
-#include <fxe/js_bindings.hpp>
-#include <fxe/types.hpp>
-#include <fxe/typescript.hpp>
-#include <fxe/v8_host.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include "../runtime/bundle_loader.hpp"
 #include "../runtime/uv_loop.hpp"
 #include "../runtime/v8/fxe_native.hpp"
@@ -20,6 +14,11 @@
 #include "../runtime/v8/native/v8_module.hpp"
 #include "../runtime/v8/native/vm.hpp"
 #include "../runtime/v8/node_compat.hpp"
+#include <fxe/js_bindings.hpp>
+#include <fxe/types.hpp>
+#include <fxe/typescript.hpp>
+#include <fxe/v8_host.hpp>
+#include <fxe/v8_literals.hpp>
 #if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
 #include "../runtime/v8/native/zlib.hpp"
 #endif
@@ -2144,8 +2143,8 @@ Error.prepareStackTrace = function(err, frames) {
       (void)install_fxe_hmr_runtime(isolate, ctx);
 
       auto vertex_topology = v8::Object::New(isolate);
-      (void)vertex_topology->Set(ctx, "Triangle"_v8(isolate), v8::Integer::New(isolate, 0));
-      (void)vertex_topology->Set(ctx, "Line"_v8(isolate), v8::Integer::New(isolate, 1));
+      (void)vertex_topology->Set(ctx, "Triangle"_v8(isolate), 0_v8(isolate));
+      (void)vertex_topology->Set(ctx, "Line"_v8(isolate), 1_v8(isolate));
       (void)ctx->Global()->Set(ctx, "VertexTopology"_v8(isolate), vertex_topology);
 
       if (!worker_mode) {

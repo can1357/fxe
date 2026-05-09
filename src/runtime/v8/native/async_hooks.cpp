@@ -1,9 +1,8 @@
 #include "async_hooks.hpp"
 
-#include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include <cstdint>
+#include <fxe/types.hpp>
+#include <fxe/v8_literals.hpp>
 #include <mutex>
 #include <string_view>
 #include <unordered_map>

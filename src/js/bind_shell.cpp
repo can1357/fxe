@@ -2,7 +2,7 @@
 #include "../os/os.hpp"
 #include "runtime/capabilities.hpp"
 
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <string>
 #include <string_view>
 #include <v8.h>

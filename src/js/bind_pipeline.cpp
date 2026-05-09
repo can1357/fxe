@@ -7,16 +7,15 @@
 
 #include "bind_image.hpp"
 
+#include <cstddef>
+#include <cstdint>
+#include <exception>
 #include <fxe/js_bindings.hpp>
 #include <fxe/pipeline.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include <cstddef>
-#include <cstdint>
-#include <exception>
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>

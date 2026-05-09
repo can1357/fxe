@@ -11,8 +11,7 @@
 #include <fxe/text_document.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
+#include <fxe/v8_literals.hpp>
 #include <unordered_map>
 #include <utility>
 #include <v8.h>

@@ -1,15 +1,14 @@
 #include "bind_layout.hpp"
 
 #include <cctype>
+#include <cmath>
+#include <exception>
 #include <fxe/font.hpp>
 #include <fxe/layout.hpp>
 #include <fxe/primitives.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include <cmath>
-#include <exception>
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <optional>
 #include <string>

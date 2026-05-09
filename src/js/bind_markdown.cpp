@@ -11,8 +11,7 @@
 
 #include <fxe/markdown.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
+#include <fxe/v8_literals.hpp>
 #if FXE_HAS_TREESITTER
 #include <fxe/highlight.hpp>
 #include <fxe/types.hpp>

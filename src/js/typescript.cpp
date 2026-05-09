@@ -1,9 +1,8 @@
-#include <fxe/types.hpp>
-#include <fxe/typescript.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include <fxe/generated/fxe_types.hpp>
 #include <fxe/generated/typescript_compiler.hpp>
+#include <fxe/types.hpp>
+#include <fxe/typescript.hpp>
+#include <fxe/v8_literals.hpp>
 
 #include "transpile_cache.hpp"
 #include "v8_code_cache.hpp"

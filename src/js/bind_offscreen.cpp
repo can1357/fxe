@@ -1,14 +1,13 @@
 #include "bind_offscreen.hpp"
 #include "weak_holder.hpp"
 
+#include "../wgpu/pipeline.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-#if FXE_HAS_WGPU
-#include "../wgpu/pipeline.hpp"
+#include <fxe/v8_literals.hpp>#if FXE_HAS_WGPU
 #endif
 
 #include <cstring>

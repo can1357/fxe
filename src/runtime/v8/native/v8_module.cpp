@@ -1,10 +1,9 @@
 #include "runtime/v8/native/v8_module.hpp"
 
-#include <fxe/v8_strings.hpp>
-
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fxe/v8_literals.hpp>
 #include <string>
 #include <string_view>
 #include <utility>

@@ -6,7 +6,7 @@
 #include "../os/os.hpp"
 
 #include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <string>
 #include <v8.h>
 

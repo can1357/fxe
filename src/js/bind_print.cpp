@@ -1,15 +1,14 @@
 #include "bind_print.hpp"
 
+#include <cstdio>
+#include <filesystem>
 #include <fxe/command_buffer.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/print_pdf.hpp>
 #include <fxe/renderer.hpp>
-#include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
-#include <cstdio>
-#include <filesystem>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 #include <string>
 #include <v8.h>
 #include <vector>

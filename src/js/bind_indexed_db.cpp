@@ -22,12 +22,11 @@
 
 #include "bind_indexed_db.hpp"
 
-#include <fxe/js_bindings.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include "../os/os.hpp"
 #include "weak_holder.hpp"
+#include <fxe/js_bindings.hpp>
 #include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 
 #include <algorithm>
 #include <cmath>

@@ -25,28 +25,3 @@ using isize = std::ptrdiff_t;
 
 using f32 = float;
 using f64 = double;
-
-// V8 internalized-string literal. Use as `"frameCount"_v8(iso)` to materialize
-// a per-isolate cached, internalized v8::Local<v8::String>. For equality against
-// a dynamic handle, include <fxe/v8_strings.hpp> and write `s == "flex"_v8`
-// (uses the current isolate). The UDL itself
-// only captures `{const char*, usize}`; the call operator is defined in
-// <fxe/v8_strings.hpp>, which any V8-using TU (every src/js/bind_*.cpp) must
-// include before invoking it. types.hpp deliberately stays free of v8.h so
-// fxe_core (which does not link V8) can keep including it.
-//
-// Cache is keyed by the literal's `const char*` address; string literals have
-// static storage duration and stable addresses, and V8 deduplicates identical
-// internalized strings across cache entries, so pointer-keying is safe.
-struct v8_string_literal {
-  const char* data;
-  usize size;
-
-  // Defined in <fxe/v8_strings.hpp>. Templated on the V8 isolate type so this
-  // header does not need to know about v8::Isolate.
-  template <typename Iso> auto operator()(Iso* iso) const;
-};
-
-constexpr v8_string_literal operator""_v8(const char* s, usize n) noexcept {
-  return {s, n};
-}

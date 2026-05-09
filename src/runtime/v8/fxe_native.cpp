@@ -4,7 +4,7 @@
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_fd.hpp"
 #include <fxe/v8_host.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 
 #include <algorithm>
 #include <array>

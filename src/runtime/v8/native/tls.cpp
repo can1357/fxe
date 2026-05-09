@@ -9,7 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <fxe/types.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <mutex>
 #include <string>

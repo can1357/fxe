@@ -224,10 +224,10 @@ ctest --preset release --output-on-failure
     "...");`, from `void` callbacks `(void)throw_type_error(iso, "...");
     return;`. Suppressing the discard with `(void)` is mandatory under
     `bugprone-unused-return-value`.
-- **V8 string literals (`_v8(iso)`):** Use the user-defined literal from
-  `<fxe/v8_strings.hpp>` for any string passed across the V8 boundary —
-  `obj->Get(ctx, "width"_v8(iso))`, `iso->ThrowException(Exception::TypeError("..."_v8(iso)))`,
-  `obj->Set(ctx, "name"_v8(iso), value)`. It returns a per-isolate
+- **V8 literals (`_v8(iso)`):** Use the user-defined literals from
+  `<fxe/v8_literals.hpp>` for values passed across the V8 boundary —
+  `obj->Get(ctx, "width"_v8(iso))`, `obj->Set(ctx, "name"_v8(iso), value)`,
+  `obj->Set(ctx, "fd"_v8(iso), 0_v8(iso))`. String literals return a per-isolate
   internalized `v8::Local<v8::String>` cached in an `Eternal` slot, so
   repeated calls are a hash lookup, not a fresh `String::NewFromUtf8`.
   Don't write `String::NewFromUtf8(iso, "width").ToLocalChecked()` in
@@ -239,7 +239,7 @@ ctest --preset release --output-on-failure
   **String equality:** compare a dynamic `v8::Local<v8::String>` to a
   literal with `s == "flex"_v8` (also ` "flex"_v8 == s`). Do not reintroduce
   `s->StringEquals("flex"_v8(iso))` for routine checks — the `operator==` /
-  `operator!=` in `<fxe/v8_strings.hpp>` materialises the same cached
+  `operator!=` in `<fxe/v8_literals.hpp>` materialises the same cached
   internalized literal via `v8::Isolate::GetCurrent()` and delegates to
   `StringEquals`. If `GetCurrent()` is not valid for the call site (not on
   the entered isolate), use the explicit `s->StringEquals("…"_v8(iso))`

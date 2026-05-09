@@ -24,8 +24,7 @@
 #include <fxe/treesitter.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
-
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>

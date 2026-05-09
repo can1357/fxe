@@ -20,7 +20,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>

@@ -13,7 +13,7 @@
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <fxe/vertex.hpp>
 
 #include <cstdint>

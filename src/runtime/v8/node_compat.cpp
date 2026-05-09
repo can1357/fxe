@@ -70,7 +70,7 @@
 #include <fxe/generated/node_compat/wasi_adapter.hpp>
 #include <fxe/generated/node_compat/worker_threads_adapter.hpp>
 #include <fxe/generated/node_compat/zlib_adapter.hpp>
-#include <fxe/v8_strings.hpp>
+#include <fxe/v8_literals.hpp>
 #include <optional>
 #include <string>
 #include <string_view>

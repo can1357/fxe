@@ -23,9 +23,8 @@
 #include "weak_holder.hpp"
 
 #include <fxe/js_bindings.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -730,7 +729,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto* sh = unwrap_stmt(info.This());
       if (!sh || !sh->stmt) {
-        info.GetReturnValue().Set(Integer::New(iso, 0));
+        info.GetReturnValue().Set(0_v8(iso));
         return;
       }
       info.GetReturnValue().Set(Integer::New(iso, sqlite3_bind_parameter_count(sh->stmt)));
@@ -1153,7 +1152,7 @@ namespace fxe::js {
     void db_get_handle(const FunctionCallbackInfo<Value>& info) {
       // Bun exposes a numeric handle for FFI bridges; we surface 0 to keep the
       // shape but discourage external use.
-      info.GetReturnValue().Set(Number::New(info.GetIsolate(), 0.0));
+      info.GetReturnValue().Set(0.0_v8(info.GetIsolate()));
     }
 
     // --- Database constructor / deserialize --------------------------------

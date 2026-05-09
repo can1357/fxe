@@ -6,9 +6,6 @@
 // Reads with no encoding return Uint8Array (raw bytes). We do NOT have Node
 // Buffer, so this differs from Node.
 
-#include <fxe/js_bindings.hpp>
-#include <fxe/v8_strings.hpp>
-
 #include "bind_fs.hpp"
 #include "bind_timers.hpp"
 #include "os/os.hpp"
@@ -16,7 +13,9 @@
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_watcher.hpp"
 #include "weak_holder.hpp"
+#include <fxe/js_bindings.hpp>
 #include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 
 #include <algorithm>
 #include <atomic>
