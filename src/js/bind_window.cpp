@@ -23,7 +23,6 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -1840,9 +1839,9 @@ namespace fxe::js {
     bool parse_run_opts(Isolate* iso, Local<Context> ctx, Local<Value> v, run_opts& out) {
       out = {};
       const auto& runner_overrides = get_runner_render_overrides();
-      // Disabled vsync: the loop polls events every iteration instead of
-      // sleeping inside `wait_events_timeout`, since short Cocoa waits
-      // periodically overshoot by 25-55 ms.
+      // Continuous mode polls only when uncapped. If the runner also supplied
+      // an explicit fps limit, app_run_loop keeps that cadence while still
+      // avoiding lazy redraw gating.
       if (runner_overrides.override_fps) {
         out.frame_period = runner_overrides.fps > 0.0 ? 1.0 / runner_overrides.fps : 0.0;
         out.continuous = runner_overrides.force_continuous;
@@ -2002,6 +2001,15 @@ namespace fxe::js {
             (void)invoke_on_frame(w);
         }
       }
+      using run_clock = std::chrono::steady_clock;
+      auto frame_period_duration = run_clock::duration::zero();
+      if (frame_period > 0.0) {
+        frame_period_duration =
+            std::chrono::ceil<run_clock::duration>(std::chrono::duration<double>(frame_period));
+      }
+      const bool capped_continuous =
+          continuous && frame_period_duration > run_clock::duration::zero();
+      auto next_continuous_frame = run_clock::now() + frame_period_duration;
 
       while (true) {
         auto wins = h->windows();
@@ -2012,23 +2020,47 @@ namespace fxe::js {
         if (all_closed)
           break;
 
-        // One global GLFW event-pump call drives every window. In
-        // continuous mode we poll instead of waiting: short Cocoa waits
-        // (e.g. wait_events_timeout(1ms)) periodically stall in mach_msg
-        // for 25-55 ms even when no events are pending, which surfaces as
-        // 30+ ms frame-time spikes under --no-lazy --no-vsync.
-        if (continuous) {
+        // One global GLFW event-pump call drives every window. Uncapped
+        // continuous mode polls instead of waiting: short Cocoa waits (e.g.
+        // wait_events_timeout(1ms)) periodically stall in mach_msg for
+        // 25-55 ms even when no events are pending. When an explicit fps
+        // limit is present, keep that cadence and only force redraws when
+        // the next frame deadline has arrived.
+        if (continuous && !capped_continuous) {
           wins.front()->wait_events_timeout(0.0);
         } else {
-          double timer_dl = fxe::js::next_timer_deadline_seconds(iso);
           double timeout = frame_period > 0.0 ? frame_period : 0.05;
+          if (capped_continuous) {
+            const auto now = run_clock::now();
+            timeout = now >= next_continuous_frame
+                          ? 0.0
+                          : std::chrono::duration<double>(next_continuous_frame - now).count();
+          }
+          double timer_dl = fxe::js::next_timer_deadline_seconds(iso);
           if (timer_dl < timeout)
             timeout = timer_dl;
           if (timeout < 0.0)
             timeout = 0.0;
           wins.front()->wait_events_timeout(timeout);
         }
-        if (continuous || frame_period > 0.0)
+
+        bool force_redraw = false;
+        if (continuous) {
+          if (capped_continuous) {
+            const auto now = run_clock::now();
+            if (now >= next_continuous_frame) {
+              force_redraw = true;
+              do {
+                next_continuous_frame += frame_period_duration;
+              } while (next_continuous_frame <= now);
+            }
+          } else {
+            force_redraw = true;
+          }
+        } else if (frame_period > 0.0) {
+          force_redraw = true;
+        }
+        if (force_redraw)
           for (auto* w : wins)
             w->post_redraw();
 

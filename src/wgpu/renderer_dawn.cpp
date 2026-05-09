@@ -33,7 +33,6 @@
 #include <array>
 #include <atomic>
 #include <bit>
-#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -42,7 +41,6 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace fxe {
@@ -332,31 +330,14 @@ namespace fxe {
           FXE_TRACE("wgpu.renderer", "frame_end mask_gen={} color_gen={}",
                     gc.generation(font::Format::grayscale), gc.generation(font::Format::bgra));
         }
-        // --no-vsync fast-skip path: macOS' CAMetalLayer always paces drawable
-        // release at the compositor refresh, so calling Surface.GetCurrentTexture
-        // every frame is hard-capped at display refresh — even with present
-        // mode Immediate / Mailbox and displaySyncEnabled=NO. When the script
-        // opted out of vsync, skip the swapchain present whenever we'd land
-        // closer than `min_present_period_s_` to the previous one. The JS
-        // frame loop still tags "endFrame" so script-side throughput is
-        // observable; the visual just refreshes at most once per period.
-        if (!want_vsync_ && min_present_period_s_ > 0.0) {
-          const auto now = std::chrono::steady_clock::now();
-          const auto since = std::chrono::duration<double>(now - last_present_).count();
-          if (since < min_present_period_s_) {
-            return;
-          }
-        }
         instance_.ProcessEvents();
-        // Re-assert want_vsync_ on the platform layer immediately before
-        // GetCurrentTexture. Dawn's MetalSwapChain calls
-        // [layer setDisplaySyncEnabled:(presentMode == Fifo)] inside
-        // GetCurrentTextureImpl, which clobbers the user's --no-vsync intent
-        // every frame.
-        win_.set_vsync(want_vsync_);
-        // 1. Acquire the next surface texture.
+        // 1. Acquire the next surface texture. On macOS Dawn may reset
+        // CAMetalLayer.displaySyncEnabled while acquiring a FIFO drawable, so
+        // the platform vsync override is re-applied immediately after
+        // GetCurrentTexture rather than before it.
         wgpu::SurfaceTexture surf_tex{};
         surface_.GetCurrentTexture(&surf_tex);
+        win_.set_vsync(want_vsync_);
         static int frame_dbg = 0;
         if (frame_dbg < 3) {
           std::fprintf(
@@ -570,7 +551,6 @@ namespace fxe {
         captured_frame_available_ = false;
         surface_.Present();
         instance_.ProcessEvents();
-        last_present_ = std::chrono::steady_clock::now();
       }
 
       bool queue_dev(const command_buffer& src, const vshader_cbuf& cbuf,
@@ -1458,9 +1438,6 @@ namespace fxe {
       wgpu::CompositeAlphaMode alpha_mode_ = wgpu::CompositeAlphaMode::Auto;
       wgpu::PresentMode present_mode_ = wgpu::PresentMode::Fifo;
       bool want_vsync_ = true;
-      // --no-vsync fast-skip pacing. See end_frame() for rationale.
-      std::chrono::steady_clock::time_point last_present_ = std::chrono::steady_clock::now();
-      double min_present_period_s_ = 1.0 / 120.0;
 
       wgpu::Buffer ubo_;
       wgpu::Buffer vbuf_;
