@@ -3,6 +3,7 @@ import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import type { LayoutResult, LayoutStyle } from '../layout/types.ts';
 import { type HitTarget, hitTargets, registerHitTarget } from '../mount/hit_test.ts';
+import { coarseClip } from '../paint/clip.ts';
 import {
   type BoundaryChild,
   Component,
@@ -15,7 +16,6 @@ import {
   useRef,
   useState,
 } from '../reconciler/fiber.ts';
-import { coarseClip } from '../paint/clip.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { attachInternalLayout, rectFromStyle } from './common.ts';

@@ -655,7 +655,6 @@ export const View = Component((props: ViewProps): Node => {
     layerChildren.push(childNode);
   }
 
-
   const layerDeps = childLayoutComplete
     ? [
         layoutSig,

@@ -12,10 +12,10 @@ import {
   setRenderTarget,
   useContext,
   useId,
+  useInternalLayout,
   useReducer,
   useRef,
   useState,
-  useInternalLayout,
 } from 'fxe-ui';
 
 import { assert, assertEqual, assertThrows, run, test } from './ts_harness.ts';

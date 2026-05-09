@@ -151,14 +151,14 @@ namespace fxe::js {
 
     // ---- option-bag helpers -------------------------------------------------
 
-    bool get_prop(Isolate* iso, Local<Context> ctx, Local<Object> o, const char* a, const char* b,
-                  Local<Value>& out) {
+    bool get_prop(Local<Context> ctx, Local<Object> o, Local<String> a, Local<Value>& out,
+                  Local<String> b = {}) {
       Local<Value> v;
-      if (o->Get(ctx, str(iso, a)).ToLocal(&v) && !v->IsUndefined()) {
+      if (o->Get(ctx, a).ToLocal(&v) && !v->IsUndefined()) {
         out = v;
         return true;
       }
-      if (b && o->Get(ctx, str(iso, b)).ToLocal(&v) && !v->IsUndefined()) {
+      if (!b.IsEmpty() && o->Get(ctx, b).ToLocal(&v) && !v->IsUndefined()) {
         out = v;
         return true;
       }
@@ -195,9 +195,9 @@ namespace fxe::js {
 
     template <typename AllowList>
     bool parse_string_allowlist(Isolate* iso, Local<Context> ctx, Local<Object> perms,
-                                const char* name, AllowList& out) {
+                                Local<String> key, const char* name, AllowList& out) {
       Local<Value> value;
-      if (!perms->Get(ctx, str(iso, name)).ToLocal(&value) || value->IsUndefined())
+      if (!perms->Get(ctx, key).ToLocal(&value) || value->IsUndefined())
         return true;
       if (value->IsBoolean()) {
         if (value->BooleanValue(iso))
@@ -215,9 +215,9 @@ namespace fxe::js {
 
     template <typename BoolAllow>
     bool parse_boolean_allow(Isolate* iso, Local<Context> ctx, Local<Object> perms,
-                             const char* name, BoolAllow& out) {
+                             Local<String> key, const char* name, BoolAllow& out) {
       Local<Value> value;
-      if (!perms->Get(ctx, str(iso, name)).ToLocal(&value) || value->IsUndefined())
+      if (!perms->Get(ctx, key).ToLocal(&value) || value->IsUndefined())
         return true;
       if (!value->IsBoolean()) {
         (void)throw_type_error(iso, std::string("permissions.") + name + " must be boolean");
@@ -242,7 +242,7 @@ namespace fxe::js {
     parse_webauthn_permissions(Isolate* iso, Local<Context> ctx, Local<Object> perms,
                                std::optional<fxe::runtime::capability_set::webauthn_policy>& out) {
       Local<Value> value;
-      if (!perms->Get(ctx, str(iso, "webauthn")).ToLocal(&value) || value->IsUndefined())
+      if (!perms->Get(ctx, "webauthn"_v8(iso)).ToLocal(&value) || value->IsUndefined())
         return true;
       if (value->IsBoolean()) {
         if (value->BooleanValue(iso)) {
@@ -264,14 +264,14 @@ namespace fxe::js {
       auto obj = value.As<Object>();
       fxe::runtime::capability_set::webauthn_policy policy;
       Local<Value> field;
-      if (!obj->Get(ctx, str(iso, "rpIds")).ToLocal(&field) || !field->IsArray()) {
+      if (!obj->Get(ctx, "rpIds"_v8(iso)).ToLocal(&field) || !field->IsArray()) {
         (void)throw_type_error(iso, "permissions.webauthn.rpIds must be a string[]");
         return false;
       }
       if (!read_string_array(iso, ctx, field, policy.rp_ids, "webauthn.rpIds"))
         return false;
 
-      if (obj->Get(ctx, str(iso, "attestation")).ToLocal(&field) && !field->IsUndefined()) {
+      if (obj->Get(ctx, "attestation"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
         if (!field->IsString()) {
           (void)throw_type_error(iso, "permissions.webauthn.attestation must be a string");
           return false;
@@ -283,7 +283,7 @@ namespace fxe::js {
           return false;
         }
       }
-      if (obj->Get(ctx, str(iso, "userVerification")).ToLocal(&field) && !field->IsUndefined()) {
+      if (obj->Get(ctx, "userVerification"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
         if (!field->IsString()) {
           (void)throw_type_error(iso, "permissions.webauthn.userVerification must be a string");
           return false;
@@ -295,11 +295,11 @@ namespace fxe::js {
           return false;
         }
       }
-      if (obj->Get(ctx, str(iso, "transports")).ToLocal(&field) && !field->IsUndefined()) {
+      if (obj->Get(ctx, "transports"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
         if (!read_string_array(iso, ctx, field, policy.transports, "webauthn.transports"))
           return false;
       }
-      if (obj->Get(ctx, str(iso, "allowVirtualAuthenticator")).ToLocal(&field) &&
+      if (obj->Get(ctx, "allowVirtualAuthenticator"_v8(iso)).ToLocal(&field) &&
           !field->IsUndefined()) {
         if (!field->IsBoolean()) {
           (void)throw_type_error(iso,
@@ -326,10 +326,10 @@ namespace fxe::js {
         return false;
       }
       auto perms = value.As<Object>();
-      return parse_string_allowlist(iso, ctx, perms, "fs", out.fs_allow) &&
-             parse_string_allowlist(iso, ctx, perms, "net", out.net_allow) &&
-             parse_boolean_allow(iso, ctx, perms, "shell", out.shell_allow) &&
-             parse_boolean_allow(iso, ctx, perms, "native", out.native_allow) &&
+      return parse_string_allowlist(iso, ctx, perms, "fs"_v8(iso), "fs", out.fs_allow) &&
+             parse_string_allowlist(iso, ctx, perms, "net"_v8(iso), "net", out.net_allow) &&
+             parse_boolean_allow(iso, ctx, perms, "shell"_v8(iso), "shell", out.shell_allow) &&
+             parse_boolean_allow(iso, ctx, perms, "native"_v8(iso), "native", out.native_allow) &&
              parse_webauthn_permissions(iso, ctx, perms, out.webauthn_allow);
     }
 
@@ -558,74 +558,76 @@ namespace fxe::js {
     Local<Object> build_event_payload(Isolate* iso, Local<Context> ctx, const input_event& ev,
                                       const char* name) {
       auto o = Object::New(iso);
-      auto set = [&](const char* k, Local<Value> v) { (void)o->Set(ctx, str(iso, k), v); };
-      set("type", str(iso, name));
+      auto set = [&](Local<String> k, Local<Value> v) { (void)o->Set(ctx, k, v); };
+      set("type"_v8(iso), str(iso, name));
       using K = input_event::kind_t;
       switch (ev.kind) {
       case K::key_down:
       case K::key_up:
-        set("key", Integer::New(iso, ev.key));
-        set("scancode", Integer::New(iso, ev.scancode));
-        set("modifiers", Integer::New(iso, ev.modifiers));
+        set("key"_v8(iso), Integer::New(iso, ev.key));
+        set("scancode"_v8(iso), Integer::New(iso, ev.scancode));
+        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
         break;
       case K::key_char:
-        set("key", Integer::New(iso, ev.key));
-        set("scancode", Integer::New(iso, ev.scancode));
-        set("modifiers", Integer::New(iso, ev.modifiers));
-        set("codepoint", Integer::NewFromUnsigned(iso, ev.codepoint));
+        set("key"_v8(iso), Integer::New(iso, ev.key));
+        set("scancode"_v8(iso), Integer::New(iso, ev.scancode));
+        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
+        set("codepoint"_v8(iso), Integer::NewFromUnsigned(iso, ev.codepoint));
         break;
       case K::mouse_move:
-        set("x", Number::New(iso, ev.x));
-        set("y", Number::New(iso, ev.y));
-        set("dx", Number::New(iso, ev.dx));
-        set("dy", Number::New(iso, ev.dy));
-        set("modifiers", Integer::New(iso, ev.modifiers));
+        set("x"_v8(iso), Number::New(iso, ev.x));
+        set("y"_v8(iso), Number::New(iso, ev.y));
+        set("dx"_v8(iso), Number::New(iso, ev.dx));
+        set("dy"_v8(iso), Number::New(iso, ev.dy));
+        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
         break;
       case K::mouse_button_down:
       case K::mouse_button_up:
-        set("x", Number::New(iso, ev.x));
-        set("y", Number::New(iso, ev.y));
-        set("button", Integer::New(iso, ev.button));
-        set("modifiers", Integer::New(iso, ev.modifiers));
+        set("x"_v8(iso), Number::New(iso, ev.x));
+        set("y"_v8(iso), Number::New(iso, ev.y));
+        set("button"_v8(iso), Integer::New(iso, ev.button));
+        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
         break;
       case K::mouse_wheel:
-        set("dx", Number::New(iso, ev.dx));
-        set("dy", Number::New(iso, ev.dy));
-        set("modifiers", Integer::New(iso, ev.modifiers));
+        set("x"_v8(iso), Number::New(iso, ev.x));
+        set("y"_v8(iso), Number::New(iso, ev.y));
+        set("dx"_v8(iso), Number::New(iso, ev.dx));
+        set("dy"_v8(iso), Number::New(iso, ev.dy));
+        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
         break;
       case K::window_resize:
-        set("width", Integer::New(iso, ev.width));
-        set("height", Integer::New(iso, ev.height));
+        set("width"_v8(iso), Integer::New(iso, ev.width));
+        set("height"_v8(iso), Integer::New(iso, ev.height));
         break;
       case K::window_move:
-        set("x", Integer::New(iso, ev.pos_x));
-        set("y", Integer::New(iso, ev.pos_y));
+        set("x"_v8(iso), Integer::New(iso, ev.pos_x));
+        set("y"_v8(iso), Integer::New(iso, ev.pos_y));
         break;
       case K::window_scale:
-        set("scaleX", Number::New(iso, static_cast<double>(ev.scale_x)));
-        set("scaleY", Number::New(iso, static_cast<double>(ev.scale_y)));
+        set("scaleX"_v8(iso), Number::New(iso, static_cast<double>(ev.scale_x)));
+        set("scaleY"_v8(iso), Number::New(iso, static_cast<double>(ev.scale_y)));
         break;
       case K::drop_files: {
         auto arr = Array::New(iso, static_cast<int>(ev.paths.size()));
         for (usize i = 0; i < ev.paths.size(); ++i)
           (void)arr->Set(ctx, static_cast<u32>(i), str(iso, ev.paths[i]));
-        set("paths", arr);
+        set("paths"_v8(iso), arr);
         break;
       }
       case K::drag_enter:
       case K::drag_over: {
-        set("x", Number::New(iso, ev.x));
-        set("y", Number::New(iso, ev.y));
+        set("x"_v8(iso), Number::New(iso, ev.x));
+        set("y"_v8(iso), Number::New(iso, ev.y));
         auto arr = Array::New(iso, static_cast<int>(ev.paths.size()));
         for (usize i = 0; i < ev.paths.size(); ++i)
           (void)arr->Set(ctx, static_cast<u32>(i), str(iso, ev.paths[i]));
-        set("paths", arr);
+        set("paths"_v8(iso), arr);
         break;
       }
       case K::drag_leave:
         break;
       case K::message: {
-        set("channel", str(iso, ev.message_channel));
+        set("channel"_v8(iso), str(iso, ev.message_channel));
         auto arr = Array::New(iso, static_cast<int>(ev.message_args_serialised.size()));
         for (usize i = 0; i < ev.message_args_serialised.size(); ++i) {
           Local<Value> value;
@@ -635,13 +637,13 @@ namespace fxe::js {
           }
           (void)arr->Set(ctx, static_cast<u32>(i), value);
         }
-        set("args", arr);
+        set("args"_v8(iso), arr);
         break;
       }
       case K::compose:
-        set("preedit", str(iso, ev.preedit));
-        set("cursor", Integer::New(iso, ev.cursor));
-        set("committed", str(iso, ev.committed));
+        set("preedit"_v8(iso), str(iso, ev.preedit));
+        set("cursor"_v8(iso), Integer::New(iso, ev.cursor));
+        set("committed"_v8(iso), str(iso, ev.committed));
         break;
       default:
         break;
@@ -711,46 +713,46 @@ namespace fxe::js {
       if (info.Length() >= 1 && info[0]->IsObject()) {
         auto o = info[0].As<Object>();
         Local<Value> v;
-        auto get = [&](const char* a, const char* b = nullptr) -> bool {
-          return get_prop(iso, ctx, o, a, b, v);
+        auto get = [&](Local<String> a, Local<String> b = {}) -> bool {
+          return get_prop(ctx, o, a, v, b);
         };
-        if (get("width") && v->IsNumber())
+        if (get("width"_v8(iso)) && v->IsNumber())
           desc.width = v->Uint32Value(ctx).FromMaybe(desc.width);
-        if (get("height") && v->IsNumber())
+        if (get("height"_v8(iso)) && v->IsNumber())
           desc.height = v->Uint32Value(ctx).FromMaybe(desc.height);
-        if (get("x") && v->IsNumber())
+        if (get("x"_v8(iso)) && v->IsNumber())
           desc.x = v->Int32Value(ctx).FromMaybe(desc.x);
-        if (get("y") && v->IsNumber())
+        if (get("y"_v8(iso)) && v->IsNumber())
           desc.y = v->Int32Value(ctx).FromMaybe(desc.y);
-        if (get("fullscreen") && v->IsBoolean())
+        if (get("fullscreen"_v8(iso)) && v->IsBoolean())
           desc.fullscreen = v->BooleanValue(iso);
-        if (get("visible") && v->IsBoolean())
+        if (get("visible"_v8(iso)) && v->IsBoolean())
           desc.visible = v->BooleanValue(iso);
-        if (get("resizable") && v->IsBoolean())
+        if (get("resizable"_v8(iso)) && v->IsBoolean())
           desc.resizable = v->BooleanValue(iso);
-        if (get("decorated") && v->IsBoolean())
+        if (get("decorated"_v8(iso)) && v->IsBoolean())
           desc.decorated = v->BooleanValue(iso);
-        if (get("transparent") && v->IsBoolean())
+        if (get("transparent"_v8(iso)) && v->IsBoolean())
           desc.transparent = v->BooleanValue(iso);
-        if (get("alwaysOnTop", "always_on_top") && v->IsBoolean())
+        if (get("alwaysOnTop"_v8(iso), "always_on_top"_v8(iso)) && v->IsBoolean())
           desc.always_on_top = v->BooleanValue(iso);
-        if (get("maximized") && v->IsBoolean())
+        if (get("maximized"_v8(iso)) && v->IsBoolean())
           desc.maximized = v->BooleanValue(iso);
-        if (get("minWidth", "min_width") && v->IsNumber())
+        if (get("minWidth"_v8(iso), "min_width"_v8(iso)) && v->IsNumber())
           desc.min_width = v->Int32Value(ctx).FromMaybe(0);
-        if (get("minHeight", "min_height") && v->IsNumber())
+        if (get("minHeight"_v8(iso), "min_height"_v8(iso)) && v->IsNumber())
           desc.min_height = v->Int32Value(ctx).FromMaybe(0);
-        if (get("maxWidth", "max_width") && v->IsNumber())
+        if (get("maxWidth"_v8(iso), "max_width"_v8(iso)) && v->IsNumber())
           desc.max_width = v->Int32Value(ctx).FromMaybe(0);
-        if (get("maxHeight", "max_height") && v->IsNumber())
+        if (get("maxHeight"_v8(iso), "max_height"_v8(iso)) && v->IsNumber())
           desc.max_height = v->Int32Value(ctx).FromMaybe(0);
-        if (get("title") && v->IsString()) {
+        if (get("title"_v8(iso)) && v->IsString()) {
           String::Utf8Value u(iso, v);
           if (*u)
             h->title.assign(*u, u.length());
           desc.title = h->title;
         }
-        if (get("preload") && !v->IsNull()) {
+        if (get("preload"_v8(iso)) && !v->IsNull()) {
           if (!v->IsString()) {
             delete h;
             (void)throw_type_error(iso, "WindowOptions.preload must be a string");
@@ -759,7 +761,7 @@ namespace fxe::js {
           preload = utf8(iso, v);
         }
         Local<Value> iso_v;
-        if (get("isolate") && !v->IsNullOrUndefined()) {
+        if (get("isolate"_v8(iso)) && !v->IsNullOrUndefined()) {
           iso_v = v;
           if (!iso_v->IsString()) {
             delete h;
@@ -773,7 +775,7 @@ namespace fxe::js {
             return;
           }
         }
-        if (get("permissions") && !parse_window_permissions(iso, ctx, v, policy)) {
+        if (get("permissions"_v8(iso)) && !parse_window_permissions(iso, ctx, v, policy)) {
           delete h;
           return;
         }
@@ -2164,20 +2166,20 @@ namespace fxe::js {
 
     Local<Object> monitor_to_js(Isolate* iso, Local<Context> ctx, const monitor_info& m) {
       auto o = Object::New(iso);
-      auto set = [&](const char* k, Local<Value> v) { (void)o->Set(ctx, str(iso, k), v); };
-      set("name", str(iso, m.name));
-      set("x", Integer::New(iso, m.x));
-      set("y", Integer::New(iso, m.y));
-      set("width", Integer::New(iso, m.width));
-      set("height", Integer::New(iso, m.height));
-      set("workX", Integer::New(iso, m.work_x));
-      set("workY", Integer::New(iso, m.work_y));
-      set("workWidth", Integer::New(iso, m.work_width));
-      set("workHeight", Integer::New(iso, m.work_height));
-      set("scaleX", Number::New(iso, static_cast<double>(m.scale_x)));
-      set("scaleY", Number::New(iso, static_cast<double>(m.scale_y)));
-      set("refreshHz", Integer::New(iso, m.refresh_hz));
-      set("primary", Boolean::New(iso, m.primary));
+      auto set = [&](Local<String> k, Local<Value> v) { (void)o->Set(ctx, k, v); };
+      set("name"_v8(iso), str(iso, m.name));
+      set("x"_v8(iso), Integer::New(iso, m.x));
+      set("y"_v8(iso), Integer::New(iso, m.y));
+      set("width"_v8(iso), Integer::New(iso, m.width));
+      set("height"_v8(iso), Integer::New(iso, m.height));
+      set("workX"_v8(iso), Integer::New(iso, m.work_x));
+      set("workY"_v8(iso), Integer::New(iso, m.work_y));
+      set("workWidth"_v8(iso), Integer::New(iso, m.work_width));
+      set("workHeight"_v8(iso), Integer::New(iso, m.work_height));
+      set("scaleX"_v8(iso), Number::New(iso, static_cast<double>(m.scale_x)));
+      set("scaleY"_v8(iso), Number::New(iso, static_cast<double>(m.scale_y)));
+      set("refreshHz"_v8(iso), Integer::New(iso, m.refresh_hz));
+      set("primary"_v8(iso), Boolean::New(iso, m.primary));
       return o;
     }
 
