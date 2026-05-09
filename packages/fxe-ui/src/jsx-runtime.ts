@@ -67,10 +67,16 @@ function fragmentFromChildren(child: JSXChild): Node {
   return { type: 'layer', props: { children: normalizeChildren(child) } };
 }
 
+const kClassComponent = Symbol('fxe-ui.isClassComponent');
+
 function isClassComponent(type: Function): boolean {
+  const cached = Reflect.get(type, kClassComponent);
+  if (cached !== undefined) return cached as boolean;
   const source = Function.prototype.toString.call(type);
   const prototype = type.prototype as { render?: unknown } | undefined;
-  return /^class\s/.test(source) || typeof prototype?.render === 'function';
+  const result = /^class\s/.test(source) || typeof prototype?.render === 'function';
+  Reflect.set(type, kClassComponent, result);
+  return result;
 }
 
 function renderClassComponent<P extends ElementProps>(
