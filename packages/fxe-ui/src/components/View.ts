@@ -231,12 +231,11 @@ function isDirectLayoutComponent(displayName: string | undefined): boolean {
   return displayName !== undefined && DIRECT_LAYOUT_COMPONENTS.has(displayName);
 }
 
-// Layout-side memoization for memo'd components. The renderer's memo bail
-// only skips paint; layoutNodeFor still calls `node.render(node.props)` for
-// every non-direct component to derive its layout. For memo'd nodes whose
-// input props haven't changed, we can reuse the previously produced JSX —
-// keyed on `node.props` identity (stable for memo'd factories) and the
-// context-value snapshot (so theme/context changes invalidate naturally).
+// Layout-side memo. The render-time memo bail saves paint, but layoutNodeFor
+// still walks every non-direct component to derive layout. We cache the
+// produced JSX as a symbol property on `node.props` — the props object is
+// reused across renders by `memo()` (per-factory LRU) when the input is
+// shallow-equal to a recent call, so this single Reflect.get hop hits.
 interface LayoutMemoEntry {
   values: unknown[];
   produced: Node;

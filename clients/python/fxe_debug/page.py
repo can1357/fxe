@@ -514,3 +514,23 @@ class Page:
         from .trace import layout_trace_drain as _impl
 
         return await _impl(self, clear=clear)
+
+    async def memo_trace_enable(self) -> None:
+        from .trace import memo_trace_enable as _impl
+
+        await _impl(self)
+
+    async def memo_trace_disable(self) -> None:
+        from .trace import memo_trace_disable as _impl
+
+        await _impl(self)
+
+    async def memo_trace_reset(self) -> None:
+        from .trace import memo_trace_reset as _impl
+
+        await _impl(self)
+
+    async def memo_trace_snapshot(self) -> dict[str, Any] | None:
+        from .trace import memo_trace_snapshot as _impl
+
+        return await _impl(self)

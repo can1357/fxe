@@ -616,6 +616,46 @@ styleHeight, tag?}`. Layer caching means re-renders skip clean subtrees;
 bumping the window size by 1px (or any deps-invalidating change) is the
 easiest way to force a full layout pass into the buffer.
 
+### Memo trace (fxe-ui reconciler)
+
+When a `memo()`-wrapped component is rebuilding more than expected ("why did
+`Sidebar` re-render when nothing visible changed?"), `page.memo_trace_*`
+surfaces the exact bail decision the reconciler made each render. Every
+memoised component is bucketed by displayName into one of:
+
+- `hit` — bail succeeded (cache reused)
+- `dirty` — fiber explicitly marked dirty (setState in a child, etc.)
+- `noCache` — first render or cache discarded
+- `noLastProps` — first render with this fiber identity
+- `epoch` — atlas repacked under the cache; forced rebuild for correctness
+- `propsDiff` — `areEqual(prev, next)` returned false
+
+The first observed `propsDiff` per component also captures `{last, next,
+lastKeys, nextKeys}` so you can see exactly which prop changed. Cost when
+disabled: one nullable-load + branch per memoised component per render.
+
+```python
+await page.memo_trace_enable()
+await asyncio.sleep(1.0)              # let the suspect frames go by
+snap = await page.memo_trace_snapshot()
+await page.memo_trace_disable()
+
+for name, slot in sorted(snap["byName"].items(), key=lambda kv: -kv[1]["propsDiff"]):
+    if slot["propsDiff"] == 0: continue
+    print(f"{name:20s} total={slot['total']:5d} hit={slot['hit']:5d} "
+          f"propsDiff={slot['propsDiff']:5d} dirty={slot['dirty']:5d}")
+    dump = snap["propsDump"].get(name)
+    if dump:
+        added = set(dump["nextKeys"]) - set(dump["lastKeys"])
+        removed = set(dump["lastKeys"]) - set(dump["nextKeys"])
+        print(f"  +keys={sorted(added)} -keys={sorted(removed)}")
+```
+
+`memo_trace_reset()` zeros the counters without disabling, useful for "snap
+before / snap after a single user gesture". Calling on an app that hasn't
+imported `fxe-ui` raises (the devtools module installs the global on import);
+that's intentional — memo tracing only makes sense for UI apps.
+
 ### When NOT to use the SDK
 
 - Modifying the script under test — just edit + re-run `bun run js …`.

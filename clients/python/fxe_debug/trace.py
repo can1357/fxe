@@ -256,3 +256,55 @@ async def layout_trace_drain(page: Any, *, clear: bool = True) -> list[dict[str,
     if not isinstance(out, list):
         raise RuntimeError(f"layout_trace_drain: unexpected response: {out!r}")
     return out
+
+# ---------------------------------------------------------------------------
+# Memo trace — fxe-ui reconciler memo() bail diagnostics.
+# ---------------------------------------------------------------------------
+#
+# When enabled in the running isolate, every memoised component records why
+# it took the rebuild vs. bail path each render, aggregated globally and per
+# displayName. Counters and the first-seen propsDiff dump live inside the
+# fxe-ui devtools module; the SDK only flips the flag and reads the snapshot.
+#
+# Snapshot shape (mirrors MemoTraceSnapshot in
+# packages/fxe-ui/src/reconciler/devtools.ts):
+#     {
+#       totals: {total, dirty, noCache, noLastProps, epoch, propsDiff, hit},
+#       byName: { "<displayName>": MemoTraceSlot, ... },
+#       propsDump: { "<displayName>": {last, next, lastKeys, nextKeys}, ... },
+#     }
+
+# `__fxe_devtools` is installed by the fxe-ui reconciler module the moment
+# it's imported (which happens as soon as the app touches any UI primitive).
+# Bail out cleanly with a typed error if the user's script never imports
+# fxe-ui — calling memo trace on a non-UI app is a usage bug worth surfacing.
+_MEMO_GUARD = (
+    "if (!globalThis.__fxe_devtools || !globalThis.__fxe_devtools.setMemoTrace) {"
+    "  throw new Error('fxe-ui devtools not installed; import fxe-ui first');"
+    "}"
+)
+
+
+async def memo_trace_enable(page: Any) -> None:
+    """Start recording memo() bail/rebuild reasons. Counters reset to zero."""
+    await page.evaluate(_MEMO_GUARD + "globalThis.__fxe_devtools.setMemoTrace(true); true")
+
+
+async def memo_trace_disable(page: Any) -> None:
+    """Stop recording and drop the accumulated counters."""
+    await page.evaluate(_MEMO_GUARD + "globalThis.__fxe_devtools.setMemoTrace(false); true")
+
+
+async def memo_trace_reset(page: Any) -> None:
+    """Zero the counters without disabling tracing."""
+    await page.evaluate(_MEMO_GUARD + "globalThis.__fxe_devtools.resetMemoTrace(); true")
+
+
+async def memo_trace_snapshot(page: Any) -> dict[str, Any] | None:
+    """Return the current snapshot, or ``None`` if tracing is disabled."""
+    out = await page.evaluate(_MEMO_GUARD + "globalThis.__fxe_devtools.memoTraceSnapshot()")
+    if out is None:
+        return None
+    if not isinstance(out, dict):
+        raise RuntimeError(f"memo_trace_snapshot: unexpected response: {out!r}")
+    return out

@@ -31,6 +31,7 @@ import {
   type DevtoolsFiberNode,
   installFiberTreeSnapshotProvider,
   isPaintFlashEnabled,
+  memoTraceState,
 } from './devtools.ts';
 import {
   getCurrentSchedulerLane,
@@ -337,7 +338,7 @@ export function Component<P>(
   return factory;
 }
 
-function shallowEqualProps(prev: unknown, next: unknown): boolean {
+export function shallowEqualProps(prev: unknown, next: unknown): boolean {
   if (Object.is(prev, next)) return true;
   if (typeof prev !== 'object' || prev === null || typeof next !== 'object' || next === null) {
     return false;
@@ -1283,18 +1284,63 @@ function renderNode(
   if (node.type === 'component') {
     const memoInfo = node.memo;
     const epoch = atlasEpoch();
-    if (
-      memoInfo &&
-      !fiber.dirty &&
-      fiber.cache !== null &&
-      fiber.lastProps !== undefined &&
-      fiber.cacheAtlasEpoch === epoch &&
-      memoInfo.areEqual(fiber.lastProps, node.props)
-    ) {
-      recordFiberCacheStatus(fiber, 'hit', false);
-      queueInto(target, fiber.cache, undefined, undefined);
-      RenderStats.recordCacheHit();
-      return;
+    if (memoInfo) {
+      const trace = memoTraceState();
+      const bail =
+        !fiber.dirty &&
+        fiber.cache !== null &&
+        fiber.lastProps !== undefined &&
+        fiber.cacheAtlasEpoch === epoch &&
+        memoInfo.areEqual(fiber.lastProps, node.props);
+      if (trace) {
+        const dn = node.displayName ?? 'anon';
+        let slot = trace.byName.get(dn);
+        if (!slot) {
+          slot = {
+            total: 0,
+            dirty: 0,
+            noCache: 0,
+            noLastProps: 0,
+            epoch: 0,
+            propsDiff: 0,
+            hit: 0,
+          };
+          trace.byName.set(dn, slot);
+        }
+        const reason: keyof typeof slot = fiber.dirty
+          ? 'dirty'
+          : fiber.cache === null
+            ? 'noCache'
+            : fiber.lastProps === undefined
+              ? 'noLastProps'
+              : fiber.cacheAtlasEpoch !== epoch
+                ? 'epoch'
+                : !memoInfo.areEqual(fiber.lastProps, node.props)
+                  ? 'propsDiff'
+                  : 'hit';
+        trace.totals.total++;
+        slot.total++;
+        trace.totals[reason]++;
+        slot[reason]++;
+        if (reason === 'propsDiff' && !trace.propsDump.has(dn)) {
+          const last = fiber.lastProps;
+          const next = node.props;
+          trace.propsDump.set(dn, {
+            last,
+            next,
+            lastKeys:
+              typeof last === 'object' && last !== null ? Object.keys(last as object) : [],
+            nextKeys:
+              typeof next === 'object' && next !== null ? Object.keys(next as object) : [],
+          });
+        }
+      }
+      if (bail) {
+        recordFiberCacheStatus(fiber, 'hit', false);
+        queueInto(target, fiber.cache as CommandBuffer, undefined, undefined);
+        RenderStats.recordCacheHit();
+        return;
+      }
     }
 
     const prevCtx = g_ctx;

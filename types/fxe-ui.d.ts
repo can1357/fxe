@@ -341,6 +341,8 @@ declare module 'fxe-ui' {
     ): { readonly [K in keyof T]: Readonly<T[K]> };
   }
 
+  export const STYLE_SHEET_BRAND: unique symbol;
+
   export interface LayerProps {
     key?: string;
     transform?: Mat4;
