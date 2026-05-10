@@ -6,9 +6,13 @@
 //            [--platform macos|win|linux] [--include <glob>...]
 //            [--signing-policy unsigned-dev|signed-release|signed-and-notarized|verify-only]
 //            [--identity <codesign-id>] [--notarize-profile <profile>]
+//            [--linux-signer minisign|gpg] [--linux-signer-key <path-or-id>]
+//            [--linux-signer-identity <string>]
+//            [--linux-signer-passphrase-file <path>]
+//            [MINISIGN_PASSWORD or --linux-signer-passphrase-file for non-interactive minisign]
 //            [--webauthn-rp-id <rp_id>...] [--webauthn-mode production|developer]
-//            [--entitlement <key>...]
-//            [--cert <path-or-subject>] [--installer dmg|pkg|msi|msix|appimage|none]
+//            [--flatpak-app-id <reverse.dns.id>] [--entitlement <key>...]
+//            [--cert <path-or-subject>] [--installer dmg|pkg|msi|msix|appimage|snap|flatpak|none]
 //            [--dmg|--msi|--msix|--appimage DEPRECATED aliases for --installer]
 //            [--update-url <url>] [--public-key <key>] [--channel stable|beta|alpha]
 //            [--version <semver> REQUIRED for installer output]
@@ -23,12 +27,12 @@
 // Signing policies:
 //   unsigned-dev (default): build without signing; emits a NOTE about unsigned output.
 //   signed-release: sign + verify release artifacts; requires --identity on macOS,
-//                   --cert on Windows, and a future Linux signing path.
-//   signed-and-notarized: macOS only; requires --identity and --notarize-profile,
-//                         then signs, verifies, notarizes, and staples.
-//   verify-only: skip signing but verify an externally signed macOS or Windows artifact.
+//                   --cert on Windows, and --linux-signer/--linux-signer-key on Linux.
+//   signed-and-notarized: macOS notarizes after signing; on Linux it degrades to signed-release.
+//   verify-only: skip signing but verify an externally signed artifact using platform tooling.
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
@@ -75,7 +79,12 @@ namespace {
     std::string platform;
     std::string identity;
     std::string notarize_profile;
+    std::string linux_signer;
+    std::string linux_signer_key;
+    std::string linux_signer_identity;
+    std::string linux_signer_passphrase_file;
     std::vector<std::string> webauthn_rp_ids;
+    std::string flatpak_app_id;
     std::string webauthn_mode;
     std::vector<std::string> entitlements;
     std::string cert;
@@ -134,6 +143,17 @@ namespace {
     std::string s = path.string();
     std::string out = "'";
     for (char c : s) {
+      if (c == '\'')
+        out += "'\\''";
+      else
+        out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
+  }
+  std::string shell_quote_text(std::string_view text) {
+    std::string out = "'";
+    for (char c : text) {
       if (c == '\'')
         out += "'\\''";
       else
@@ -355,6 +375,107 @@ namespace {
       out.insert(out.begin(), '_');
     return out;
   }
+  std::string slugify_for_snap(std::string_view value) {
+    std::string out;
+    out.reserve(value.size() + 1);
+    bool last_dash = false;
+    for (char c : value) {
+      const unsigned char uc = static_cast<unsigned char>(c);
+      if (std::isalnum(uc)) {
+        out.push_back(static_cast<char>(std::tolower(uc)));
+        last_dash = false;
+      } else if (!out.empty() && !last_dash) {
+        out.push_back('-');
+        last_dash = true;
+      }
+    }
+    while (!out.empty() && out.back() == '-')
+      out.pop_back();
+    if (out.empty() || !std::isalpha(static_cast<unsigned char>(out.front())))
+      out.insert(out.begin(), 'a');
+    return out;
+  }
+
+  std::string derive_flatpak_app_id(std::string_view value) {
+    std::string leaf;
+    leaf.reserve(value.size() + 1);
+    for (char c : value) {
+      const unsigned char uc = static_cast<unsigned char>(c);
+      leaf.push_back(std::isalnum(uc) ? static_cast<char>(std::tolower(uc)) : '_');
+    }
+    if (leaf.empty() || !std::isalpha(static_cast<unsigned char>(leaf.front())))
+      leaf.insert(leaf.begin(), 'a');
+    return "org.fxe." + leaf;
+  }
+
+  bool is_valid_flatpak_app_id(std::string_view value) {
+    if (value.size() < 3 || value.find('.') == std::string_view::npos)
+      return false;
+    usize segment_start = 0;
+    while (segment_start < value.size()) {
+      const usize segment_end = value.find('.', segment_start);
+      const std::string_view segment =
+          segment_end == std::string_view::npos
+              ? value.substr(segment_start)
+              : value.substr(segment_start, segment_end - segment_start);
+      if (segment.empty() || !std::isalpha(static_cast<unsigned char>(segment.front())))
+        return false;
+      for (char c : segment) {
+        const unsigned char uc = static_cast<unsigned char>(c);
+        if (!std::isalnum(uc) && c != '_' && c != '-')
+          return false;
+      }
+      if (segment_end == std::string_view::npos)
+        break;
+      segment_start = segment_end + 1;
+    }
+    return true;
+  }
+
+  std::string sanitize_summary(std::string_view value) {
+    std::string out;
+    out.reserve(value.size());
+    bool last_space = false;
+    for (char c : value) {
+      if (c == '\n' || c == '\r' || c == ':' || c == '\'' || c == '"') {
+        if (!out.empty() && !last_space) {
+          out.push_back(' ');
+          last_space = true;
+        }
+        continue;
+      }
+      if (std::isspace(static_cast<unsigned char>(c))) {
+        if (!out.empty() && !last_space) {
+          out.push_back(' ');
+          last_space = true;
+        }
+        continue;
+      }
+      out.push_back(c);
+      last_space = false;
+    }
+    if (out.empty())
+      out = "fxe application";
+    return out;
+  }
+
+  std::string indent_block(std::string_view value, std::string_view indent = "  ") {
+    std::string out;
+    out.reserve(value.size() + indent.size() * 2);
+    usize start = 0;
+    while (start <= value.size()) {
+      const usize end = value.find('\n', start);
+      const std::string_view line =
+          end == std::string_view::npos ? value.substr(start) : value.substr(start, end - start);
+      out += indent;
+      out.append(line.data(), line.size());
+      if (end == std::string_view::npos)
+        break;
+      out.push_back('\n');
+      start = end + 1;
+    }
+    return out;
+  }
 
   [[maybe_unused]] std::string msix_publisher(const Args& a) {
     if (!a.cert.empty() && !fs::exists(a.cert)) {
@@ -405,6 +526,61 @@ namespace {
     if (rc != 0)
       die(action + " failed with exit code " + std::to_string(rc));
   }
+  std::string run_command_capture(const std::string& command, int* exit_code_out = nullptr) {
+    std::array<char, 256> buffer{};
+    std::string out;
+#if defined(_WIN32)
+    FILE* pipe = _popen(command.c_str(), "r");
+#else
+    FILE* pipe = popen(command.c_str(), "r");
+#endif
+    if (!pipe) {
+      if (exit_code_out)
+        *exit_code_out = -1;
+      return out;
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe))
+      out += buffer.data();
+#if defined(_WIN32)
+    const int status = _pclose(pipe);
+#else
+    const int status = pclose(pipe);
+#endif
+    if (exit_code_out)
+      *exit_code_out = status;
+    return out;
+  }
+
+  std::string_view trim_ascii(std::string_view text) {
+    usize start = 0;
+    while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])))
+      ++start;
+    usize end = text.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])))
+      --end;
+    return text.substr(start, end - start);
+  }
+
+  std::string normalize_fingerprint(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char c : text) {
+      if (std::isspace(static_cast<unsigned char>(c)))
+        continue;
+      out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+    return out;
+  }
+
+  bool is_hex_fingerprint(std::string_view text) {
+    if (text.size() != 40)
+      return false;
+    for (char c : text) {
+      if (!std::isxdigit(static_cast<unsigned char>(c)))
+        return false;
+    }
+    return true;
+  }
 
   Args parse(int argc, char** argv) {
     Args a;
@@ -441,6 +617,14 @@ namespace {
         a.identity = need("--identity");
       else if (s == "--notarize-profile")
         a.notarize_profile = need("--notarize-profile");
+      else if (s == "--linux-signer")
+        a.linux_signer = need("--linux-signer");
+      else if (s == "--linux-signer-key")
+        a.linux_signer_key = need("--linux-signer-key");
+      else if (s == "--linux-signer-identity")
+        a.linux_signer_identity = need("--linux-signer-identity");
+      else if (s == "--linux-signer-passphrase-file")
+        a.linux_signer_passphrase_file = need("--linux-signer-passphrase-file");
       else if (s == "--webauthn-rp-id") {
         std::string rp_id = need("--webauthn-rp-id");
         if (!is_valid_webauthn_rp_id(rp_id))
@@ -452,7 +636,9 @@ namespace {
           die("unknown --webauthn-mode value: " + a.webauthn_mode +
               " (expected production or developer)");
         }
-      } else if (s == "--cert")
+      } else if (s == "--flatpak-app-id")
+        a.flatpak_app_id = need("--flatpak-app-id");
+      else if (s == "--cert")
         a.cert = need("--cert");
       else if (s == "--signing-policy") {
         const std::string value = need("--signing-policy");
@@ -469,7 +655,7 @@ namespace {
           installer = fxe_pack::cli_detail::parse_installer_value(value);
         } catch (const std::invalid_argument&) {
           die("unknown --installer value: " + value +
-              " (expected dmg, pkg, msi, msix, appimage, or none)");
+              " (expected dmg, pkg, msi, msix, appimage, snap, flatpak, or none)");
         }
         if (a.installer != InstallerFormat::None && a.installer != installer) {
           die("conflicting installer selection: --installer " + value +
@@ -514,11 +700,16 @@ namespace {
             << "                [--signing-policy "
                "unsigned-dev|signed-release|signed-and-notarized|verify-only]\n"
             << "                [--identity CODESIGN_ID] [--notarize-profile PROFILE]\n"
+            << "                [--linux-signer minisign|gpg] [--linux-signer-key PATH_OR_ID]\n"
+            << "                [--linux-signer-identity TEXT]\n"
+            << "                [MINISIGN_PASSWORD env or --linux-signer-passphrase-file for "
+               "minisign]\n"
+            << "                [--linux-signer-passphrase-file PATH]\n"
             << "                [--webauthn-rp-id RP_ID ...] [--webauthn-mode "
                "production|developer]\n"
-            << "                [--entitlement KEY ...]\n"
+            << "                [--flatpak-app-id REVERSE_DNS_ID] [--entitlement KEY ...]\n"
             << "                [--cert PATH_OR_SUBJECT] [--installer "
-               "dmg|pkg|msi|msix|appimage|none]\n"
+               "dmg|pkg|msi|msix|appimage|snap|flatpak|none]\n"
             << "                [--dmg|--msi|--msix|--appimage DEPRECATED]\n"
             << "                [--update-url URL] [--public-key KEY] [--channel "
                "stable|beta|alpha]\n"
@@ -538,6 +729,10 @@ namespace {
                "CN=Publisher\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.AppImage --platform linux "
                "--installer appimage\n"
+            << "  fxe-pack examples/js/react_demo.ts --out MyApp.snap --platform linux "
+               "--installer snap\n"
+            << "  fxe-pack examples/js/react_demo.ts --out MyApp.flatpak --platform linux "
+               "--installer flatpak\n"
             << "  fxe-pack examples/js/react_demo.ts --out my-app.tar.gz --platform linux\n"
             << "\nEntitlements:\n"
             << "  --entitlement KEY may be repeated. Accepted keys: camera, microphone,\n"
@@ -546,13 +741,11 @@ namespace {
             << "    app-sandbox.\n"
             << "\nSigning policies:\n"
             << "  unsigned-dev (default): build without signing; emits a NOTE.\n"
-            << "  signed-release: sign + verify release artifacts; requires --identity on "
-               "macOS,\n"
-            << "    --cert on Windows, and a future Linux signing path.\n"
-            << "  signed-and-notarized: macOS only; requires --identity and --notarize-profile,\n"
-            << "    then signs, verifies, notarizes, and staples.\n"
-            << "  verify-only: skip signing but verify an externally signed macOS or Windows "
-               "artifact.\n";
+            << "  signed-release: sign + verify release artifacts; requires --identity on macOS,\n"
+            << "    --cert on Windows, and --linux-signer/--linux-signer-key on Linux.\n"
+            << "  signed-and-notarized: macOS notarizes after signing; on Linux it behaves\n"
+            << "    like signed-release.\n"
+            << "  verify-only: skip signing but verify an externally signed artifact.\n";
         std::exit(0);
       } else if (!s.empty() && s[0] == '-') {
         die("unknown flag: " + std::string(s));
@@ -572,10 +765,12 @@ namespace {
       die("--webauthn-mode requires --platform macos");
     if (!a.entitlements.empty() && a.platform != "macos")
       die("--entitlement requires --platform macos");
+    if (!a.flatpak_app_id.empty() && !is_valid_flatpak_app_id(a.flatpak_app_id))
+      die("invalid --flatpak-app-id: " + a.flatpak_app_id + " (expected reverse-dns style id)");
     if (!a.signing_policy_explicit) {
       if (!a.identity.empty() && !a.notarize_profile.empty()) {
         a.signing_policy = SigningPolicy::SignedAndNotarized;
-      } else if (!a.identity.empty() || !a.cert.empty()) {
+      } else if (!a.identity.empty() || !a.cert.empty() || !a.linux_signer.empty()) {
         a.signing_policy = SigningPolicy::SignedRelease;
       }
       if (a.signing_policy != SigningPolicy::UnsignedDev) {
@@ -599,6 +794,10 @@ namespace {
       die("--installer msix requires --platform win");
     if (a.installer == InstallerFormat::AppImage && a.platform != "linux")
       die("--installer appimage requires --platform linux");
+    if (a.installer == InstallerFormat::Snap && a.platform != "linux")
+      die("--installer snap requires --platform linux");
+    if (a.installer == InstallerFormat::Flatpak && a.platform != "linux")
+      die("--installer flatpak requires --platform linux");
     if (a.name.empty())
       a.name = fs::path(a.entry).stem().string();
     if (a.out.empty())
@@ -643,8 +842,11 @@ namespace {
     if (!a.cert.empty() && a.signing_policy == SigningPolicy::UnsignedDev) {
       std::cerr << "fxe-pack: NOTE: ignoring --cert under --signing-policy unsigned-dev\n";
     }
-    if (a.signing_policy == SigningPolicy::SignedAndNotarized && a.platform != "macos")
-      die("--signing-policy signed-and-notarized is only supported with --platform macos");
+    if (a.signing_policy == SigningPolicy::SignedAndNotarized && a.platform != "macos" &&
+        a.platform != "linux") {
+      die("--signing-policy signed-and-notarized is only supported with --platform macos "
+          "(Linux treats it like signed-release)");
+    }
     if ((a.signing_policy == SigningPolicy::SignedRelease ||
          a.signing_policy == SigningPolicy::SignedAndNotarized ||
          a.signing_policy == SigningPolicy::VerifyOnly) &&
@@ -654,6 +856,37 @@ namespace {
       die("--signing-policy " + signing_policy_value(a.signing_policy) +
           " requires macOS .app, .dmg, or .pkg output (use --out <name>.app, <name>.dmg, "
           "<name>.pkg, or --installer dmg/pkg)");
+    }
+    const bool linux_signing_requested = (a.signing_policy == SigningPolicy::SignedRelease ||
+                                          a.signing_policy == SigningPolicy::SignedAndNotarized ||
+                                          a.signing_policy == SigningPolicy::VerifyOnly) &&
+                                         a.platform == "linux";
+    if (linux_signing_requested) {
+      if (a.linux_signer.empty())
+        die("--signing-policy " + signing_policy_value(a.signing_policy) +
+            " on Linux requires --linux-signer minisign|gpg");
+      if (a.linux_signer != "minisign" && a.linux_signer != "gpg")
+        die("unknown --linux-signer value: " + a.linux_signer + " (expected minisign or gpg)");
+      if (a.linux_signer_key.empty())
+        die("--linux-signer " + a.linux_signer + " requires --linux-signer-key");
+      if (!a.linux_signer_passphrase_file.empty() && !fs::exists(a.linux_signer_passphrase_file))
+        die("--linux-signer-passphrase-file not found: " + a.linux_signer_passphrase_file);
+      if (a.linux_signer == "minisign") {
+        if (!tool_exists("minisign"))
+          die("--linux-signer minisign requires the minisign tool on PATH");
+        if (!fs::exists(a.linux_signer_key))
+          die("--linux-signer minisign requires a readable key file at --linux-signer-key");
+        if ((a.signing_policy == SigningPolicy::SignedRelease ||
+             a.signing_policy == SigningPolicy::SignedAndNotarized) &&
+            a.linux_signer_identity.empty()) {
+          die("--linux-signer minisign requires --linux-signer-identity when signing on Linux");
+        }
+      } else {
+        if (!tool_exists("gpg"))
+          die("--linux-signer gpg requires the gpg tool on PATH");
+      }
+      if (!tool_exists("sha256sum") && !tool_exists("openssl"))
+        die("--linux-signer requires sha256sum or openssl on PATH for SHA256SUMS generation");
     }
     if (a.signing_policy == SigningPolicy::SignedRelease) {
       if (a.platform == "macos") {
@@ -677,12 +910,9 @@ namespace {
         if (!tool_exists("signtool"))
           die("--signing-policy signed-release requires signtool, which was not found in PATH");
 #endif
-      } else if (a.platform == "linux") {
-        die("--signing-policy signed-release requires a Linux GPG/minisign signing path, which "
-            "is TODO");
       }
     }
-    if (a.signing_policy == SigningPolicy::SignedAndNotarized) {
+    if (a.signing_policy == SigningPolicy::SignedAndNotarized && a.platform == "macos") {
       if (a.identity.empty())
         die("--signing-policy signed-and-notarized requires --identity");
       if (a.notarize_profile.empty())
@@ -719,9 +949,6 @@ namespace {
         if (!tool_exists("signtool"))
           die("--signing-policy verify-only requires signtool, which was not found in PATH");
 #endif
-      } else if (a.platform == "linux") {
-        die("--signing-policy verify-only requires a Linux signature verification path, which is "
-            "TODO");
       }
     }
     if (a.installer == InstallerFormat::Dmg || is_macos_dmg_output(a)) {
@@ -768,6 +995,10 @@ namespace {
     }
     if (a.installer == InstallerFormat::AppImage && a.platform != "linux")
       die("--installer appimage requires --platform linux");
+    if (a.installer == InstallerFormat::Snap && a.platform != "linux")
+      die("--installer snap requires --platform linux");
+    if (a.installer == InstallerFormat::Flatpak && a.platform != "linux")
+      die("--installer flatpak requires --platform linux");
     if (fs::path(a.out).extension() == ".AppImage" && a.platform != "linux")
       die("AppImage output requires --platform linux");
     if (a.platform == "linux" &&
@@ -775,6 +1006,14 @@ namespace {
         !tool_exists("appimagetool")) {
       die("AppImage output was requested but appimagetool was not found in PATH; use --out "
           "<name>.tar.gz for fallback packaging or install appimagetool");
+    }
+    if (a.installer == InstallerFormat::Snap && !tool_exists("snapcraft"))
+      die("--installer snap requires snapcraft on PATH");
+    if (a.installer == InstallerFormat::Flatpak) {
+      if (!tool_exists("flatpak-builder"))
+        die("--installer flatpak requires flatpak-builder on PATH");
+      if (!tool_exists("flatpak"))
+        die("--installer flatpak requires flatpak on PATH");
     }
     if (a.compress == Compression::Zstd && !tool_exists("zstd")) {
       die("--compress zstd requires the zstd command, which was not found in PATH");
@@ -1061,6 +1300,328 @@ namespace {
     run_command_or_die(cmd.str(), "AppImage packaging");
     fs::remove_all(appdir);
     return out;
+  }
+  fs::path wrap_linux_snap(const Args& a, const fs::path& staged_bin, const fs::path& out,
+                           const fs::path& tmpl_dir, const fs::path& fxe_run_dir) {
+    if (out.extension() != ".snap")
+      die("--installer snap requires --out <name>.snap");
+    fs::path workdir = fs::temp_directory_path() / ("fxe-pack-" + a.name + ".snap-build");
+    fs::remove_all(workdir);
+    fs::create_directories(workdir / "payload" / "bin");
+    fs::create_directories(workdir / "snap");
+    move_one(staged_bin, workdir / "payload" / a.name);
+    make_executable(workdir / "payload" / a.name);
+    copy_runtime_sidecars(fxe_run_dir, workdir / "payload" / "bin");
+    std::string snapcraft = load_template_or(tmpl_dir, "snapcraft.yaml.in", "");
+    snapcraft = subst(snapcraft, "SNAP_NAME", slugify_for_snap(a.name));
+    snapcraft = subst(snapcraft, "APP_NAME", a.name);
+    snapcraft = subst(snapcraft, "VERSION", a.package.version);
+    snapcraft = subst(snapcraft, "SUMMARY", sanitize_summary(a.name));
+    snapcraft = subst(snapcraft, "DESCRIPTION", indent_block(a.name + " packaged by fxe-pack"));
+    spit(workdir / "snap" / "snapcraft.yaml", snapcraft);
+    fs::create_directories(out.parent_path());
+    fs::remove(out);
+    std::ostringstream cmd;
+    cmd << "cd " << shell_quote(workdir) << " && snapcraft ";
+    if (const char* destructive = std::getenv("FXE_PACK_SNAP_DESTRUCTIVE");
+        destructive && std::string_view(destructive) == "1") {
+      cmd << "--destructive-mode ";
+    }
+    cmd << "--output " << shell_quote(out);
+    run_command_or_die(cmd.str(), "Snap packaging");
+    fs::remove_all(workdir);
+    return out;
+  }
+
+  fs::path wrap_linux_flatpak(const Args& a, const fs::path& staged_bin, const fs::path& out,
+                              const fs::path& tmpl_dir, const fs::path& fxe_run_dir) {
+    if (out.extension() != ".flatpak")
+      die("--installer flatpak requires --out <name>.flatpak");
+    const std::string app_id =
+        a.flatpak_app_id.empty() ? derive_flatpak_app_id(a.name) : a.flatpak_app_id;
+    if (a.flatpak_app_id.empty()) {
+      std::cerr << "fxe-pack: NOTE: defaulting --flatpak-app-id to " << app_id
+                << "; pass --flatpak-app-id explicitly for release builds.\n";
+    }
+    fs::path workdir = fs::temp_directory_path() / ("fxe-pack-" + a.name + ".flatpak-build");
+    fs::remove_all(workdir);
+    fs::create_directories(workdir);
+    move_one(staged_bin, workdir / a.name);
+    make_executable(workdir / a.name);
+    copy_runtime_sidecars(fxe_run_dir, workdir);
+    std::string manifest = load_template_or(tmpl_dir, "flatpak-manifest.yaml.in", "");
+    manifest = subst(manifest, "APP_NAME", a.name);
+    manifest = subst(manifest, "FLATPAK_APP_ID", app_id);
+    if (fs::exists(workdir / "icudtl.dat")) {
+      manifest = subst(manifest, "FLATPAK_EXTRA_BUILD_COMMANDS",
+                       "\n      - install -Dm644 icudtl.dat /app/bin/icudtl.dat");
+      manifest = subst(manifest, "FLATPAK_EXTRA_SOURCES",
+                       "\n      - type: file\n        path: ./icudtl.dat");
+    } else {
+      manifest = subst(manifest, "FLATPAK_EXTRA_BUILD_COMMANDS", "");
+      manifest = subst(manifest, "FLATPAK_EXTRA_SOURCES", "");
+    }
+    fs::path manifest_path = workdir / (app_id + ".yml");
+    spit(manifest_path, manifest);
+    fs::create_directories(out.parent_path());
+    fs::remove(out);
+    std::ostringstream builder_cmd;
+    builder_cmd << "flatpak-builder --force-clean --repo=" << shell_quote(workdir / "repo") << " "
+                << shell_quote(workdir / "build") << " " << shell_quote(manifest_path);
+    run_command_or_die(builder_cmd.str(), "Flatpak build");
+    std::ostringstream bundle_cmd;
+    bundle_cmd << "flatpak build-bundle " << shell_quote(workdir / "repo") << " "
+               << shell_quote(out) << " " << shell_quote_text(app_id);
+    run_command_or_die(bundle_cmd.str(), "Flatpak bundle");
+    fs::remove_all(workdir);
+    return out;
+  }
+
+  std::string linux_sha256_hex_or_die(const fs::path& artifact) {
+    auto parse_hex = [&](std::string_view output) {
+      output = trim_ascii(output);
+      const usize end = output.find_first_of(" \t\r\n");
+      std::string hex = std::string(end == std::string_view::npos ? output : output.substr(0, end));
+      if (hex.size() != 64)
+        die("failed to parse SHA-256 output for " + artifact.string());
+      for (char& c : hex) {
+        if (!std::isxdigit(static_cast<unsigned char>(c)))
+          die("failed to parse SHA-256 output for " + artifact.string());
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      return hex;
+    };
+    int exit_code = -1;
+    if (tool_exists("sha256sum")) {
+      const std::string output =
+          run_command_capture("sha256sum " + shell_quote(artifact), &exit_code);
+      if (exit_code != 0)
+        die("sha256sum failed for " + artifact.string());
+      return parse_hex(output);
+    }
+    const std::string output =
+        run_command_capture("openssl dgst -sha256 " + shell_quote(artifact), &exit_code);
+    if (exit_code != 0)
+      die("openssl dgst -sha256 failed for " + artifact.string());
+    const usize eq = output.find('=');
+    return parse_hex(eq == std::string::npos ? output : std::string_view(output).substr(eq + 1));
+  }
+
+  std::string linux_signer_key_value(const std::string& key_ref) {
+    if (fs::exists(key_ref) && fs::is_regular_file(key_ref))
+      return std::string(trim_ascii(slurp(key_ref)));
+    return std::string(trim_ascii(key_ref));
+  }
+
+  bool read_minisign_untrusted_comment(const fs::path& sig_path, std::string& comment_out) {
+    std::ifstream input(sig_path, std::ios::binary);
+    if (!input)
+      return false;
+    return static_cast<bool>(std::getline(input, comment_out));
+  }
+
+  fs::path minisign_signature_path(const fs::path& artifact) {
+    fs::path minisig = artifact;
+    minisig += ".minisig";
+    if (fs::exists(minisig))
+      return minisig;
+    fs::path sig = artifact;
+    sig += ".sig";
+    if (fs::exists(sig))
+      return sig;
+    die("no minisign signature found alongside " + artifact.string() +
+        " (expected .minisig or .sig)");
+  }
+
+  fs::path materialize_minisign_public_key_or_die(const fs::path& key_path, bool& cleanup_out) {
+    cleanup_out = false;
+    if (key_path.extension() == ".pub")
+      return key_path;
+    fs::path public_key = fs::temp_directory_path() /
+                          ("fxe-pack-" + safe_identifier(key_path.stem().string()) + ".pub");
+    fs::remove(public_key);
+    std::ostringstream cmd;
+    cmd << "minisign -R -s " << shell_quote(key_path) << " -p " << shell_quote(public_key);
+    run_command_or_die(cmd.str(), "minisign public-key recovery");
+    cleanup_out = true;
+    return public_key;
+  }
+
+  std::string resolve_gpg_fingerprint_or_die(const Args& a, bool prefer_secret_keyring) {
+    const std::string raw = linux_signer_key_value(a.linux_signer_key);
+    const std::string normalized = normalize_fingerprint(raw);
+    if (is_hex_fingerprint(normalized))
+      return normalized;
+    const auto query = [&](bool secret) -> std::string {
+      std::ostringstream cmd;
+      cmd << "gpg --batch --with-colons --fingerprint "
+          << (secret ? "--list-secret-keys " : "--list-keys ") << shell_quote_text(raw) << " 2>&1";
+      int exit_code = -1;
+      const std::string output = run_command_capture(cmd.str(), &exit_code);
+      if (exit_code != 0)
+        return {};
+      std::istringstream lines(output);
+      std::string line;
+      while (std::getline(lines, line)) {
+        if (line.rfind("fpr:::::::::", 0) != 0)
+          continue;
+        const std::string_view rest = std::string_view(line).substr(12);
+        const usize end = rest.find(':');
+        const std::string fingerprint =
+            normalize_fingerprint(end == std::string_view::npos ? rest : rest.substr(0, end));
+        if (is_hex_fingerprint(fingerprint))
+          return fingerprint;
+      }
+      return {};
+    };
+    if (prefer_secret_keyring) {
+      if (std::string fingerprint = query(true); !fingerprint.empty())
+        return fingerprint;
+      if (std::string fingerprint = query(false); !fingerprint.empty())
+        return fingerprint;
+    } else {
+      if (std::string fingerprint = query(false); !fingerprint.empty())
+        return fingerprint;
+      if (std::string fingerprint = query(true); !fingerprint.empty())
+        return fingerprint;
+    }
+    die("failed to resolve a 40-character GPG fingerprint from --linux-signer-key " +
+        a.linux_signer_key);
+  }
+
+  void verify_linux_minisign_or_die(const Args& a, const fs::path& artifact) {
+    const fs::path sig_path = minisign_signature_path(artifact);
+    bool cleanup_public_key = false;
+    const fs::path public_key =
+        materialize_minisign_public_key_or_die(fs::path(a.linux_signer_key), cleanup_public_key);
+    if (!a.linux_signer_identity.empty()) {
+      std::string first_line;
+      if (!read_minisign_untrusted_comment(sig_path, first_line)) {
+        if (cleanup_public_key)
+          fs::remove(public_key);
+        die("failed to read minisign signature metadata: " + sig_path.string());
+      }
+      constexpr std::string_view k_untrusted_prefix = "untrusted comment:";
+      if (first_line.rfind(std::string(k_untrusted_prefix), 0) != 0) {
+        if (cleanup_public_key)
+          fs::remove(public_key);
+        die("minisign signature missing untrusted comment: " + sig_path.string());
+      }
+      const std::string_view comment =
+          trim_ascii(std::string_view(first_line).substr(k_untrusted_prefix.size()));
+      if (!comment.starts_with(a.linux_signer_identity)) {
+        if (cleanup_public_key)
+          fs::remove(public_key);
+        die("minisign untrusted comment mismatch for " + artifact.string());
+      }
+    }
+    std::ostringstream cmd;
+    cmd << "minisign -V -x " << shell_quote(sig_path) << " -p " << shell_quote(public_key) << " -m "
+        << shell_quote(artifact);
+    run_command_or_die(cmd.str(), "minisign verification");
+    if (cleanup_public_key)
+      fs::remove(public_key);
+  }
+
+  void verify_linux_gpg_or_die(const Args& a, const fs::path& artifact) {
+    const fs::path sig_path = artifact.string() + ".asc";
+    if (!fs::exists(sig_path))
+      die("no gpg detached signature found alongside " + artifact.string() + " (expected .asc)");
+    const std::string expected_fingerprint = resolve_gpg_fingerprint_or_die(a, false);
+    int verify_exit = -1;
+    const std::string verify_output =
+        run_command_capture("gpg --batch --status-fd 2 --verify " + shell_quote(sig_path) + " " +
+                                shell_quote(artifact) + " 2>&1",
+                            &verify_exit);
+    bool saw_goodsig = false;
+    bool saw_validsig = false;
+    std::string observed_fingerprint;
+    std::istringstream status_lines(verify_output);
+    std::string line;
+    while (std::getline(status_lines, line)) {
+      if (line.rfind("[GNUPG:] GOODSIG ", 0) == 0) {
+        saw_goodsig = true;
+      } else if (line.rfind("[GNUPG:] VALIDSIG ", 0) == 0) {
+        saw_validsig = true;
+        const std::string_view rest = trim_ascii(std::string_view(line).substr(18));
+        const usize end = rest.find_first_of(" \t\r\n");
+        observed_fingerprint =
+            normalize_fingerprint(end == std::string_view::npos ? rest : rest.substr(0, end));
+      }
+    }
+    if (verify_exit != 0)
+      die("gpg verification failed for " + artifact.string() + ": " +
+          std::string(trim_ascii(verify_output)));
+    if (!saw_goodsig && !saw_validsig)
+      die("gpg verification did not report a valid detached signature for " + artifact.string());
+    if (!is_hex_fingerprint(observed_fingerprint))
+      die("gpg verification did not report a signing fingerprint for " + artifact.string());
+    if (observed_fingerprint != expected_fingerprint)
+      die("gpg signing fingerprint mismatch for " + artifact.string());
+  }
+
+  void verify_linux_signature_target_or_die(const Args& a, const fs::path& artifact) {
+    // TODO: factor this detached-signature verification out into a shared helper with updater.cpp.
+    if (a.linux_signer == "minisign") {
+      verify_linux_minisign_or_die(a, artifact);
+      return;
+    }
+    if (a.linux_signer == "gpg") {
+      verify_linux_gpg_or_die(a, artifact);
+      return;
+    }
+    die("unknown --linux-signer value: " + a.linux_signer);
+  }
+
+  void sign_linux_signature_target_or_die(const Args& a, const fs::path& artifact) {
+    if (a.linux_signer == "minisign") {
+      const fs::path sig_path = artifact.string() + ".minisig";
+      fs::remove(sig_path);
+      std::ostringstream cmd;
+      if (!a.linux_signer_passphrase_file.empty()) {
+        const std::string quoted_file = shell_quote(fs::path(a.linux_signer_passphrase_file));
+        cmd << "MINISIGN_PASSWORD=$(tr -d '\\r\\n' < " << quoted_file << ") "
+            << "MINISIGN_PASSPHRASE=$(tr -d '\\r\\n' < " << quoted_file << ") ";
+      }
+      cmd << "minisign -S -s " << shell_quote(fs::path(a.linux_signer_key)) << " -m "
+          << shell_quote(artifact) << " -x " << shell_quote(sig_path) << " -c "
+          << shell_quote_text(a.linux_signer_identity);
+      run_command_or_die(cmd.str(), "minisign signing");
+      verify_linux_minisign_or_die(a, artifact);
+      return;
+    }
+    if (a.linux_signer == "gpg") {
+      const fs::path sig_path = artifact.string() + ".asc";
+      fs::remove(sig_path);
+      std::ostringstream cmd;
+      cmd << "gpg --batch --yes --detach-sign --armor ";
+      if (!a.linux_signer_passphrase_file.empty())
+        cmd << "--pinentry-mode loopback --passphrase-file "
+            << shell_quote(fs::path(a.linux_signer_passphrase_file)) << " ";
+      cmd << "--local-user " << shell_quote_text(linux_signer_key_value(a.linux_signer_key))
+          << " -o " << shell_quote(sig_path) << " " << shell_quote(artifact);
+      run_command_or_die(cmd.str(), "gpg signing");
+      verify_linux_gpg_or_die(a, artifact);
+      return;
+    }
+    die("unknown --linux-signer value: " + a.linux_signer);
+  }
+
+  void sign_linux_artifact_or_die(const Args& a, const fs::path& artifact) {
+    if (a.signing_policy == SigningPolicy::UnsignedDev)
+      return;
+    if (a.signing_policy == SigningPolicy::VerifyOnly) {
+      verify_linux_signature_target_or_die(a, artifact);
+      const fs::path sums = artifact.parent_path() / "SHA256SUMS";
+      if (fs::exists(sums))
+        verify_linux_signature_target_or_die(a, sums);
+      return;
+    }
+    sign_linux_signature_target_or_die(a, artifact);
+    const std::string sha256 = linux_sha256_hex_or_die(artifact);
+    const fs::path sums = artifact.parent_path() / "SHA256SUMS";
+    spit(sums, sha256 + "  " + artifact.filename().string() + "\n");
+    sign_linux_signature_target_or_die(a, sums);
   }
 
   fs::path write_plain_output(const fs::path& staged_bin, const fs::path& out) {
@@ -1661,7 +2222,8 @@ namespace {
 int main(int argc, char** argv) {
   Args a = parse(argc, argv);
   if (produces_installer(a) && a.package.version.empty())
-    die("--version is required when producing an installer (.dmg/.pkg/.msi/.msix/.appimage)");
+    die("--version is required when producing an installer "
+        "(.dmg/.pkg/.msi/.msix/.appimage/.snap/.flatpak)");
   if (produces_installer(a) && a.package.manufacturer.empty())
     die("--manufacturer/--publisher is required when producing an installer");
   if (!produces_installer(a) && a.package.version.empty())
@@ -1783,11 +2345,23 @@ int main(int argc, char** argv) {
                                        requested_out.extension() == ".AppImage")) {
     final_out = wrap_linux_appimage(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
     artifact_kind = "Linux AppImage";
+    sign_linux_artifact_or_die(a, final_out);
+  } else if (a.platform == "linux" && a.installer == InstallerFormat::Snap) {
+    final_out = wrap_linux_snap(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
+    artifact_kind = "Linux Snap package";
+    sign_linux_artifact_or_die(a, final_out);
+  } else if (a.platform == "linux" && a.installer == InstallerFormat::Flatpak) {
+    final_out = wrap_linux_flatpak(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
+    artifact_kind = "Linux Flatpak bundle";
+    sign_linux_artifact_or_die(a, final_out);
   } else if (a.platform == "linux" && has_suffix(requested_out.string(), ".tar.gz")) {
     final_out = wrap_linux_tar_gz(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
     artifact_kind = "Linux .tar.gz archive";
+    sign_linux_artifact_or_die(a, final_out);
   } else {
     final_out = write_plain_output(staged_bin, requested_out);
+    if (a.platform == "linux")
+      sign_linux_artifact_or_die(a, final_out);
   }
 
   maybe_zstd_compress(a, final_out);
@@ -1801,12 +2375,19 @@ int main(int argc, char** argv) {
   }
   if (a.signing_policy == SigningPolicy::UnsignedDev) {
     std::cout << "fxe-pack: NOTE: output uses --signing-policy unsigned-dev and was not signed.\n";
-  } else if (a.signing_policy == SigningPolicy::SignedRelease && a.platform == "macos") {
+  } else if ((a.signing_policy == SigningPolicy::SignedRelease ||
+              a.signing_policy == SigningPolicy::SignedAndNotarized) &&
+             a.platform == "macos") {
     std::cout << "fxe-pack: NOTE: output is signed but not notarized; use --signing-policy "
                  "signed-and-notarized for notarized macOS release output.\n";
   } else if (a.signing_policy == SigningPolicy::VerifyOnly) {
     std::cout << "fxe-pack: NOTE: verification ran without signing due to --signing-policy "
                  "verify-only.\n";
+  } else if ((a.signing_policy == SigningPolicy::SignedRelease ||
+              a.signing_policy == SigningPolicy::SignedAndNotarized) &&
+             a.platform == "linux") {
+    std::cout << "fxe-pack: NOTE: Linux output is signed and accompanied by detached signatures "
+                 "and SHA256SUMS.\n";
   }
   return 0;
 }

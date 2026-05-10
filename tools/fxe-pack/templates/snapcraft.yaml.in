@@ -1,0 +1,33 @@
+name: @SNAP_NAME@
+base: core22
+version: '@VERSION@'
+summary: @SUMMARY@
+description: |
+  @DESCRIPTION@
+confinement: strict
+grade: stable
+architectures:
+  - build-on: amd64
+  - build-on: arm64
+
+apps:
+  @SNAP_NAME@:
+    command: bin/@APP_NAME@
+    plugs:
+      - home
+      - network
+      - network-bind
+      - desktop
+      - desktop-legacy
+      - opengl
+      - audio-playback
+      - audio-record
+      - wayland
+      - x11
+
+parts:
+  @SNAP_NAME@:
+    plugin: dump
+    source: ./payload
+    organize:
+      '@APP_NAME@': bin/@APP_NAME@

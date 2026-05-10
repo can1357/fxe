@@ -1,0 +1,22 @@
+app-id: @FLATPAK_APP_ID@
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: @APP_NAME@
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=xdg-documents
+  - --filesystem=xdg-download
+modules:
+  - name: @APP_NAME@
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 @APP_NAME@ /app/bin/@APP_NAME@@FLATPAK_EXTRA_BUILD_COMMANDS@
+    sources:
+      - type: file
+        path: ./@APP_NAME@@FLATPAK_EXTRA_SOURCES@

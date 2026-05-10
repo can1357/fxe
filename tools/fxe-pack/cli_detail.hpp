@@ -8,7 +8,7 @@
 
 namespace fxe_pack::cli_detail {
 
-  enum class InstallerFormat { None, Dmg, Pkg, Msi, Msix, AppImage };
+  enum class InstallerFormat { None, Dmg, Pkg, Msi, Msix, AppImage, Snap, Flatpak };
 
   inline std::string installer_value(InstallerFormat installer) {
     switch (installer) {
@@ -24,6 +24,10 @@ namespace fxe_pack::cli_detail {
       return "msix";
     case InstallerFormat::AppImage:
       return "appimage";
+    case InstallerFormat::Snap:
+      return "snap";
+    case InstallerFormat::Flatpak:
+      return "flatpak";
     }
     throw std::invalid_argument("unknown installer format");
   }
@@ -41,6 +45,10 @@ namespace fxe_pack::cli_detail {
       return InstallerFormat::Msix;
     if (value == "appimage")
       return InstallerFormat::AppImage;
+    if (value == "snap")
+      return InstallerFormat::Snap;
+    if (value == "flatpak")
+      return InstallerFormat::Flatpak;
     throw std::invalid_argument("unknown --installer value: " + std::string(value));
   }
 
