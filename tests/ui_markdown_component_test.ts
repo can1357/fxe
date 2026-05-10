@@ -1,8 +1,8 @@
 import { CommandBuffer, Primitives, type Renderer, type Window, type WindowEventName } from 'fxe';
 import {
   clearHitTargets,
-  type FiberNode,
   drainLayoutTrace,
+  type FiberNode,
   type HitTarget,
   hitTest,
   Markdown as MarkdownComponent,

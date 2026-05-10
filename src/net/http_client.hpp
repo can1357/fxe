@@ -7,9 +7,8 @@
 // FXE_HAS_CURL is defined. The native TLS/HTTPS transport mirrors redirect,
 // timeout/cancellation, and cookie-jar behavior when libcurl is unavailable.
 // TODO(net,phase9): http_request::proxy needs native proxy and NO_PROXY handling.
-// TODO(net,phase9): http_request::multipart needs native multipart/form-data encoding.
-// TODO(net,phase9): http_request::body_source, http_request::body_size_hint, and
-// http_client::resume_upload() need native streaming upload support.
+// TODO(net,phase9): http_request::multipart still needs native multipart/form-data encoding.
+// TODO(net,phase9): native HTTPS still buffers body_source uploads instead of streaming them.
 #include "cookie_jar.hpp"
 
 #include <cstddef>
@@ -24,6 +23,8 @@
 namespace fxe::net {
 
   using header_list = std::vector<std::pair<std::string, std::string>>;
+  using upload_body_source =
+      std::function<std::pair<std::size_t, bool>(unsigned char* ptr, std::size_t max_bytes)>;
 
   class multipart_form {
   public:
@@ -33,12 +34,16 @@ namespace fxe::net {
       std::string filename;
       std::string content_type;
       std::string bytes;
+      upload_body_source body_source;
+      std::optional<std::int64_t> size_hint;
       bool file = false;
     };
 
     void add_field(std::string name, std::string value);
     void add_file(std::string name, std::string filename, std::string content_type,
                   std::string bytes);
+    void add_file_stream(std::string name, std::string filename, std::string content_type,
+                         upload_body_source body_source, std::optional<std::int64_t> size_hint);
     bool empty() const noexcept {
       return parts_.empty();
     }
@@ -67,8 +72,7 @@ namespace fxe::net {
     std::string url;
     header_list headers;
     std::string body; // raw bytes
-    std::function<std::pair<std::size_t, bool>(unsigned char* ptr, std::size_t max_bytes)>
-        body_source;
+    upload_body_source body_source;
     std::optional<std::int64_t> body_size_hint;
     bool follow_redirects = true;
     int timeout_ms = 0; // 0 = library default

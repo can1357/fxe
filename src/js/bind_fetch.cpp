@@ -1248,8 +1248,10 @@ namespace fxe::js {
           signal_obj_local = scratch.signal_obj.Get(iso);
           have_signal = true;
         }
-        if (!init_stream_body.IsEmpty())
+        if (!init_stream_body.IsEmpty()) {
+          hreq.body.clear();
           stream_body_local = init_stream_body;
+        }
       }
 
       if (hreq.url.empty()) {

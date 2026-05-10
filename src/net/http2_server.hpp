@@ -2,7 +2,9 @@
 
 #include "net/http2_client.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <fxe/types.hpp>
 #include <memory>
 #include <nghttp2/nghttp2.h>
@@ -31,14 +33,20 @@ namespace fxe::net {
 
   class http2_server {
   public:
+    using on_data_consumed = std::function<void(i32 stream_id, std::size_t chunk_size)>;
+
     static std::unique_ptr<http2_server> listen(const http2_server_options& options,
                                                 std::string& err);
     virtual ~http2_server();
     virtual u16 local_port() const = 0;
     virtual std::optional<http2_incoming_request> poll(std::string& err) = 0;
     virtual bool respond(u64 request_id, const http2_response& response, std::string& err) = 0;
+    virtual i32 submit_push_promise(i32 parent_stream_id, const http2_request& promised_request,
+                                    const http2_response& promised_response, std::string& err) = 0;
     virtual bool cancel(i32 stream_id, u32 error_code = NGHTTP2_CANCEL) = 0;
     virtual void close() = 0;
     virtual std::string last_error() const = 0;
+    virtual void set_on_data_consumed(on_data_consumed handler) = 0;
+    virtual void set_stream_window(i32 stream_id, i32 window_size) = 0;
   };
 } // namespace fxe::net

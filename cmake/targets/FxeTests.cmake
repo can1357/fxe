@@ -216,6 +216,14 @@ if(FXE_BUILD_TESTS)
             MbedTLS::mbedcrypto
         )
         fxe_add_cpp_test(
+            fxe_native_http2_push_flow_control_tests
+            tests/native_http2_push_flow_control_test.cpp
+            fxe_net
+            MbedTLS::mbedtls
+            MbedTLS::mbedx509
+            MbedTLS::mbedcrypto
+        )
+        fxe_add_cpp_test(
             fxe_native_https_tests
             tests/native_https_test.cpp
             fxe_deps

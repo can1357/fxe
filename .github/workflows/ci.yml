@@ -3,6 +3,7 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   checks:
@@ -20,6 +21,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y shellcheck pipx
           sudo pipx install --global --force clang-format==22.1.4
+      - name: Lint smoke install script
+        run: shellcheck scripts/smoke_install.sh
       - run: bun run ci:quick
 
   build:
@@ -144,3 +147,187 @@ jobs:
           else
             ctest --test-dir build -C Release -VV --timeout 60 -R '^(fxe_core_tests|fxe_example_)'
           fi
+
+  package-smoke:
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            formats: [dmg, pkg]
+          - os: windows-2022
+            formats: [msi, msix]
+          - os: ubuntu-24.04
+            formats: [appimage]
+    runs-on: ${{ matrix.os }}
+    env:
+      BUILD_DIR: build/package-smoke
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-bincache,readwrite"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: lukka/get-cmake@latest
+      - name: Set up MSVC dev environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Linux packaging deps
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb pkg-config autoconf autoconf-archive automake libtool \
+            libxinerama-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
+            libv8-dev flatpak flatpak-builder squashfs-tools
+          curl -fsSL -o /tmp/appimagetool.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          sudo install -m 0755 /tmp/appimagetool.AppImage /usr/local/bin/appimagetool.AppImage
+          sudo tee /usr/local/bin/appimagetool >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          exec env APPIMAGE_EXTRACT_AND_RUN=1 /usr/local/bin/appimagetool.AppImage "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/appimagetool
+          if command -v snap >/dev/null 2>&1; then
+            sudo snap install snapcraft --classic || echo "::warning::snap smoke skipped, snapcraft install failed"
+          else
+            echo "::warning::snap smoke skipped, snap unavailable on runner"
+          fi
+
+      - name: Install macOS packaging deps
+        if: runner.os == 'macOS'
+        run: brew install autoconf automake libtool pkg-config v8
+
+      - name: Install Windows packaging deps
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install -y pkgconfiglite wixtoolset lessmsi v8
+          $v8Header = Get-ChildItem -Path 'C:\ProgramData\chocolatey\lib' -Filter v8.h -Recurse -ErrorAction Stop |
+            Select-Object -First 1 -ExpandProperty FullName
+          $v8Root = Split-Path -Parent (Split-Path -Parent $v8Header)
+          "V8_DIR=$v8Root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $icu = Get-ChildItem -Path $v8Root -Filter icudtl.dat -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1 -ExpandProperty FullName
+          if ($icu) {
+            "FXE_V8_ICUDTL=$icu" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
+
+      - name: Cache vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg-bincache
+          key: vcpkg-bincache-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-bincache-${{ runner.os }}-
+
+      - name: Cache vcpkg checkout
+        uses: actions/cache@v4
+        with:
+          path: vcpkg
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Bootstrap in-tree vcpkg
+        shell: bash
+        run: |
+          if [ ! -d vcpkg/.git ]; then
+            git clone https://github.com/microsoft/vcpkg.git vcpkg
+          fi
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            if [ ! -x vcpkg/vcpkg.exe ]; then
+              ./vcpkg/bootstrap-vcpkg.bat -disableMetrics
+            fi
+          else
+            if [ ! -x vcpkg/vcpkg ]; then
+              ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+            fi
+          fi
+
+      - name: Set up compiler cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ matrix.os }}-package-smoke
+          variant: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+          max-size: 500M
+
+      - name: Cache CMake FetchContent deps
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILD_DIR }}/_deps
+          key: cmake-deps-package-smoke-${{ runner.os }}-${{ hashFiles('cmake/deps.cmake', 'CMakeLists.txt') }}
+          restore-keys: |
+            cmake-deps-package-smoke-${{ runner.os }}-
+
+      - name: Configure (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cmake -S . -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DFXE_FETCH_DEPS=ON \
+            -DFXE_ENABLE_WGPU=OFF \
+            -DFXE_ENABLE_V8=ON \
+            -DFXE_ENABLE_NODE_COMPAT=ON \
+            -DFXE_BUILD_PACKAGER=ON \
+            -DGLFW_BUILD_WAYLAND=OFF \
+            ${FXE_V8_ICUDTL:+-DFXE_V8_ICUDTL="$FXE_V8_ICUDTL"}
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmakeArgs = @(
+            '-S', '.',
+            '-B', $env:BUILD_DIR,
+            '-G', 'Ninja',
+            "-DCMAKE_TOOLCHAIN_FILE=$pwd/vcpkg/scripts/buildsystems/vcpkg.cmake",
+            '-DCMAKE_BUILD_TYPE=Release',
+            '-DCMAKE_C_COMPILER_LAUNCHER=sccache',
+            '-DCMAKE_CXX_COMPILER_LAUNCHER=sccache',
+            '-DFXE_FETCH_DEPS=ON',
+            '-DFXE_ENABLE_WGPU=OFF',
+            '-DFXE_ENABLE_V8=ON',
+            '-DFXE_ENABLE_NODE_COMPAT=ON',
+            '-DFXE_BUILD_PACKAGER=ON'
+          )
+          if ($env:FXE_V8_ICUDTL) {
+            $cmakeArgs += "-DFXE_V8_ICUDTL=$env:FXE_V8_ICUDTL"
+          }
+          & cmake @cmakeArgs
+        env:
+          CC: cl
+          CXX: cl
+
+      - name: Build packager smoke targets
+        run: cmake --build ${{ env.BUILD_DIR }} --config Release --target fxe_run fxe-pack
+
+      - name: Smoke installer formats (Unix matrix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          for format in ${{ join(matrix.formats, ' ') }}; do
+            bash scripts/smoke_install.sh "$format" "$BUILD_DIR"
+          done
+
+      - name: Smoke installer formats (Windows matrix)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($format in '${{ join(matrix.formats, ' ' ) }}'.Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            ./scripts/smoke_install.ps1 -Format $format -BuildDir $env:BUILD_DIR
+          }
+
+      - name: Smoke optional Linux installers
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          FXE_PACK_SNAP_DESTRUCTIVE: '1'
+        run: |
+          bash scripts/smoke_install.sh snap "$BUILD_DIR"
+          bash scripts/smoke_install.sh flatpak "$BUILD_DIR"

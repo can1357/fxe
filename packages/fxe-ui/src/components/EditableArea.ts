@@ -24,12 +24,12 @@ import {
   addNextOccurrence,
   applyEditsAtRanges,
   autocloseTyped,
+  type BracketContextProvider,
   expandLines,
   findMatchingBracket,
   indentSelection,
   inferIndent,
   outdentSelection,
-  type BracketContextProvider,
 } from './editable_area_logic.ts';
 import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
 

@@ -78,6 +78,18 @@ namespace fxe::net {
     p.file = true;
     parts_.push_back(std::move(p));
   }
+  void multipart_form::add_file_stream(std::string name, std::string filename,
+                                       std::string content_type, upload_body_source body_source,
+                                       std::optional<std::int64_t> size_hint) {
+    part p;
+    p.name = std::move(name);
+    p.filename = std::move(filename);
+    p.content_type = std::move(content_type);
+    p.body_source = std::move(body_source);
+    p.size_hint = size_hint;
+    p.file = true;
+    parts_.push_back(std::move(p));
+  }
 
   namespace {
     const char* http_error_code_name(http_error code) {
@@ -176,6 +188,10 @@ namespace fxe::net {
       return origin_key{scheme + "://" + host + ":" + std::to_string(port)};
     }
 
+    struct multipart_stream_state {
+      upload_body_source body_source;
+    };
+
     struct in_flight {
       http_request_id id;
       CURL* easy = nullptr;
@@ -184,8 +200,9 @@ namespace fxe::net {
       http_response resp;
       std::string body_buf;
       std::string upload_buf;
-      std::function<std::pair<std::size_t, bool>(unsigned char* ptr, std::size_t max_bytes)>
-          body_source;
+      upload_body_source body_source;
+      multipart_form multipart;
+      std::vector<std::unique_ptr<multipart_stream_state>> multipart_streams;
       std::string request_url;
       std::string origin;
       std::vector<std::string> set_cookie_headers;
@@ -367,6 +384,24 @@ namespace fxe::net {
         curl_easy_setopt(easy, CURLOPT_PROXYUSERPWD, fl.proxy_userpwd.c_str());
     }
 
+    static usize mime_read_cb(char* ptr, usize size, usize nmemb, void* user) {
+      auto* state = static_cast<multipart_stream_state*>(user);
+      if (!state || !state->body_source)
+        return 0;
+      const usize want = size * nmemb;
+      auto [n, done] = state->body_source(reinterpret_cast<unsigned char*>(ptr), want);
+      if (n == 0)
+        return done ? 0 : CURL_READFUNC_PAUSE;
+      return n;
+    }
+
+    static int mime_seek_cb(void* user, curl_off_t offset, int origin) {
+      (void)user;
+      (void)offset;
+      (void)origin;
+      return CURL_SEEKFUNC_CANTSEEK;
+    }
+
     bool configure_multipart(CURL* easy, in_flight& fl, const multipart_form& multipart) {
       if (multipart.empty())
         return false;
@@ -382,7 +417,18 @@ namespace fxe::net {
           curl_mime_filename(part, p.filename.c_str());
           if (!p.content_type.empty())
             curl_mime_type(part, p.content_type.c_str());
-          curl_mime_data(part, p.bytes.data(), p.bytes.size());
+          if (p.body_source) {
+            auto stream_state = std::make_unique<multipart_stream_state>();
+            stream_state->body_source = p.body_source;
+            auto* raw_stream_state = stream_state.get();
+            fl.multipart_streams.push_back(std::move(stream_state));
+            const curl_off_t size_hint =
+                p.size_hint.has_value() ? static_cast<curl_off_t>(*p.size_hint) : -1;
+            curl_mime_data_cb(part, size_hint, mime_read_cb, mime_seek_cb, nullptr,
+                              raw_stream_state);
+          } else {
+            curl_mime_data(part, p.bytes.data(), p.bytes.size());
+          }
         } else {
           curl_mime_data(part, p.value.c_str(), p.value.size());
         }
@@ -569,6 +615,7 @@ namespace fxe::net {
       fl->request_url = req.url;
       fl->origin = std::move(origin);
       fl->upload_buf = std::move(req.body);
+      fl->multipart = std::move(req.multipart);
       fl->body_source = std::move(req.body_source);
       fl->easy = curl_easy_init();
       if (!fl->easy) {
@@ -616,8 +663,8 @@ namespace fxe::net {
       }
 
       const std::string& m = req.method;
-      if (!req.multipart.empty()) {
-        if (!configure_multipart(fl->easy, *fl, req.multipart)) {
+      if (!fl->multipart.empty()) {
+        if (!configure_multipart(fl->easy, *fl, fl->multipart)) {
           auto fail_cb = std::move(fl->cb);
           cleanup_in_flight(fl);
           reject_request(std::move(fail_cb), http_error::unknown, "curl_mime_init failed");

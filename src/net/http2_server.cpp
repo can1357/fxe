@@ -11,6 +11,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <future>
 #include <fxe/types.hpp>
 #include <map>
 #include <memory>
@@ -51,6 +52,11 @@ namespace fxe::net {
              name == "keep-alive" || name == "proxy-connection" || name == "transfer-encoding";
     }
 
+    bool is_forbidden_user_header(std::string_view name) {
+      return name == ":method" || name == ":path" || name == ":scheme" || name == ":authority" ||
+             is_connection_specific(name);
+    }
+
     nghttp2_nv make_nv(const std::string& name, const std::string& value) {
       return nghttp2_nv{reinterpret_cast<u8*>(const_cast<char*>(name.data())),
                         reinterpret_cast<u8*>(const_cast<char*>(value.data())), name.size(),
@@ -75,6 +81,16 @@ namespace fxe::net {
       return entries;
     }
 
+    std::optional<std::string>
+    find_header_value(const std::vector<std::pair<std::string, std::string>>& headers,
+                      std::string_view name) {
+      for (const auto& [header_name, header_value] : headers) {
+        if (lower_ascii(header_name) == name)
+          return header_value;
+      }
+      return std::nullopt;
+    }
+
     struct response_slot {
       std::mutex mutex;
       std::condition_variable cv;
@@ -85,6 +101,8 @@ namespace fxe::net {
       i32 stream_id = 0;
       http2_response response;
       std::function<bool(i32, u32)> cancel_cb;
+      std::function<i32(const http2_request&, const http2_response&, std::string&)> push_cb;
+      std::function<bool(i32, std::string&)> set_window_cb;
     };
 
     struct queued_request {
@@ -149,6 +167,28 @@ namespace fxe::net {
         return true;
       }
 
+      i32 submit_push_promise(i32 parent_stream_id, const http2_request& promised_request,
+                              const http2_response& promised_response, std::string& err) override {
+        clear_last_error();
+        err.clear();
+        std::shared_ptr<response_slot> slot;
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          auto it = slots_by_stream_.find(parent_stream_id);
+          if (it != slots_by_stream_.end())
+            slot = it->second;
+        }
+        if (!slot || !slot->push_cb) {
+          err = "unknown HTTP/2 stream id";
+          set_last_error(err);
+          return -1;
+        }
+        const i32 pushed_stream_id = slot->push_cb(promised_request, promised_response, err);
+        if (pushed_stream_id < 0 && err.empty())
+          err = last_error();
+        return pushed_stream_id;
+      }
+
       bool cancel(i32 stream_id, u32 error_code = NGHTTP2_CANCEL) override {
         clear_last_error();
         std::shared_ptr<response_slot> slot;
@@ -184,9 +224,8 @@ namespace fxe::net {
         std::vector<std::shared_ptr<response_slot>> slots;
         {
           std::lock_guard<std::mutex> lock(mutex_);
-          for (const auto& [_, slot] : slots_by_request_) {
+          for (const auto& [_, slot] : slots_by_request_)
             slots.push_back(slot);
-          }
           slots_by_request_.clear();
           slots_by_stream_.clear();
           queue_.clear();
@@ -209,6 +248,33 @@ namespace fxe::net {
         return last_error_;
       }
 
+      void set_on_data_consumed(on_data_consumed handler) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        on_data_consumed_ = std::move(handler);
+      }
+
+      void set_stream_window(i32 stream_id, i32 window_size) override {
+        clear_last_error();
+        std::shared_ptr<response_slot> slot;
+        {
+          std::lock_guard<std::mutex> lock(mutex_);
+          auto it = slots_by_stream_.find(stream_id);
+          if (it != slots_by_stream_.end())
+            slot = it->second;
+        }
+        if (!slot || !slot->set_window_cb) {
+          set_last_error("unknown HTTP/2 stream id");
+          return;
+        }
+        std::string err;
+        if (!slot->set_window_cb(window_size, err)) {
+          if (err.empty())
+            err = last_error();
+          if (!err.empty())
+            set_last_error(err);
+        }
+      }
+
       bool is_closed() const {
         return closed_.load();
       }
@@ -223,8 +289,15 @@ namespace fxe::net {
         last_error_.clear();
       }
 
-      std::shared_ptr<response_slot> enqueue(http2_incoming_request request,
-                                             std::function<bool(i32, u32)> cancel_cb) {
+      on_data_consumed data_consumed_handler() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return on_data_consumed_;
+      }
+
+      std::shared_ptr<response_slot>
+      enqueue(http2_incoming_request request, std::function<bool(i32, u32)> cancel_cb,
+              std::function<i32(const http2_request&, const http2_response&, std::string&)> push_cb,
+              std::function<bool(i32, std::string&)> set_window_cb) {
         auto slot = std::make_shared<response_slot>();
         {
           std::lock_guard<std::mutex> lock(mutex_);
@@ -232,6 +305,8 @@ namespace fxe::net {
           slot->request_id = request.id;
           slot->stream_id = request.stream_id;
           slot->cancel_cb = std::move(cancel_cb);
+          slot->push_cb = std::move(push_cb);
+          slot->set_window_cb = std::move(set_window_cb);
           slots_by_request_[request.id] = slot;
           slots_by_stream_[request.stream_id] = slot;
           queue_.push_back(queued_request{std::move(request), slot});
@@ -274,6 +349,7 @@ namespace fxe::net {
         }
 
         void run() {
+          session_thread_id_ = std::this_thread::get_id();
           if (nghttp2_session_callbacks_new(&callbacks_) != 0)
             return;
           nghttp2_session_callbacks_set_send_callback(callbacks_, send_callback);
@@ -283,7 +359,10 @@ namespace fxe::net {
           nghttp2_session_callbacks_set_on_data_chunk_recv_callback(callbacks_, on_data_chunk);
           nghttp2_session_callbacks_set_on_frame_recv_callback(callbacks_, on_frame_recv);
           nghttp2_session_callbacks_set_on_stream_close_callback(callbacks_, on_stream_close);
-          if (nghttp2_session_server_new(&session_, callbacks_, this) != 0)
+          nghttp2_option_new(&option_);
+          if (option_)
+            nghttp2_option_set_no_auto_window_update(option_, 1);
+          if (nghttp2_session_server_new2(&session_, callbacks_, this, option_) != 0)
             return;
           const auto entries = settings_entries(owner_.settings_);
           {
@@ -297,6 +376,11 @@ namespace fxe::net {
             }
             if (!flush_locked())
               return;
+            if (owner_.settings_.stream_max_recv_window_size &&
+                !set_local_window_size_locked(
+                    0, static_cast<i32>(*owner_.settings_.stream_max_recv_window_size),
+                    "set HTTP/2 server connection window"))
+              return;
           }
 
           while (!owner_.is_closed()) {
@@ -306,15 +390,19 @@ namespace fxe::net {
               std::lock_guard<std::mutex> session_lock(session_mutex_);
               if (!session_)
                 break;
+              process_pending_tasks_locked();
               rv = nghttp2_session_recv(session_);
               if (rv == NGHTTP2_ERR_EOF) {
                 stop = true;
               } else if (rv < 0 && rv != NGHTTP2_ERR_WOULDBLOCK) {
                 owner_.set_last_error(describe_nghttp2_error(rv, "receive HTTP/2 frames"));
                 stop = true;
-              } else if (!flush_locked()) {
-                owner_.set_last_error("send HTTP/2 frames failed");
-                stop = true;
+              } else {
+                process_pending_tasks_locked();
+                if (!flush_locked()) {
+                  owner_.set_last_error("send HTTP/2 frames failed");
+                  stop = true;
+                }
               }
             }
             for (i32 stream_id : owner_.expired_streams())
@@ -335,6 +423,59 @@ namespace fxe::net {
             return false;
           }
           return flush_locked();
+        }
+
+        i32 submit_push_promise(i32 parent_stream_id, const http2_request& promised_request,
+                                const http2_response& promised_response, std::string& err) {
+          if (std::this_thread::get_id() == session_thread_id_)
+            return submit_push_promise_locked(parent_stream_id, promised_request, promised_response,
+                                              err);
+
+          auto promise = std::make_shared<std::promise<i32>>();
+          auto future = promise->get_future();
+          {
+            std::lock_guard<std::mutex> session_lock(session_mutex_);
+            if (!session_) {
+              err = "HTTP/2 session is closed";
+              owner_.set_last_error(err);
+              return -1;
+            }
+            pending_tasks_.emplace_back([this, promise, parent_stream_id, promised_request,
+                                         promised_response, &err]() mutable {
+              promise->set_value(submit_push_promise_locked(parent_stream_id, promised_request,
+                                                            promised_response, err));
+            });
+          }
+          return future.get();
+        }
+
+        bool set_stream_window(i32 stream_id, i32 window_size, std::string& err) {
+          if (std::this_thread::get_id() == session_thread_id_) {
+            const bool ok = set_local_window_size_locked(stream_id, window_size,
+                                                         "set HTTP/2 server stream window");
+            if (!ok)
+              err = owner_.last_error();
+            return ok;
+          }
+
+          auto promise = std::make_shared<std::promise<bool>>();
+          auto future = promise->get_future();
+          {
+            std::lock_guard<std::mutex> session_lock(session_mutex_);
+            if (!session_) {
+              err = "HTTP/2 session is closed";
+              owner_.set_last_error(err);
+              return false;
+            }
+            pending_tasks_.emplace_back([this, promise, stream_id, window_size, &err]() mutable {
+              const bool ok = set_local_window_size_locked(stream_id, window_size,
+                                                           "set HTTP/2 server stream window");
+              if (!ok)
+                err = owner_.last_error();
+              promise->set_value(ok);
+            });
+          }
+          return future.get();
         }
 
       private:
@@ -386,10 +527,16 @@ namespace fxe::net {
           return 0;
         }
 
-        static int on_data_chunk(nghttp2_session*, u8, i32 stream_id, const u8* data, usize len,
-                                 void* user_data) {
+        static int on_data_chunk(nghttp2_session* session, u8, i32 stream_id, const u8* data,
+                                 usize len, void* user_data) {
           auto* self = static_cast<session_worker*>(user_data);
           self->requests_[stream_id].body.append(reinterpret_cast<const char*>(data), len);
+          const int consume_rv = nghttp2_session_consume(session, stream_id, len);
+          if (consume_rv != 0)
+            self->owner_.set_last_error(describe_nghttp2_error(consume_rv, "consume HTTP/2 data"));
+          auto callback = self->owner_.data_consumed_handler();
+          if (callback)
+            callback(stream_id, len);
           return 0;
         }
 
@@ -441,19 +588,30 @@ namespace fxe::net {
             request.method = "GET";
           if (request.path.empty())
             request.path = "/";
-          auto slot = owner_.enqueue(std::move(request), [this](i32 stream_id, u32 error_code) {
-            return cancel_stream(stream_id, error_code);
-          });
+          auto slot = owner_.enqueue(
+              std::move(request),
+              [this](i32 stream_id, u32 error_code) {
+                return cancel_stream(stream_id, error_code);
+              },
+              [this](const http2_request& promised_request, const http2_response& promised_response,
+                     std::string& err) {
+                return submit_push_promise(current_stream_id_, promised_request, promised_response,
+                                           err);
+              },
+              [this](i32 window_size, std::string& err) {
+                return set_stream_window(current_stream_id_, window_size, err);
+              });
           std::unique_lock<std::mutex> lock(slot->mutex);
           slot->cv.wait(lock, [&] { return slot->ready || slot->closed || owner_.is_closed(); });
           if (!slot->ready)
             return false;
           auto response = slot->response;
           lock.unlock();
-          return submit_response(response);
+          return submit_response(current_stream_id_, response, "submit HTTP/2 response");
         }
 
-        bool submit_response(const http2_response& response) {
+        bool submit_response(i32 stream_id, const http2_response& response,
+                             std::string_view action) {
           std::vector<std::pair<std::string, std::string>> storage;
           storage.emplace_back(":status",
                                std::to_string(response.status == 0 ? 200 : response.status));
@@ -475,17 +633,90 @@ namespace fxe::net {
           nghttp2_data_provider provider{};
           nghttp2_data_provider* provider_ptr = nullptr;
           if (!response.body.empty()) {
-            response_bodies_[current_stream_id_] = body_state{response.body, 0};
+            response_bodies_[stream_id] = body_state{response.body, 0};
             provider.read_callback = response_body_read;
             provider_ptr = &provider;
           }
-          const int rv = nghttp2_submit_response(session_, current_stream_id_, nva.data(),
-                                                 nva.size(), provider_ptr);
+          const int rv =
+              nghttp2_submit_response(session_, stream_id, nva.data(), nva.size(), provider_ptr);
           if (rv != 0) {
-            owner_.set_last_error(describe_nghttp2_error(rv, "submit HTTP/2 response"));
+            owner_.set_last_error(describe_nghttp2_error(rv, action));
+            response_bodies_.erase(stream_id);
             return false;
           }
           return flush_locked();
+        }
+
+        i32 submit_push_promise_locked(i32 parent_stream_id, const http2_request& promised_request,
+                                       const http2_response& promised_response, std::string& err) {
+          err.clear();
+          if (!session_) {
+            err = "HTTP/2 session is closed";
+            owner_.set_last_error(err);
+            return -1;
+          }
+          if (nghttp2_session_get_remote_settings(session_, NGHTTP2_SETTINGS_ENABLE_PUSH) == 0) {
+            err = "peer disabled push";
+            owner_.set_last_error(err);
+            return -1;
+          }
+
+          const std::string method =
+              promised_request.method.empty() ? "GET" : promised_request.method;
+          const std::string path = promised_request.path.empty() ? "/" : promised_request.path;
+          const std::string scheme =
+              find_header_value(promised_request.headers, ":scheme").value_or("https");
+          auto authority = find_header_value(promised_request.headers, ":authority");
+          if (!authority)
+            authority = find_header_value(promised_request.headers, "host");
+          if (!authority || authority->empty()) {
+            err = "push promise requires :authority header";
+            owner_.set_last_error(err);
+            return -1;
+          }
+
+          std::vector<std::pair<std::string, std::string>> storage;
+          storage.emplace_back(":method", method);
+          storage.emplace_back(":path", path);
+          storage.emplace_back(":scheme", scheme);
+          storage.emplace_back(":authority", *authority);
+          for (const auto& [name, value] : promised_request.headers) {
+            auto lowered = lower_ascii(name);
+            if (lowered == ":scheme" || lowered == ":authority")
+              continue;
+            if (is_forbidden_user_header(lowered))
+              continue;
+            storage.emplace_back(std::move(lowered), value);
+          }
+
+          std::vector<nghttp2_nv> request_nva;
+          request_nva.reserve(storage.size());
+          for (const auto& [name, value] : storage)
+            request_nva.push_back(make_nv(name, value));
+
+          const i32 promised_stream_id =
+              nghttp2_submit_push_promise(session_, NGHTTP2_FLAG_NONE, parent_stream_id,
+                                          request_nva.data(), request_nva.size(), nullptr);
+          if (promised_stream_id < 0) {
+            err = describe_nghttp2_error(promised_stream_id, "submit HTTP/2 push promise");
+            owner_.set_last_error(err);
+            return -1;
+          }
+
+          if (!submit_response(promised_stream_id, promised_response,
+                               "submit HTTP/2 pushed response")) {
+            err = owner_.last_error();
+            return -1;
+          }
+          return promised_stream_id;
+        }
+
+        void process_pending_tasks_locked() {
+          while (!pending_tasks_.empty()) {
+            auto task = std::move(pending_tasks_.front());
+            pending_tasks_.pop_front();
+            task();
+          }
         }
 
         bool flush_locked() {
@@ -499,12 +730,26 @@ namespace fxe::net {
           return true;
         }
 
+        bool set_local_window_size_locked(i32 stream_id, i32 window_size, std::string_view action) {
+          if (!session_)
+            return false;
+          const int rv = nghttp2_session_set_local_window_size(session_, NGHTTP2_FLAG_NONE,
+                                                               stream_id, window_size);
+          if (rv != 0) {
+            owner_.set_last_error(describe_nghttp2_error(rv, action));
+            return false;
+          }
+          return flush_locked();
+        }
+
         bool handle_request_with_stream(http2_incoming_request request) {
           current_stream_id_ = request.stream_id;
           return handle_request(std::move(request));
         }
 
         void cleanup() {
+          std::lock_guard<std::mutex> session_lock(session_mutex_);
+          process_pending_tasks_locked();
           if (session_) {
             nghttp2_session_del(session_);
             session_ = nullptr;
@@ -513,6 +758,10 @@ namespace fxe::net {
             nghttp2_session_callbacks_del(callbacks_);
             callbacks_ = nullptr;
           }
+          if (option_) {
+            nghttp2_option_del(option_);
+            option_ = nullptr;
+          }
           if (stream_)
             stream_->close();
         }
@@ -520,8 +769,11 @@ namespace fxe::net {
         http2_server_impl& owner_;
         std::unique_ptr<tls_client> stream_;
         nghttp2_session_callbacks* callbacks_ = nullptr;
+        nghttp2_option* option_ = nullptr;
         nghttp2_session* session_ = nullptr;
         std::mutex session_mutex_;
+        std::thread::id session_thread_id_{};
+        std::deque<std::function<void()>> pending_tasks_;
         std::map<i32, http2_incoming_request> requests_;
         std::map<i32, body_state> response_bodies_;
         i32 current_stream_id_ = 0;
@@ -585,6 +837,7 @@ namespace fxe::net {
       u64 next_request_id_ = 1;
       std::thread accept_thread_;
       std::vector<std::thread> workers_;
+      on_data_consumed on_data_consumed_;
       mutable std::string last_error_;
     };
   } // namespace
