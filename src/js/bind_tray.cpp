@@ -199,19 +199,26 @@ namespace fxe::js {
       info.GetReturnValue().Set(
           Function::New(ctx, tray_disposer_cb, to_v8(iso, token)).ToLocalChecked());
     }
+
+    void tray_constructor_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto tpl = FunctionTemplate::New(iso, tray_constructor);
+      tpl->SetClassName("Tray"_v8(iso));
+      tpl->InstanceTemplate()->SetInternalFieldCount(1);
+      auto proto = tpl->PrototypeTemplate();
+      proto->Set(iso, "setMenu", FunctionTemplate::New(iso, tray_set_menu_cb));
+      proto->Set(iso, "setImage", FunctionTemplate::New(iso, tray_set_image_cb));
+      proto->Set(iso, "setTitle", FunctionTemplate::New(iso, tray_set_title_cb));
+      proto->Set(iso, "setToolTip", FunctionTemplate::New(iso, tray_set_tooltip_cb));
+      proto->Set(iso, "on", FunctionTemplate::New(iso, tray_on_cb));
+      proto->Set(iso, "destroy", FunctionTemplate::New(iso, tray_destroy_cb));
+      info.GetReturnValue().Set(tpl->GetFunction(ctx).ToLocalChecked());
+    }
   } // namespace
 
   void install_tray_global(Isolate* iso, Local<ObjectTemplate> global) {
-    auto tpl = FunctionTemplate::New(iso, tray_constructor);
-    tpl->SetClassName("Tray"_v8(iso));
-    tpl->InstanceTemplate()->SetInternalFieldCount(1);
-    auto proto = tpl->PrototypeTemplate();
-    proto->Set(iso, "setMenu", FunctionTemplate::New(iso, tray_set_menu_cb));
-    proto->Set(iso, "setImage", FunctionTemplate::New(iso, tray_set_image_cb));
-    proto->Set(iso, "setTitle", FunctionTemplate::New(iso, tray_set_title_cb));
-    proto->Set(iso, "setToolTip", FunctionTemplate::New(iso, tray_set_tooltip_cb));
-    proto->Set(iso, "on", FunctionTemplate::New(iso, tray_on_cb));
-    proto->Set(iso, "destroy", FunctionTemplate::New(iso, tray_destroy_cb));
-    global->Set(iso, "Tray", tpl);
+    global->SetLazyDataProperty("Tray"_v8(iso), tray_constructor_getter);
   }
 } // namespace fxe::js

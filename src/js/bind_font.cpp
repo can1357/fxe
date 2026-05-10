@@ -142,6 +142,17 @@ namespace fxe::js {
       }
       info.GetReturnValue().Set(0_v8(iso));
     }
+    void font_namespace_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "load"_v8(iso), Function::New(ctx, s_load).ToLocalChecked());
+      (void)ns->Set(ctx, "builtin"_v8(iso), Function::New(ctx, s_builtin).ToLocalChecked());
+      (void)ns->Set(ctx, "dispose"_v8(iso), Function::New(ctx, s_dispose).ToLocalChecked());
+      (void)ns->Set(ctx, "system"_v8(iso), Function::New(ctx, s_system).ToLocalChecked());
+      info.GetReturnValue().Set(ns);
+    }
   } // namespace
 
   const fxe::font_info* resolve_font_id(u32 /*font_id*/) {
@@ -150,12 +161,6 @@ namespace fxe::js {
   }
 
   void install_font_global(Isolate* iso, Local<ObjectTemplate> global) {
-    HandleScope hs(iso);
-    auto ns = ObjectTemplate::New(iso);
-    ns->Set(iso, "load", FunctionTemplate::New(iso, s_load));
-    ns->Set(iso, "builtin", FunctionTemplate::New(iso, s_builtin));
-    ns->Set(iso, "dispose", FunctionTemplate::New(iso, s_dispose));
-    ns->Set(iso, "system", FunctionTemplate::New(iso, s_system));
-    global->Set(iso, "Font", ns);
+    global->SetLazyDataProperty("Font"_v8(iso), font_namespace_getter);
   }
 } // namespace fxe::js

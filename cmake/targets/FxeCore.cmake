@@ -31,6 +31,10 @@ target_include_directories(fxe_font PUBLIC include)
 target_link_libraries(fxe_font PUBLIC fxe_deps)
 target_link_libraries(fxe_font PUBLIC fxe_log)
 target_compile_features(fxe_font PUBLIC cxx_std_20)
+if(TARGET fxe_runtime)
+    target_link_libraries(fxe_font PUBLIC fxe_runtime)
+endif()
+
 
 # Embed JetBrainsMono Nerd Font Mono (SIL OFL-1.1, vendored under
 # assets/fonts/) so apps get Nerd Font icon coverage without bundling

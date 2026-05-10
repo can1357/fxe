@@ -63,6 +63,11 @@ namespace fxe::runtime {
     bool verify_platform_code_signature(const std::filesystem::path& artifact,
                                         std::string_view expected_authority,
                                         std::string_view expected_subject, std::string& error_out);
+    // Internal: testing only.
+    void set_platform_swap_destination_override_for_tests(
+        const std::optional<std::filesystem::path>& path);
+    // Internal: testing only.
+    const std::vector<std::string>& last_platform_swap_argv();
   } // namespace detail
 
   // Parse a Sparkle appcast RSS/XML document into update_manifest_v2 metadata. The parser
@@ -95,9 +100,10 @@ namespace fxe::runtime {
     // Stage: write bytes to tmpdir, verify sha256 + signature, atomic-rename into staging dir.
     static std::optional<std::string> stage(const update_descriptor& d, std::string& error_out);
 
-    // v1 apply records the pending marker as consumed; platform relauncher swap is intentionally
-    // later.
+    // Consume the staged marker and, on macOS bundled-app updates, hand off the bundle swap.
     static bool apply_pending(std::string& error_out);
+    static bool perform_platform_swap(const std::string& staged_path, std::string& error_out,
+                                      bool dry_run = false);
 
     // After apply_pending(), the next launch must call mark_ready() within a
     // configurable health window or the launcher rolls back. Returns true if a

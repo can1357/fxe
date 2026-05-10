@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <fxe/string_utils.hpp>
 #include <fxe/types.hpp>
@@ -23,10 +24,13 @@
 #include <unordered_set>
 
 #ifndef _WIN32
+#include <signal.h>
+#include <spawn.h>
 #include <sys/wait.h>
-#endif
-#if defined(__linux__)
 #include <unistd.h>
+#endif
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
 #endif
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -518,6 +522,50 @@ namespace fxe::runtime {
       out.push_back('\'');
       return out;
     }
+    std::optional<std::filesystem::path>& platform_swap_destination_override() {
+      static std::optional<std::filesystem::path> path;
+      return path;
+    }
+
+    std::vector<std::string>& last_platform_swap_argv_storage() {
+      static std::vector<std::string> argv;
+      return argv;
+    }
+
+    bool path_looks_like_app_bundle(const std::filesystem::path& path) {
+      return path.extension() == ".app";
+    }
+
+#ifdef __APPLE__
+    std::optional<std::filesystem::path> current_executable_path() {
+      u32 size = 0;
+      if (_NSGetExecutablePath(nullptr, &size) != -1 || size == 0)
+        return std::nullopt;
+      std::vector<char> buf(size);
+      if (_NSGetExecutablePath(buf.data(), &size) != 0)
+        return std::nullopt;
+      std::error_code ec;
+      auto resolved = std::filesystem::weakly_canonical(std::filesystem::path(buf.data()), ec);
+      if (ec)
+        return std::filesystem::path(buf.data());
+      return resolved;
+    }
+
+    std::optional<std::filesystem::path> current_bundle_path() {
+      if (auto override_path = platform_swap_destination_override(); override_path)
+        return *override_path;
+      auto exe = current_executable_path();
+      if (!exe)
+        return std::nullopt;
+      for (std::filesystem::path cur = exe->parent_path(); !cur.empty(); cur = cur.parent_path()) {
+        if (path_looks_like_app_bundle(cur))
+          return cur;
+        if (cur == cur.parent_path())
+          break;
+      }
+      return std::nullopt;
+    }
+#endif
 
     std::string run_command_capture(const std::string& command, int* exit_code_out = nullptr) {
       std::array<char, 256> buffer{};
@@ -1343,6 +1391,79 @@ namespace fxe::runtime {
     return final_path.string();
   }
 
+  void detail::set_platform_swap_destination_override_for_tests(
+      const std::optional<std::filesystem::path>& path) {
+    platform_swap_destination_override() = path;
+  }
+
+  const std::vector<std::string>& detail::last_platform_swap_argv() {
+    return last_platform_swap_argv_storage();
+  }
+
+  bool updater::perform_platform_swap(const std::string& staged_path, std::string& error_out,
+                                      bool dry_run) {
+    error_out.clear();
+    auto& argv_out = last_platform_swap_argv_storage();
+    argv_out.clear();
+#ifdef __APPLE__
+    const std::filesystem::path staged(staged_path);
+    if (!path_looks_like_app_bundle(staged))
+      return true;
+    auto destination = current_bundle_path();
+    if (!destination) {
+      error_out = "failed to resolve running app bundle destination for staged swap";
+      return false;
+    }
+    std::error_code ec;
+    const std::filesystem::path staged_resolved = std::filesystem::weakly_canonical(staged, ec);
+    const std::filesystem::path staged_final = ec ? staged : staged_resolved;
+    ec.clear();
+    const std::filesystem::path dest_resolved = std::filesystem::weakly_canonical(*destination, ec);
+    const std::filesystem::path dest_final = ec ? *destination : dest_resolved;
+    const std::string script = std::format("while kill -0 {} 2>/dev/null; do /bin/sleep 0.1; done; "
+                                           "/bin/mv -f {} {} && /usr/bin/open {}",
+                                           static_cast<i64>(::getpid()), shell_quote(staged_final),
+                                           shell_quote(dest_final), shell_quote(dest_final));
+    argv_out = {"/bin/sh", "-c", script};
+    if (dry_run)
+      return true;
+    std::array<char*, 4> argv = {
+        argv_out[0].data(),
+        argv_out[1].data(),
+        argv_out[2].data(),
+        nullptr,
+    };
+    posix_spawnattr_t attr;
+    int rv = posix_spawnattr_init(&attr);
+    if (rv != 0) {
+      error_out = "posix_spawnattr_init failed: " + std::system_category().message(rv);
+      return false;
+    }
+#ifdef POSIX_SPAWN_SETSID
+    rv = posix_spawnattr_setflags(&attr, static_cast<short>(POSIX_SPAWN_SETSID));
+    if (rv != 0) {
+      posix_spawnattr_destroy(&attr);
+      error_out = "posix_spawnattr_setflags failed: " + std::system_category().message(rv);
+      return false;
+    }
+#endif
+    char* const envp[] = {nullptr};
+    [[maybe_unused]] pid_t child_pid = 0;
+    rv = posix_spawn(&child_pid, "/bin/sh", nullptr, &attr, argv.data(), envp);
+    posix_spawnattr_destroy(&attr);
+    if (rv != 0) {
+      error_out = "posix_spawn failed: " + std::system_category().message(rv);
+      return false;
+    }
+    return true;
+#else
+    (void)staged_path;
+    (void)dry_run;
+    // Non-macOS still uses the legacy in-process marker transition; platform swap stays unchanged.
+    return true;
+#endif
+  }
+
   bool updater::apply_pending(std::string& error_out) {
     const auto root = updates_root();
     std::error_code ec;
@@ -1355,6 +1476,7 @@ namespace fxe::runtime {
         continue;
       const auto marker = entry.path() / ".staged";
       if (std::filesystem::exists(marker, ec)) {
+        const std::filesystem::path staged_payload = read_first_line(marker);
         const auto pending = entry.path() / ".pending";
         std::filesystem::rename(marker, pending, ec);
         if (ec) {
@@ -1364,7 +1486,18 @@ namespace fxe::runtime {
         const std::string version = entry.path().filename().string();
         if (!record_installed_version(root, version, error_out))
           return false;
-        return write_pending_first_launch_flag(root, version, error_out);
+        if (!write_pending_first_launch_flag(root, version, error_out))
+          return false;
+#ifdef __APPLE__
+        if (path_looks_like_app_bundle(staged_payload) &&
+            staged_payload.parent_path() == entry.path() &&
+            !perform_platform_swap(staged_payload.string(), error_out))
+          return false;
+#else
+        // Windows/Linux keep the legacy marker-only path until their swap helpers land.
+        (void)staged_payload;
+#endif
+        return true;
       }
     }
     return true;

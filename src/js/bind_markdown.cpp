@@ -189,8 +189,10 @@ namespace fxe::js {
 
     // Markdown.FLAG_* mirrors fxe::markdown::parse_flags so JS callers can
     // assemble a custom flag set without depending on magic numbers.
-    void install_flag_constants(Isolate* iso, Local<ObjectTemplate> ns) {
-      auto add = [&](const char* name, uint32_t value) { ns->Set(iso, name, to_v8(iso, value)); };
+    void install_flag_constants(Isolate* iso, Local<Context> ctx, Local<Object> ns) {
+      auto add = [&](const char* name, u32 value) {
+        (void)ns->Set(ctx, to_v8_string(iso, name), to_v8(iso, value));
+      };
       add("FLAG_COLLAPSE_WHITESPACE", md::flag_collapse_whitespace);
       add("FLAG_PERMISSIVE_ATX_HEADERS", md::flag_permissive_atx_headers);
       add("FLAG_PERMISSIVE_URL_AUTOLINKS", md::flag_permissive_url_autolinks);
@@ -273,16 +275,22 @@ namespace fxe::js {
 #endif
     }
 
+    void markdown_namespace_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "parse"_v8(iso), Function::New(ctx, md_parse).ToLocalChecked());
+      (void)ns->Set(ctx, "highlight"_v8(iso), Function::New(ctx, md_highlight).ToLocalChecked());
+      (void)ns->Set(ctx, "highlightLanguages"_v8(iso),
+                    Function::New(ctx, md_highlight_languages).ToLocalChecked());
+      install_flag_constants(iso, ctx, ns);
+      info.GetReturnValue().Set(ns);
+    }
   } // namespace
 
   void install_markdown_global(Isolate* iso, Local<ObjectTemplate> global) {
-    HandleScope hs(iso);
-    auto ns = ObjectTemplate::New(iso);
-    ns->Set(iso, "parse", FunctionTemplate::New(iso, md_parse));
-    ns->Set(iso, "highlight", FunctionTemplate::New(iso, md_highlight));
-    ns->Set(iso, "highlightLanguages", FunctionTemplate::New(iso, md_highlight_languages));
-    install_flag_constants(iso, ns);
-    global->Set(iso, "Markdown", ns);
+    global->SetLazyDataProperty("Markdown"_v8(iso), markdown_namespace_getter);
   }
 
 } // namespace fxe::js

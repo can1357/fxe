@@ -9,6 +9,7 @@
 // fontconfig/CT/win32-fonts), the collection stays empty and the text path
 // degrades to a no-op.
 
+#include "../runtime/bundle_loader.hpp"
 #include <fxe/font.hpp>
 
 #include <atomic>
@@ -23,10 +24,75 @@ namespace fxe::font {
   }
 
   namespace {
-    void populate_default_collection(Collection& c) {
-      auto disc = default_discover();
+    [[nodiscard]] u32 style_weight(Style style) {
+      switch (style) {
+      case Style::regular:
+      case Style::italic:
+        return 400;
+      case Style::bold:
+      case Style::bold_italic:
+        return 700;
+      }
+      return 400;
+    }
+
+    [[nodiscard]] std::string_view style_name(Style style) {
+      switch (style) {
+      case Style::regular:
+      case Style::bold:
+        return "normal";
+      case Style::italic:
+      case Style::bold_italic:
+        return "italic";
+      }
+      return "normal";
+    }
+
+    [[nodiscard]] std::shared_ptr<Face> load_bundled_face(std::string_view family, Style style,
+                                                          f32 pixel_size) {
+      auto bundled =
+          fxe::runtime::resolve_bundled_font(family, style_weight(style), style_name(style));
+      if (!bundled)
+        return nullptr;
+      auto face = load_face_from_bytes(bundled->bytes_view, pixel_size, 0);
+      if (!face)
+        return nullptr;
+      return std::shared_ptr<Face>(std::move(face));
+    }
+
+    void add_family_candidate(Collection& c, Discover* disc, Style style, std::string_view family,
+                              f32 pixel_size, bool is_fallback, bool& added_primary) {
+      if (auto bundled = load_bundled_face(family, style, pixel_size)) {
+        if (!added_primary && !is_fallback) {
+          c.add_primary(style, std::move(bundled));
+          added_primary = true;
+        } else {
+          c.add_fallback(style, std::move(bundled));
+        }
+        return;
+      }
       if (!disc)
         return;
+      Descriptor q;
+      q.family = std::string(family);
+      q.style = style;
+      q.size_pt = pixel_size;
+      auto results = disc->find(q);
+      if (results.empty())
+        return;
+      auto& d = results.front();
+      d.style = style;
+      d.size_pt = pixel_size;
+      if (!added_primary && !is_fallback) {
+        c.add_primary(style, std::move(d));
+        added_primary = true;
+      } else {
+        c.add_fallback(style, std::move(d));
+      }
+    }
+
+    void populate_default_collection(Collection& c) {
+      auto disc = default_discover();
 
       // Style → list of preferred families. Ordered from "platform native"
       // outwards so the first hit wins.
@@ -52,24 +118,8 @@ namespace fxe::font {
       const float default_pt = 16.0f;
       for (const auto& sp : prefs) {
         bool added_primary = false;
-        for (const char* fam : sp.families) {
-          Descriptor q;
-          q.family = fam;
-          q.style = sp.style;
-          q.size_pt = default_pt;
-          auto results = disc->find(q);
-          if (results.empty())
-            continue;
-          auto& d = results.front();
-          d.style = sp.style;
-          d.size_pt = default_pt;
-          if (!added_primary) {
-            c.add_primary(sp.style, std::move(d));
-            added_primary = true;
-          } else {
-            c.add_fallback(sp.style, std::move(d));
-          }
-        }
+        for (const char* fam : sp.families)
+          add_family_candidate(c, disc.get(), sp.style, fam, default_pt, false, added_primary);
       }
 
       // Emoji fallback. Try platform-native names; let discovery do the rest.

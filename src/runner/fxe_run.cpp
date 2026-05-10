@@ -79,8 +79,10 @@
 //                    lookup; finally falls back to the build-time discovered
 //                    location baked into FXE_V8_ICUDTL_PATH.
 
+#include <fxe/color.hpp>
 #include <fxe/debug.hpp>
 #include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_host.hpp>
@@ -265,6 +267,83 @@ namespace {
       return c == '1' || c == 't' || c == 'y';
     }
     return false;
+  }
+
+  [[nodiscard]] int hex_nibble(char c) noexcept {
+    if (c >= '0' && c <= '9')
+      return c - '0';
+    if (c >= 'a' && c <= 'f')
+      return 10 + (c - 'a');
+    if (c >= 'A' && c <= 'F')
+      return 10 + (c - 'A');
+    return -1;
+  }
+  [[nodiscard]] std::optional<fxe::r8g8b8a8> parse_splash_bg(std::string_view raw) noexcept {
+    if (raw.empty())
+      return std::nullopt;
+    if (raw.front() == '#')
+      raw.remove_prefix(1);
+    if (raw.size() != 6 && raw.size() != 8)
+      return std::nullopt;
+    auto byte_at = [&](usize offset) -> int {
+      const int hi = hex_nibble(raw[offset]);
+      const int lo = hex_nibble(raw[offset + 1]);
+      return hi < 0 || lo < 0 ? -1 : ((hi << 4) | lo);
+    };
+    const int r = byte_at(0);
+    const int g = byte_at(2);
+    const int b = byte_at(4);
+    const int a = raw.size() == 8 ? byte_at(6) : 255;
+    if (r < 0 || g < 0 || b < 0 || a < 0)
+      return std::nullopt;
+    return fxe::r8g8b8a8{static_cast<u8>(r), static_cast<u8>(g), static_cast<u8>(b),
+                         static_cast<u8>(a)};
+  }
+  [[nodiscard]] bool should_show_startup_splash(const cli_options& opts) noexcept {
+    if (opts.render_overrides.override_render_surface &&
+        opts.render_overrides.render_surface == fxe::js::runner_render_surface::offscreen) {
+      return false;
+    }
+    if (opts.render_overrides.override_window_visible && !opts.render_overrides.window_visible)
+      return false;
+    return true;
+  }
+  [[nodiscard]] fxe::splash_options make_splash_options() {
+    fxe::splash_options opts;
+    if (const char* raw = std::getenv("FXE_SPLASH_BG"); raw && *raw) {
+      if (auto parsed = parse_splash_bg(raw)) {
+        opts.background = *parsed;
+      } else {
+        FXE_WARN("runner.splash", "invalid FXE_SPLASH_BG='{}'; using default {}", raw,
+                 opts.background.to_string());
+      }
+    }
+    return opts;
+  }
+  [[nodiscard]] fxe::renderer_options
+  make_splash_renderer_options(const fxe::js::runner_render_overrides& overrides) noexcept {
+    fxe::renderer_options opts;
+    if (overrides.override_multisample_count)
+      opts.multisample_count = overrides.multisample_count;
+    if (overrides.override_bloom)
+      opts.enable_bloom = overrides.enable_bloom;
+    if (overrides.override_vsync)
+      opts.vsync = overrides.vsync;
+    return opts;
+  }
+  void draw_startup_splash(fxe::window& win, fxe::renderer& renderer, const fxe::r8g8b8a8& bg) {
+    const fxe::math::vec4 clear{float(bg.r) / 255.0f, float(bg.g) / 255.0f, float(bg.b) / 255.0f,
+                                float(bg.a) / 255.0f};
+    win.set_surface_background_color(clear.x, clear.y, clear.z, clear.w);
+    renderer.set_clear_color(clear);
+    renderer.begin_frame();
+    renderer.end_frame();
+  }
+  void pump_startup_splash_redraw(fxe::window* win, fxe::renderer* renderer) {
+    if (!win || !renderer || !win->take_redraw_request())
+      return;
+    renderer->begin_frame();
+    renderer->end_frame();
   }
 
   bool apply_render_surface(cli_options& o, std::string_view value) {
@@ -840,6 +919,8 @@ namespace {
     fxe::debug::server* srv = nullptr;
     screenshot_watchdog* shot = nullptr;
     hmr_watcher* hmr = nullptr;
+    std::unique_ptr<fxe::renderer>* splash_renderer_owner = nullptr;
+    fxe::renderer* splash_renderer = nullptr;
   };
 
   void combined_pump_trampoline(void* user) {
@@ -850,6 +931,16 @@ namespace {
       cp->shot->step();
     if (cp->hmr)
       cp->hmr->step();
+    pump_startup_splash_redraw(cp->host ? cp->host->active_window() : nullptr, cp->splash_renderer);
+    if (cp->host && cp->splash_renderer_owner && cp->splash_renderer &&
+        *cp->splash_renderer_owner) {
+      auto renderers = cp->host->renderers();
+      if (renderers.size() > 1) {
+        cp->host->unregister_renderer(cp->splash_renderer);
+        cp->splash_renderer_owner->reset();
+        cp->splash_renderer = nullptr;
+      }
+    }
     close_windows_for_signal(cp->host);
   }
   bool combined_paused_trampoline(void* user) {
@@ -911,16 +1002,42 @@ int main(int argc, char** argv) {
     usage(argv[0]);
     return opts.show_usage ? 0 : 64;
   }
+  std::unique_ptr<fxe::renderer> splash_renderer;
+  fxe::window* splash_window = nullptr;
+  fxe::renderer* splash_renderer_raw = nullptr;
+  if (should_show_startup_splash(opts)) {
+    try {
+      const auto splash_opts = make_splash_options();
+      auto splash = fxe::create_splash_window(splash_opts);
+      if (splash) {
+        splash_window = splash.get();
+        splash_renderer = fxe::create_renderer(*splash_window,
+                                               make_splash_renderer_options(opts.render_overrides));
+        splash_renderer_raw = splash_renderer.get();
+        draw_startup_splash(*splash_window, *splash_renderer_raw, splash_opts.background);
+        fxe::stage_splash_window(std::move(splash));
+      }
+    } catch (const std::exception& e) {
+      FXE_WARN("runner.splash", "startup splash disabled: {}", e.what());
+      splash_window = nullptr;
+      splash_renderer.reset();
+      splash_renderer_raw = nullptr;
+      fxe::stage_splash_window({});
+    }
+  }
 
   std::string icudtl = resolve_icudtl(argv[0]);
   fxe::js::initialize(argv[0], icudtl);
-
   int status = 0;
   install_runner_signal_handlers();
   {
     fxe::js::host host;
 
     fxe::js::set_runner_render_overrides(opts.render_overrides);
+    if (splash_window)
+      host.register_window(splash_window);
+    if (splash_window && splash_renderer_raw)
+      host.register_renderer(splash_window, splash_renderer_raw);
 
     // ----- Debug server -----------------------------------------------------
     std::unique_ptr<fxe::debug::server> debug_srv;
@@ -954,6 +1071,7 @@ int main(int argc, char** argv) {
         std::fflush(stderr);
         while (debug_srv->is_paused() && requested_shutdown_signal() == 0) {
           debug_srv->pump_tasks();
+          pump_startup_splash_redraw(splash_window, splash_renderer_raw);
           close_windows_for_signal(&host);
           std::this_thread::sleep_for(std::chrono::milliseconds(20));
         }
@@ -964,7 +1082,8 @@ int main(int argc, char** argv) {
 
     // ----- Screenshot watchdog + combined pump ------------------------------
     screenshot_watchdog shot;
-    combined_pump pump_state{&host, debug_srv.get(), nullptr, nullptr};
+    combined_pump pump_state{&host,   debug_srv.get(),  nullptr,
+                             nullptr, &splash_renderer, splash_renderer_raw};
     if (opts.screenshot) {
       shot.host = &host;
       shot.debug_srv = debug_srv.get();
@@ -1189,6 +1308,12 @@ int main(int argc, char** argv) {
       host.set_console_sink(nullptr, nullptr);
       debug_srv->stop();
     }
+    if (splash_renderer) {
+      host.unregister_renderer(splash_renderer_raw);
+      splash_renderer.reset();
+      splash_renderer_raw = nullptr;
+    }
+    fxe::stage_splash_window({});
     fxe::audio::shutdown();
     fxe::js::shutdown();
     std::exit(status);

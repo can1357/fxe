@@ -1,10 +1,13 @@
 #pragma once
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "fxa_archive.hpp"
+#include <fxe/types.hpp>
 namespace fxe::runtime {
 
   // Inspect the host binary at `argv0` for an appended FXA archive trailer.
@@ -20,6 +23,10 @@ namespace fxe::runtime {
 
   // The archive name designated as the entry point. Empty if none / unmounted.
   std::string bundle_entry();
+  struct bundle_font_entry {
+    std::string virtual_name;
+    std::span<const u8> bytes_view{};
+  };
 
   // Read a virtual file. Names match those embedded by `fxe-pack`. The lookup
   // also tries a few common normalizations: leading "./" stripped, and (when
@@ -28,5 +35,9 @@ namespace fxe::runtime {
 
   // List archive names.
   std::vector<std::string> list_virtual();
+  std::vector<fxe::runtime::fxa_archive::BundledFont> bundle_fonts();
+
+  std::optional<bundle_font_entry> resolve_bundled_font(std::string_view family, u32 weight = 400,
+                                                        std::string_view style = "normal");
 
 } // namespace fxe::runtime

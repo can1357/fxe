@@ -2959,12 +2959,74 @@ namespace fxe {
 
 #endif
 
+  namespace {
+    std::mutex& staged_splash_window_mutex() {
+      static std::mutex mu;
+      return mu;
+    }
+    std::unique_ptr<window>& staged_splash_window_slot() {
+      static std::unique_ptr<window> splash;
+      return splash;
+    }
+    void apply_window_desc(window& w, const window_desc& desc) {
+      w.set_title(desc.title);
+      w.set_size(static_cast<int>(desc.width), static_cast<int>(desc.height));
+      if (desc.x != INT_MIN && desc.y != INT_MIN)
+        w.set_position(desc.x, desc.y);
+      w.set_min_size(desc.min_width, desc.min_height);
+      w.set_max_size(desc.max_width, desc.max_height);
+      w.set_resizable(desc.resizable);
+      w.set_decorated(desc.decorated);
+      w.set_always_on_top(desc.always_on_top);
+      w.set_visible(desc.visible);
+      if (desc.maximized)
+        w.maximize();
+      else if (w.is_maximized())
+        w.restore();
+      w.set_fullscreen(desc.fullscreen);
+    }
+    void apply_splash_options(window& w, const splash_options& opts) {
+      w.set_title(opts.title);
+      w.set_size(static_cast<int>(opts.width), static_cast<int>(opts.height));
+      w.set_decorated(opts.decorated);
+      w.set_title_bar_style(opts.chrome);
+      if (opts.traffic_light_position)
+        (void)w.set_traffic_light_position(opts.traffic_light_position->x,
+                                           opts.traffic_light_position->y);
+    }
+  } // namespace
+
   std::unique_ptr<window> create_window(const window_desc& desc) {
+    std::lock_guard<std::mutex> lock(staged_splash_window_mutex());
+    auto& staged = staged_splash_window_slot();
+    if (staged) {
+      apply_window_desc(*staged, desc);
+      return std::exchange(staged, nullptr);
+    }
 #if FXE_HAS_GLFW
     return std::make_unique<glfw_window>(desc);
 #else
     return std::make_unique<stub_window>(desc);
 #endif
+  }
+  std::unique_ptr<window> create_splash_window(const splash_options& opts) {
+    window_desc desc;
+    desc.width = opts.width;
+    desc.height = opts.height;
+    desc.title = opts.title;
+    desc.decorated = opts.decorated;
+    desc.visible = true;
+#if FXE_HAS_GLFW
+    auto splash = std::make_unique<glfw_window>(desc);
+#else
+    auto splash = std::make_unique<stub_window>(desc);
+#endif
+    apply_splash_options(*splash, opts);
+    return splash;
+  }
+  void stage_splash_window(std::unique_ptr<window> splash) noexcept {
+    std::lock_guard<std::mutex> lock(staged_splash_window_mutex());
+    staged_splash_window_slot() = std::move(splash);
   }
   bool fxe_supports_native_gestures() {
 #if defined(__APPLE__) || defined(_WIN32)

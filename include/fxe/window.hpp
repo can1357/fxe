@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fxe/color.hpp>
 #include <fxe/types.hpp>
 
 #include <climits>
@@ -10,8 +11,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-
-#include <cstdint>
 #include <vector>
 
 #include <fxe/math.hpp>
@@ -70,6 +69,16 @@ namespace fxe {
     hidden,
     hidden_inset,
     custom_buttons,
+  };
+
+  struct splash_options {
+    u32 width = 1280;
+    u32 height = 720;
+    std::string_view title = "fxe";
+    r8g8b8a8 background{0x1a, 0x1a, 0x1f, 0xff};
+    bool decorated = true;
+    title_bar_style chrome = title_bar_style::default_;
+    std::optional<math::ivec2> traffic_light_position;
   };
 
   enum class vibrancy_kind : u8 {
@@ -485,6 +494,8 @@ namespace fxe {
     std::vector<input_event> injected_events_;
   };
   std::unique_ptr<window> create_window(const window_desc& desc = {});
+  std::unique_ptr<window> create_splash_window(const splash_options& opts = {});
+  void stage_splash_window(std::unique_ptr<window> splash) noexcept;
   bool fxe_supports_native_gestures();
 
 #if FXE_HAS_WGPU

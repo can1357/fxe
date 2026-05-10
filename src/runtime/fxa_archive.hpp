@@ -14,6 +14,13 @@ namespace fxe::runtime::fxa_archive {
     u64 size = 0;
   };
 
+  struct BundledFont {
+    std::string family;
+    std::string virtual_path;
+    u32 weight = 400;
+    std::string style = "normal";
+  };
+
   struct ManifestMetadata {
     std::string app_name;
     std::string version;
@@ -25,6 +32,7 @@ namespace fxe::runtime::fxa_archive {
     std::string channel;
     std::string signer_secret_key_b64;
     std::string signer_public_key_b64;
+    std::vector<BundledFont> fonts;
   };
 
   struct PackOptions {
@@ -65,6 +73,9 @@ namespace fxe::runtime::fxa_archive {
     const std::string& payload_sha256() const noexcept {
       return payload_sha256_;
     }
+    const std::vector<BundledFont>& fonts() const noexcept {
+      return fonts_;
+    }
 
   private:
     std::string path_;
@@ -78,6 +89,7 @@ namespace fxe::runtime::fxa_archive {
     std::vector<u8> decompressed_payload_;
     std::unordered_map<std::string, Entry> index_;
     std::vector<std::string> names_;
+    std::vector<BundledFont> fonts_;
   };
 
 } // namespace fxe::runtime::fxa_archive

@@ -2,6 +2,7 @@
 #include "../os/os.hpp"
 
 #include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -74,13 +75,21 @@ namespace fxe::js {
         fn.Reset();
       r.by_acc.clear();
     }
+    void global_shortcut_namespace_getter(Local<Name> /*name*/,
+                                          const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "register"_v8(iso), Function::New(ctx, gs_register).ToLocalChecked());
+      (void)ns->Set(ctx, "unregister"_v8(iso), Function::New(ctx, gs_unregister).ToLocalChecked());
+      (void)ns->Set(ctx, "unregisterAll"_v8(iso),
+                    Function::New(ctx, gs_unregister_all).ToLocalChecked());
+      info.GetReturnValue().Set(ns);
+    }
   } // namespace
 
   void install_global_shortcut_global(Isolate* iso, Local<ObjectTemplate> global) {
-    auto t = ObjectTemplate::New(iso);
-    t->Set(iso, "register", FunctionTemplate::New(iso, gs_register));
-    t->Set(iso, "unregister", FunctionTemplate::New(iso, gs_unregister));
-    t->Set(iso, "unregisterAll", FunctionTemplate::New(iso, gs_unregister_all));
-    global->Set(iso, "globalShortcut", t);
+    global->SetLazyDataProperty("globalShortcut"_v8(iso), global_shortcut_namespace_getter);
   }
 } // namespace fxe::js

@@ -107,13 +107,20 @@ namespace fxe::js {
       set_prop(ctx, result, "response", idx);
       info.GetReturnValue().Set(resolved(ctx, result));
     }
+    void dialog_namespace_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "showOpenDialog"_v8(iso), Function::New(ctx, show_open).ToLocalChecked());
+      (void)ns->Set(ctx, "showSaveDialog"_v8(iso), Function::New(ctx, show_save).ToLocalChecked());
+      (void)ns->Set(ctx, "showMessageBox"_v8(iso),
+                    Function::New(ctx, show_message).ToLocalChecked());
+      info.GetReturnValue().Set(ns);
+    }
   } // namespace
 
   void install_dialog_global(Isolate* iso, Local<ObjectTemplate> global) {
-    auto t = ObjectTemplate::New(iso);
-    t->Set(iso, "showOpenDialog", FunctionTemplate::New(iso, show_open));
-    t->Set(iso, "showSaveDialog", FunctionTemplate::New(iso, show_save));
-    t->Set(iso, "showMessageBox", FunctionTemplate::New(iso, show_message));
-    global->Set(iso, "dialog", t);
+    global->SetLazyDataProperty("dialog"_v8(iso), dialog_namespace_getter);
   }
 } // namespace fxe::js

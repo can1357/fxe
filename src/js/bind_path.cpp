@@ -108,26 +108,32 @@ namespace fxe::js {
       auto p = to_std_string(iso, info[0]);
       info.GetReturnValue().Set(fs::path(p).is_absolute());
     }
+    void path_namespace_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "join"_v8(iso), Function::New(ctx, path_join).ToLocalChecked());
+      (void)ns->Set(ctx, "resolve"_v8(iso), Function::New(ctx, path_resolve).ToLocalChecked());
+      (void)ns->Set(ctx, "dirname"_v8(iso), Function::New(ctx, path_dirname).ToLocalChecked());
+      (void)ns->Set(ctx, "basename"_v8(iso), Function::New(ctx, path_basename).ToLocalChecked());
+      (void)ns->Set(ctx, "extname"_v8(iso), Function::New(ctx, path_extname).ToLocalChecked());
+      (void)ns->Set(ctx, "relative"_v8(iso), Function::New(ctx, path_relative).ToLocalChecked());
+      (void)ns->Set(ctx, "normalize"_v8(iso), Function::New(ctx, path_normalize).ToLocalChecked());
+      (void)ns->Set(ctx, "isAbsolute"_v8(iso),
+                    Function::New(ctx, path_is_absolute).ToLocalChecked());
+#if defined(_WIN32)
+      (void)ns->Set(ctx, "sep"_v8(iso), "\\"_v8(iso));
+      (void)ns->Set(ctx, "delimiter"_v8(iso), ";"_v8(iso));
+#else
+      (void)ns->Set(ctx, "sep"_v8(iso), "/"_v8(iso));
+      (void)ns->Set(ctx, "delimiter"_v8(iso), ":"_v8(iso));
+#endif
+      info.GetReturnValue().Set(ns);
+    }
   } // namespace
 
   void install_path_global(Isolate* iso, Local<ObjectTemplate> global) {
-    HandleScope hs(iso);
-    auto t = ObjectTemplate::New(iso);
-    t->Set(iso, "join", FunctionTemplate::New(iso, path_join));
-    t->Set(iso, "resolve", FunctionTemplate::New(iso, path_resolve));
-    t->Set(iso, "dirname", FunctionTemplate::New(iso, path_dirname));
-    t->Set(iso, "basename", FunctionTemplate::New(iso, path_basename));
-    t->Set(iso, "extname", FunctionTemplate::New(iso, path_extname));
-    t->Set(iso, "relative", FunctionTemplate::New(iso, path_relative));
-    t->Set(iso, "normalize", FunctionTemplate::New(iso, path_normalize));
-    t->Set(iso, "isAbsolute", FunctionTemplate::New(iso, path_is_absolute));
-#if defined(_WIN32)
-    t->Set(iso, "sep", "\\"_v8(iso));
-    t->Set(iso, "delimiter", ";"_v8(iso));
-#else
-    t->Set(iso, "sep", "/"_v8(iso));
-    t->Set(iso, "delimiter", ":"_v8(iso));
-#endif
-    global->Set(iso, "path", t);
+    global->SetLazyDataProperty("path"_v8(iso), path_namespace_getter);
   }
 } // namespace fxe::js

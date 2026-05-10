@@ -207,6 +207,54 @@ namespace fxe::runtime::fxa_archive {
     const cbor::map* cbor_map_value(const cbor::value& value) {
       return std::get_if<cbor::map>(&static_cast<const cbor::storage&>(value));
     }
+    [[nodiscard]] std::string lower_ascii(std::string_view value) {
+      std::string out;
+      out.reserve(value.size());
+      for (char ch : value)
+        out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+      return out;
+    }
+
+    [[nodiscard]] bool bundled_font_less(const BundledFont& a, const BundledFont& b) {
+      if (a.family != b.family)
+        return a.family < b.family;
+      if (a.weight != b.weight)
+        return a.weight < b.weight;
+      if (a.style != b.style)
+        return a.style < b.style;
+      return a.virtual_path < b.virtual_path;
+    }
+
+    std::optional<BundledFont> parse_bundled_font(const cbor::value& value, std::string* error) {
+      const auto* font_map = cbor_map_value(value);
+      if (!font_map) {
+        if (error)
+          *error = "archive manifest font entry must be a map";
+        return std::nullopt;
+      }
+      const auto family = cbor_text(*font_map, "family");
+      const auto path = cbor_text(*font_map, "path");
+      const auto weight = cbor_u64(*font_map, "weight");
+      const auto style = cbor_text(*font_map, "style");
+      if (!family || !path || !weight || !style || *weight == 0 || *weight > 1000u) {
+        if (error)
+          *error = "archive manifest font entry missing required fields";
+        return std::nullopt;
+      }
+      BundledFont out;
+      out.family = *family;
+      out.virtual_path = *path;
+      out.weight = static_cast<u32>(*weight);
+      out.style = lower_ascii(*style);
+      return out;
+    }
+
+    cbor::value encode_bundled_font(const BundledFont& font) {
+      return cbor::value(cbor::map{{"family", cbor::value(font.family)},
+                                   {"path", cbor::value(font.virtual_path)},
+                                   {"weight", cbor::value(uint64_t(font.weight))},
+                                   {"style", cbor::value(font.style)}});
+    }
 
     struct ParsedManifest {
       std::string compression;
@@ -214,6 +262,7 @@ namespace fxe::runtime::fxa_archive {
       std::string public_key;
       std::string signature_algorithm;
       std::vector<std::pair<std::string, Entry>> entries;
+      std::vector<BundledFont> fonts;
     };
 
     std::optional<ParsedManifest> parse_manifest(std::span<const u8> bytes, std::string* error) {
@@ -255,6 +304,15 @@ namespace fxe::runtime::fxa_archive {
         out.public_key = *text;
       if (const auto text = cbor_text(*root, "signatureAlgorithm"))
         out.signature_algorithm = *text;
+      if (const auto* fonts_value = cbor_array_value(*root, "fonts")) {
+        out.fonts.reserve(fonts_value->size());
+        for (const auto& item : *fonts_value) {
+          auto font = parse_bundled_font(item, error);
+          if (!font)
+            return std::nullopt;
+          out.fonts.push_back(std::move(*font));
+        }
+      }
       out.entries.reserve(entries_value->size());
       for (const auto& item : *entries_value) {
         const auto* entry_map = cbor_map_value(item);
@@ -359,6 +417,15 @@ namespace fxe::runtime::fxa_archive {
                                 {"size", cbor::value(uint64_t(entry.size))}}));
     }
 
+    std::vector<BundledFont> manifest_fonts = meta.fonts;
+    for (auto& font : manifest_fonts)
+      font.style = lower_ascii(font.style);
+    std::sort(manifest_fonts.begin(), manifest_fonts.end(), bundled_font_less);
+    cbor::array encoded_fonts;
+    encoded_fonts.reserve(manifest_fonts.size());
+    for (const auto& font : manifest_fonts)
+      encoded_fonts.push_back(encode_bundled_font(font));
+
     cbor::map manifest_map{{"magic", cbor::value(std::string("fxa1"))},
                            {"appName", cbor::value(meta.app_name)},
                            {"version", cbor::value(meta.version)},
@@ -367,6 +434,8 @@ namespace fxe::runtime::fxa_archive {
                            {"compression", cbor::value(compression)},
                            {"payloadSha256", cbor::value(sha256_hex(payload))},
                            {"entries", cbor::value(std::move(manifest_entries))}};
+    if (!encoded_fonts.empty())
+      manifest_map["fonts"] = cbor::value(std::move(encoded_fonts));
     if (!meta.channel.empty())
       manifest_map["channel"] = cbor::value(meta.channel);
     if (!meta.update_url.empty())
@@ -488,6 +557,7 @@ namespace fxe::runtime::fxa_archive {
       return;
     compression_ = parsed->compression;
     payload_sha256_ = parsed->payload_sha256;
+    fonts_ = parsed->fonts;
 
     signed_archive_ = (flags & k_signed_flag) != 0;
     const auto* signature = reinterpret_cast<const u8*>(trailer + 48);

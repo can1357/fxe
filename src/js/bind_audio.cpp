@@ -48,6 +48,12 @@ namespace fxe::js {
     inline constexpr unsigned int TAG_AUDIO_CAPTURE = 0x41554443u; // 'AUDC'
 
     using TplGlobal = Global<FunctionTemplate>;
+    Local<FunctionTemplate> get_or_create_sound_template(Isolate* iso);
+    Local<FunctionTemplate> get_or_create_capture_template(Isolate* iso);
+    void sound_play(const FunctionCallbackInfo<Value>& info);
+    void sound_stop(const FunctionCallbackInfo<Value>& info);
+    void sound_dispose(const FunctionCallbackInfo<Value>& info);
+    void capture_session_stop(const FunctionCallbackInfo<Value>& info);
     std::unordered_map<Isolate*, TplGlobal>& sound_tpl_table() {
       static std::unordered_map<Isolate*, TplGlobal> t;
       return t;
@@ -112,7 +118,7 @@ namespace fxe::js {
 
     Local<Object> make_sound_object(Isolate* iso, Local<Context> ctx, audio::sound_handle handle) {
       EscapableHandleScope hs(iso);
-      auto tpl = sound_tpl_table()[iso].Get(iso);
+      auto tpl = get_or_create_sound_template(iso);
       auto fn = tpl->GetFunction(ctx).ToLocalChecked();
       auto obj = fn->NewInstance(ctx).ToLocalChecked();
       auto* holder = new sound_holder{{}, handle, false};
@@ -264,7 +270,7 @@ namespace fxe::js {
     Local<Object> make_capture_object(Isolate* iso, Local<Context> ctx,
                                       std::shared_ptr<capture_holder> holder) {
       EscapableHandleScope hs(iso);
-      auto tpl = capture_tpl_table()[iso].Get(iso);
+      auto tpl = get_or_create_capture_template(iso);
       auto fn = tpl->GetFunction(ctx).ToLocalChecked();
       auto obj = fn->NewInstance(ctx).ToLocalChecked();
       auto* ref = new std::shared_ptr<capture_holder>(std::move(holder));
@@ -331,6 +337,44 @@ namespace fxe::js {
         return false;
       out = static_cast<u32>(value);
       return true;
+    }
+
+    Local<FunctionTemplate> build_sound_template(Isolate* iso) {
+      auto tpl = FunctionTemplate::New(iso, sound_constructor);
+      tpl->SetClassName("Sound"_v8(iso));
+      tpl->InstanceTemplate()->SetInternalFieldCount(2);
+      auto proto = tpl->PrototypeTemplate();
+      proto->Set(iso, "play", FunctionTemplate::New(iso, sound_play));
+      proto->Set(iso, "stop", FunctionTemplate::New(iso, sound_stop));
+      proto->Set(iso, "dispose", FunctionTemplate::New(iso, sound_dispose));
+      return tpl;
+    }
+
+    Local<FunctionTemplate> get_or_create_sound_template(Isolate* iso) {
+      auto& table = sound_tpl_table();
+      if (auto it = table.find(iso); it != table.end())
+        return it->second.Get(iso);
+      auto tpl = build_sound_template(iso);
+      table[iso].Reset(iso, tpl);
+      return tpl;
+    }
+
+    Local<FunctionTemplate> build_capture_template(Isolate* iso) {
+      auto tpl = FunctionTemplate::New(iso, capture_constructor);
+      tpl->SetClassName("CaptureSession"_v8(iso));
+      tpl->InstanceTemplate()->SetInternalFieldCount(2);
+      auto proto = tpl->PrototypeTemplate();
+      proto->Set(iso, "stop", FunctionTemplate::New(iso, capture_session_stop));
+      return tpl;
+    }
+
+    Local<FunctionTemplate> get_or_create_capture_template(Isolate* iso) {
+      auto& table = capture_tpl_table();
+      if (auto it = table.find(iso); it != table.end())
+        return it->second.Get(iso);
+      auto tpl = build_capture_template(iso);
+      table[iso].Reset(iso, tpl);
+      return tpl;
     }
 
     bool parse_capture_options(Isolate* iso, Local<Context> ctx, Local<Value> value,
@@ -644,39 +688,45 @@ namespace fxe::js {
       info.GetReturnValue().Set(make_capture_object(iso, ctx, std::move(holder)));
     }
 
+    void sound_constructor_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      info.GetReturnValue().Set(
+          get_or_create_sound_template(iso)->GetFunction(ctx).ToLocalChecked());
+    }
+
+    void capture_session_constructor_getter(Local<Name> /*name*/,
+                                            const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      info.GetReturnValue().Set(
+          get_or_create_capture_template(iso)->GetFunction(ctx).ToLocalChecked());
+    }
+
+    void audio_namespace_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "load"_v8(iso), Function::New(ctx, audio_load).ToLocalChecked());
+      (void)ns->Set(ctx, "loadFromBytes"_v8(iso),
+                    Function::New(ctx, audio_load_from_bytes).ToLocalChecked());
+      (void)ns->Set(ctx, "setMasterVolume"_v8(iso),
+                    Function::New(ctx, audio_set_master_volume).ToLocalChecked());
+      (void)ns->Set(ctx, "enumerateDevices"_v8(iso),
+                    Function::New(ctx, audio_enumerate_devices).ToLocalChecked());
+      (void)ns->Set(ctx, "startCapture"_v8(iso),
+                    Function::New(ctx, audio_start_capture).ToLocalChecked());
+      info.GetReturnValue().Set(ns);
+    }
   } // namespace
 
   void install_audio_bindings(Isolate* iso, Local<ObjectTemplate> global) {
-    HandleScope hs(iso);
-
-    // Sound class.
-    auto stpl = FunctionTemplate::New(iso, sound_constructor);
-    stpl->SetClassName("Sound"_v8(iso));
-    stpl->InstanceTemplate()->SetInternalFieldCount(2);
-    auto sproto = stpl->PrototypeTemplate();
-    sproto->Set(iso, "play", FunctionTemplate::New(iso, sound_play));
-    sproto->Set(iso, "stop", FunctionTemplate::New(iso, sound_stop));
-    sproto->Set(iso, "dispose", FunctionTemplate::New(iso, sound_dispose));
-    global->Set(iso, "Sound", stpl);
-    sound_tpl_table()[iso].Reset(iso, stpl);
-
-    // CaptureSession class.
-    auto ctpl = FunctionTemplate::New(iso, capture_constructor);
-    ctpl->SetClassName("CaptureSession"_v8(iso));
-    ctpl->InstanceTemplate()->SetInternalFieldCount(2);
-    auto cproto = ctpl->PrototypeTemplate();
-    cproto->Set(iso, "stop", FunctionTemplate::New(iso, capture_session_stop));
-    global->Set(iso, "CaptureSession", ctpl);
-    capture_tpl_table()[iso].Reset(iso, ctpl);
-
-    // Audio namespace.
-    auto ns = ObjectTemplate::New(iso);
-    ns->Set(iso, "load", FunctionTemplate::New(iso, audio_load));
-    ns->Set(iso, "loadFromBytes", FunctionTemplate::New(iso, audio_load_from_bytes));
-    ns->Set(iso, "setMasterVolume", FunctionTemplate::New(iso, audio_set_master_volume));
-    ns->Set(iso, "enumerateDevices", FunctionTemplate::New(iso, audio_enumerate_devices));
-    ns->Set(iso, "startCapture", FunctionTemplate::New(iso, audio_start_capture));
-    global->Set(iso, "Audio", ns);
+    global->SetLazyDataProperty("Sound"_v8(iso), sound_constructor_getter);
+    global->SetLazyDataProperty("CaptureSession"_v8(iso), capture_session_constructor_getter);
+    global->SetLazyDataProperty("Audio"_v8(iso), audio_namespace_getter);
   }
 
 } // namespace fxe::js

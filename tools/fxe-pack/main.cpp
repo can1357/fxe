@@ -71,6 +71,10 @@ namespace {
     std::string update_url;
     std::string public_key;
   };
+  struct BundledFontInput {
+    fxa::BundledFont manifest;
+    std::string disk_path;
+  };
 
   struct Args {
     std::string entry;
@@ -97,6 +101,7 @@ namespace {
     PackageMetadata package;
     Compression compress = Compression::None;
     std::vector<std::string> includes;
+    std::vector<BundledFontInput> fonts;
   };
 
   bool produces_installer(const Args& a) {
@@ -573,6 +578,87 @@ namespace {
     }
     return out;
   }
+  std::string lower_ascii(std::string_view text) {
+    std::string out;
+    out.reserve(text.size());
+    for (char c : text)
+      out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    return out;
+  }
+
+  std::string sanitize_archive_component(std::string_view value) {
+    std::string out;
+    out.reserve(value.size());
+    for (char c : value) {
+      const unsigned char uc = static_cast<unsigned char>(c);
+      if (std::isalnum(uc))
+        out.push_back(static_cast<char>(std::tolower(uc)));
+      else if (!out.empty() && out.back() != '-')
+        out.push_back('-');
+    }
+    while (!out.empty() && out.back() == '-')
+      out.pop_back();
+    if (out.empty())
+      out = "font";
+    return out;
+  }
+
+  u32 parse_font_weight_or_die(std::string_view value, std::string_view raw) {
+    if (value.empty())
+      die("invalid --font weight in " + std::string(raw));
+    u32 weight = 0;
+    for (char c : value) {
+      if (!std::isdigit(static_cast<unsigned char>(c)))
+        die("invalid --font weight in " + std::string(raw));
+      weight = weight * 10u + static_cast<u32>(c - '0');
+      if (weight > 1000u)
+        die("invalid --font weight in " + std::string(raw));
+    }
+    if (weight == 0)
+      die("invalid --font weight in " + std::string(raw));
+    return weight;
+  }
+
+  BundledFontInput parse_font_flag(std::string_view raw) {
+    const usize eq = raw.find('=');
+    if (eq == std::string_view::npos || eq == 0 || eq + 1 >= raw.size())
+      die("invalid --font value: " + std::string(raw) + " (expected family[:weight[:style]]=path)");
+    const std::string_view lhs = trim_ascii(raw.substr(0, eq));
+    const std::string_view rhs = trim_ascii(raw.substr(eq + 1));
+    if (lhs.empty() || rhs.empty())
+      die("invalid --font value: " + std::string(raw) + " (expected family[:weight[:style]]=path)");
+    const usize first_colon = lhs.find(':');
+    const usize second_colon = first_colon == std::string_view::npos
+                                   ? std::string_view::npos
+                                   : lhs.find(':', first_colon + 1);
+    const usize extra_colon = second_colon == std::string_view::npos
+                                  ? std::string_view::npos
+                                  : lhs.find(':', second_colon + 1);
+    if (extra_colon != std::string_view::npos)
+      die("invalid --font value: " + std::string(raw) + " (expected family[:weight[:style]]=path)");
+    BundledFontInput out;
+    out.manifest.family = std::string(
+        trim_ascii(first_colon == std::string_view::npos ? lhs : lhs.substr(0, first_colon)));
+    if (out.manifest.family.empty())
+      die("invalid --font family in " + std::string(raw));
+    out.manifest.weight =
+        first_colon == std::string_view::npos
+            ? 400u
+            : parse_font_weight_or_die(
+                  trim_ascii(second_colon == std::string_view::npos
+                                 ? lhs.substr(first_colon + 1)
+                                 : lhs.substr(first_colon + 1, second_colon - first_colon - 1)),
+                  raw);
+    out.manifest.style = second_colon == std::string_view::npos
+                             ? "normal"
+                             : lower_ascii(trim_ascii(lhs.substr(second_colon + 1)));
+    if (out.manifest.style.empty())
+      die("invalid --font style in " + std::string(raw));
+    out.disk_path = std::string(rhs);
+    if (!fs::exists(out.disk_path) || !fs::is_regular_file(out.disk_path))
+      die("font file not found: " + out.disk_path);
+    return out;
+  }
 
   bool is_hex_fingerprint(std::string_view text) {
     if (text.size() != 40)
@@ -617,6 +703,8 @@ namespace {
         a.platform = need("--platform");
       else if (s == "--include")
         a.includes.push_back(need("--include"));
+      else if (s == "--font")
+        a.fonts.push_back(parse_font_flag(need("--font")));
       else if (s == "--identity")
         a.identity = need("--identity");
       else if (s == "--notarize-profile")
@@ -720,7 +808,7 @@ namespace {
             << "                [--version SEMVER REQUIRED for installer output]\n"
             << "                [--manufacturer NAME|--publisher NAME REQUIRED for installer "
                "output]\n"
-            << "                [--compress zstd|none]\n"
+            << "                [--compress zstd|none] [--font family[:weight[:style]]=path ...]\n"
             << "\nExamples:\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.app --platform macos\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.dmg --platform macos\n"
@@ -743,6 +831,8 @@ namespace {
             << "    network-client, network-server, apple-events, jit, unsigned-memory,\n"
             << "    dyld-env-vars, disable-library-validation, files-user-selected-rw,\n"
             << "    app-sandbox.\n"
+            << "  --font family[:weight[:style]]=path may be repeated. weight defaults to 400,\n"
+            << "    style defaults to normal.\n"
             << "\nSigning policies:\n"
             << "  unsigned-dev (default): build without signing; emits a NOTE.\n"
             << "  signed-release: sign + verify release artifacts; requires --identity on macOS,\n"
@@ -1140,6 +1230,7 @@ namespace {
     // disk path -> archive name
     std::vector<std::pair<std::string, std::string>> v;
     std::string entry_archive;
+    std::vector<fxa::BundledFont> fonts;
   };
 
   Files collect(const Args& a) {
@@ -1155,6 +1246,13 @@ namespace {
         return p.filename().string();
       std::string s = r.generic_string();
       return s;
+    };
+    auto archive_name_taken = [&](std::string_view candidate) {
+      for (const auto& existing : out.v) {
+        if (existing.second == candidate)
+          return true;
+      }
+      return false;
     };
 
     out.v.emplace_back(entry.string(), rel(entry));
@@ -1187,6 +1285,21 @@ namespace {
             out.v.emplace_back(e.path().string(), rel(e.path()));
         }
       }
+    }
+    for (const auto& font : a.fonts) {
+      const fs::path font_path = fs::absolute(font.disk_path);
+      std::string archive_base = "fonts/" + sanitize_archive_component(font.manifest.family) + "-" +
+                                 std::to_string(font.manifest.weight) + "-" +
+                                 sanitize_archive_component(font.manifest.style);
+      const std::string ext = lower_ascii(font_path.extension().string());
+      std::string archive_name = archive_base + ext;
+      for (u32 suffix = 2; archive_name_taken(archive_name); ++suffix)
+        archive_name = archive_base + "-" + std::to_string(suffix) + ext;
+      out.v.emplace_back(font_path.string(), archive_name);
+      auto manifest_font = font.manifest;
+      manifest_font.virtual_path = archive_name;
+      manifest_font.style = lower_ascii(manifest_font.style);
+      out.fonts.push_back(std::move(manifest_font));
     }
     // De-duplicate by archive name (keep first).
     std::vector<std::pair<std::string, std::string>> dedup;
@@ -2271,6 +2384,7 @@ int main(int argc, char** argv) {
   if (!a.bundle_secret_key.empty())
     manifest.signer_secret_key_b64 = load_bundle_secret_key_b64(a.bundle_secret_key);
   manifest.signer_public_key_b64 = a.package.public_key;
+  manifest.fonts = files.fonts;
   fxa::PackOptions pack_opts;
   pack_opts.compress = a.compress == Compression::Zstd;
   pack_opts.sign = !a.package.public_key.empty() && !manifest.signer_secret_key_b64.empty();

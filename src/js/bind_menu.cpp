@@ -213,15 +213,24 @@ namespace fxe::js {
       fxe::os::set_application_menu_handler(
           [](const std::string& id) { invoke_menu_command_callback(id); });
     }
+
+    void menu_namespace_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "setApplicationMenu"_v8(iso),
+                    Function::New(ctx, menu_set_application_menu).ToLocalChecked());
+      (void)ns->Set(ctx, "popup"_v8(iso), Function::New(ctx, menu_popup).ToLocalChecked());
+      (void)ns->Set(ctx, "updateItem"_v8(iso),
+                    Function::New(ctx, menu_update_item).ToLocalChecked());
+      (void)ns->Set(ctx, "findItem"_v8(iso), Function::New(ctx, menu_find_item).ToLocalChecked());
+      (void)ns->Set(ctx, "onCommand"_v8(iso), Function::New(ctx, menu_on_command).ToLocalChecked());
+      info.GetReturnValue().Set(ns);
+    }
   } // namespace
 
   void install_menu_global(Isolate* iso, Local<ObjectTemplate> global) {
-    auto t = ObjectTemplate::New(iso);
-    t->Set(iso, "setApplicationMenu", FunctionTemplate::New(iso, menu_set_application_menu));
-    t->Set(iso, "popup", FunctionTemplate::New(iso, menu_popup));
-    t->Set(iso, "updateItem", FunctionTemplate::New(iso, menu_update_item));
-    t->Set(iso, "findItem", FunctionTemplate::New(iso, menu_find_item));
-    t->Set(iso, "onCommand", FunctionTemplate::New(iso, menu_on_command));
-    global->Set(iso, "Menu", t);
+    global->SetLazyDataProperty("Menu"_v8(iso), menu_namespace_getter);
   }
 } // namespace fxe::js
