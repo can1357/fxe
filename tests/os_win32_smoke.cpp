@@ -1,10 +1,4 @@
 // Win32-only smoke tests for fxe::os desktop integrations.
-// TODO: This repository currently has no tests/CMakeLists.txt. Register this
-// target from the top-level test section when that build file is split:
-//   add_executable(fxe_os_win32_tests os_win32_smoke.cpp)
-//   target_link_libraries(fxe_os_win32_tests PRIVATE fxe_os)
-//   target_compile_features(fxe_os_win32_tests PRIVATE cxx_std_20)
-//   add_test(NAME fxe_os_win32_tests COMMAND fxe_os_win32_tests)
 
 #ifdef _WIN32
 #ifndef NOMINMAX

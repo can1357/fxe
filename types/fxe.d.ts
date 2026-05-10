@@ -3102,13 +3102,233 @@ declare module 'fxe:fs' {
 
 // === fxe:net begin ===
 declare module 'fxe:net' {
-  // TODO(impl): add declarations once src/js/bind_net.cpp defines the module surface.
+  export interface DnsLookupOptions {
+    family?: number;
+    all?: boolean;
+    verbatim?: boolean;
+  }
+  export interface DnsLookupResult {
+    address: string;
+    family: number;
+  }
+  export interface DnsLookupServiceResult {
+    hostname: string;
+    service: string;
+  }
+  export interface DnsMxRecord {
+    priority: number;
+    exchange: string;
+  }
+  export interface DnsSrvRecord {
+    priority: number;
+    weight: number;
+    port: number;
+    name: string;
+  }
+  export interface DnsCaaRecord {
+    critical: number;
+    [tag: string]: string | number;
+  }
+  export interface DnsSoaRecord {
+    nsname: string;
+    hostmaster: string;
+    serial: number;
+    refresh: number;
+    retry: number;
+    expire: number;
+    minttl: number;
+  }
+  export interface DnsNaptrRecord {
+    order: number;
+    preference: number;
+    flags: string;
+    service: string;
+    regexp: string;
+    replacement: string;
+  }
+  export interface SocketError {
+    error: string;
+    errno: number;
+  }
+  export interface SocketAddress {
+    address: string;
+    family: 'IPv4' | 'IPv6';
+    port: number;
+  }
+  export interface BoundSocketAddress extends SocketAddress {
+    fd: number;
+  }
+  export interface IpcListenerAddress {
+    fd: number;
+    path: string;
+  }
+  export interface ConnectResult {
+    fd: number;
+    connected: boolean;
+  }
+  export interface FinishConnectResult {
+    connected: boolean;
+    error?: string;
+    errno?: number;
+  }
+  export interface ReadEofResult {
+    eof: true;
+  }
+  export interface ReadDataResult {
+    data: Uint8Array;
+  }
+  export type ReadResult = SocketError | ReadEofResult | ReadDataResult | null;
+  export interface DatagramPacket extends SocketAddress {
+    data: Uint8Array;
+  }
+  export interface DnsNamespace {
+    lookup(hostname: string, callback: (err: Error | null, result?: DnsLookupResult) => void): void;
+    lookup(
+      hostname: string,
+      options: number | (DnsLookupOptions & { all?: false }),
+      callback: (err: Error | null, result?: DnsLookupResult) => void,
+    ): void;
+    lookup(
+      hostname: string,
+      options: DnsLookupOptions & { all: true },
+      callback: (err: Error | null, result?: DnsLookupResult[]) => void,
+    ): void;
+    lookupService(
+      address: string,
+      port: number,
+      callback: (err: Error | null, result?: DnsLookupServiceResult) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: 'A' | 'AAAA' | 'CNAME' | 'NS' | 'PTR',
+      callback: (err: Error | null, records?: string[]) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: 'TXT',
+      callback: (err: Error | null, records?: string[][]) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: 'MX',
+      callback: (err: Error | null, records?: DnsMxRecord[]) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: 'SRV',
+      callback: (err: Error | null, records?: DnsSrvRecord[]) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: 'CAA',
+      callback: (err: Error | null, records?: DnsCaaRecord[]) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: 'SOA',
+      callback: (err: Error | null, records?: DnsSoaRecord) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: 'NAPTR',
+      callback: (err: Error | null, records?: DnsNaptrRecord[]) => void,
+    ): void;
+    resolveRecord(
+      hostname: string,
+      rrtype: string,
+      callback: (err: Error | null, records?: unknown) => void,
+    ): void;
+  }
+  export interface TcpNamespace {
+    listen(host?: string, port?: number): BoundSocketAddress;
+    accept(fd: number): BoundSocketAddress | SocketError | null;
+    connect(host?: string, port?: number): ConnectResult;
+    finishConnect(fd: number): FinishConnectResult | SocketError;
+    read(fd: number): ReadResult;
+    write(fd: number, data: string | Uint8Array | ArrayBuffer): number;
+    shutdown(fd: number): void;
+    close(fd: number): void;
+    address(fd: number): SocketAddress | null;
+  }
+  export interface IpcNamespace {
+    listen(path: string): IpcListenerAddress;
+    accept(fd: number): { fd: number } | SocketError | null;
+    connect(path: string): ConnectResult;
+    finishConnect(fd: number): FinishConnectResult | SocketError;
+    read(fd: number): ReadResult;
+    recv(fd: number): ReadResult;
+    write(fd: number, data: string | Uint8Array | ArrayBuffer): number;
+    send(fd: number, data: string | Uint8Array | ArrayBuffer): number;
+    shutdown(fd: number): void;
+    close(fd: number): void;
+    address(fd: number): null;
+  }
+  export interface DatagramNamespace {
+    bind(host?: string, port?: number, family?: string): BoundSocketAddress;
+    recv(fd: number): DatagramPacket | SocketError | null;
+    send(
+      fd: number,
+      data: string | Uint8Array | ArrayBuffer,
+      host: string,
+      port: number,
+      family?: string,
+    ): number;
+    close(fd: number): void;
+  }
+  export const dns: DnsNamespace;
+  export const tcp: TcpNamespace;
+  export const net: TcpNamespace;
+  export const ipc: IpcNamespace;
+  export const udp: DatagramNamespace;
+  export const dgram: DatagramNamespace;
 }
 // === fxe:net end ===
 
 // === fxe:os begin ===
 declare module 'fxe:os' {
-  // TODO(impl): add declarations once src/js/bind_os.cpp defines the module surface.
+  export interface CpuInfo {
+    model: string;
+    speed: number;
+    times: {
+      user: number;
+      nice: number;
+      sys: number;
+      idle: number;
+      irq: number;
+    };
+  }
+  export interface NetworkInterfaceInfo {
+    address: string;
+    netmask: string;
+    family: 'IPv4' | 'IPv6';
+    mac: string;
+    internal: boolean;
+    cidr: null;
+  }
+  export interface UserInfo {
+    username: string;
+    uid: number;
+    gid: number;
+    shell: string;
+    homedir: string;
+  }
+  export function platform(): string;
+  export function arch(): string;
+  export function release(): string;
+  export function type(): string;
+  export function endianness(): 'LE' | 'BE';
+  export function homedir(): string;
+  export function tmpdir(): string;
+  export function hostname(): string;
+  export function uptime(): number;
+  export function totalmem(): number;
+  export function freemem(): number;
+  export function cpus(): CpuInfo[];
+  export function networkInterfaces(): Record<string, NetworkInterfaceInfo[]>;
+  export function userInfo(): UserInfo;
+  export function installSystemChangeObserver(
+    callback: (kind: string) => void,
+  ): (() => void) | false;
 }
 // === fxe:os end ===
 

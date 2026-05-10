@@ -185,6 +185,13 @@ if(FXE_BUILD_TESTS)
             fxe_os
         )
     endif()
+    if(WIN32)
+        fxe_add_cpp_test(
+            fxe_os_win32_smoke_tests
+            tests/os_win32_smoke.cpp
+            fxe_os
+        )
+    endif()
     if(FXE_ENABLE_NATIVE_TLS_HTTP2)
         fxe_add_cpp_test(
             fxe_native_tls_tests
@@ -263,11 +270,18 @@ if(FXE_BUILD_TESTS)
     if(TARGET fxe_js)
         fxe_add_v8_ts_test(fxe_ts_tests)
         fxe_add_v8_ts_test(fxe_ui_box_shadow_blur_test tests/ui_box_shadow_blur_test.tsx)
+        fxe_add_v8_ts_test(fxe_bind_fxe_net_test tests/bind_fxe_net_test.ts)
+        fxe_add_v8_ts_test(fxe_bind_fxe_os_test tests/bind_fxe_os_test.ts)
         file(
             GLOB _v8_ts_test_scripts
             RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
             CONFIGURE_DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/*_test.ts"
+        )
+        list(
+            FILTER _v8_ts_test_scripts
+            EXCLUDE
+            REGEX "bind_fxe_(net|os)_test\\.ts$"
         )
         if(NOT FXE_ENABLE_NATIVE_TLS_HTTP2)
             # node_compat_http2_test.ts requires the native HTTP/2 stack.
