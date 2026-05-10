@@ -5,6 +5,8 @@ list(APPEND _fxe_runtime_sources tools/fxe-pack/bundle.cpp)
 add_library(fxe_runtime STATIC ${_fxe_runtime_sources})
 add_library(fxe::runtime ALIAS fxe_runtime)
 target_link_libraries(fxe_runtime PRIVATE unofficial-sodium::sodium)
+find_package(pugixml CONFIG REQUIRED)
+target_link_libraries(fxe_runtime PRIVATE pugixml::pugixml)
 target_compile_features(fxe_runtime PUBLIC cxx_std_20)
 target_include_directories(
     fxe_runtime

@@ -15,6 +15,7 @@
 #include <fxe/types.hpp>
 #include <limits>
 #include <mutex>
+#include <pugixml.hpp>
 #include <sodium.h>
 #include <sstream>
 #include <system_error>
@@ -152,50 +153,6 @@ namespace fxe::runtime {
       return true;
     }
 
-    struct xml_attribute {
-      std::string name;
-      std::string value;
-    };
-
-    struct xml_node {
-      std::string name;
-      std::string text;
-      std::vector<xml_attribute> attributes;
-      std::vector<xml_node> children;
-
-      const xml_node* child(std::string_view wanted) const {
-        for (const auto& entry : children) {
-          if (entry.name == wanted)
-            return &entry;
-        }
-        return nullptr;
-      }
-
-      std::string_view attribute(std::string_view wanted) const {
-        for (const auto& entry : attributes) {
-          if (entry.name == wanted)
-            return entry.value;
-        }
-        return {};
-      }
-    };
-
-    bool starts_with(std::string_view text, usize pos, std::string_view needle) {
-      return pos <= text.size() && text.substr(pos, needle.size()) == needle;
-    }
-
-    bool starts_with_ci(std::string_view text, usize pos, std::string_view needle) {
-      if (pos > text.size() || text.size() - pos < needle.size())
-        return false;
-      for (usize i = 0; i < needle.size(); ++i) {
-        if (std::tolower(static_cast<unsigned char>(text[pos + i])) !=
-            std::tolower(static_cast<unsigned char>(needle[i]))) {
-          return false;
-        }
-      }
-      return true;
-    }
-
     std::string_view trim_ascii(std::string_view text) {
       usize start = 0;
       while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])))
@@ -204,367 +161,6 @@ namespace fxe::runtime {
       while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])))
         --end;
       return text.substr(start, end - start);
-    }
-
-    bool append_utf8(std::string& out, uint32_t codepoint) {
-      if (codepoint > 0x10ffff || (codepoint >= 0xd800 && codepoint <= 0xdfff))
-        return false;
-      if (codepoint <= 0x7f) {
-        out.push_back(static_cast<char>(codepoint));
-      } else if (codepoint <= 0x7ff) {
-        out.push_back(static_cast<char>(0xc0 | (codepoint >> 6)));
-        out.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
-      } else if (codepoint <= 0xffff) {
-        out.push_back(static_cast<char>(0xe0 | (codepoint >> 12)));
-        out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
-        out.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
-      } else {
-        out.push_back(static_cast<char>(0xf0 | (codepoint >> 18)));
-        out.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f)));
-        out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f)));
-        out.push_back(static_cast<char>(0x80 | (codepoint & 0x3f)));
-      }
-      return true;
-    }
-
-    bool decode_xml_entities(std::string_view text, std::string& out, std::string& error_out) {
-      for (usize i = 0; i < text.size(); ++i) {
-        if (text[i] != '&') {
-          out.push_back(text[i]);
-          continue;
-        }
-        const usize semi = text.find(';', i + 1);
-        if (semi == std::string_view::npos) {
-          error_out = "malformed XML entity";
-          return false;
-        }
-        const std::string_view entity = text.substr(i + 1, semi - i - 1);
-        if (entity == "amp") {
-          out.push_back('&');
-        } else if (entity == "lt") {
-          out.push_back('<');
-        } else if (entity == "gt") {
-          out.push_back('>');
-        } else if (entity == "quot") {
-          out.push_back('"');
-        } else if (entity == "apos") {
-          out.push_back('\'');
-        } else if (!entity.empty() && entity[0] == '#') {
-          const bool hex = entity.size() > 2 && (entity[1] == 'x' || entity[1] == 'X');
-          const std::string_view digits = hex ? entity.substr(2) : entity.substr(1);
-          if (digits.empty()) {
-            error_out = "malformed XML numeric entity";
-            return false;
-          }
-          uint32_t codepoint = 0;
-          for (char c : digits) {
-            uint32_t digit = 0;
-            if (hex) {
-              if (c >= '0' && c <= '9')
-                digit = static_cast<uint32_t>(c - '0');
-              else if (c >= 'a' && c <= 'f')
-                digit = 10u + static_cast<uint32_t>(c - 'a');
-              else if (c >= 'A' && c <= 'F')
-                digit = 10u + static_cast<uint32_t>(c - 'A');
-              else {
-                error_out = "malformed XML numeric entity";
-                return false;
-              }
-              if (codepoint > (std::numeric_limits<uint32_t>::max() >> 4)) {
-                error_out = "XML numeric entity overflow";
-                return false;
-              }
-              codepoint = (codepoint << 4) | digit;
-            } else {
-              if (c < '0' || c > '9') {
-                error_out = "malformed XML numeric entity";
-                return false;
-              }
-              digit = static_cast<uint32_t>(c - '0');
-              if (codepoint > (std::numeric_limits<uint32_t>::max() - digit) / 10) {
-                error_out = "XML numeric entity overflow";
-                return false;
-              }
-              codepoint = codepoint * 10 + digit;
-            }
-          }
-          if (!append_utf8(out, codepoint)) {
-            error_out = "XML numeric entity is invalid";
-            return false;
-          }
-        } else {
-          error_out = "unsupported XML entity";
-          return false;
-        }
-        i = semi;
-      }
-      return true;
-    }
-
-    class xml_parser {
-    public:
-      xml_parser(std::string_view input, std::string& error_out)
-          : input_(input), error_out_(error_out) {}
-
-      bool parse_document(xml_node& out) {
-        if (input_.size() > 4u * 1024u * 1024u) {
-          error_out_ = "XML input exceeds 4 MiB limit";
-          return false;
-        }
-        for (usize i = 0; i < input_.size(); ++i) {
-          if (starts_with_ci(input_, i, "<!DOCTYPE") || starts_with_ci(input_, i, "<!ENTITY")) {
-            error_out_ = "XML DOCTYPE/entity declarations are not allowed";
-            return false;
-          }
-        }
-        skip_misc();
-        if (eof()) {
-          error_out_ = "XML document is empty";
-          return false;
-        }
-        if (!parse_node(out))
-          return false;
-        skip_misc();
-        if (!eof()) {
-          error_out_ = "unexpected XML content after root element";
-          return false;
-        }
-        return true;
-      }
-
-    private:
-      bool eof() const {
-        return pos_ >= input_.size();
-      }
-
-      char peek() const {
-        return eof() ? '\0' : input_[pos_];
-      }
-
-      void skip_space() {
-        while (!eof() && std::isspace(static_cast<unsigned char>(peek())))
-          ++pos_;
-      }
-
-      bool skip_processing_instruction() {
-        if (!starts_with(input_, pos_, "<?"))
-          return false;
-        const usize end = input_.find("?>", pos_ + 2);
-        if (end == std::string_view::npos) {
-          error_out_ = "unterminated XML processing instruction";
-          return false;
-        }
-        pos_ = end + 2;
-        return true;
-      }
-
-      bool skip_comment() {
-        if (!starts_with(input_, pos_, "<!--"))
-          return false;
-        const usize end = input_.find("-->", pos_ + 4);
-        if (end == std::string_view::npos) {
-          error_out_ = "unterminated XML comment";
-          return false;
-        }
-        pos_ = end + 3;
-        return true;
-      }
-
-      void skip_misc() {
-        while (true) {
-          skip_space();
-          if (starts_with(input_, pos_, "<?")) {
-            if (!skip_processing_instruction())
-              return;
-            continue;
-          }
-          if (starts_with(input_, pos_, "<!--")) {
-            if (!skip_comment())
-              return;
-            continue;
-          }
-          break;
-        }
-      }
-
-      bool parse_name(std::string& out) {
-        if (eof()) {
-          error_out_ = "unexpected end of XML";
-          return false;
-        }
-        const usize start = pos_;
-        const auto is_name_char = [](char c) {
-          const unsigned char uc = static_cast<unsigned char>(c);
-          return std::isalnum(uc) || c == '_' || c == '-' || c == ':' || c == '.';
-        };
-        if (!is_name_char(input_[pos_])) {
-          error_out_ = "invalid XML name";
-          return false;
-        }
-        ++pos_;
-        while (!eof() && is_name_char(input_[pos_]))
-          ++pos_;
-        out.assign(input_.substr(start, pos_ - start));
-        return true;
-      }
-
-      bool parse_quoted_value(std::string& out) {
-        if (eof() || (peek() != '"' && peek() != '\'')) {
-          error_out_ = "XML attribute value must be quoted";
-          return false;
-        }
-        const char quote = peek();
-        ++pos_;
-        const usize start = pos_;
-        while (!eof() && peek() != quote)
-          ++pos_;
-        if (eof()) {
-          error_out_ = "unterminated XML attribute";
-          return false;
-        }
-        out.clear();
-        if (!decode_xml_entities(input_.substr(start, pos_ - start), out, error_out_))
-          return false;
-        ++pos_;
-        return true;
-      }
-
-      bool parse_attributes(std::vector<xml_attribute>& out) {
-        while (true) {
-          skip_space();
-          if (eof()) {
-            error_out_ = "unexpected end of XML";
-            return false;
-          }
-          if (starts_with(input_, pos_, "/>") || peek() == '>')
-            return true;
-          xml_attribute attr;
-          if (!parse_name(attr.name))
-            return false;
-          skip_space();
-          if (eof() || peek() != '=') {
-            error_out_ = "XML attribute missing '='";
-            return false;
-          }
-          ++pos_;
-          skip_space();
-          if (!parse_quoted_value(attr.value))
-            return false;
-          out.push_back(std::move(attr));
-        }
-      }
-
-      bool parse_text(std::string& out) {
-        const usize start = pos_;
-        while (!eof() && peek() != '<')
-          ++pos_;
-        std::string decoded;
-        decoded.reserve(pos_ - start);
-        if (!decode_xml_entities(input_.substr(start, pos_ - start), decoded, error_out_))
-          return false;
-        out += decoded;
-        return true;
-      }
-
-      bool parse_cdata(std::string& out) {
-        if (!starts_with(input_, pos_, "<![CDATA["))
-          return false;
-        const usize start = pos_ + 9;
-        const usize end = input_.find("]]>", start);
-        if (end == std::string_view::npos) {
-          error_out_ = "unterminated XML CDATA";
-          return false;
-        }
-        out.append(input_.substr(start, end - start));
-        pos_ = end + 3;
-        return true;
-      }
-
-      bool parse_node(xml_node& out) {
-        if (eof() || peek() != '<') {
-          error_out_ = "expected XML element";
-          return false;
-        }
-        if (starts_with(input_, pos_, "</")) {
-          error_out_ = "unexpected XML closing tag";
-          return false;
-        }
-        if (starts_with(input_, pos_, "<!") || starts_with(input_, pos_, "<?")) {
-          error_out_ = "unsupported XML declaration";
-          return false;
-        }
-        ++pos_;
-        if (!parse_name(out.name))
-          return false;
-        if (!parse_attributes(out.attributes))
-          return false;
-        if (starts_with(input_, pos_, "/>")) {
-          pos_ += 2;
-          return true;
-        }
-        if (eof() || peek() != '>') {
-          error_out_ = "expected '>'";
-          return false;
-        }
-        ++pos_;
-        while (true) {
-          if (eof()) {
-            error_out_ = "unterminated XML element";
-            return false;
-          }
-          if (starts_with(input_, pos_, "</")) {
-            pos_ += 2;
-            std::string close_name;
-            if (!parse_name(close_name))
-              return false;
-            skip_space();
-            if (eof() || peek() != '>') {
-              error_out_ = "expected closing '>'";
-              return false;
-            }
-            ++pos_;
-            if (close_name != out.name) {
-              error_out_ = "mismatched XML closing tag";
-              return false;
-            }
-            return true;
-          }
-          if (starts_with(input_, pos_, "<![CDATA[")) {
-            if (!parse_cdata(out.text))
-              return false;
-            continue;
-          }
-          if (starts_with(input_, pos_, "<!--")) {
-            if (!skip_comment())
-              return false;
-            continue;
-          }
-          if (starts_with(input_, pos_, "<?")) {
-            if (!skip_processing_instruction())
-              return false;
-            continue;
-          }
-          if (peek() == '<') {
-            xml_node child;
-            if (!parse_node(child))
-              return false;
-            out.children.push_back(std::move(child));
-            continue;
-          }
-          if (!parse_text(out.text))
-            return false;
-        }
-      }
-
-      std::string_view input_;
-      usize pos_ = 0;
-      std::string& error_out_;
-    };
-
-    std::string xml_child_text(const xml_node& node, std::string_view name) {
-      if (const auto* child = node.child(name))
-        return std::string(trim_ascii(child->text));
-      return {};
     }
 
     std::optional<int64_t> parse_i64_decimal(std::string_view text) {
@@ -1066,69 +662,107 @@ namespace fxe::runtime {
   std::optional<update_manifest_v2> parse_appcast_xml(std::string_view xml,
                                                       std::string& error_out) {
     error_out.clear();
-    xml_node root;
-    xml_parser parser(xml, error_out);
-    if (!parser.parse_document(root))
+    if (xml.size() > 4u * 1024u * 1024u) {
+      error_out = "XML input exceeds 4 MiB limit";
       return std::nullopt;
-    if (root.name != "rss") {
+    }
+    // Reject DOCTYPE / ENTITY declarations to prevent XXE-style payloads.
+    // pugixml itself never resolves external entities (no DTD loader), so
+    // disallowing the markers up-front is sufficient and keeps the strict
+    // input contract the previous hand-rolled parser enforced.
+    for (usize i = 0; i + 1 < xml.size(); ++i) {
+      if (xml[i] != '<' || xml[i + 1] != '!')
+        continue;
+      const auto rest = xml.substr(i + 2);
+      const auto matches_ci = [&](std::string_view needle) {
+        if (rest.size() < needle.size())
+          return false;
+        for (usize j = 0; j < needle.size(); ++j) {
+          if (std::tolower(static_cast<unsigned char>(rest[j])) !=
+              std::tolower(static_cast<unsigned char>(needle[j])))
+            return false;
+        }
+        return true;
+      };
+      if (matches_ci("DOCTYPE") || matches_ci("ENTITY")) {
+        error_out = "XML DOCTYPE/entity declarations are not allowed";
+        return std::nullopt;
+      }
+    }
+
+    pugi::xml_document doc;
+    const pugi::xml_parse_result result =
+        doc.load_buffer(xml.data(), xml.size(), pugi::parse_default);
+    if (!result) {
+      error_out = std::string("XML parse failed: ") + result.description();
+      return std::nullopt;
+    }
+
+    const pugi::xml_node root = doc.document_element();
+    if (std::string_view(root.name()) != "rss") {
       error_out = "appcast root must be rss";
       return std::nullopt;
     }
-    const auto* channel = root.child("channel");
+    const pugi::xml_node channel = root.child("channel");
     if (!channel) {
       error_out = "appcast missing channel";
       return std::nullopt;
     }
 
-    const xml_node* first_item = nullptr;
-    const xml_node* host_item = nullptr;
+    const auto child_text = [](const pugi::xml_node& node, const char* name) {
+      return std::string(trim_ascii(node.child(name).child_value()));
+    };
+
+    pugi::xml_node first_item;
+    pugi::xml_node host_item;
     const std::string_view host_os = host_sparkle_os();
-    for (const auto& child : channel->children) {
-      if (child.name != "item")
-        continue;
+    for (pugi::xml_node child = channel.child("item"); child;
+         child = child.next_sibling("item")) {
       if (!first_item)
-        first_item = &child;
-      if (!host_os.empty()) {
-        const auto* enclosure = child.child("enclosure");
+        first_item = child;
+      if (!host_os.empty() && !host_item) {
+        const pugi::xml_node enclosure = child.child("enclosure");
         const std::string_view sparkle_os =
-            enclosure ? trim_ascii(enclosure->attribute("sparkle:os")) : std::string_view{};
-        if (!sparkle_os.empty() && sparkle_os == host_os && !host_item)
-          host_item = &child;
+            trim_ascii(enclosure.attribute("sparkle:os").as_string());
+        if (!sparkle_os.empty() && sparkle_os == host_os)
+          host_item = child;
       }
     }
-    const xml_node* item = host_item ? host_item : first_item;
+    const pugi::xml_node item = host_item ? host_item : first_item;
     if (!item) {
       error_out = "appcast has no items";
       return std::nullopt;
     }
-    const auto* enclosure = item->child("enclosure");
+    const pugi::xml_node enclosure = item.child("enclosure");
     if (!enclosure) {
       error_out = "appcast item missing enclosure";
       return std::nullopt;
     }
-    const std::string_view enclosure_url = trim_ascii(enclosure->attribute("url"));
+    const std::string_view enclosure_url =
+        trim_ascii(enclosure.attribute("url").as_string());
     if (enclosure_url.empty()) {
       error_out = "appcast item missing enclosure url";
       return std::nullopt;
     }
 
     update_manifest_v2 out;
-    out.version = xml_child_text(*item, "sparkle:version");
+    out.version = child_text(item, "sparkle:version");
     if (out.version.empty())
-      out.version = std::string(trim_ascii(enclosure->attribute("sparkle:version")));
+      out.version =
+          std::string(trim_ascii(enclosure.attribute("sparkle:version").as_string()));
     if (out.version.empty())
-      out.version = xml_child_text(*item, "sparkle:shortVersionString");
+      out.version = child_text(item, "sparkle:shortVersionString");
     if (out.version.empty()) {
       error_out = "appcast item missing version";
       return std::nullopt;
     }
-    if (const std::string channel_text = xml_child_text(*item, "sparkle:channel");
+    if (const std::string channel_text = child_text(item, "sparkle:channel");
         !channel_text.empty()) {
       if (const auto parsed = updater::parse_channel(channel_text))
         out.channel = *parsed;
     }
-    if (const std::string_view platform =
-            normalize_sparkle_platform(trim_ascii(enclosure->attribute("sparkle:os")));
+    if (const std::string_view platform = normalize_sparkle_platform(
+            trim_ascii(enclosure.attribute("sparkle:os").as_string()));
         !platform.empty()) {
       out.platform = std::string(platform);
     }
@@ -1137,8 +771,8 @@ namespace fxe::runtime {
     update_manifest_v2::artifact artifact;
     artifact.kind = "full";
     artifact.url = std::string(enclosure_url);
-    artifact.sha256 =
-        ascii_lower(std::string(trim_ascii(enclosure->attribute("sparkle:installerSha256"))));
+    artifact.sha256 = ascii_lower(std::string(
+        trim_ascii(enclosure.attribute("sparkle:installerSha256").as_string())));
     if (artifact.sha256.empty()) {
       error_out = "appcast item missing sha256";
       return std::nullopt;
@@ -1147,7 +781,7 @@ namespace fxe::runtime {
       error_out = "appcast item sha256 is invalid";
       return std::nullopt;
     }
-    if (const auto size = parse_i64_decimal(enclosure->attribute("length")))
+    if (const auto size = parse_i64_decimal(enclosure.attribute("length").as_string()))
       artifact.size = *size;
     out.artifacts.push_back(std::move(artifact));
     return out;
