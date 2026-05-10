@@ -10,6 +10,7 @@
 #include <mbedtls/version.h>
 #include <mbedtls/x509_crt.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -17,6 +18,7 @@
 #include <sstream>
 #include <string_view>
 
+#include <fxe/log.hpp>
 #include <fxe/types.hpp>
 #include <list>
 #include <memory>
@@ -104,11 +106,12 @@ namespace fxe::net {
 
     struct cached_session {
       std::string key;
-      tls_session_ptr session;
+      std::vector<unsigned char> serialized;
       std::chrono::steady_clock::time_point expires_at;
     };
 
     constexpr auto k_default_session_ttl = std::chrono::seconds(300);
+    constexpr usize k_max_cached_sessions = 64;
 
     std::mutex& session_cache_mu() {
       static std::mutex mu;
@@ -118,6 +121,31 @@ namespace fxe::net {
     std::list<cached_session>& session_cache() {
       static std::list<cached_session> cache;
       return cache;
+    }
+    tls_session_cache_stats& session_cache_stats() {
+      static tls_session_cache_stats stats;
+      return stats;
+    }
+
+    std::vector<unsigned char> save_session_blob(const mbedtls_ssl_session& session,
+                                                 std::string& err) {
+      usize cap = 2048;
+      for (int attempt = 0; attempt != 6; ++attempt) {
+        std::vector<unsigned char> blob(cap);
+        size_t used = 0;
+        const int ret = mbedtls_ssl_session_save(&session, blob.data(), blob.size(), &used);
+        if (ret == 0) {
+          blob.resize(used);
+          return blob;
+        }
+        if (ret != MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL) {
+          err = tls_error("mbedtls_ssl_session_save", ret);
+          return {};
+        }
+        cap = std::max<usize>(cap * 2, used);
+      }
+      err = "mbedtls_ssl_session_save failed: serialized session exceeded 65536 bytes";
+      return {};
     }
 
     std::string sha256_hex(std::string_view data) {
@@ -202,6 +230,7 @@ namespace fxe::net {
       for (auto it = cache.begin(); it != cache.end(); ++it) {
         if (it->key == key) {
           cache.erase(it);
+          ++session_cache_stats().evictions;
           return;
         }
       }
@@ -211,39 +240,78 @@ namespace fxe::net {
       const auto now = std::chrono::steady_clock::now();
       std::lock_guard<std::mutex> lk(session_cache_mu());
       auto& cache = session_cache();
+      auto& stats = session_cache_stats();
       for (auto it = cache.begin(); it != cache.end();) {
         if (it->expires_at <= now) {
           it = cache.erase(it);
+          ++stats.evictions;
           continue;
         }
         if (it->key != key) {
           ++it;
           continue;
         }
-        int ret = mbedtls_ssl_set_session(&ssl, it->session.get());
+        auto session = make_tls_session();
+        int ret =
+            mbedtls_ssl_session_load(session.get(), it->serialized.data(), it->serialized.size());
+        if (ret != 0) {
+          FXE_WARN("net.tls", "session_cache_drop key={} op=load err={}", key,
+                   tls_error("mbedtls_ssl_session_load", ret));
+          it = cache.erase(it);
+          ++stats.evictions;
+          return;
+        }
+        ret = mbedtls_ssl_set_session(&ssl, session.get());
         if (ret == 0) {
+          ++stats.hits;
+          FXE_DEBUG("net.tls", "session_cache_hit key={} bytes={}", key, it->serialized.size());
           cache.splice(cache.begin(), cache, it);
         } else {
+          FXE_WARN("net.tls", "session_cache_drop key={} op=set err={}", key,
+                   tls_error("mbedtls_ssl_set_session", ret));
           cache.erase(it);
+          ++stats.evictions;
         }
         return;
       }
+      ++stats.misses;
+      FXE_DEBUG("net.tls", "session_cache_miss key={}", key);
     }
 
     void store_cached_session(const mbedtls_ssl_context& ssl, const std::string& key,
                               std::chrono::seconds ttl) {
       auto session = make_tls_session();
-      if (mbedtls_ssl_get_session(&ssl, session.get()) != 0)
+      const int get_ret = mbedtls_ssl_get_session(&ssl, session.get());
+      if (get_ret != 0) {
+        FXE_WARN("net.tls", "session_cache_skip_store key={} err={}", key,
+                 tls_error("mbedtls_ssl_get_session", get_ret));
         return;
+      }
+
+      std::string err;
+      auto blob = save_session_blob(*session, err);
+      if (!err.empty()) {
+        FXE_WARN("net.tls", "session_cache_skip_store key={} err={}", key, err);
+        return;
+      }
 
       const auto effective_ttl = ttl.count() == 0 ? k_default_session_ttl : ttl;
       std::lock_guard<std::mutex> lk(session_cache_mu());
       auto& cache = session_cache();
+      auto& stats = session_cache_stats();
       erase_cached_session_locked(key);
-      cache.push_front(cached_session{key, std::move(session),
-                                      std::chrono::steady_clock::now() + effective_ttl});
-      while (cache.size() > 128)
+      cache.push_front(cached_session{
+          key,
+          std::move(blob),
+          std::chrono::steady_clock::now() + effective_ttl,
+      });
+      ++stats.stores;
+      while (cache.size() > k_max_cached_sessions) {
         cache.pop_back();
+        ++stats.evictions;
+      }
+      FXE_DEBUG("net.tls", "session_cache_store key={} entries={} ttl_s={}", key, cache.size(),
+                effective_ttl.count());
     }
 
     void configure_ocsp_stapling(mbedtls_ssl_config& conf, const tls_options& opts,
@@ -253,10 +321,10 @@ namespace fxe::net {
         return;
 
 #if FXE_TLS_OCSP_STAPLING_SUPPORTED
-      // TODO: wire the real mbedTLS request/retrieval hooks here if a future
-      // release exposes a public client-side stapling API.
       status = ocsp_stapling_status::requested_no_response;
 #else
+      FXE_DEBUG("net.tls", "ocsp_stapling_unavailable host={} reason=no_public_client_api",
+                opts.host);
       status = ocsp_stapling_status::unsupported;
 #endif
     }
@@ -618,6 +686,18 @@ namespace fxe::net {
 
   bool tls_client::supports_ocsp_stapling() noexcept {
     return FXE_TLS_OCSP_STAPLING_SUPPORTED != 0;
+  }
+  void tls_session_cache_reset_for_test() noexcept {
+    std::lock_guard<std::mutex> lk(session_cache_mu());
+    session_cache().clear();
+    session_cache_stats() = {};
+  }
+
+  tls_session_cache_stats tls_session_cache_stats_for_test() noexcept {
+    std::lock_guard<std::mutex> lk(session_cache_mu());
+    auto stats = session_cache_stats();
+    stats.entries = session_cache().size();
+    return stats;
   }
 
   std::string tls_session_cache_key_for_test(const tls_options& opts) {

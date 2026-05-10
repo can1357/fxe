@@ -1,4 +1,5 @@
 #include "runtime/v8/native/https.hpp"
+#include "runtime/v8/native/https_transport.hpp"
 
 #include "net/tls_client.hpp"
 #include "net/tls_server.hpp"
@@ -695,101 +696,38 @@ namespace fxe::runtime {
         throw_error(iso, "__fxe_native.https.request requires url, options, body");
         return;
       }
-      std::string parse_error;
-      auto url = parse_https_url(string_arg(iso, info[0]), parse_error);
-      if (!url) {
-        throw_error(iso, parse_error);
-        return;
-      }
       auto options = info[1].As<Object>();
-      fxe::net::tls_options tls_options;
-      tls_options.host = url->host;
-      tls_options.port = url->port;
-      tls_options.reject_unauthorized =
-          object_bool_prop(iso, ctx, options, "rejectUnauthorized", true);
-      tls_options.session_namespace = object_string_prop(iso, ctx, options, "sessionNamespace");
-      tls_options.alpn = {"http/1.1"};
-      std::string err;
-      auto client = fxe::net::tls_client::connect(tls_options, err);
-      if (!client) {
-        throw_error(iso, err.empty() ? "native HTTPS request TLS connect failed" : err);
-        return;
-      }
-      auto method = object_string_prop(iso, ctx, options, "method");
-      if (method.empty())
-        method = "GET";
+      fxe::net::http_request request;
+      request.url = string_arg(iso, info[0]);
+      request.method = object_string_prop(iso, ctx, options, "method");
+      if (request.method.empty())
+        request.method = "GET";
       auto headers_value = get_prop(iso, ctx, options, "headers");
       auto headers = headers_value ? headers_from_value(iso, ctx, *headers_value)
                                    : std::map<std::string, std::string>{};
-      auto body = bytes_from_value(iso, ctx, info[2]);
-      headers.emplace(
-          "host", url->host + (url->port == 443 ? std::string{} : ":" + std::to_string(url->port)));
-      headers["connection"] = "close";
-      if (!body.empty())
-        headers["content-length"] = std::to_string(body.size());
-      std::ostringstream request;
-      request << method << ' ' << url->path << " HTTP/1.1\r\n";
-      for (const auto& [key, value] : headers)
-        request << key << ": " << value << "\r\n";
-      request << "\r\n";
-      auto request_head = request.str();
-      std::string write_error;
-      if (!write_all(*client, request_head, &write_error) ||
-          (!body.empty() && !write_all(*client, body, &write_error))) {
-        throw_error(iso, write_error.empty() ? "native HTTPS request write failed" : write_error);
-        client->close();
+      for (auto& [key, value] : headers)
+        request.headers.emplace_back(std::move(key), std::move(value));
+      request.body = bytes_from_value(iso, ctx, info[2]);
+
+      native_https_request_options native_options;
+      native_options.reject_unauthorized =
+          object_bool_prop(iso, ctx, options, "rejectUnauthorized", true);
+      native_options.session_namespace = object_string_prop(iso, ctx, options, "sessionNamespace");
+      auto response =
+          perform_native_https_request(std::move(request), nullptr, std::move(native_options));
+      if (!response.error.empty()) {
+        throw_error(iso, response.error);
         return;
       }
-      auto raw = read_tls_until_close(*client, err);
-      client->close();
-      if (!raw) {
-        throw_error(iso, err);
-        return;
-      }
-      const auto header_end = raw->find("\r\n\r\n");
-      if (header_end == std::string::npos) {
-        throw_error(iso, "native HTTPS response missing headers");
-        return;
-      }
-      std::string_view header_block(raw->data(), header_end);
-      auto line_end = header_block.find("\r\n");
-      auto status_line = header_block.substr(
-          0, line_end == std::string_view::npos ? header_block.size() : line_end);
-      int status = 0;
-      std::string status_message;
-      if (status_line.starts_with("HTTP/")) {
-        const auto first_space = status_line.find(' ');
-        const auto second_space = first_space == std::string_view::npos
-                                      ? std::string_view::npos
-                                      : status_line.find(' ', first_space + 1);
-        if (first_space != std::string_view::npos) {
-          auto code = status_line.substr(first_space + 1, second_space == std::string_view::npos
-                                                              ? std::string_view::npos
-                                                              : second_space - first_space - 1);
-          (void)std::from_chars(code.data(), code.data() + code.size(), status);
-          if (second_space != std::string_view::npos)
-            status_message = std::string(status_line.substr(second_space + 1));
-        }
-      }
+
       std::map<std::string, std::string> response_headers;
-      usize line_start = line_end == std::string_view::npos ? header_block.size() : line_end + 2;
-      while (line_start < header_block.size()) {
-        line_end = header_block.find("\r\n", line_start);
-        if (line_end == std::string_view::npos)
-          line_end = header_block.size();
-        auto line = header_block.substr(line_start, line_end - line_start);
-        const auto colon = line.find(':');
-        if (colon != std::string_view::npos)
-          response_headers[lower_ascii(trim_ascii(line.substr(0, colon)))] =
-              trim_ascii(line.substr(colon + 1));
-        line_start = line_end + 2;
-      }
+      for (const auto& [key, value] : response.headers)
+        response_headers[lower_ascii(key)] = value;
       auto out = Object::New(iso);
-      set_number(ctx, out, "statusCode", status);
-      set_string(ctx, out, "statusMessage", status_message);
+      set_number(ctx, out, "statusCode", response.status);
+      set_string(ctx, out, "statusMessage", response.status_text);
       set(ctx, out, "headers", headers_to_object(iso, ctx, response_headers));
-      set_string(ctx, out, "body",
-                 std::string_view(raw->data() + header_end + 4, raw->size() - header_end - 4));
+      set_string(ctx, out, "body", response.body);
       info.GetReturnValue().Set(out);
     }
 

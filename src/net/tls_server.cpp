@@ -19,6 +19,7 @@
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/ssl.h>
+#include <mbedtls/ssl_cache.h>
 #include <mbedtls/version.h>
 #include <mbedtls/x509_crt.h>
 
@@ -176,9 +177,13 @@ namespace fxe::net {
         mbedtls_pk_init(&key);
         mbedtls_entropy_init(&entropy);
         mbedtls_ctr_drbg_init(&ctr_drbg);
+        mbedtls_ssl_cache_init(&session_cache);
+        mbedtls_ssl_cache_set_max_entries(&session_cache, 64);
+        mbedtls_ssl_cache_set_timeout(&session_cache, 300);
       }
 
       ~server_state() {
+        mbedtls_ssl_cache_free(&session_cache);
         mbedtls_pk_free(&key);
         mbedtls_x509_crt_free(&cert);
         mbedtls_ctr_drbg_free(&ctr_drbg);
@@ -189,6 +194,7 @@ namespace fxe::net {
       mbedtls_pk_context key{};
       mbedtls_entropy_context entropy{};
       mbedtls_ctr_drbg_context ctr_drbg{};
+      mbedtls_ssl_cache_context session_cache{};
       std::vector<std::string> alpn;
       bool request_client_cert = false;
       std::string expected_client_cert;
@@ -235,6 +241,8 @@ namespace fxe::net {
         ret = mbedtls_ssl_conf_own_cert(&conf_, &state_->cert, &state_->key);
         if (ret != 0)
           return fail(err, tls_error("mbedtls_ssl_conf_own_cert", ret));
+        mbedtls_ssl_conf_session_cache(&conf_, &state_->session_cache, mbedtls_ssl_cache_get,
+                                       mbedtls_ssl_cache_set);
 
         if (!configure_alpn(conf_, state_->alpn, alpn_storage_, alpn_ptrs_, err)) {
           last_error_ = err;

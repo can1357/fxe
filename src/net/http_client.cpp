@@ -1,5 +1,6 @@
 #include "http_client.hpp"
 #include "runtime/uv_loop.hpp"
+#include "runtime/v8/native/https_transport.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -921,15 +922,39 @@ namespace fxe::net {
       }
       return true;
     }
+
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+    struct native_in_flight {
+      http_request_id id = 0;
+      std::unique_ptr<fxe::runtime::native_https_request_handle> handle;
+      http_callback cb;
+    };
+#endif
   } // namespace
 
-  struct http_client::impl {};
-  http_client::http_client() : cookies_(), p_(nullptr) {}
+  struct http_client::impl {
+    std::atomic<http_request_id> next_id{1};
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+    std::mutex mu;
+    std::unordered_map<http_request_id, std::unique_ptr<native_in_flight>> by_id;
+    cookie_jar& jar;
+
+    explicit impl(cookie_jar& cookies) : jar(cookies) {}
+#else
+    explicit impl(cookie_jar&) {}
+#endif
+  };
+
+  http_client::http_client() : cookies_(), p_(new impl(cookies_)) {}
   http_client::~http_client() {
-    (void)p_;
+    delete p_;
   }
   bool http_client::available() {
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+    return true;
+#else
     return false;
+#endif
   }
   http_client& http_client::instance() {
     static http_client c;
@@ -943,22 +968,70 @@ namespace fxe::net {
   void http_client::set_cookie_file_path(std::string path) {
     cookies_.persist(std::move(path));
   }
+
   http_request_id http_client::submit(http_request req, http_callback cb) {
+    const auto id = p_->next_id.fetch_add(1);
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+    if (is_https_url_without_curl(req.url)) {
+      auto in_flight = std::make_unique<native_in_flight>();
+      in_flight->id = id;
+      in_flight->cb = std::move(cb);
+      in_flight->handle = fxe::runtime::start_native_https_request(std::move(req), &cookies_);
+      std::lock_guard<std::mutex> lock(p_->mu);
+      p_->by_id[id] = std::move(in_flight);
+      return id;
+    }
+#endif
+
     http_response r;
     if (is_https_url_without_curl(req.url)) {
-      set_http_error(
-          r, http_error::no_backend,
-          "fetch unavailable: HTTPS requires libcurl built with TLS and https protocol support");
+      set_http_error(r, http_error::no_backend,
+                     "fetch unavailable: HTTPS requires native TLS support in this build");
     } else {
       set_http_error(r, http_error::no_backend, "fetch unavailable: libcurl not linked");
     }
     if (cb)
       cb(std::move(r));
-    return 0;
+    return id;
   }
-  void http_client::abort(http_request_id) {}
-  void http_client::resume_upload(http_request_id) {}
-  void http_client::poll() {}
+
+  void http_client::abort(http_request_id id) {
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+    std::lock_guard<std::mutex> lock(p_->mu);
+    auto it = p_->by_id.find(id);
+    if (it == p_->by_id.end() || !it->second || !it->second->handle)
+      return;
+    it->second->handle->abort();
+#else
+    (void)id;
+#endif
+  }
+
+  void http_client::resume_upload(http_request_id id) {
+    (void)id;
+  }
+
+  void http_client::poll() {
+#if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
+    std::vector<std::pair<http_callback, http_response>> completed;
+    {
+      std::lock_guard<std::mutex> lock(p_->mu);
+      for (auto it = p_->by_id.begin(); it != p_->by_id.end();) {
+        http_response response;
+        if (!it->second || !it->second->handle || !it->second->handle->poll(response)) {
+          ++it;
+          continue;
+        }
+        completed.emplace_back(std::move(it->second->cb), std::move(response));
+        it = p_->by_id.erase(it);
+      }
+    }
+    for (auto& [cb, response] : completed) {
+      if (cb)
+        cb(std::move(response));
+    }
+#endif
+  }
 
 #endif
 

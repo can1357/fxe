@@ -1,12 +1,15 @@
+#pragma once
+
 // Minimal HTTP client used by bind_fetch.
 //
 // Single-threaded API: caller submits a request, polls periodically, and the
 // completion callback fires from inside poll(). Backed by libcurl-multi when
-// FXE_HAS_CURL is defined; HTTPS/TLS verification is delegated to libcurl until
-// the native mbedTLS transport exists. Without libcurl, requests fail
-// synchronously with a clear "fetch unavailable" error so callers stay
-// observable.
-// TODO(net): Phase 9/future work: native transport parity.
+// FXE_HAS_CURL is defined. The native TLS/HTTPS transport mirrors redirect,
+// timeout/cancellation, and cookie-jar behavior when libcurl is unavailable.
+// TODO(net,phase9): http_request::proxy needs native proxy and NO_PROXY handling.
+// TODO(net,phase9): http_request::multipart needs native multipart/form-data encoding.
+// TODO(net,phase9): http_request::body_source, http_request::body_size_hint, and
+// http_client::resume_upload() need native streaming upload support.
 #include "cookie_jar.hpp"
 
 #include <cstddef>

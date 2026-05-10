@@ -50,6 +50,15 @@ namespace fxe::net {
 
   // test-only: mirrors the internal TLS session cache identity derivation.
   std::string tls_session_cache_key_for_test(const tls_options& opts);
+  struct tls_session_cache_stats {
+    usize entries = 0;
+    usize hits = 0;
+    usize misses = 0;
+    usize stores = 0;
+    usize evictions = 0;
+  };
+  void tls_session_cache_reset_for_test() noexcept;
+  tls_session_cache_stats tls_session_cache_stats_for_test() noexcept;
   class tls_client {
   public:
     static std::unique_ptr<tls_client> connect(const tls_options&, std::string& err);
