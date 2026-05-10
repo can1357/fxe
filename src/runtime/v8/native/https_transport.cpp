@@ -141,31 +141,59 @@ namespace fxe::runtime {
         return std::nullopt;
       }
       url.remove_prefix(prefix.size());
-      const auto slash = url.find('/');
-      const auto authority = slash == std::string_view::npos ? url : url.substr(0, slash);
+      const auto path_start = url.find_first_of("/?#");
+      const auto authority = path_start == std::string_view::npos ? url : url.substr(0, path_start);
       parsed_url out;
       out.scheme = "https";
-      out.path = slash == std::string_view::npos ? "/" : std::string(url.substr(slash));
+      out.path = path_start == std::string_view::npos ? "/" : std::string(url.substr(path_start));
       if (out.path.empty())
         out.path = "/";
       if (authority.empty()) {
         error = "HTTPS URL missing host";
         return std::nullopt;
       }
-      const auto colon = authority.rfind(':');
-      if (colon != std::string_view::npos && authority.find(']') == std::string_view::npos) {
-        out.host = std::string(authority.substr(0, colon));
-        unsigned int port = 0;
-        auto port_text = authority.substr(colon + 1);
-        auto [ptr, ec] =
-            std::from_chars(port_text.data(), port_text.data() + port_text.size(), port);
-        if (ec != std::errc{} || ptr != port_text.data() + port_text.size() || port > 65535) {
-          error = "invalid HTTPS URL port";
+      if (authority.front() == '[') {
+        const auto end = authority.find(']');
+        if (end == std::string_view::npos) {
+          error = "invalid HTTPS URL host";
           return std::nullopt;
         }
-        out.port = static_cast<u16>(port);
+        out.host = std::string(authority.substr(1, end - 1));
+        if (end + 1 < authority.size()) {
+          if (authority[end + 1] != ':') {
+            error = "invalid HTTPS URL host";
+            return std::nullopt;
+          }
+          unsigned int port = 0;
+          auto port_text = authority.substr(end + 2);
+          auto [ptr, ec] =
+              std::from_chars(port_text.data(), port_text.data() + port_text.size(), port);
+          if (ec != std::errc{} || ptr != port_text.data() + port_text.size() || port > 65535) {
+            error = "invalid HTTPS URL port";
+            return std::nullopt;
+          }
+          out.port = static_cast<u16>(port);
+        }
       } else {
-        out.host = std::string(authority);
+        const auto colon = authority.rfind(':');
+        if (colon != std::string_view::npos) {
+          out.host = std::string(authority.substr(0, colon));
+          unsigned int port = 0;
+          auto port_text = authority.substr(colon + 1);
+          auto [ptr, ec] =
+              std::from_chars(port_text.data(), port_text.data() + port_text.size(), port);
+          if (ec != std::errc{} || ptr != port_text.data() + port_text.size() || port > 65535) {
+            error = "invalid HTTPS URL port";
+            return std::nullopt;
+          }
+          out.port = static_cast<u16>(port);
+        } else {
+          out.host = std::string(authority);
+        }
+      }
+      if (out.host.empty()) {
+        error = "HTTPS URL missing host";
+        return std::nullopt;
       }
       return out;
     }
@@ -603,8 +631,9 @@ namespace fxe::runtime {
 
         parsed->response.final_url = current_url;
         for (const auto& header : parsed->set_cookie_headers) {
-          if (jar)
-            (void)jar->set_from_header(header, current_url);
+          if (jar && jar->set_from_header(header, current_url)) {
+            FXE_TRACE("net.cookies", "stored Set-Cookie for url={}", current_url);
+          }
         }
         if (!request.follow_redirects || !is_redirect_status(parsed->response.status))
           return std::move(parsed->response);
@@ -613,6 +642,8 @@ namespace fxe::runtime {
         if (!location)
           return std::move(parsed->response);
         if (redirects >= options.max_redirects) {
+          FXE_WARN("net.http", "redirect_limit_exceeded url={} redirects={}", current_url,
+                   redirects);
           set_http_error(parsed->response, fxe::net::http_error::unknown, "too many redirects");
           return std::move(parsed->response);
         }
@@ -621,7 +652,7 @@ namespace fxe::runtime {
           set_http_error(parsed->response, fxe::net::http_error::no_backend, err);
           return std::move(parsed->response);
         }
-        FXE_TRACE("net.native_https", "following redirect status={} from={} to={}",
+        FXE_TRACE("net.https", "following redirect status={} from={} to={}",
                   parsed->response.status, current_url, *next_url);
         prepare_redirect_request(request, parsed->response.status);
         current_url = std::move(*next_url);
@@ -667,7 +698,7 @@ namespace fxe::runtime {
       }
 
       void abort() override {
-        FXE_TRACE("net.native_https", "aborting native HTTPS request");
+        FXE_TRACE("net.http", "aborting native HTTPS request");
         cancel_request(state_, cancel_reason::abort);
       }
 

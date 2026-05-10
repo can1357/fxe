@@ -301,9 +301,11 @@ function isPlainLayoutObject(value: unknown): value is Record<string, unknown> {
 // Layout walks run before the current render can rebuild composite children.
 // Reusing the last produced subtree for layout is safe when props are layout-
 // equivalent even if event callbacks were recreated inline.
-function layoutEquivalentValue(prev: unknown, next: unknown, depth = 0): boolean {
+function layoutEquivalentValue(prev: unknown, next: unknown, depth = 0, propKey?: string): boolean {
   if (Object.is(prev, next)) return true;
-  if (typeof prev === 'function' && typeof next === 'function') return true;
+  if (typeof prev === 'function' && typeof next === 'function') {
+    return typeof propKey === 'string' && /^on[A-Z]/.test(propKey);
+  }
   if (depth >= 4) return false;
   if (Array.isArray(prev) || Array.isArray(next)) {
     if (!Array.isArray(prev) || !Array.isArray(next) || prev.length !== next.length) return false;
@@ -318,7 +320,7 @@ function layoutEquivalentValue(prev: unknown, next: unknown, depth = 0): boolean
   if (prevKeys.length !== nextKeys.length || prevKeys.length > 64) return false;
   for (const key of prevKeys) {
     if (!Object.hasOwn(next, key)) return false;
-    if (!layoutEquivalentValue(prev[key], next[key], depth + 1)) return false;
+    if (!layoutEquivalentValue(prev[key], next[key], depth + 1, key)) return false;
   }
   return true;
 }

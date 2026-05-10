@@ -439,24 +439,52 @@ namespace fxe::runtime {
         return std::nullopt;
       }
       url.remove_prefix(prefix.size());
-      const auto slash = url.find('/');
-      auto authority = slash == std::string_view::npos ? url : url.substr(0, slash);
+      const auto path_start = url.find_first_of("/?#");
+      auto authority = path_start == std::string_view::npos ? url : url.substr(0, path_start);
       parsed_url out;
-      out.path = slash == std::string_view::npos ? "/" : std::string(url.substr(slash));
-      const auto colon = authority.rfind(':');
-      if (colon != std::string_view::npos) {
-        out.host = std::string(authority.substr(0, colon));
-        auto port_text = authority.substr(colon + 1);
-        unsigned int port = 0;
-        auto [ptr, ec] =
-            std::from_chars(port_text.data(), port_text.data() + port_text.size(), port);
-        if (ec != std::errc{} || ptr != port_text.data() + port_text.size() || port > 65535) {
-          error = "invalid HTTPS URL port";
+      out.path = path_start == std::string_view::npos ? "/" : std::string(url.substr(path_start));
+      if (authority.empty()) {
+        error = "HTTPS URL missing host";
+        return std::nullopt;
+      }
+      if (authority.front() == '[') {
+        const auto end = authority.find(']');
+        if (end == std::string_view::npos) {
+          error = "invalid HTTPS URL host";
           return std::nullopt;
         }
-        out.port = static_cast<u16>(port);
+        out.host = std::string(authority.substr(1, end - 1));
+        if (end + 1 < authority.size()) {
+          if (authority[end + 1] != ':') {
+            error = "invalid HTTPS URL host";
+            return std::nullopt;
+          }
+          auto port_text = authority.substr(end + 2);
+          unsigned int port = 0;
+          auto [ptr, ec] =
+              std::from_chars(port_text.data(), port_text.data() + port_text.size(), port);
+          if (ec != std::errc{} || ptr != port_text.data() + port_text.size() || port > 65535) {
+            error = "invalid HTTPS URL port";
+            return std::nullopt;
+          }
+          out.port = static_cast<u16>(port);
+        }
       } else {
-        out.host = std::string(authority);
+        const auto colon = authority.rfind(':');
+        if (colon != std::string_view::npos) {
+          out.host = std::string(authority.substr(0, colon));
+          auto port_text = authority.substr(colon + 1);
+          unsigned int port = 0;
+          auto [ptr, ec] =
+              std::from_chars(port_text.data(), port_text.data() + port_text.size(), port);
+          if (ec != std::errc{} || ptr != port_text.data() + port_text.size() || port > 65535) {
+            error = "invalid HTTPS URL port";
+            return std::nullopt;
+          }
+          out.port = static_cast<u16>(port);
+        } else {
+          out.host = std::string(authority);
+        }
       }
       if (out.host.empty()) {
         error = "HTTPS URL missing host";

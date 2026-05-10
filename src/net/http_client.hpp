@@ -109,7 +109,7 @@ namespace fxe::net {
     // Drive completion. Cheap to call every frame.
     void poll();
 
-    // True when libcurl is linked and initialised successfully.
+    // True when either libcurl or the native HTTPS fallback is available.
     static bool available();
     cookie_jar& cookies();
     void set_cookie_file_path(std::string path);
