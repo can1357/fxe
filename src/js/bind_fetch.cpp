@@ -18,6 +18,7 @@
 #include <deque>
 #include <fxe/js_bindings.hpp>
 #include <fxe/types.hpp>
+#include <fxe/string_utils.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <memory>
@@ -106,11 +107,6 @@ namespace fxe::js {
         return {};
       String::Utf8Value u(iso, s);
       return std::string(*u ? *u : "", *u ? u.length() : 0);
-    }
-    std::string ascii_lower(std::string s) {
-      for (char& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      return s;
     }
 
     std::string header_value(const net::header_list& headers, std::string_view key) {

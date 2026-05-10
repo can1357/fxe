@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <fxe/string_utils.hpp>
 #include <fxe/types.hpp>
 #include <iomanip>
 #include <mutex>
@@ -26,13 +27,6 @@ namespace fxe::net {
       std::string host;
       std::string path = "/";
     };
-
-    std::string ascii_lower_copy(std::string s) {
-      for (char& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      return s;
-    }
-
     bool ascii_ieq(std::string_view a, std::string_view b) {
       if (a.size() != b.size())
         return false;
@@ -44,21 +38,12 @@ namespace fxe::net {
       return true;
     }
 
-    std::string trim_copy(std::string_view in) {
-      auto is_ws = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-      while (!in.empty() && is_ws(static_cast<unsigned char>(in.front())))
-        in.remove_prefix(1);
-      while (!in.empty() && is_ws(static_cast<unsigned char>(in.back())))
-        in.remove_suffix(1);
-      return std::string(in);
-    }
-
     parsed_url parse_url(std::string_view url) {
       parsed_url out;
       auto scheme_end = url.find("://");
       usize authority = 0;
       if (scheme_end != std::string_view::npos) {
-        out.scheme = ascii_lower_copy(std::string(url.substr(0, scheme_end)));
+        out.scheme = ascii_lower(std::string(url.substr(0, scheme_end)));
         authority = scheme_end + 3;
       }
       auto path_pos = url.find('/', authority);
@@ -89,7 +74,7 @@ namespace fxe::net {
         auto colon = host_port.rfind(':');
         out.host = colon == std::string::npos ? host_port : host_port.substr(0, colon);
       }
-      out.host = ascii_lower_copy(out.host);
+      out.host = ascii_lower(out.host);
       return out;
     }
 
@@ -108,11 +93,7 @@ namespace fxe::net {
     }
 
     bool parse_int64(std::string_view value, i64& out) {
-      auto is_ws = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-      while (!value.empty() && is_ws(value.front()))
-        value.remove_prefix(1);
-      while (!value.empty() && is_ws(value.back()))
-        value.remove_suffix(1);
+      value = trim(value);
       if (value.empty())
         return false;
       const char* first = value.data();
@@ -136,7 +117,7 @@ namespace fxe::net {
     }
 
     bool parse_http_date(std::string_view value, i64& out) {
-      std::string s = trim_copy(value);
+      std::string s(trim(value));
       static constexpr std::array<const char*, 3> formats{
           "%a, %d %b %Y %H:%M:%S GMT",
           "%A, %d-%b-%y %H:%M:%S GMT",
@@ -156,7 +137,7 @@ namespace fxe::net {
     }
 
     std::string normalized_domain(std::string domain) {
-      domain = ascii_lower_copy(trim_copy(domain));
+      domain = ascii_lower(std::string(trim(domain)));
       if (domain.rfind("#httponly_", 0) == 0)
         domain.erase(0, 10);
       while (!domain.empty() && domain.front() == '.')
@@ -254,8 +235,8 @@ namespace fxe::net {
     if (eq == std::string_view::npos)
       return std::nullopt;
     cookie out;
-    out.name = trim_copy(pair.substr(0, eq));
-    out.value = trim_copy(pair.substr(eq + 1));
+    out.name = std::string(trim(pair.substr(0, eq)));
+    out.value = std::string(trim(pair.substr(eq + 1)));
     out.domain = parsed.host;
     out.path = default_cookie_path(parsed.path);
     if (out.name.empty())
@@ -264,17 +245,17 @@ namespace fxe::net {
     bool saw_max_age = false;
     while (!rest.empty()) {
       auto next = rest.find(';');
-      std::string attr = trim_copy(next == std::string_view::npos ? rest : rest.substr(0, next));
+      std::string attr(trim(next == std::string_view::npos ? rest : rest.substr(0, next)));
       rest = next == std::string_view::npos ? std::string_view{} : rest.substr(next + 1);
       if (attr.empty())
         continue;
       auto attr_eq = attr.find('=');
-      std::string key = ascii_lower_copy(
-          trim_copy(attr_eq == std::string::npos ? std::string_view(attr)
-                                                 : std::string_view(attr).substr(0, attr_eq)));
+      std::string key = ascii_lower(std::string(
+          trim(attr_eq == std::string::npos ? std::string_view(attr)
+                                            : std::string_view(attr).substr(0, attr_eq))));
       std::string val = attr_eq == std::string::npos
                             ? std::string{}
-                            : trim_copy(std::string_view(attr).substr(attr_eq + 1));
+                            : std::string(trim(std::string_view(attr).substr(attr_eq + 1)));
       if (key == "domain") {
         auto domain = normalized_domain(std::move(val));
         if (domain.empty())
@@ -338,7 +319,7 @@ namespace fxe::net {
   }
 
   bool cookie_jar::set_locked(cookie c, bool schedule_save) {
-    c.name = trim_copy(c.name);
+    c.name = std::string(trim(c.name));
     c.domain = normalized_domain(std::move(c.domain));
     if (c.path.empty() || c.path.front() != '/')
       c.path = "/";

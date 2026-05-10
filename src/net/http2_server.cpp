@@ -13,6 +13,7 @@
 #include <functional>
 #include <future>
 #include <fxe/types.hpp>
+#include <fxe/string_utils.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -39,12 +40,6 @@ namespace fxe::net {
       using clock = std::chrono::steady_clock;
       return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch())
           .count();
-    }
-
-    std::string lower_ascii(std::string value) {
-      std::transform(value.begin(), value.end(), value.begin(),
-                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-      return value;
     }
 
     bool is_connection_specific(std::string_view name) {
@@ -85,7 +80,7 @@ namespace fxe::net {
     find_header_value(const std::vector<std::pair<std::string, std::string>>& headers,
                       std::string_view name) {
       for (const auto& [header_name, header_value] : headers) {
-        if (lower_ascii(header_name) == name)
+        if (ascii_lower(header_name) == name)
           return header_value;
       }
       return std::nullopt;
@@ -634,7 +629,7 @@ namespace fxe::net {
           storage.emplace_back(":status",
                                std::to_string(response.status == 0 ? 200 : response.status));
           for (const auto& [name, value] : response.headers) {
-            auto lowered = lower_ascii(name);
+            auto lowered = ascii_lower(name);
             if (!lowered.empty() && lowered.front() == ':')
               continue;
             if (is_connection_specific(lowered))
@@ -699,7 +694,7 @@ namespace fxe::net {
           storage.emplace_back(":scheme", scheme);
           storage.emplace_back(":authority", *authority);
           for (const auto& [name, value] : promised_request.headers) {
-            auto lowered = lower_ascii(name);
+            auto lowered = ascii_lower(name);
             if (lowered == ":scheme" || lowered == ":authority")
               continue;
             if (is_forbidden_user_header(lowered))

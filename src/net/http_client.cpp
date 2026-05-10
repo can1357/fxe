@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <fxe/string_utils.hpp>
 #include <fxe/types.hpp>
 #include <memory>
 #include <mutex>
@@ -28,19 +29,13 @@ namespace fxe::net {
       std::string path = "/";
     };
 
-    [[maybe_unused]] std::string ascii_lower_copy(std::string s) {
-      for (char& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      return s;
-    }
-
 #ifdef FXE_HAS_CURL
     parsed_url parse_url_for_cookies(const std::string& url) {
       parsed_url out;
       auto scheme_end = url.find("://");
       usize authority = 0;
       if (scheme_end != std::string::npos) {
-        out.scheme = ascii_lower_copy(url.substr(0, scheme_end));
+        out.scheme = ascii_lower(url.substr(0, scheme_end));
         authority = scheme_end + 3;
       }
       auto path_pos = url.find('/', authority);
@@ -59,7 +54,7 @@ namespace fxe::net {
         auto colon = host_port.rfind(':');
         out.host = colon == std::string::npos ? host_port : host_port.substr(0, colon);
       }
-      out.host = ascii_lower_copy(out.host);
+      out.host = ascii_lower(out.host);
       return out;
     }
 #endif
@@ -155,7 +150,7 @@ namespace fxe::net {
     origin_key normalized_origin_key(const std::string& url) {
       auto scheme_end = url.find("://");
       std::string scheme =
-          scheme_end == std::string::npos ? "http" : ascii_lower_copy(url.substr(0, scheme_end));
+          scheme_end == std::string::npos ? "http" : ascii_lower(url.substr(0, scheme_end));
       usize authority = scheme_end == std::string::npos ? 0 : scheme_end + 3;
       auto path_pos = url.find_first_of("/?#", authority);
       std::string host_port = path_pos == std::string::npos
@@ -188,7 +183,7 @@ namespace fxe::net {
         }
       }
 
-      host = ascii_lower_copy(host);
+      host = ascii_lower(host);
       if (port <= 0)
         port = scheme == "https" ? 443 : 80;
       return origin_key{scheme + "://" + host + ":" + std::to_string(port)};
@@ -267,7 +262,7 @@ namespace fxe::net {
       while (i < val.size() && (val[i] == ' ' || val[i] == '\t'))
         ++i;
       val.erase(0, i);
-      if (ascii_lower_copy(name) == "set-cookie")
+      if (ascii_lower(name) == "set-cookie")
         fl->set_cookie_headers.push_back(val);
       fl->resp.headers.emplace_back(std::move(name), std::move(val));
       return n;
@@ -292,19 +287,10 @@ namespace fxe::net {
 
     bool header_exists(const header_list& headers, const std::string& lower_name) {
       for (const auto& [k, _] : headers) {
-        if (ascii_lower_copy(k) == lower_name)
+        if (ascii_lower(k) == lower_name)
           return true;
       }
       return false;
-    }
-
-    std::string trim_copy(std::string s) {
-      auto is_ws = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-      while (!s.empty() && is_ws(static_cast<unsigned char>(s.front())))
-        s.erase(s.begin());
-      while (!s.empty() && is_ws(static_cast<unsigned char>(s.back())))
-        s.pop_back();
-      return s;
     }
 
     bool no_proxy_matches(const std::string& no_proxy, const std::string& url) {
@@ -314,7 +300,7 @@ namespace fxe::net {
       std::stringstream ss(no_proxy);
       std::string token;
       while (std::getline(ss, token, ',')) {
-        token = ascii_lower_copy(trim_copy(std::move(token)));
+        token = ascii_lower(std::string(trim(token)));
         if (token.empty())
           continue;
         if (token == "*")
@@ -356,7 +342,7 @@ namespace fxe::net {
     }
 
     long proxy_type_from_url(const std::string& proxy) {
-      const auto lower = ascii_lower_copy(proxy);
+      const auto lower = ascii_lower(proxy);
       if (lower.rfind("socks5h://", 0) == 0)
         return CURLPROXY_SOCKS5_HOSTNAME;
       if (lower.rfind("socks5://", 0) == 0)
@@ -658,7 +644,7 @@ namespace fxe::net {
       if (!jar_cookie.empty()) {
         bool merged_cookie = false;
         for (auto& [k, v] : req.headers) {
-          if (ascii_lower_copy(k) == "cookie") {
+          if (ascii_lower(k) == "cookie") {
             v = v.empty() ? jar_cookie : jar_cookie + "; " + v;
             merged_cookie = true;
             break;

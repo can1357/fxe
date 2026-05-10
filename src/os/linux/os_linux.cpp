@@ -2,6 +2,7 @@
 // optional low-level libdbus-1 desktop integrations.
 
 #include "../os.hpp"
+#include <fxe/string_utils.hpp>
 #include <fxe/log.hpp>
 
 #if !defined(__APPLE__) && !defined(_WIN32)
@@ -745,39 +746,8 @@ namespace fxe::os {
       }
       return lines;
     }
-
-    std::string lower_ascii(std::string_view raw) {
-      std::string out;
-      out.reserve(raw.size());
-      for (char raw_c : raw) {
-        unsigned char c = static_cast<unsigned char>(raw_c);
-        out.push_back(static_cast<char>(std::tolower(c)));
-      }
-      return out;
-    }
-
-    std::string upper_ascii(std::string_view raw) {
-      std::string out;
-      out.reserve(raw.size());
-      for (char raw_c : raw) {
-        unsigned char c = static_cast<unsigned char>(raw_c);
-        out.push_back(static_cast<char>(std::toupper(c)));
-      }
-      return out;
-    }
-
-    std::string trim_copy(std::string_view raw) {
-      usize first = 0;
-      while (first < raw.size() && std::isspace(static_cast<unsigned char>(raw[first])) != 0)
-        ++first;
-      usize last = raw.size();
-      while (last > first && std::isspace(static_cast<unsigned char>(raw[last - 1])) != 0)
-        --last;
-      return std::string(raw.substr(first, last - first));
-    }
-
     std::optional<bool> parse_bool_setting(std::string_view raw) {
-      std::string value = lower_ascii(trim_copy(raw));
+      std::string value = ascii_lower(std::string(trim(raw)));
       if (value == "true" || value == "1")
         return true;
       if (value == "false" || value == "0")
@@ -792,7 +762,7 @@ namespace fxe::os {
       std::vector<std::string> tokens;
       std::string token;
       auto flush = [&]() {
-        std::string trimmed = lower_ascii(trim_copy(token));
+        std::string trimmed = ascii_lower(std::string(trim(token)));
         token.clear();
         if (!trimmed.empty())
           tokens.push_back(std::move(trimmed));
@@ -838,7 +808,7 @@ namespace fxe::os {
           run_command_capture({"gsettings", "get", std::string(schema), std::string(key)});
       if (result.exit_code != 0)
         return std::nullopt;
-      std::string value = trim_copy(result.stdout_text);
+      std::string value(trim(result.stdout_text));
       if (value.size() >= 2 && value.front() == '\'' && value.back() == '\'')
         value = value.substr(1, value.size() - 2);
       {
@@ -873,8 +843,8 @@ namespace fxe::os {
         usize end = accelerator.find('+', start);
         if (end == std::string_view::npos)
           end = accelerator.size();
-        std::string token = trim_copy(accelerator.substr(start, end - start));
-        std::string lower = lower_ascii(token);
+        std::string token(trim(accelerator.substr(start, end - start)));
+        std::string lower = ascii_lower(token);
         if (lower == "cmd" || lower == "command" || lower == "meta" || lower == "super")
           modifiers.push_back("Meta");
         else if (lower == "ctrl" || lower == "control" || lower == "commandorcontrol" ||
@@ -893,7 +863,7 @@ namespace fxe::os {
 
       if (key.empty())
         return {};
-      std::string lower_key = lower_ascii(key);
+      std::string lower_key = ascii_lower(key);
       if (lower_key == "return")
         key = "Enter";
       else if (lower_key == "esc")
@@ -903,7 +873,7 @@ namespace fxe::os {
       else if (lower_key == "plus")
         key = "+";
       else if (key.size() == 1)
-        key = upper_ascii(key);
+        key = ascii_upper(key);
 
       modifiers.push_back(key);
       return join_strings(modifiers, '+');
@@ -2203,7 +2173,7 @@ namespace fxe::os {
     auto theme = gsettings_get("org.gnome.desktop.interface", "gtk-theme");
     if (!theme)
       return false;
-    return lower_ascii(*theme).find("highcontrast") != std::string::npos;
+    return ascii_lower(*theme).find("highcontrast") != std::string::npos;
   }
 
   double system_font_scale() {
@@ -2222,7 +2192,7 @@ namespace fxe::os {
     auto scheme = gsettings_get("org.gnome.desktop.interface", "color-scheme");
     if (!scheme)
       return "no-preference";
-    std::string value = lower_ascii(*scheme);
+    std::string value = ascii_lower(*scheme);
     if (value == "prefer-dark")
       return "dark";
     if (value == "prefer-light")

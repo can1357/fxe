@@ -15,6 +15,7 @@
 #include <cwchar>
 #include <filesystem>
 #include <fxe/log.hpp>
+#include <fxe/string_utils.hpp>
 #include <limits>
 #include <map>
 #include <memory>
@@ -538,15 +539,8 @@ namespace fxe::os {
       return out;
     }
 
-    std::string lower_ascii(std::string_view s) {
-      std::string out(s);
-      for (char& ch : out)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-      return out;
-    }
-
     UINT map_virtual_key_name(std::string_view key) {
-      std::string s = lower_ascii(key);
+      std::string s = ascii_lower(key);
       if (s.size() == 1) {
         unsigned char ch = static_cast<unsigned char>(s[0]);
         if (ch >= 'a' && ch <= 'z')
@@ -606,7 +600,7 @@ namespace fxe::os {
 
       parsed_accelerator out;
       for (usize i = 0; i + 1 < parts.size(); ++i) {
-        std::string token = lower_ascii(parts[i]);
+        std::string token = ascii_lower(parts[i]);
         if (token == "ctrl" || token == "control" || token == "cmdorctrl" ||
             token == "commandorcontrol")
           out.modifiers |= MOD_CONTROL;

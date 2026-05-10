@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <deque>
 #include <fxe/types.hpp>
+#include <fxe/string_utils.hpp>
 #include <fxe/v8_literals.hpp>
 #include <map>
 #include <memory>
@@ -133,22 +134,6 @@ namespace fxe::runtime {
       return (*value)->BooleanValue(iso);
     }
 
-    std::string lower_ascii(std::string value) {
-      std::transform(value.begin(), value.end(), value.begin(),
-                     [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-      return value;
-    }
-
-    std::string trim_ascii(std::string_view value) {
-      usize first = 0;
-      while (first < value.size() && std::isspace(static_cast<unsigned char>(value[first])))
-        ++first;
-      usize last = value.size();
-      while (last > first && std::isspace(static_cast<unsigned char>(value[last - 1])))
-        --last;
-      return std::string(value.substr(first, last - first));
-    }
-
     std::string header_value_to_string(Isolate* iso, Local<Context> ctx, Local<Value> value) {
       if (value->IsNullOrUndefined())
         return {};
@@ -182,7 +167,7 @@ namespace fxe::runtime {
         Local<Value> key_value;
         if (!names->Get(ctx, i).ToLocal(&key_value))
           continue;
-        auto key = lower_ascii(string_arg(iso, key_value));
+        auto key = ascii_lower(string_arg(iso, key_value));
         Local<Value> val;
         if (!obj->Get(ctx, key_value).ToLocal(&val))
           continue;
@@ -205,7 +190,7 @@ namespace fxe::runtime {
     std::string header_value(const std::vector<std::pair<std::string, std::string>>& headers,
                              std::string_view lower_name) {
       for (const auto& [key, value] : headers) {
-        if (lower_ascii(key) == lower_name)
+        if (ascii_lower(key) == lower_name)
           return value;
       }
       return {};
@@ -314,8 +299,8 @@ namespace fxe::runtime {
         auto line = header_block.substr(line_start, line_end - line_start);
         const auto colon = line.find(':');
         if (colon != std::string_view::npos) {
-          auto key = lower_ascii(trim_ascii(line.substr(0, colon)));
-          auto value = trim_ascii(line.substr(colon + 1));
+          auto key = ascii_lower(trim(line.substr(0, colon)));
+          auto value = trim(line.substr(colon + 1));
           if (!key.empty())
             request.headers[key] = value;
         }
@@ -366,8 +351,8 @@ namespace fxe::runtime {
               auto line = header_block.substr(line_start, line_end - line_start);
               const auto colon = line.find(':');
               if (colon != std::string_view::npos)
-                headers[lower_ascii(trim_ascii(line.substr(0, colon)))] =
-                    trim_ascii(line.substr(colon + 1));
+                headers[ascii_lower(trim(line.substr(0, colon)))] =
+                    trim(line.substr(colon + 1));
               line_start = line_end + 2;
             }
             auto content_length = parse_content_length(headers);
@@ -700,7 +685,7 @@ namespace fxe::runtime {
 
       std::map<std::string, std::string> response_headers;
       for (const auto& [key, value] : response.headers)
-        response_headers[lower_ascii(key)] = value;
+        response_headers[ascii_lower(key)] = value;
       auto out = Object::New(iso);
       set_number(ctx, out, "statusCode", response.status);
       set_string(ctx, out, "statusMessage", response.status_text);

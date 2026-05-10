@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <fxe/types.hpp>
+#include <fxe/string_utils.hpp>
 #include <limits>
 #include <mutex>
 #include <pugixml.hpp>
@@ -73,12 +74,6 @@ namespace fxe::runtime {
       }
       out.resize(out_len);
       return out;
-    }
-
-    std::string ascii_lower(std::string s) {
-      for (char& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      return s;
     }
 
     std::string filename_from_url(std::string_view url) {
@@ -159,18 +154,8 @@ namespace fxe::runtime {
       return true;
     }
 
-    std::string_view trim_ascii(std::string_view text) {
-      usize start = 0;
-      while (start < text.size() && std::isspace(static_cast<unsigned char>(text[start])))
-        ++start;
-      usize end = text.size();
-      while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])))
-        --end;
-      return text.substr(start, end - start);
-    }
-
     std::optional<int64_t> parse_i64_decimal(std::string_view text) {
-      text = trim_ascii(text);
+      text = trim(text);
       if (text.empty())
         return std::nullopt;
       int64_t value = 0;
@@ -775,7 +760,7 @@ namespace fxe::runtime {
         return false;
       }
       const std::string_view comment =
-          trim_ascii(std::string_view(first_line).substr(k_untrusted_prefix.size()));
+          trim(std::string_view(first_line).substr(k_untrusted_prefix.size()));
       if (!comment.starts_with(expected_authority)) {
         error_out = "minisign untrusted comment mismatch";
         return false;
@@ -786,7 +771,7 @@ namespace fxe::runtime {
                                                          " -m " + shell_quote(artifact) + " 2>&1",
                                                      &verify_exit);
       if (verify_exit != 0) {
-        error_out = "minisign verification failed: " + std::string(trim_ascii(output));
+        error_out = "minisign verification failed: " + std::string(trim(output));
         return false;
       }
       return true;
@@ -817,7 +802,7 @@ namespace fxe::runtime {
                                   shell_quote(subject_path) + " 2>&1",
                               &import_exit);
       if (import_exit != 0) {
-        error_out = "gpg key import failed: " + std::string(trim_ascii(import_output));
+        error_out = "gpg key import failed: " + std::string(trim(import_output));
         return false;
       }
       int verify_exit = -1;
@@ -834,7 +819,7 @@ namespace fxe::runtime {
       while (std::getline(status_lines, line)) {
         if (line.rfind("[GNUPG:] GOODSIG ", 0) == 0) {
           saw_goodsig = true;
-          const std::string_view rest = trim_ascii(std::string_view(line).substr(17));
+          const std::string_view rest = trim(std::string_view(line).substr(17));
           const usize end = rest.find_first_of(" \t\r\n");
           const std::string token =
               normalize_fingerprint(end == std::string_view::npos ? rest : rest.substr(0, end));
@@ -842,14 +827,14 @@ namespace fxe::runtime {
             observed_fingerprint = token;
         } else if (line.rfind("[GNUPG:] VALIDSIG ", 0) == 0) {
           saw_validsig = true;
-          const std::string_view rest = trim_ascii(std::string_view(line).substr(18));
+          const std::string_view rest = trim(std::string_view(line).substr(18));
           const usize end = rest.find_first_of(" \t\r\n");
           observed_fingerprint =
               normalize_fingerprint(end == std::string_view::npos ? rest : rest.substr(0, end));
         }
       }
       if (verify_exit != 0) {
-        error_out = "gpg verification failed: " + std::string(trim_ascii(verify_output));
+        error_out = "gpg verification failed: " + std::string(trim(verify_output));
         return false;
       }
       if (!saw_goodsig && !saw_validsig) {
@@ -955,7 +940,7 @@ namespace fxe::runtime {
     }
 
     const auto child_text = [](const pugi::xml_node& node, const char* name) {
-      return std::string(trim_ascii(node.child(name).child_value()));
+      return std::string(trim(node.child(name).child_value()));
     };
 
     pugi::xml_node first_item;
@@ -967,7 +952,7 @@ namespace fxe::runtime {
       if (!host_os.empty() && !host_item) {
         const pugi::xml_node enclosure = child.child("enclosure");
         const std::string_view sparkle_os =
-            trim_ascii(enclosure.attribute("sparkle:os").as_string());
+            trim(enclosure.attribute("sparkle:os").as_string());
         if (!sparkle_os.empty() && sparkle_os == host_os)
           host_item = child;
       }
@@ -982,7 +967,7 @@ namespace fxe::runtime {
       error_out = "appcast item missing enclosure";
       return std::nullopt;
     }
-    const std::string_view enclosure_url = trim_ascii(enclosure.attribute("url").as_string());
+    const std::string_view enclosure_url = trim(enclosure.attribute("url").as_string());
     if (enclosure_url.empty()) {
       error_out = "appcast item missing enclosure url";
       return std::nullopt;
@@ -991,7 +976,7 @@ namespace fxe::runtime {
     update_manifest_v2 out;
     out.version = child_text(item, "sparkle:version");
     if (out.version.empty())
-      out.version = std::string(trim_ascii(enclosure.attribute("sparkle:version").as_string()));
+      out.version = std::string(trim(enclosure.attribute("sparkle:version").as_string()));
     if (out.version.empty())
       out.version = child_text(item, "sparkle:shortVersionString");
     if (out.version.empty()) {
@@ -1004,7 +989,7 @@ namespace fxe::runtime {
         out.channel = *parsed;
     }
     if (const std::string_view platform =
-            normalize_sparkle_platform(trim_ascii(enclosure.attribute("sparkle:os").as_string()));
+            normalize_sparkle_platform(trim(enclosure.attribute("sparkle:os").as_string()));
         !platform.empty()) {
       out.platform = std::string(platform);
     }
@@ -1014,7 +999,7 @@ namespace fxe::runtime {
     artifact.kind = "full";
     artifact.url = std::string(enclosure_url);
     artifact.sha256 = ascii_lower(
-        std::string(trim_ascii(enclosure.attribute("sparkle:installerSha256").as_string())));
+        std::string(trim(enclosure.attribute("sparkle:installerSha256").as_string())));
     if (artifact.sha256.empty()) {
       error_out = "appcast item missing sha256";
       return std::nullopt;
@@ -1045,7 +1030,7 @@ namespace fxe::runtime {
         line.remove_suffix(1);
       offset = line_end == std::string_view::npos ? text.size() + 1 : line_end + 1;
 
-      line = trim_ascii(line);
+      line = trim(line);
       if (line.empty() || line.front() == '#')
         continue;
 

@@ -4,6 +4,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fxe/types.hpp>
+#include <fxe/string_utils.hpp>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -15,12 +16,6 @@ namespace fxe::runtime {
 
     std::mutex g_mu;
     std::unordered_map<int, capability_set> g_policies;
-
-    std::string ascii_lower(std::string s) {
-      for (char& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      return s;
-    }
 
     bool starts_with(std::string_view s, std::string_view prefix) {
       return s.size() >= prefix.size() && s.compare(0, prefix.size(), prefix) == 0;

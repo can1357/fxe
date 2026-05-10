@@ -2,6 +2,7 @@
 
 #include "net/tls_client.hpp"
 
+#include <fxe/string_utils.hpp>
 #include <fxe/log.hpp>
 
 #include <algorithm>
@@ -67,24 +68,9 @@ namespace fxe::runtime {
       clock_type::time_point deadline;
     };
 
-    std::string ascii_lower_copy(std::string value) {
-      std::transform(value.begin(), value.end(), value.begin(),
-                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-      return value;
-    }
-
-    std::string trim_copy(std::string_view in) {
-      auto is_ws = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-      while (!in.empty() && is_ws(static_cast<unsigned char>(in.front())))
-        in.remove_prefix(1);
-      while (!in.empty() && is_ws(static_cast<unsigned char>(in.back())))
-        in.remove_suffix(1);
-      return std::string(in);
-    }
-
     bool header_exists(const fxe::net::header_list& headers, std::string_view lower_name) {
       for (const auto& [key, _] : headers) {
-        if (ascii_lower_copy(key) == lower_name)
+        if (ascii_lower(key) == lower_name)
           return true;
       }
       return false;
@@ -93,7 +79,7 @@ namespace fxe::runtime {
     std::optional<std::string> header_value(const fxe::net::header_list& headers,
                                             std::string_view lower_name) {
       for (const auto& [key, value] : headers) {
-        if (ascii_lower_copy(key) == lower_name)
+        if (ascii_lower(key) == lower_name)
           return value;
       }
       return std::nullopt;
@@ -130,7 +116,7 @@ namespace fxe::runtime {
     }
 
     bool is_https_url(std::string_view url) {
-      return url.size() >= 8 && ascii_lower_copy(std::string(url.substr(0, 8))) == "https://";
+      return url.size() >= 8 && ascii_lower(std::string(url.substr(0, 8))) == "https://";
     }
 
     std::optional<parsed_url> parse_https_url(std::string_view url, std::string& error) {
@@ -318,7 +304,7 @@ namespace fxe::runtime {
     }
 
     fxe::net::http_error classify_connect_error(const std::string& error) {
-      const auto lower = ascii_lower_copy(error);
+      const auto lower = ascii_lower(error);
       if (lower.find("resolve") != std::string::npos || lower.find("name") != std::string::npos)
         return fxe::net::http_error::dns;
       if (lower.find("connect") != std::string::npos || lower.find("refused") != std::string::npos)
@@ -388,10 +374,10 @@ namespace fxe::runtime {
         auto line = header_block.substr(line_start, line_end - line_start);
         const auto colon = line.find(':');
         if (colon != std::string_view::npos) {
-          std::string name = trim_copy(line.substr(0, colon));
-          std::string value = trim_copy(line.substr(colon + 1));
+          std::string name(trim(line.substr(0, colon)));
+          std::string value(trim(line.substr(colon + 1)));
           if (!name.empty()) {
-            if (ascii_lower_copy(name) == "set-cookie")
+            if (ascii_lower(name) == "set-cookie")
               out.set_cookie_headers.push_back(value);
             out.response.headers.emplace_back(std::move(name), std::move(value));
           }
@@ -478,7 +464,7 @@ namespace fxe::runtime {
       headers.reserve(request.headers.size() + 6);
       std::string explicit_cookie;
       for (const auto& [key, value] : request.headers) {
-        const auto lower = ascii_lower_copy(key);
+        const auto lower = ascii_lower(key);
         if (lower == "cookie") {
           explicit_cookie = value;
           continue;

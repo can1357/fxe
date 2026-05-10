@@ -19,6 +19,7 @@
 #include <fxe/debug.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/v8_host.hpp>
+#include <fxe/string_utils.hpp>
 #include <fxe/window.hpp>
 #if defined(FXE_DEBUG_HAS_WEBAUTHN)
 #include "../webauthn/debug_handlers.hpp"
@@ -63,18 +64,12 @@ namespace fxe::debug {
       return std::chrono::duration<double>(clock::now().time_since_epoch()).count();
     }
 
-    std::string network_ascii_lower(std::string s) {
-      std::transform(s.begin(), s.end(), s.begin(),
-                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-      return s;
-    }
-
     json network_headers_to_json(const std::vector<std::pair<std::string, std::string>>& headers) {
       json out{json::object()};
       for (const auto& [name, value] : headers) {
         if (name.empty())
           continue;
-        const std::string key = network_ascii_lower(name);
+        const std::string key = ascii_lower(name);
         auto it = out.find(key);
         if (it != out.end() && it->is_string() && key == "set-cookie")
           *it = it->get_ref<const std::string&>() + "\n" + value;

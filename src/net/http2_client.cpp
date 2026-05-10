@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fxe/types.hpp>
+#include <fxe/string_utils.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -35,12 +36,6 @@ namespace fxe::net {
       using clock = std::chrono::steady_clock;
       return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch())
           .count();
-    }
-
-    std::string lower_ascii(std::string value) {
-      std::transform(value.begin(), value.end(), value.begin(),
-                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-      return value;
     }
 
     bool is_forbidden_user_header(std::string_view name) {
@@ -155,7 +150,7 @@ namespace fxe::net {
         storage.emplace_back(":authority", host_);
         storage.emplace_back(":path", request.path.empty() ? "/" : request.path);
         for (const auto& [name, value] : request.headers) {
-          auto lowered = lower_ascii(name);
+          auto lowered = ascii_lower(name);
           if (is_forbidden_user_header(lowered))
             continue;
           storage.emplace_back(std::move(lowered), value);

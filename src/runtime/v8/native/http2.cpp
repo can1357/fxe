@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fxe/types.hpp>
+#include <fxe/string_utils.hpp>
 #include <fxe/v8_literals.hpp>
 #include <map>
 #include <memory>
@@ -168,16 +169,10 @@ namespace fxe::runtime {
       set(ctx, obj, key, Boolean::New(Isolate::GetCurrent(), value));
     }
 
-    std::string lower_ascii(std::string value) {
-      for (char& ch : value)
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-      return value;
-    }
-
     std::string header_value(const std::vector<std::pair<std::string, std::string>>& headers,
                              std::string_view lower_name) {
       for (const auto& [name, value] : headers) {
-        if (lower_ascii(name) == lower_name)
+        if (ascii_lower(name) == lower_name)
           return value;
       }
       return {};

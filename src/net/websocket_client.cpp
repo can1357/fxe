@@ -1,5 +1,6 @@
 #include "websocket_client.hpp"
 #include "runtime/uv_loop.hpp"
+#include <fxe/string_utils.hpp>
 #include <fxe/types.hpp>
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
 #include "tls_client.hpp"
@@ -145,22 +146,7 @@ namespace fxe::net {
       return true;
     }
 
-    std::string ascii_lower(std::string s) {
-      for (char& c : s)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      return s;
-    }
-
 #if defined(FXE_HAS_NATIVE_TLS_HTTP2_DEPS) && FXE_HAS_NATIVE_TLS_HTTP2_DEPS
-    std::string trim(std::string_view v) {
-      usize begin = 0;
-      while (begin < v.size() && (v[begin] == ' ' || v[begin] == '\t'))
-        ++begin;
-      usize end = v.size();
-      while (end > begin && (v[end - 1] == ' ' || v[end - 1] == '\t'))
-        --end;
-      return std::string(v.substr(begin, end - begin));
-    }
 
     std::vector<std::string> split_http_list(std::string_view v, char sep) {
       std::vector<std::string> out;
@@ -170,11 +156,11 @@ namespace fxe::net {
         if (v[i] == '"') {
           quoted = !quoted;
         } else if (!quoted && v[i] == sep) {
-          out.push_back(trim(v.substr(start, i - start)));
+          out.emplace_back(trim(v.substr(start, i - start)));
           start = i + 1;
         }
       }
-      out.push_back(trim(v.substr(start)));
+      out.emplace_back(trim(v.substr(start)));
       return out;
     }
 
@@ -189,7 +175,7 @@ namespace fxe::net {
         if (colon != std::string::npos && colon < eol) {
           std::string name = ascii_lower(headers.substr(line, colon - line));
           if (name == name_lower)
-            out.push_back(trim(std::string_view(headers).substr(colon + 1, eol - colon - 1)));
+            out.emplace_back(trim(std::string_view(headers).substr(colon + 1, eol - colon - 1)));
         }
         line = eol + 2;
       }
@@ -197,7 +183,7 @@ namespace fxe::net {
     }
 
     bool parse_window_bits(std::string_view value, int& bits) {
-      std::string v = trim(value);
+      std::string v(trim(value));
       if (v.empty()) {
         bits = 15;
         return true;
