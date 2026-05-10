@@ -18,6 +18,22 @@
 #include <list>
 #include <memory>
 #include <mutex>
+
+// <mbedtls/ssl.h> in the vcpkg-shipped 2.x/3.x builds exposes the RFC 6066
+// status_request extension identifier, but not a public client API to request
+// or retrieve stapled OCSP responses. Keep the gate at 0 until mbedTLS ships a
+// real hook we can probe here.
+#ifdef __has_include
+#if defined(MBEDTLS_SSL_PROTO_TLS1_2) && __has_include(<mbedtls/ssl.h>) && \
+    defined(MBEDTLS_TLS_EXT_STATUS_REQUEST) && 0
+#define FXE_TLS_OCSP_STAPLING_SUPPORTED 1
+#else
+#define FXE_TLS_OCSP_STAPLING_SUPPORTED 0
+#endif
+#else
+#define FXE_TLS_OCSP_STAPLING_SUPPORTED 0
+#endif
+
 namespace fxe::net {
 
   namespace {
@@ -131,13 +147,19 @@ namespace fxe::net {
         cache.pop_back();
     }
 
-    void configure_ocsp_stapling(mbedtls_ssl_config& conf, const tls_options& opts) {
+    void configure_ocsp_stapling(mbedtls_ssl_config& conf, const tls_options& opts,
+                                 ocsp_stapling_status& status) {
       (void)conf;
-      (void)opts;
-      // Mbed TLS 2.x and the 3.x public headers used by vcpkg expose certificate
-      // verification through mbedtls_ssl_conf_authmode(), but do not expose a
-      // stable client API to request or retrieve stapled OCSP responses. Keep
-      // normal certificate verification enabled and skip stapling when unavailable.
+      if (!opts.request_ocsp_stapling)
+        return;
+
+#if FXE_TLS_OCSP_STAPLING_SUPPORTED
+      // TODO: wire the real mbedTLS request/retrieval hooks here if a future
+      // release exposes a public client-side stapling API.
+      status = ocsp_stapling_status::requested_no_response;
+#else
+      status = ocsp_stapling_status::unsupported;
+#endif
     }
 
     bool load_system_roots(mbedtls_x509_crt& ca) {
@@ -232,6 +254,7 @@ namespace fxe::net {
       }
 
       bool connect_to(const tls_options& opts, std::string& err) {
+        status_ = ocsp_stapling_status::not_requested;
         if (opts.host.empty()) {
           err = "TLS host must not be empty";
           return false;
@@ -250,7 +273,7 @@ namespace fxe::net {
         mbedtls_ssl_conf_rng(&conf_, mbedtls_ctr_drbg_random, &ctr_drbg_);
         mbedtls_ssl_conf_authmode(&conf_, opts.reject_unauthorized ? MBEDTLS_SSL_VERIFY_REQUIRED
                                                                    : MBEDTLS_SSL_VERIFY_NONE);
-        configure_ocsp_stapling(conf_, opts);
+        configure_ocsp_stapling(conf_, opts, status_);
 
         std::string effective_ca = opts.ca_pem;
         if (!opts.ca_path.empty()) {
@@ -439,6 +462,10 @@ namespace fxe::net {
         return std::string(subject, static_cast<usize>(ret));
       }
 
+      ::fxe::net::ocsp_stapling_status ocsp_stapling_status() const noexcept override {
+        return status_;
+      }
+
       std::string last_error() const override {
         return last_error_;
       }
@@ -466,10 +493,31 @@ namespace fxe::net {
       std::vector<const char*> alpn_ptrs_;
       bool closed_ = false;
       mutable std::string last_error_;
+      ::fxe::net::ocsp_stapling_status status_ = ::fxe::net::ocsp_stapling_status::not_requested;
     };
   } // namespace
 
+  const char* ocsp_stapling_status_name(ocsp_stapling_status status) noexcept {
+    switch (status) {
+    case ocsp_stapling_status::unsupported:
+      return "unsupported";
+    case ocsp_stapling_status::not_requested:
+      return "not_requested";
+    case ocsp_stapling_status::requested_no_response:
+      return "requested_no_response";
+    case ocsp_stapling_status::stapled_valid:
+      return "stapled_valid";
+    case ocsp_stapling_status::stapled_invalid:
+      return "stapled_invalid";
+    }
+    return "unknown";
+  }
+
   tls_client::~tls_client() = default;
+
+  bool tls_client::supports_ocsp_stapling() noexcept {
+    return FXE_TLS_OCSP_STAPLING_SUPPORTED != 0;
+  }
 
   std::unique_ptr<tls_client> tls_client::connect(const tls_options& opts, std::string& err) {
     err.clear();

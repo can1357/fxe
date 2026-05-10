@@ -535,6 +535,19 @@ declare namespace FXE {
     setCursorLock(locked: boolean): void;
     setRawMouseMotion(enabled: boolean): void;
     isRawMouseMotionSupported(): boolean;
+    /**
+     * Tell the OS compositor to exclude this window from screen capture / recording.
+     * macOS uses NSWindowSharingNone; Windows uses WDA_EXCLUDEFROMCAPTURE; Linux
+     * returns false (no portable X11/Wayland equivalent) and warns once.
+     *
+     * The FXE debug screenshot path (Page.captureFrame / Page.screenshot) reads
+     * the framebuffer directly and is NOT affected — this hook only blocks OS
+     * capture tools (screen recorders, AirPlay, Win+G overlay, etc.).
+     *
+     * @returns true when the platform applied the request.
+     */
+    setContentProtection(enabled: boolean): boolean;
+    isContentProtectionEnabled(): boolean;
     setCursorImage(
       rgba: Uint8Array | Uint8ClampedArray,
       width: number,

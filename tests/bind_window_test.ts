@@ -193,6 +193,15 @@ test('Window cursor, icon, drag region, and fullscreen methods validate safe inp
     win.setRawMouseMotion(true);
     win.setRawMouseMotion(false);
     assertEqual(typeof win.isRawMouseMotionSupported(), 'boolean');
+    assertEqual(typeof win.setContentProtection(false), 'boolean');
+    assertEqual(typeof win.setContentProtection(true), 'boolean');
+    assertEqual(typeof win.isContentProtectionEnabled(), 'boolean');
+    const enabled = win.setContentProtection(true);
+    if (enabled) {
+      assertEqual(win.isContentProtectionEnabled(), true);
+      assertEqual(win.setContentProtection(false), true);
+      assertEqual(win.isContentProtectionEnabled(), false);
+    }
     win.setFullscreen(false);
     assertEqual(win.isFullscreen(), false);
 

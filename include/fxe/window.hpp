@@ -254,6 +254,20 @@ namespace fxe {
       (void)enabled;
       return false;
     }
+    // Tell the OS compositor to exclude this window from screen capture and screen
+    // recording. macOS maps to NSWindowSharingNone; Windows to
+    // WDA_EXCLUDEFROMCAPTURE; Linux returns false (X11/Wayland have no portable
+    // equivalent). Returns true when the platform applied the request.
+    //
+    // The FXE debug screenshot path (Page.captureFrame / Page.screenshot) reads
+    // the framebuffer directly and is NOT affected — this hook only protects
+    // against OS-level capture tooling (screen recorders, AirPlay, Win+G, etc.).
+    virtual bool set_content_protection(bool /*enabled*/) {
+      return false;
+    }
+    [[nodiscard]] virtual bool is_content_protection_enabled() const {
+      return false;
+    }
     virtual void set_visible(bool) {}
     virtual bool set_icon(const u8* rgba, int w, int h) {
       (void)rgba;

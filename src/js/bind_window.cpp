@@ -1398,6 +1398,20 @@ namespace fxe::js {
         return;
       info.GetReturnValue().Set(w->is_raw_mouse_motion_supported());
     }
+    void win_set_content_protection(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      const bool enabled = info.Length() >= 1 && info[0]->BooleanValue(iso);
+      info.GetReturnValue().Set(w->set_content_protection(enabled));
+    }
+    void win_is_content_protection_enabled(const FunctionCallbackInfo<Value>& info) {
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      info.GetReturnValue().Set(w->is_content_protection_enabled());
+    }
     void win_set_cursor_image(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
@@ -2414,6 +2428,9 @@ namespace fxe::js {
     proto->Set(iso, "setRawMouseMotion", FunctionTemplate::New(iso, win_set_raw_mouse_motion));
     proto->Set(iso, "isRawMouseMotionSupported",
                FunctionTemplate::New(iso, win_is_raw_mouse_motion_supported));
+    proto->Set(iso, "setContentProtection", FunctionTemplate::New(iso, win_set_content_protection));
+    proto->Set(iso, "isContentProtectionEnabled",
+               FunctionTemplate::New(iso, win_is_content_protection_enabled));
     proto->Set(iso, "setCursorImage", FunctionTemplate::New(iso, win_set_cursor_image));
     proto->Set(iso, "clearCursorImage", FunctionTemplate::New(iso, win_clear_cursor_image));
     proto->Set(iso, "clipboardText", FunctionTemplate::New(iso, win_clipboard_text));

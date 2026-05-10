@@ -55,6 +55,20 @@ namespace fxe::runtime {
                                  std::string_view canonical_manifest,
                                  std::string_view expected_public_key_b64, std::string& error_out);
 
+  // Parse a Sparkle appcast RSS/XML document into update_manifest_v2 metadata. The parser
+  // selects the first host-matching item when `sparkle:os` is present, otherwise the first
+  // item, emits exactly one `full` artifact, and leaves `arch`, `signature`, and
+  // `canonical_bytes` empty. Sparkle ed signatures are not verified here; callers must
+  // perform any trust checks separately.
+  std::optional<update_manifest_v2> parse_appcast_xml(std::string_view xml, std::string& error_out);
+
+  // Parse a Squirrel RELEASES feed into update_manifest_v2 metadata. Artifact URLs are the
+  // raw filenames from the feed and may need caller-side resolution against the feed URL;
+  // `platform`, `arch`, `signature`, and `canonical_bytes` stay empty, and delta entries
+  // are lossy (`from_version`/`target_sha256` remain empty). The parser normalizes metadata
+  // only and does not verify Squirrel sha1 values.
+  std::optional<update_manifest_v2> parse_squirrel_releases(std::string_view text,
+                                                            std::string& error_out);
   std::optional<update_manifest_v2> parse_manifest_v2_cbor(const std::vector<uint8_t>& bytes,
                                                            std::string& error_out);
 

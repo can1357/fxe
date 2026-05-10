@@ -17,6 +17,16 @@ using ssize_t = SSIZE_T;
 
 namespace fxe::net {
 
+  enum class ocsp_stapling_status {
+    unsupported,
+    not_requested,
+    requested_no_response,
+    stapled_valid,
+    stapled_invalid,
+  };
+
+  const char* ocsp_stapling_status_name(ocsp_stapling_status status) noexcept;
+
   struct tls_options {
     std::string host;
     u16 port = 443;
@@ -28,6 +38,8 @@ namespace fxe::net {
     std::string client_cert_path; // file path; takes precedence if non-empty
     std::string client_key_pem;
     std::string client_key_path; // file path; takes precedence if non-empty
+    // Defaults to true, but callers must inspect tls_client::ocsp_stapling_status()
+    // after connect because some mbedTLS builds do not expose client-side stapling.
     bool request_ocsp_stapling = true;
     bool enable_session_resumption = true;
   };
@@ -35,6 +47,7 @@ namespace fxe::net {
   class tls_client {
   public:
     static std::unique_ptr<tls_client> connect(const tls_options&, std::string& err);
+    static bool supports_ocsp_stapling() noexcept;
     virtual ~tls_client();
 
     virtual ssize_t read(void* buf, usize cap) = 0;
@@ -46,6 +59,9 @@ namespace fxe::net {
     virtual ssize_t write(const void* buf, usize len) = 0;
     virtual std::string negotiated_alpn() const = 0;
     virtual std::optional<std::string> peer_cert_subject() const = 0;
+    virtual ::fxe::net::ocsp_stapling_status ocsp_stapling_status() const noexcept {
+      return ::fxe::net::ocsp_stapling_status::not_requested;
+    }
     virtual std::string last_error() const = 0;
     virtual void close() = 0;
   };

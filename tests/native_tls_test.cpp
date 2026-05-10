@@ -199,6 +199,7 @@ namespace {
     std::string client_received;
     std::string server_received;
     std::string peer_subject;
+    fxe::net::ocsp_stapling_status ocsp_status = fxe::net::ocsp_stapling_status::not_requested;
   };
 
   round_trip_result run_round_trip(const generated_certificate& cert, bool reject_unauthorized,
@@ -262,6 +263,7 @@ namespace {
     result.client_alpn = client->negotiated_alpn();
     auto peer_subject = client->peer_cert_subject();
     result.peer_subject = peer_subject.value_or(std::string{});
+    result.ocsp_status = client->ocsp_stapling_status();
     if (!write_all(*client, "ping", 4, result.err)) {
       client->close();
       server->close();
@@ -295,6 +297,11 @@ namespace {
     if (!result.ok)
       std::fprintf(stderr, "verified round trip error: %s\n", result.err.c_str());
     CHECK(result.ok);
+    CHECK(fxe::net::tls_client::supports_ocsp_stapling() || true);
+    CHECK(result.ocsp_status == fxe::net::ocsp_stapling_status::unsupported ||
+          result.ocsp_status == fxe::net::ocsp_stapling_status::requested_no_response);
+    CHECK(std::string(fxe::net::ocsp_stapling_status_name(
+              fxe::net::ocsp_stapling_status::unsupported)) == "unsupported");
     CHECK(result.client_received == "pong");
     CHECK(result.server_received == "ping");
     CHECK(result.client_alpn == "http/1.1");

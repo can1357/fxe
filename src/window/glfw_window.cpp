@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fxe/log.hpp>
 #include <fxe/types.hpp>
 #include <fxe/window.hpp>
 
@@ -63,6 +64,9 @@
 #endif
 #ifndef DWMSBT_TABBEDWINDOW
 #define DWMSBT_TABBEDWINDOW 4
+#endif
+#ifndef WDA_EXCLUDEFROMCAPTURE
+#define WDA_EXCLUDEFROMCAPTURE 0x00000011
 #endif
 #endif
 
@@ -467,6 +471,13 @@ namespace fxe {
     [ns setOpaque:NO];
     [ns setBackgroundColor:[NSColor clearColor]];
     [ns setHasShadow:YES];
+  }
+  static bool fxe_macos_set_content_protection(void* nswindow_void, bool enabled) {
+    NSWindow* ns = (__bridge NSWindow*)nswindow_void;
+    if (!ns)
+      return false;
+    [ns setSharingType:enabled ? NSWindowSharingNone : NSWindowSharingReadOnly];
+    return true;
   }
 
   static NSVisualEffectMaterial fxe_macos_vibrancy_material(const char* kind) {
@@ -1435,6 +1446,29 @@ namespace fxe {
     [[nodiscard]] bool is_raw_mouse_motion_supported() const override {
       return glfwRawMouseMotionSupported() == GLFW_TRUE;
     }
+    bool set_content_protection(bool enabled) override {
+#if defined(__APPLE__)
+      const bool applied = handle_ && fxe_macos_set_content_protection(
+                                          (__bridge void*)glfwGetCocoaWindow(handle_), enabled);
+#elif defined(_WIN32)
+      const bool applied =
+          handle_ && fxe_win32_set_content_protection(glfwGetWin32Window(handle_), enabled);
+#else
+      static std::once_flag warned_once;
+      std::call_once(warned_once, [] {
+        FXE_WARN("window.linux", "setContentProtection unsupported on this platform");
+      });
+      (void)enabled;
+      const bool applied = false;
+#endif
+      if (!applied)
+        return false;
+      content_protection_ = enabled;
+      return true;
+    }
+    [[nodiscard]] bool is_content_protection_enabled() const override {
+      return content_protection_;
+    }
     std::string clipboard_text() const override {
       const char* s = glfwGetClipboardString(handle_);
       return s ? std::string(s) : std::string{};
@@ -1545,6 +1579,11 @@ namespace fxe {
       data.data = &accent;
       data.size_of_data = sizeof(accent);
       return set_window_composition_attribute(hwnd, &data) != FALSE;
+    }
+    static bool fxe_win32_set_content_protection(HWND hwnd, bool enabled) {
+      if (!hwnd)
+        return false;
+      return SetWindowDisplayAffinity(hwnd, enabled ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE) != 0;
     }
 
     static HICON win32_create_hicon_from_rgba(const u8* rgba, int width, int height) {
@@ -2584,6 +2623,7 @@ namespace fxe {
     std::optional<math::ivec2> max_size_limit_;
     int saved_x_ = 100, saved_y_ = 100, saved_w_ = 1280, saved_h_ = 720;
     bool fullscreen_ = false;
+    bool content_protection_ = false;
     std::atomic<int> mods_{0};
     double last_cursor_x_ = 0.0, last_cursor_y_ = 0.0;
     bool cursor_seen_ = false;
