@@ -491,14 +491,49 @@ function singleBoundaryNode(child: BoundaryChild): Node {
   const children = normalizeBoundaryChildren(child);
   return children.length === 1 ? children[0] : Layer({ children });
 }
+function attachInternalToProduced(
+  produced: Node,
+  layout: LayoutResult | undefined,
+  text: TextStyle | undefined,
+): Node {
+  if (produced.type === 'component') {
+    const nextLayout = produced.internalLayout ?? layout;
+    const nextText = produced.internalTextStyle ?? text;
+    if (nextLayout === produced.internalLayout && nextText === produced.internalTextStyle) {
+      return produced;
+    }
+    return { ...produced, internalLayout: nextLayout, internalTextStyle: nextText };
+  }
+
+  if (produced.type === 'layer') {
+    if (produced.props.children.length !== 1) return produced;
+    const attached = attachInternalToProduced(produced.props.children[0], layout, text);
+    return attached === produced.props.children[0]
+      ? produced
+      : { ...produced, props: { ...produced.props, children: [attached] } };
+  }
+
+  if (
+    produced.type === 'provider' ||
+    produced.type === 'portal' ||
+    produced.type === 'error-boundary' ||
+    produced.type === 'suspense'
+  ) {
+    const children = normalizeBoundaryChildren(produced.props.children);
+    if (children.length !== 1) return produced;
+    const attached = attachInternalToProduced(children[0], layout, text);
+    return attached === children[0]
+      ? produced
+      : { ...produced, props: { ...produced.props, children: [attached] } };
+  }
+
+  return produced;
+}
+
 function propagateInternalToProduced(node: Node, produced: Node | null): Node | null {
-  if (produced === null) return produced;
-  if (node.type !== 'component') return produced;
-  if (produced.type !== 'component') return produced;
-  const layout = produced.internalLayout ?? node.internalLayout;
-  const text = produced.internalTextStyle ?? node.internalTextStyle;
-  if (layout === produced.internalLayout && text === produced.internalTextStyle) return produced;
-  return { ...produced, internalLayout: layout, internalTextStyle: text };
+  if (produced === null || node.type !== 'component') return produced;
+  if (node.internalLayout === undefined && node.internalTextStyle === undefined) return produced;
+  return attachInternalToProduced(produced, node.internalLayout, node.internalTextStyle);
 }
 
 function shouldTraverseMemoProduced(node: Node): boolean {

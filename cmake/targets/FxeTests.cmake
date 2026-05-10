@@ -202,6 +202,27 @@ if(FXE_BUILD_TESTS)
             MbedTLS::mbedcrypto
         )
         fxe_add_cpp_test(
+            fxe_native_https_tests
+            tests/native_https_test.cpp
+            fxe_deps
+            fxe_log
+            MbedTLS::mbedtls
+            MbedTLS::mbedx509
+            MbedTLS::mbedcrypto
+        )
+        target_include_directories(fxe_native_https_tests PRIVATE src include)
+        target_compile_definitions(fxe_native_https_tests PRIVATE FXE_HAS_NATIVE_TLS_HTTP2_DEPS=1)
+        target_compile_features(fxe_native_https_tests PRIVATE cxx_std_20)
+        target_sources(
+            fxe_native_https_tests
+            PRIVATE
+                src/net/cookie_jar.cpp
+                src/net/http_client.cpp
+                src/net/tls_client.cpp
+                src/net/tls_server.cpp
+                src/runtime/v8/native/https_transport.cpp
+        )
+        fxe_add_cpp_test(
             fxe_ws_deflate_tests
             tests/ws_deflate_test.cpp
             fxe_net

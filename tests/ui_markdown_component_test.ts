@@ -1,4 +1,4 @@
-import { CommandBuffer, type Renderer, type Window, type WindowEventName } from 'fxe';
+import { CommandBuffer, Primitives, type Renderer, type Window, type WindowEventName } from 'fxe';
 import {
   clearHitTargets,
   type FiberNode,
@@ -10,8 +10,10 @@ import {
   mount,
   render,
   resetEventPipeline,
+  ScrollView,
   setLayoutTraceEnabled,
   snapshotFiberTree,
+  View,
 } from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
@@ -221,6 +223,99 @@ test('Markdown block positions settle after lazy mount redraw', () => {
   } finally {
     setLayoutTraceEnabled(false);
     drainLayoutTrace();
+  }
+});
+
+test('Markdown table text settles inside ScrollView first frame', () => {
+  const renderer = new CommandBuffer() as unknown as Renderer & CommandBuffer;
+  const draws: Array<{ text: string; x: number; y: number }> = [];
+  const clear = renderer.clear.bind(renderer);
+  renderer.clear = () => {
+    draws.length = 0;
+    clear();
+  };
+  renderer.beginFrame = () => renderer.clear();
+  renderer.endFrame = () => undefined;
+
+  const primitives = Primitives as unknown as {
+    drawText: (...args: unknown[]) => [number, number, number, number];
+    drawTextRun: (
+      cb: CommandBuffer | Renderer,
+      runs: ReadonlyArray<{ x: number; y: number; text: string; size?: number; color?: number }>,
+    ) => void;
+  };
+  const drawText = primitives.drawText;
+  const drawTextRun = primitives.drawTextRun;
+  primitives.drawText = (...args: unknown[]) => {
+    if (typeof args[1] === 'number' && typeof args[2] === 'number' && typeof args[4] === 'string') {
+      draws.push({ x: args[1], y: args[2], text: args[4] });
+    }
+    return drawText(...args);
+  };
+  primitives.drawTextRun = (cb, runs) => {
+    for (const run of runs) draws.push({ x: run.x, y: run.y, text: run.text });
+    drawTextRun(cb, runs);
+  };
+
+  const frameCallback: { current: ((window: Window) => void) | null } = { current: null };
+  let redrawPending = true;
+  const listeners = new Map<string, number>();
+  const win = {
+    framebufferSize: () => [360, 240] as [number, number],
+    requestRedraw: () => {
+      redrawPending = true;
+    },
+    setFrameCallback: (cb: ((window: Window) => void) | null) => {
+      frameCallback.current = cb;
+    },
+    takeRedrawRequest: () => {
+      const pending = redrawPending;
+      redrawPending = false;
+      return pending;
+    },
+    on: (event: WindowEventName) => {
+      listeners.set(event, (listeners.get(event) ?? 0) + 1);
+      return () => listeners.set(event, (listeners.get(event) ?? 1) - 1);
+    },
+  } as unknown as Window;
+
+  const source = [
+    '# Table',
+    '',
+    '| Feature  | Status |',
+    '| :------- | :----: |',
+    '| Headings | ok     |',
+    '| Lists    | ok     |',
+  ].join('\n');
+  const root = View({
+    style: { width: 360, height: 240 },
+    children: ScrollView({
+      style: { width: 360, height: 240 },
+      children: MarkdownComponent({ source, style: { width: 360, padding: 16 } }),
+    }),
+  });
+
+  try {
+    const dispose = mount(root, win, { renderer });
+    try {
+      assert(frameCallback.current !== null, 'lazy mount should install frame callback');
+      assert(!redrawPending, 'ScrollView markdown layout should settle before present');
+      const yFor = (text: string): number => {
+        const hit = draws.find((draw) => draw.text === text);
+        assert(hit !== undefined, `expected drawText for ${text}`);
+        return hit.y;
+      };
+      const headerY = yFor('Feature');
+      const firstRowY = yFor('Headings');
+      const secondRowY = yFor('Lists');
+      assert(firstRowY > headerY, 'first table row text must be below header text');
+      assert(secondRowY > firstRowY, 'second table row text must be below first row text');
+    } finally {
+      dispose();
+    }
+  } finally {
+    primitives.drawText = drawText;
+    primitives.drawTextRun = drawTextRun;
   }
 });
 

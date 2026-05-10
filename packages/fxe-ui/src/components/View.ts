@@ -292,6 +292,37 @@ function contextValuesMatch(cached: unknown[], frames: readonly ContextFrameSnap
   return true;
 }
 
+function isPlainLayoutObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+// Layout walks run before the current render can rebuild composite children.
+// Reusing the last produced subtree for layout is safe when props are layout-
+// equivalent even if event callbacks were recreated inline.
+function layoutEquivalentValue(prev: unknown, next: unknown, depth = 0): boolean {
+  if (Object.is(prev, next)) return true;
+  if (typeof prev === 'function' && typeof next === 'function') return true;
+  if (depth >= 4) return false;
+  if (Array.isArray(prev) || Array.isArray(next)) {
+    if (!Array.isArray(prev) || !Array.isArray(next) || prev.length !== next.length) return false;
+    for (let i = 0; i < prev.length; ++i) {
+      if (!layoutEquivalentValue(prev[i], next[i], depth + 1)) return false;
+    }
+    return true;
+  }
+  if (!isPlainLayoutObject(prev) || !isPlainLayoutObject(next)) return false;
+  const prevKeys = Object.keys(prev);
+  const nextKeys = Object.keys(next);
+  if (prevKeys.length !== nextKeys.length || prevKeys.length > 64) return false;
+  for (const key of prevKeys) {
+    if (!Object.hasOwn(next, key)) return false;
+    if (!layoutEquivalentValue(prev[key], next[key], depth + 1)) return false;
+  }
+  return true;
+}
+
 function layoutNodeListSig(nodes: readonly LayoutNode[]): { sig: string; complete: boolean } {
   const parts = new Array<string>(nodes.length);
   let complete = true;
@@ -361,6 +392,7 @@ function layoutNodeFor(
       // RUNNING ahead of the reconciler, so without a local swap the
       // identity-keyed caches below would always miss against
       // last-frame's `lastProps` even when the props are shallow-equal.
+      let propsMatchLastForLayout = parentFiber?.lastProps === node.props;
       if (
         parentFiber !== null &&
         parentFiber.lastProps !== undefined &&
@@ -370,7 +402,12 @@ function layoutNodeFor(
           node.memo !== undefined
             ? node.memo.areEqual(parentFiber.lastProps, node.props)
             : shallowEqualProps(parentFiber.lastProps, node.props);
-        if (eq) (node as { props: unknown }).props = parentFiber.lastProps;
+        if (eq) {
+          (node as { props: unknown }).props = parentFiber.lastProps;
+          propsMatchLastForLayout = true;
+        } else {
+          propsMatchLastForLayout = layoutEquivalentValue(parentFiber.lastProps, node.props);
+        }
       }
       const cachedLayout = parentFiber?.layoutCache;
       if (
@@ -378,7 +415,9 @@ function layoutNodeFor(
         cachedLayout.props === node.props &&
         contextValuesMatch(cachedLayout.values, contextFrames)
       ) {
-        return cachedLayout.layoutNode as LayoutNode;
+        const cachedNode = cachedLayout.layoutNode as LayoutNode;
+        if (cachedNode._sig !== undefined) return cachedNode;
+        parentFiber.layoutCache = undefined;
       }
       let produced: Node | null = null;
       // Primary cache: previous render stored produced JSX on the child
@@ -391,7 +430,7 @@ function layoutNodeFor(
       if (
         parentFiber !== null &&
         parentFiber.lastProducedNode !== null &&
-        parentFiber.lastProps === node.props
+        propsMatchLastForLayout
       ) {
         produced = parentFiber.lastProducedNode;
       }
@@ -435,11 +474,15 @@ function layoutNodeFor(
           : null;
       const result = layoutNodeFor(produced, inheritedTextStyle, contextFrames, innerFiber);
       if (parentFiber) {
-        parentFiber.layoutCache = {
-          props: node.props,
-          values: snapshotContextValues(contextFrames),
-          layoutNode: result,
-        };
+        if (result._sig !== undefined) {
+          parentFiber.layoutCache = {
+            props: node.props,
+            values: snapshotContextValues(contextFrames),
+            layoutNode: result,
+          };
+        } else {
+          parentFiber.layoutCache = undefined;
+        }
       }
       return result;
     }
@@ -449,6 +492,14 @@ function layoutNodeFor(
       ...inheritedTextStyle,
       ...resolved.text,
     };
+    // ScrollView's content is measured from its portal CommandBuffer; it is not
+    // part of the parent's flex tree and cannot be resolved through this fiber.
+    if (node.displayName === 'ScrollView') {
+      return {
+        style: resolved.layout,
+        _sig: `S|${layoutSig}`,
+      };
+    }
     if (node.displayName === 'Text') {
       const text = textFromChildren(childProps.children);
       return {
