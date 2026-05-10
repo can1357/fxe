@@ -21,6 +21,12 @@
 #include <system_error>
 #include <unordered_set>
 
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <softpub.h>
@@ -528,72 +534,102 @@ namespace fxe::runtime {
       return out;
     }
 
-#ifdef __APPLE__
-    std::string run_command_capture(const std::string& command) {
+    std::string run_command_capture(const std::string& command, int* exit_code_out = nullptr) {
       std::array<char, 256> buffer{};
       std::string out;
+#if defined(_WIN32)
+      FILE* pipe = _popen(command.c_str(), "r");
+#else
       FILE* pipe = popen(command.c_str(), "r");
-      if (!pipe)
+#endif
+      if (!pipe) {
+        if (exit_code_out)
+          *exit_code_out = -1;
         return out;
+      }
       while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe))
         out += buffer.data();
-      (void)pclose(pipe);
+#if defined(_WIN32)
+      const int status = _pclose(pipe);
+      if (exit_code_out)
+        *exit_code_out = status;
+#else
+      const int status = pclose(pipe);
+      if (exit_code_out)
+        *exit_code_out = status == -1 ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : status);
+#endif
       return out;
     }
-#endif
 
-    bool verify_platform_code_signature(const std::filesystem::path& artifact,
-                                        std::string_view expected_authority,
-                                        std::string_view expected_subject, std::string& error_out) {
-      if (expected_authority.empty() && expected_subject.empty())
-        return true;
-#ifdef __APPLE__
-      const std::string quoted = shell_quote(artifact);
-      if (std::system(("/usr/bin/codesign --verify --deep --strict " + quoted).c_str()) != 0) {
-        error_out = "update artifact code-signature verification failed";
+#if defined(__linux__)
+    bool tool_on_path(std::string_view name) {
+      if (name.empty())
         return false;
-      }
-      const std::string details =
-          run_command_capture("/usr/bin/codesign -dvvv --verbose=4 " + quoted + " 2>&1");
-      if (!expected_authority.empty() &&
-          details.find("Authority=" + std::string(expected_authority)) == std::string::npos) {
-        error_out = "update artifact signing authority mismatch";
+      if (name.find('/') != std::string_view::npos)
+        return access(std::string(name).c_str(), X_OK) == 0;
+      const char* path_env = std::getenv("PATH");
+      if (!path_env)
         return false;
+      std::string_view path(path_env);
+      usize start = 0;
+      while (start <= path.size()) {
+        const usize end = path.find(':', start);
+        const std::string_view entry =
+            end == std::string_view::npos ? path.substr(start) : path.substr(start, end - start);
+        const std::filesystem::path dir =
+            entry.empty() ? std::filesystem::current_path() : std::filesystem::path(entry);
+        const std::filesystem::path candidate = dir / std::string(name);
+        if (access(candidate.string().c_str(), X_OK) == 0)
+          return true;
+        if (end == std::string_view::npos)
+          break;
+        start = end + 1;
       }
-      if (!expected_subject.empty() &&
-          details.find(std::string(expected_subject)) == std::string::npos) {
-        error_out = "update artifact signing subject mismatch";
-        return false;
-      }
-      return true;
-#elif defined(_WIN32)
-      std::wstring wide = artifact.wstring();
-      WINTRUST_FILE_INFO file_info{};
-      file_info.cbStruct = sizeof(file_info);
-      file_info.pcwszFilePath = wide.c_str();
-      GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-      WINTRUST_DATA trust_data{};
-      trust_data.cbStruct = sizeof(trust_data);
-      trust_data.dwUIChoice = WTD_UI_NONE;
-      trust_data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
-      trust_data.dwUnionChoice = WTD_CHOICE_FILE;
-      trust_data.dwStateAction = WTD_STATEACTION_VERIFY;
-      trust_data.pFile = &file_info;
-      LONG status = WinVerifyTrust(nullptr, &policy, &trust_data);
-      trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
-      (void)WinVerifyTrust(nullptr, &policy, &trust_data);
-      if (status != ERROR_SUCCESS) {
-        error_out = "update artifact WinTrust verification failed";
-        return false;
-      }
-      (void)expected_authority;
-      (void)expected_subject;
-      return true;
-#else
-      error_out = "update artifact code-signature verification is not supported on this platform";
       return false;
-#endif
     }
+
+    std::string normalize_fingerprint(std::string_view text) {
+      std::string out;
+      out.reserve(text.size());
+      for (char c : text) {
+        if (std::isspace(static_cast<unsigned char>(c)))
+          continue;
+        out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      }
+      return out;
+    }
+
+    bool is_hex_fingerprint(std::string_view text) {
+      if (text.size() != 40)
+        return false;
+      for (char c : text) {
+        if (!std::isxdigit(static_cast<unsigned char>(c)))
+          return false;
+      }
+      return true;
+    }
+
+    bool read_minisign_untrusted_comment(const std::filesystem::path& sig_path,
+                                         std::string& comment_out) {
+      std::ifstream input(sig_path, std::ios::binary);
+      if (!input)
+        return false;
+      return static_cast<bool>(std::getline(input, comment_out));
+    }
+
+    std::optional<std::filesystem::path> make_temp_gpg_home(std::string& error_out) {
+      std::string tmpl =
+          (std::filesystem::temp_directory_path() / "fxe-updater-gpg-XXXXXX").string();
+      std::vector<char> buffer(tmpl.begin(), tmpl.end());
+      buffer.push_back('\0');
+      char* created = mkdtemp(buffer.data());
+      if (!created) {
+        error_out = "failed to create temporary gpg homedir";
+        return std::nullopt;
+      }
+      return std::filesystem::path(created);
+    }
+#endif
 
     std::vector<u8> hex_bytes(std::string_view hex) {
       auto hex_value = [](char c) -> u8 {
@@ -628,6 +664,215 @@ namespace fxe::runtime {
     static const ed25519_self_test k_ed25519_self_test;
 
   } // namespace
+
+  bool detail::detect_detached_signature(const std::filesystem::path& artifact,
+                                         std::filesystem::path& sig_path_out,
+                                         std::string& flavor_out) {
+    const std::array<std::pair<std::string_view, std::string_view>, 3> candidates = {{
+        {".minisig", "minisign"},
+        {".sig", "minisign"},
+        {".asc", "gpg"},
+    }};
+    std::error_code ec;
+    for (const auto& [suffix, flavor] : candidates) {
+      std::filesystem::path candidate = artifact;
+      candidate += suffix;
+      ec.clear();
+      if (std::filesystem::exists(candidate, ec) && !ec) {
+        sig_path_out = std::move(candidate);
+        flavor_out = std::string(flavor);
+        return true;
+      }
+    }
+    sig_path_out.clear();
+    flavor_out.clear();
+    return false;
+  }
+
+  bool detail::verify_platform_code_signature(const std::filesystem::path& artifact,
+                                              std::string_view expected_authority,
+                                              std::string_view expected_subject,
+                                              std::string& error_out) {
+    if (expected_authority.empty() && expected_subject.empty())
+      return true;
+#ifdef __APPLE__
+    const std::string quoted = shell_quote(artifact);
+    if (std::system(("/usr/bin/codesign --verify --deep --strict " + quoted).c_str()) != 0) {
+      error_out = "update artifact code-signature verification failed";
+      return false;
+    }
+    const std::string details =
+        run_command_capture("/usr/bin/codesign -dvvv --verbose=4 " + quoted + " 2>&1");
+    if (!expected_authority.empty() &&
+        details.find("Authority=" + std::string(expected_authority)) == std::string::npos) {
+      error_out = "update artifact signing authority mismatch";
+      return false;
+    }
+    if (!expected_subject.empty() &&
+        details.find(std::string(expected_subject)) == std::string::npos) {
+      error_out = "update artifact signing subject mismatch";
+      return false;
+    }
+    return true;
+#elif defined(_WIN32)
+    std::wstring wide = artifact.wstring();
+    WINTRUST_FILE_INFO file_info{};
+    file_info.cbStruct = sizeof(file_info);
+    file_info.pcwszFilePath = wide.c_str();
+    GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    WINTRUST_DATA trust_data{};
+    trust_data.cbStruct = sizeof(trust_data);
+    trust_data.dwUIChoice = WTD_UI_NONE;
+    trust_data.fdwRevocationChecks = WTD_REVOKE_WHOLECHAIN;
+    trust_data.dwUnionChoice = WTD_CHOICE_FILE;
+    trust_data.dwStateAction = WTD_STATEACTION_VERIFY;
+    trust_data.pFile = &file_info;
+    LONG status = WinVerifyTrust(nullptr, &policy, &trust_data);
+    trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
+    (void)WinVerifyTrust(nullptr, &policy, &trust_data);
+    if (status != ERROR_SUCCESS) {
+      error_out = "update artifact WinTrust verification failed";
+      return false;
+    }
+    (void)expected_authority;
+    (void)expected_subject;
+    return true;
+#elif defined(__linux__)
+    if (expected_authority.empty()) {
+      error_out = "detached signature verification requires expected_authority";
+      return false;
+    }
+    if (expected_subject.empty()) {
+      error_out = "detached signature verification requires expected_subject public key path";
+      return false;
+    }
+    std::filesystem::path sig_path;
+    std::string flavor;
+    if (!detect_detached_signature(artifact, sig_path, flavor)) {
+      error_out =
+          "no detached signature found alongside artifact (expected .minisig, .sig, or .asc)";
+      return false;
+    }
+    const std::filesystem::path subject_path(expected_subject);
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(subject_path, ec) || ec) {
+      error_out = "detached-signature public key file not found: " + subject_path.string();
+      return false;
+    }
+    if (flavor == "minisign") {
+      if (!tool_on_path("minisign")) {
+        error_out = "minisign is not available on PATH";
+        return false;
+      }
+      std::string first_line;
+      if (!read_minisign_untrusted_comment(sig_path, first_line)) {
+        error_out = "failed to read minisign signature metadata: " + sig_path.string();
+        return false;
+      }
+      constexpr std::string_view k_untrusted_prefix = "untrusted comment:";
+      if (first_line.rfind(std::string(k_untrusted_prefix), 0) != 0) {
+        error_out = "minisign signature missing untrusted comment";
+        return false;
+      }
+      const std::string_view comment =
+          trim_ascii(std::string_view(first_line).substr(k_untrusted_prefix.size()));
+      if (!comment.starts_with(expected_authority)) {
+        error_out = "minisign untrusted comment mismatch";
+        return false;
+      }
+      int verify_exit = -1;
+      const std::string output = run_command_capture("minisign -V -x " + shell_quote(sig_path) +
+                                                         " -p " + shell_quote(subject_path) +
+                                                         " -m " + shell_quote(artifact) + " 2>&1",
+                                                     &verify_exit);
+      if (verify_exit != 0) {
+        error_out = "minisign verification failed: " + std::string(trim_ascii(output));
+        return false;
+      }
+      return true;
+    }
+    if (flavor == "gpg") {
+      if (!tool_on_path("gpg")) {
+        error_out = "gpg is not available on PATH";
+        return false;
+      }
+      const std::string expected_fingerprint = normalize_fingerprint(expected_authority);
+      if (!is_hex_fingerprint(expected_fingerprint)) {
+        error_out = "gpg signing fingerprint must be 40 hexadecimal characters";
+        return false;
+      }
+      auto homedir = make_temp_gpg_home(error_out);
+      if (!homedir)
+        return false;
+      struct gpg_home_cleanup {
+        std::filesystem::path path;
+        ~gpg_home_cleanup() {
+          std::error_code cleanup_error;
+          std::filesystem::remove_all(path, cleanup_error);
+        }
+      } cleanup{*homedir};
+      int import_exit = -1;
+      const std::string import_output =
+          run_command_capture("gpg --batch --homedir " + shell_quote(*homedir) + " --import " +
+                                  shell_quote(subject_path) + " 2>&1",
+                              &import_exit);
+      if (import_exit != 0) {
+        error_out = "gpg key import failed: " + std::string(trim_ascii(import_output));
+        return false;
+      }
+      int verify_exit = -1;
+      const std::string verify_output =
+          run_command_capture("gpg --batch --no-auto-check-trustdb --homedir " +
+                                  shell_quote(*homedir) + " --status-fd 2 --verify " +
+                                  shell_quote(sig_path) + " " + shell_quote(artifact) + " 2>&1",
+                              &verify_exit);
+      bool saw_goodsig = false;
+      bool saw_validsig = false;
+      std::string observed_fingerprint;
+      std::istringstream status_lines(verify_output);
+      std::string line;
+      while (std::getline(status_lines, line)) {
+        if (line.rfind("[GNUPG:] GOODSIG ", 0) == 0) {
+          saw_goodsig = true;
+          const std::string_view rest = trim_ascii(std::string_view(line).substr(17));
+          const usize end = rest.find_first_of(" \t\r\n");
+          const std::string token =
+              normalize_fingerprint(end == std::string_view::npos ? rest : rest.substr(0, end));
+          if (is_hex_fingerprint(token))
+            observed_fingerprint = token;
+        } else if (line.rfind("[GNUPG:] VALIDSIG ", 0) == 0) {
+          saw_validsig = true;
+          const std::string_view rest = trim_ascii(std::string_view(line).substr(18));
+          const usize end = rest.find_first_of(" \t\r\n");
+          observed_fingerprint =
+              normalize_fingerprint(end == std::string_view::npos ? rest : rest.substr(0, end));
+        }
+      }
+      if (verify_exit != 0) {
+        error_out = "gpg verification failed: " + std::string(trim_ascii(verify_output));
+        return false;
+      }
+      if (!saw_goodsig && !saw_validsig) {
+        error_out = "gpg verification did not report a valid detached signature";
+        return false;
+      }
+      if (!is_hex_fingerprint(observed_fingerprint)) {
+        error_out = "gpg verification did not report a signing fingerprint";
+        return false;
+      }
+      if (observed_fingerprint != expected_fingerprint) {
+        error_out = "gpg signing fingerprint mismatch";
+        return false;
+      }
+      return true;
+    }
+    error_out = "unsupported detached signature flavor: " + flavor;
+    return false;
+#else
+    error_out = "update artifact code-signature verification is not supported on this platform";
+    return false;
+#endif
+  }
 
   bool ed25519_verify(std::span<const u8> sig, std::span<const u8> message,
                       std::span<const u8> public_key) {
@@ -1093,8 +1338,8 @@ namespace fxe::runtime {
     std::filesystem::remove(partial_path, ec);
     if (!write_all(partial_path, d.artifact, error_out))
       return std::nullopt;
-    if (!verify_platform_code_signature(partial_path, d.expected_signing_authority,
-                                        d.expected_subject, error_out)) {
+    if (!detail::verify_platform_code_signature(partial_path, d.expected_signing_authority,
+                                                d.expected_subject, error_out)) {
       std::filesystem::remove(partial_path, ec);
       return std::nullopt;
     }

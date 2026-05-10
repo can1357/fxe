@@ -184,6 +184,7 @@ if(FXE_BUILD_TESTS)
             tests/os_linux_smoke.cpp
             fxe_os
         )
+        fxe_add_cpp_test(fxe_updater_linux_signature_tests tests/updater_linux_signature_test.cpp fxe_runtime fxe_os)
     endif()
     if(WIN32)
         fxe_add_cpp_test(

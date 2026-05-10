@@ -2,23 +2,11 @@
 // `TextDocument`. Pairs a `LineViewport` for paint with a focusable hit
 // target that owns selection state, dispatches edits through `History`,
 // and translates GLFW key events into doc mutations.
-//
-// Scope (v1):
-//   - Single cursor (multi-cursor follow-up; the underlying selection model
-//     supports it but key handling is single-cursor-first).
-//   - Char input via composition events.
-//   - Backspace / Delete / Arrow keys / Home / End.
-//   - Tab inserts the configured `tabString` (default '  ').
-//   - Cmd/Ctrl + Z / Y for undo / redo through `History`.
-//   - Enter inserts a newline.
-//
-// Multi-cursor, block-select, smart-bracket, find-and-replace are
-// follow-ups that build on this base via the same selection + history
-// surface.
 
-import type { ComposeEvent, KeyEvent } from 'fxe';
+import type { ComposeEvent, KeyEvent, MouseButtonEvent } from 'fxe';
+import { MultiRangeSelection, type Range } from 'fxe-doc';
 import { recordLayout } from '../debug/layout_trace.ts';
-import { registerHitTarget } from '../mount/hit_test.ts';
+import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
 import {
   Component,
   type Node,
@@ -30,10 +18,12 @@ import {
 } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
-import { isPrimaryModifier, MOD_SHIFT } from '../text/edit_model.ts';
+import { isPrimaryModifier, MOD_ALT, MOD_SHIFT } from '../text/edit_model.ts';
 import { rectFromStyle } from './common.ts';
+import { addNextOccurrence, applyEditsAtRanges, expandLines } from './editable_area_logic.ts';
 import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
 
+const KEY_ESCAPE = 256;
 const KEY_ENTER = 257;
 const KEY_TAB = 258;
 const KEY_BACKSPACE = 259;
@@ -44,6 +34,8 @@ const KEY_DOWN = 264;
 const KEY_UP = 265;
 const KEY_HOME = 268;
 const KEY_END = 269;
+const KEY_D = 68;
+const KEY_L = 76;
 const KEY_Z = 90;
 const KEY_Y = 89;
 
@@ -92,10 +84,7 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     styleHeight: resolved.layout.height,
   });
 
-  // Cursor as offset; selection range as anchor/focus (anchor = where the
-  // selection started, focus = current cursor end).
-  const [anchor, setAnchor] = useState(0);
-  const [focus, setFocus] = useState(0);
+  const [sel, setSel] = useState(() => MultiRangeSelection.cursor(0));
   const wantedCol = useRef<number>(-1);
   const tabString = props.tabString ?? '  ';
 
@@ -113,42 +102,63 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
   const undo = (): boolean => (props.history ? props.history.undo() : false);
   const redo = (): boolean => (props.history ? props.history.redo() : false);
 
-  const moveTo = (offset: number, extend: boolean): void => {
-    const clamped = Math.max(0, Math.min(doc.length(), offset));
-    setFocus(clamped);
-    if (!extend) setAnchor(clamped);
-    wantedCol.current = -1;
-    if (props.onCursorChange) {
-      const lc = doc.offsetToLineCol(clamped);
-      props.onCursorChange(lc.line, lc.col);
-    }
+  const notifyPrimaryCursor = (nextSel: MultiRangeSelection): void => {
+    if (!props.onCursorChange) return;
+    const lc = doc.offsetToLineCol(nextSel.primaryRange().focus);
+    props.onCursorChange(lc.line, lc.col);
+  };
+
+  const commitSelection = (nextSel: MultiRangeSelection, nextWantedCol: number): void => {
+    setSel(nextSel);
+    wantedCol.current = nextWantedCol;
+    notifyPrimaryCursor(nextSel);
+  };
+
+  const moveSelection = (
+    mapper: (range: Range, index: number) => Range,
+    nextWantedCol: number,
+  ): void => {
+    commitSelection(sel.with(sel.ranges.map(mapper), sel.primary), nextWantedCol);
+  };
+
+  const moveTo = (delta: number, extend: boolean): void => {
+    moveSelection((range) => {
+      const nextOffset = Math.max(0, Math.min(doc.length(), range.focus + delta));
+      return extend
+        ? { anchor: range.anchor, focus: nextOffset }
+        : { anchor: nextOffset, focus: nextOffset };
+    }, -1);
   };
 
   const moveByLine = (delta: number, extend: boolean): void => {
-    const lc = doc.offsetToLineCol(focus);
-    const targetLine = Math.max(0, Math.min(doc.lineCount() - 1, lc.line + delta));
-    const wantCol = wantedCol.current >= 0 ? wantedCol.current : lc.col;
-    const newOffset = doc.lineColToOffset(targetLine, wantCol);
-    setFocus(newOffset);
-    if (!extend) setAnchor(newOffset);
-    wantedCol.current = wantCol;
-    if (props.onCursorChange) {
-      const out = doc.offsetToLineCol(newOffset);
-      props.onCursorChange(out.line, out.col);
-    }
+    const primaryCol = doc.offsetToLineCol(sel.primaryRange().focus).col;
+    const nextWantedCol = wantedCol.current >= 0 ? wantedCol.current : primaryCol;
+    moveSelection((range, index) => {
+      const lc = doc.offsetToLineCol(range.focus);
+      const targetLine = Math.max(0, Math.min(doc.lineCount() - 1, lc.line + delta));
+      const targetCol = index === sel.primary ? nextWantedCol : lc.col;
+      const nextOffset = doc.lineColToOffset(targetLine, targetCol);
+      return extend
+        ? { anchor: range.anchor, focus: nextOffset }
+        : { anchor: nextOffset, focus: nextOffset };
+    }, nextWantedCol);
   };
 
-  const ordered = (): { start: number; end: number } => {
-    return anchor <= focus ? { start: anchor, end: focus } : { start: focus, end: anchor };
+  const moveToLineBoundary = (which: 'start' | 'end', extend: boolean): void => {
+    moveSelection((range) => {
+      const lc = doc.offsetToLineCol(range.focus);
+      const nextOffset = which === 'start' ? doc.lineToOffset(lc.line) : doc.lineRange(lc.line).end;
+      return extend
+        ? { anchor: range.anchor, focus: nextOffset }
+        : { anchor: nextOffset, focus: nextOffset };
+    }, -1);
   };
 
-  const replaceSelection = (text: string, origin: string): void => {
-    const { start, end } = ordered();
-    dispatch([{ start, removed: end - start, inserted: text }], { origin });
-    const newPos = start + text.length;
-    setAnchor(newPos);
-    setFocus(newPos);
-    wantedCol.current = -1;
+  const applySelectionEdit = (text: string, origin: string): void => {
+    const { edits, nextSel } = applyEditsAtRanges(doc, sel, text, origin);
+    if (edits.length === 0) return;
+    dispatch(edits, { origin });
+    commitSelection(nextSel, -1);
   };
 
   const onKeyDown = (raw: unknown): void => {
@@ -157,7 +167,6 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     const shift = (mod & MOD_SHIFT) !== 0;
     const primary = isPrimaryModifier(mod);
 
-    // Undo / redo.
     if (primary && ev.key === KEY_Z) {
       if (shift) redo();
       else undo();
@@ -167,13 +176,22 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
       redo();
       return;
     }
+    if (primary && ev.key === KEY_D) {
+      const nextSel = addNextOccurrence(doc, sel);
+      if (nextSel !== sel) commitSelection(nextSel, -1);
+      return;
+    }
+    if (primary && ev.key === KEY_L) {
+      commitSelection(expandLines(doc, sel), -1);
+      return;
+    }
 
     switch (ev.key) {
       case KEY_LEFT:
-        moveTo(focus - 1, shift);
+        moveTo(-1, shift);
         return;
       case KEY_RIGHT:
-        moveTo(focus + 1, shift);
+        moveTo(1, shift);
         return;
       case KEY_UP:
         moveByLine(-1, shift);
@@ -181,42 +199,27 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
       case KEY_DOWN:
         moveByLine(1, shift);
         return;
-      case KEY_HOME: {
-        const lc = doc.offsetToLineCol(focus);
-        moveTo(doc.lineToOffset(lc.line), shift);
+      case KEY_HOME:
+        moveToLineBoundary('start', shift);
         return;
-      }
-      case KEY_END: {
-        const lc = doc.offsetToLineCol(focus);
-        moveTo(doc.lineRange(lc.line).end, shift);
+      case KEY_END:
+        moveToLineBoundary('end', shift);
         return;
-      }
-      case KEY_BACKSPACE: {
-        const { start, end } = ordered();
-        if (end > start) {
-          replaceSelection('', 'delete');
-        } else if (start > 0) {
-          dispatch([{ start: start - 1, removed: 1, inserted: '' }], { origin: 'delete' });
-          setAnchor(start - 1);
-          setFocus(start - 1);
-        }
+      case KEY_BACKSPACE:
+        applySelectionEdit('', 'delete-backward');
         return;
-      }
-      case KEY_DELETE: {
-        const { start, end } = ordered();
-        if (end > start) {
-          replaceSelection('', 'delete');
-        } else if (start < doc.length()) {
-          dispatch([{ start, removed: 1, inserted: '' }], { origin: 'delete' });
-        }
+      case KEY_DELETE:
+        applySelectionEdit('', 'delete-forward');
         return;
-      }
       case KEY_ENTER:
-        replaceSelection('\n', 'newline');
+        applySelectionEdit('\n', 'newline');
         if (props.history?.breakCoalescing) props.history.breakCoalescing();
         return;
       case KEY_TAB:
-        replaceSelection(tabString, 'indent');
+        applySelectionEdit(tabString, 'indent');
+        return;
+      case KEY_ESCAPE:
+        commitSelection(sel.collapseToPrimary(), -1);
         return;
       default:
         return;
@@ -224,7 +227,6 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
   };
 
   const onCompose = (ev: ComposeEvent): void => {
-    // GLFW char/codepoint composition. Insert the typed text at the cursor.
     const composed = ev as ComposeEvent & { text?: string; codepoint?: number };
     let inserted = '';
     if (typeof composed.text === 'string') {
@@ -234,17 +236,14 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     }
     if (inserted.length === 0) return;
     if (inserted === '\n' || inserted === '\r') {
-      // Newlines arrive via key events on most platforms; ignore here.
       return;
     }
-    replaceSelection(inserted, 'type');
+    applySelectionEdit(inserted, 'type');
   };
 
-  // Re-render on doc revision.
   useEffect(() => {
     const subId = doc.subscribe(() => {
-      // setState noop to bump the fiber.
-      setFocus((f) => f);
+      setSel((current) => current.with(current.ranges, current.primary));
     });
     return () => {
       doc.unsubscribe(subId);
@@ -265,34 +264,31 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     onCompose,
   });
 
-  // Wrap the user's getLineDecorations to add primary-cursor selection rects.
   const fontSize = typeof resolved.text.fontSize === 'number' ? resolved.text.fontSize : 14;
   const charW = fontSize * 0.6;
-  const range = ordered();
   const lineHeight = props.lineHeight;
   const decorate: LineDecorationFn = (line) => {
     const userDecorations: LineDecorations | null = props.getLineDecorations
       ? props.getLineDecorations(line)
       : null;
     const lineRange = doc.lineRange(line);
-    if (range.end <= lineRange.start || range.start > lineRange.end) {
-      return userDecorations;
-    }
-    const selStart = Math.max(range.start, lineRange.start);
-    const selEnd = Math.min(range.end, lineRange.end);
-    const colStart = selStart - lineRange.start;
-    const colEnd = selEnd - lineRange.start;
-    const widthCols = Math.max(colEnd - colStart, range.end > lineRange.end ? 1 : 0);
-    if (widthCols <= 0 && colStart !== colEnd) return userDecorations;
-    const x = colStart * charW;
-    const w = widthCols * charW;
-    const rects = new Float32Array([x, 0, w, lineHeight]);
+    let selectionRects = userDecorations?.selectionRects ?? null;
+    forEachRange(sel, (range) => {
+      if (range.end <= lineRange.start || range.start > lineRange.end) return;
+      const selStart = Math.max(range.start, lineRange.start);
+      const selEnd = Math.min(range.end, lineRange.end);
+      const colStart = selStart - lineRange.start;
+      const colEnd = selEnd - lineRange.start;
+      const widthCols = Math.max(colEnd - colStart, range.end > lineRange.end ? 1 : 0);
+      if (widthCols <= 0 && colStart === colEnd) return;
+      const rects = new Float32Array([colStart * charW, 0, widthCols * charW, lineHeight]);
+      selectionRects =
+        selectionRects && selectionRects.length > 0 ? mergeRects(selectionRects, rects) : rects;
+    });
+    if (!selectionRects) return userDecorations;
     return {
       ...(userDecorations ?? {}),
-      selectionRects:
-        userDecorations?.selectionRects && userDecorations.selectionRects.length > 0
-          ? mergeRects(userDecorations.selectionRects, rects)
-          : rects,
+      selectionRects,
     };
   };
 
@@ -305,15 +301,33 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     showWhitespace: props.showWhitespace,
     textColor: props.textColor,
     scrollY: props.scrollY,
-    onClickPosition: (line, col) => {
+    onClickPosition: (line, col, ev) => {
       const off = doc.lineColToOffset(line, col);
-      setAnchor(off);
-      setFocus(off);
-      wantedCol.current = col;
-      if (props.onCursorChange) props.onCursorChange(line, col);
+      const mouse = ev as SyntheticEvent<MouseButtonEvent>;
+      const nextSel =
+        (mouse.nativeEvent.modifiers & MOD_ALT) !== 0
+          ? sel.add({ anchor: off, focus: off })
+          : MultiRangeSelection.cursor(off);
+      commitSelection(nextSel, col);
     },
   });
 }, 'EditableArea');
+
+function orderedRange(range: Range): { start: number; end: number } {
+  return range.anchor <= range.focus
+    ? { start: range.anchor, end: range.focus }
+    : { start: range.focus, end: range.anchor };
+}
+
+function forEachRange(
+  selection: MultiRangeSelection,
+  fn: (range: { start: number; end: number }) => void,
+): void {
+  selection.ranges
+    .map(orderedRange)
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+    .forEach(fn);
+}
 
 function mergeRects(a: Float32Array, b: Float32Array): Float32Array {
   const out = new Float32Array(a.length + b.length);

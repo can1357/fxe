@@ -55,6 +55,16 @@ namespace fxe::runtime {
                                  std::string_view canonical_manifest,
                                  std::string_view expected_public_key_b64, std::string& error_out);
 
+  namespace detail {
+    // Internal: testing only.
+    bool detect_detached_signature(const std::filesystem::path& artifact,
+                                   std::filesystem::path& sig_path_out, std::string& flavor_out);
+    // Internal: testing only.
+    bool verify_platform_code_signature(const std::filesystem::path& artifact,
+                                        std::string_view expected_authority,
+                                        std::string_view expected_subject, std::string& error_out);
+  } // namespace detail
+
   // Parse a Sparkle appcast RSS/XML document into update_manifest_v2 metadata. The parser
   // selects the first host-matching item when `sparkle:os` is present, otherwise the first
   // item, emits exactly one `full` artifact, and leaves `arch`, `signature`, and

@@ -1,10 +1,48 @@
+/**
+ * Deterministic SVG parser supporting path/rect/circle/line/polyline/polygon geometry,
+ * transforms, solid fills/strokes, and linear/radial gradient paints.
+ * Text, images, filters, masks, clipping, and other unsupported elements are ignored.
+ */
+export type SvgAffine = readonly [number, number, number, number, number, number];
+
+export interface SvgGradientStop {
+  offset: number;
+  color: number;
+}
+
+export type SvgPaint =
+  | { kind: 'solid'; color: number }
+  | {
+      kind: 'linear-gradient';
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      stops: SvgGradientStop[];
+      spread: 'pad' | 'reflect' | 'repeat';
+      gradientUnits: 'userSpaceOnUse' | 'objectBoundingBox';
+      transform: SvgAffine;
+    }
+  | {
+      kind: 'radial-gradient';
+      cx: number;
+      cy: number;
+      r: number;
+      fx: number;
+      fy: number;
+      stops: SvgGradientStop[];
+      spread: 'pad' | 'reflect' | 'repeat';
+      gradientUnits: 'userSpaceOnUse' | 'objectBoundingBox';
+      transform: SvgAffine;
+    };
+
 export interface SvgShape {
   /** Filled subpath. */
   path: Path;
-  /** Optional fill color (RRGGBBAA). Undefined = use caller default. */
-  fill?: number;
-  /** Optional stroke color (RRGGBBAA). */
-  stroke?: number;
+  /** Optional fill paint. Undefined = use caller default. */
+  fill?: number | SvgPaint;
+  /** Optional stroke paint. */
+  stroke?: number | SvgPaint;
   /** Stroke width. */
   strokeWidth?: number;
   /** Fill rule. */
@@ -19,11 +57,11 @@ export interface SvgDocument {
   shapes: SvgShape[];
 }
 
-type Affine = [number, number, number, number, number, number];
+type Affine = SvgAffine;
 
 type StyleState = {
-  fill?: number;
-  stroke?: number;
+  fill?: number | SvgPaint;
+  stroke?: number | SvgPaint;
   strokeWidth?: number;
   fillRule?: 'nonzero' | 'evenodd';
 };
@@ -36,6 +74,40 @@ type Scope = {
 type XmlToken =
   | { type: 'start'; name: string; attributes: Record<string, string>; selfClosing: boolean }
   | { type: 'end'; name: string };
+
+type GradientSpread = 'pad' | 'reflect' | 'repeat';
+type GradientUnits = 'userSpaceOnUse' | 'objectBoundingBox';
+type GradientPaint =
+  | Extract<SvgPaint, { kind: 'linear-gradient' }>
+  | Extract<SvgPaint, { kind: 'radial-gradient' }>;
+
+type BaseGradientDef = {
+  id: string;
+  href?: string;
+  stops: SvgGradientStop[];
+  spread?: GradientSpread;
+  gradientUnits?: GradientUnits;
+  transform?: Affine;
+};
+
+type LinearGradientDef = BaseGradientDef & {
+  kind: 'linear-gradient';
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+};
+
+type RadialGradientDef = BaseGradientDef & {
+  kind: 'radial-gradient';
+  cx?: number;
+  cy?: number;
+  r?: number;
+  fx?: number;
+  fy?: number;
+};
+
+type SvgGradientDef = LinearGradientDef | RadialGradientDef;
 
 const IDENTITY: Affine = [1, 0, 0, 1, 0, 0];
 const FLOAT_PATTERN = /[-+]?(?:\d+\.\d+|\d+\.?|\.\d+)(?:[eE][-+]?\d+)?/g;
@@ -51,6 +123,7 @@ const COLOR_NAMES: Record<string, number | undefined> = {
 
 export function parseSvg(source: string): SvgDocument {
   const tokens = tokenizeXml(source);
+  const gradients = collectGradients(tokens);
   const scopes: Scope[] = [{ transform: IDENTITY, style: {} }];
   const shapes: SvgShape[] = [];
   let width = 0;
@@ -66,7 +139,7 @@ export function parseSvg(source: string): SvgDocument {
     const current = scopes[scopes.length - 1];
     const attrs = token.attributes;
     const transform = composeAffine(current.transform, parseTransform(attrs.transform));
-    const style = mergeStyle(current.style, attrs);
+    const style = mergeStyle(current.style, attrs, gradients);
 
     if (token.name === 'svg') {
       if (viewBox === undefined) {
@@ -85,7 +158,7 @@ export function parseSvg(source: string): SvgDocument {
       continue;
     }
 
-    const shape = buildShape(token.name, attrs, transform, style);
+    const shape = buildShape(token.name, attrs, transform, style, gradients);
     if (shape !== undefined) {
       shapes.push(shape);
     }
@@ -184,12 +257,210 @@ function parseAttributes(source: string): Record<string, string> {
   }
   return attributes;
 }
+function collectGradients(tokens: XmlToken[]): Map<string, GradientPaint> {
+  const defs = new Map<string, SvgGradientDef>();
+  let current: SvgGradientDef | undefined;
+  let depth = 0;
+
+  for (const token of tokens) {
+    if (token.type === 'start') {
+      if (current === undefined) {
+        const def = parseGradientDefinition(token);
+        if (def === undefined) continue;
+        if (token.selfClosing) {
+          defs.set(def.id, def);
+        } else {
+          current = def;
+          depth = 1;
+        }
+        continue;
+      }
+
+      if (token.name === 'stop') {
+        const stop = parseGradientStop(token.attributes);
+        if (stop !== undefined) current.stops.push(stop);
+      }
+      if (!token.selfClosing) {
+        depth += 1;
+      }
+      continue;
+    }
+
+    if (current === undefined) continue;
+    depth -= 1;
+    if (depth === 0) {
+      defs.set(current.id, current);
+      current = undefined;
+    }
+  }
+
+  const resolved = new Map<string, GradientPaint>();
+  const visiting = new Set<string>();
+  for (const id of defs.keys()) {
+    const paint = resolveGradient(id, defs, resolved, visiting);
+    if (paint !== undefined) {
+      resolved.set(id, paint);
+    }
+  }
+  return resolved;
+}
+
+function parseGradientDefinition(
+  token: Extract<XmlToken, { type: 'start' }>,
+): SvgGradientDef | undefined {
+  const id = token.attributes.id?.trim();
+  if (!id) return undefined;
+
+  if (token.name === 'lineargradient') {
+    return {
+      kind: 'linear-gradient',
+      id,
+      href: parseGradientHref(token.attributes),
+      stops: [],
+      spread: parseGradientSpread(token.attributes.spreadMethod),
+      gradientUnits: parseGradientUnits(token.attributes.gradientUnits),
+      transform:
+        token.attributes.gradientTransform !== undefined
+          ? parseTransform(token.attributes.gradientTransform)
+          : undefined,
+      x1: parseSvgScalar(token.attributes.x1),
+      y1: parseSvgScalar(token.attributes.y1),
+      x2: parseSvgScalar(token.attributes.x2),
+      y2: parseSvgScalar(token.attributes.y2),
+    };
+  }
+
+  if (token.name === 'radialgradient') {
+    return {
+      kind: 'radial-gradient',
+      id,
+      href: parseGradientHref(token.attributes),
+      stops: [],
+      spread: parseGradientSpread(token.attributes.spreadMethod),
+      gradientUnits: parseGradientUnits(token.attributes.gradientUnits),
+      transform:
+        token.attributes.gradientTransform !== undefined
+          ? parseTransform(token.attributes.gradientTransform)
+          : undefined,
+      cx: parseSvgScalar(token.attributes.cx),
+      cy: parseSvgScalar(token.attributes.cy),
+      r: parseSvgScalar(token.attributes.r),
+      fx: parseSvgScalar(token.attributes.fx),
+      fy: parseSvgScalar(token.attributes.fy),
+    };
+  }
+
+  return undefined;
+}
+
+function parseGradientHref(attrs: Record<string, string>): string | undefined {
+  const raw = attrs.href ?? attrs['xlink:href'];
+  if (!raw) return undefined;
+  const value = raw.trim();
+  return value.startsWith('#') && value.length > 1 ? value.slice(1) : undefined;
+}
+
+function parseGradientSpread(raw: string | undefined): GradientSpread | undefined {
+  switch (raw?.trim()) {
+    case 'reflect':
+      return 'reflect';
+    case 'repeat':
+      return 'repeat';
+    case 'pad':
+      return 'pad';
+    default:
+      return undefined;
+  }
+}
+
+function parseGradientUnits(raw: string | undefined): GradientUnits | undefined {
+  switch (raw?.trim()) {
+    case 'userSpaceOnUse':
+      return 'userSpaceOnUse';
+    case 'objectBoundingBox':
+      return 'objectBoundingBox';
+    default:
+      return undefined;
+  }
+}
+
+function parseGradientStop(attrs: Record<string, string>): SvgGradientStop | undefined {
+  const offset = parseGradientOffset(attrs.offset);
+  if (offset === undefined) return undefined;
+  const color = parseStopColor(attrs['stop-color'], attrs['stop-opacity']);
+  return { offset, color };
+}
+
+function resolveGradient(
+  id: string,
+  defs: ReadonlyMap<string, SvgGradientDef>,
+  resolved: Map<string, GradientPaint>,
+  visiting: Set<string>,
+): GradientPaint | undefined {
+  const cached = resolved.get(id);
+  if (cached !== undefined) return cached;
+  const def = defs.get(id);
+  if (def === undefined || visiting.has(id)) return undefined;
+
+  visiting.add(id);
+  try {
+    const base = def.href ? resolveGradient(def.href, defs, resolved, visiting) : undefined;
+    let paint: GradientPaint;
+
+    if (def.kind === 'linear-gradient') {
+      const inherited = base?.kind === 'linear-gradient' ? base : undefined;
+      paint = {
+        kind: 'linear-gradient',
+        x1: def.x1 ?? inherited?.x1 ?? 0,
+        y1: def.y1 ?? inherited?.y1 ?? 0,
+        x2: def.x2 ?? inherited?.x2 ?? 1,
+        y2: def.y2 ?? inherited?.y2 ?? 0,
+        stops: cloneGradientStops(def.stops.length > 0 ? def.stops : (inherited?.stops ?? [])),
+        spread: def.spread ?? inherited?.spread ?? 'pad',
+        gradientUnits: def.gradientUnits ?? inherited?.gradientUnits ?? 'objectBoundingBox',
+        transform: copyAffine(def.transform ?? inherited?.transform ?? IDENTITY),
+      };
+    } else {
+      const inherited = base?.kind === 'radial-gradient' ? base : undefined;
+      const cx = def.cx ?? inherited?.cx ?? 0.5;
+      const cy = def.cy ?? inherited?.cy ?? 0.5;
+      const fx = def.fx ?? inherited?.fx ?? cx;
+      const fy = def.fy ?? inherited?.fy ?? cy;
+      paint = {
+        kind: 'radial-gradient',
+        cx,
+        cy,
+        r: def.r ?? inherited?.r ?? 0.5,
+        fx,
+        fy,
+        stops: cloneGradientStops(def.stops.length > 0 ? def.stops : (inherited?.stops ?? [])),
+        spread: def.spread ?? inherited?.spread ?? 'pad',
+        gradientUnits: def.gradientUnits ?? inherited?.gradientUnits ?? 'objectBoundingBox',
+        transform: copyAffine(def.transform ?? inherited?.transform ?? IDENTITY),
+      };
+    }
+
+    resolved.set(id, paint);
+    return paint;
+  } finally {
+    visiting.delete(id);
+  }
+}
+
+function cloneGradientStops(stops: readonly SvgGradientStop[]): SvgGradientStop[] {
+  return stops.map((stop) => ({ offset: stop.offset, color: stop.color }));
+}
+
+function copyAffine(matrix: Affine): Affine {
+  return [matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]];
+}
 
 function buildShape(
   tag: string,
   attrs: Record<string, string>,
   transform: Affine,
   style: StyleState,
+  gradients: ReadonlyMap<string, GradientPaint>,
 ): SvgShape | undefined {
   let path: Path | undefined;
   switch (tag) {
@@ -217,8 +488,8 @@ function buildShape(
   }
   if (path === undefined) return undefined;
 
-  const fill = attrs.fill !== undefined ? parseColor(attrs.fill) : style.fill;
-  const stroke = attrs.stroke !== undefined ? parseColor(attrs.stroke) : style.stroke;
+  const fill = attrs.fill !== undefined ? parsePaint(attrs.fill, gradients) : style.fill;
+  const stroke = attrs.stroke !== undefined ? parsePaint(attrs.stroke, gradients) : style.stroke;
   const strokeWidth =
     attrs['stroke-width'] !== undefined ? parseNumber(attrs['stroke-width']) : style.strokeWidth;
   const fillRule =
@@ -233,10 +504,14 @@ function buildShape(
   };
 }
 
-function mergeStyle(base: StyleState, attrs: Record<string, string>): StyleState {
+function mergeStyle(
+  base: StyleState,
+  attrs: Record<string, string>,
+  gradients: ReadonlyMap<string, GradientPaint>,
+): StyleState {
   const next: StyleState = { ...base };
-  if (attrs.fill !== undefined) next.fill = parseColor(attrs.fill);
-  if (attrs.stroke !== undefined) next.stroke = parseColor(attrs.stroke);
+  if (attrs.fill !== undefined) next.fill = parsePaint(attrs.fill, gradients);
+  if (attrs.stroke !== undefined) next.stroke = parsePaint(attrs.stroke, gradients);
   if (attrs['stroke-width'] !== undefined) {
     next.strokeWidth = parseNumber(attrs['stroke-width']);
   }
@@ -918,6 +1193,25 @@ function parseNumberList(raw: string): number[] {
   return out;
 }
 
+function parsePaint(
+  raw: string,
+  gradients: ReadonlyMap<string, GradientPaint>,
+): number | SvgPaint | undefined {
+  const input = raw.trim();
+  if (!input) return undefined;
+
+  const gradientMatch = /^url\(#([^)]+)\)$/.exec(input);
+  if (gradientMatch) {
+    return gradients.get(gradientMatch[1]);
+  }
+
+  if (input.toLowerCase() === 'currentcolor') {
+    return undefined;
+  }
+
+  return parseColor(input);
+}
+
 function parseColor(raw: string): number | undefined {
   const input = raw.trim().toLowerCase();
   if (!input) return undefined;
@@ -987,6 +1281,36 @@ function parseAlpha(raw: string): number | undefined {
   if (!Number.isFinite(value)) return undefined;
   if (value <= 1) return clampByte(value * 255);
   return clampByte(value);
+}
+
+function parseSvgScalar(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const value = raw.trim();
+  if (!value) return undefined;
+  if (value.endsWith('%')) {
+    const pct = Number.parseFloat(value.slice(0, -1));
+    return Number.isFinite(pct) ? pct / 100 : undefined;
+  }
+  return parseNumber(value);
+}
+
+function parseGradientOffset(raw: string | undefined): number | undefined {
+  const value = parseSvgScalar(raw);
+  if (value === undefined) return undefined;
+  return Math.max(0, Math.min(1, value));
+}
+
+function parseStopColor(colorRaw: string | undefined, opacityRaw: string | undefined): number {
+  const color = parseColor(colorRaw ?? 'black') ?? 0x000000ff;
+  if (opacityRaw === undefined) return color;
+  const opacity = parseAlpha(opacityRaw);
+  if (opacity === undefined) return color;
+  return applyOpacity(color, opacity);
+}
+
+function applyOpacity(color: number, opacity: number): number {
+  const alpha = clampByte((color & 0xff) * (opacity / 255));
+  return ((color & 0xffffff00) | alpha) >>> 0;
 }
 
 function clampByte(value: number): number {

@@ -4,6 +4,7 @@
 // Usage:
 //   fxe-pack <entry.ts> [--out <path>] [--name <appname>] [--icon <path>]
 //            [--platform macos|win|linux] [--include <glob>...]
+//            [--signing-policy unsigned-dev|signed-release|signed-and-notarized|verify-only]
 //            [--identity <codesign-id>] [--notarize-profile <profile>]
 //            [--webauthn-rp-id <rp_id>...] [--webauthn-mode production|developer]
 //            [--cert <path-or-subject>] [--installer dmg|msi|msix|appimage|none]
@@ -12,6 +13,14 @@
 //            [--version <semver> REQUIRED for installer output]
 //            [--manufacturer <name>|--publisher <name> REQUIRED for installer output]
 //            [--compress zstd|none]
+
+// Signing policies:
+//   unsigned-dev (default): build without signing; emits a NOTE about unsigned output.
+//   signed-release: sign + verify release artifacts; requires --identity on macOS,
+//                   --cert on Windows, and a future Linux signing path.
+//   signed-and-notarized: macOS only; requires --identity and --notarize-profile,
+//                         then signs, verifies, notarizes, and staples.
+//   verify-only: skip signing but verify an externally signed macOS or Windows artifact.
 
 #include <algorithm>
 #include <cctype>
@@ -43,6 +52,7 @@ namespace {
 
   enum class InstallerFormat { None, Dmg, Msi, Msix, AppImage };
 
+  enum class SigningPolicy { UnsignedDev, SignedRelease, SignedAndNotarized, VerifyOnly };
   struct PackageMetadata {
     std::string version;
     std::string manufacturer;
@@ -62,6 +72,8 @@ namespace {
     std::vector<std::string> webauthn_rp_ids;
     std::string webauthn_mode;
     std::string cert;
+    SigningPolicy signing_policy = SigningPolicy::UnsignedDev;
+    bool signing_policy_explicit = false;
     InstallerFormat installer = InstallerFormat::None;
     bool installer_explicit = false;
     PackageMetadata package;
@@ -269,6 +281,37 @@ namespace {
         " (expected dmg, msi, msix, appimage, or none)");
   }
 
+  std::string signing_policy_value(SigningPolicy policy) {
+    switch (policy) {
+    case SigningPolicy::UnsignedDev:
+      return "unsigned-dev";
+    case SigningPolicy::SignedRelease:
+      return "signed-release";
+    case SigningPolicy::SignedAndNotarized:
+      return "signed-and-notarized";
+    case SigningPolicy::VerifyOnly:
+      return "verify-only";
+    }
+    die("unknown signing policy");
+  }
+
+  SigningPolicy parse_signing_policy_value(std::string_view value) {
+    if (value == "unsigned-dev")
+      return SigningPolicy::UnsignedDev;
+    if (value == "signed-release")
+      return SigningPolicy::SignedRelease;
+    if (value == "signed-and-notarized")
+      return SigningPolicy::SignedAndNotarized;
+    if (value == "verify-only")
+      return SigningPolicy::VerifyOnly;
+    die("unknown --signing-policy value: " + std::string(value) +
+        " (expected unsigned-dev, signed-release, signed-and-notarized, or verify-only)");
+  }
+
+  bool policy_signs(SigningPolicy policy) {
+    return policy == SigningPolicy::SignedRelease || policy == SigningPolicy::SignedAndNotarized;
+  }
+
   [[maybe_unused]] bool has_wix_tooling() {
 #if defined(_WIN32)
     return tool_exists("wix") || (tool_exists("candle") && tool_exists("light"));
@@ -414,7 +457,11 @@ namespace {
         }
       } else if (s == "--cert")
         a.cert = need("--cert");
-      else if (s == "--version")
+      else if (s == "--signing-policy") {
+        const std::string value = need("--signing-policy");
+        a.signing_policy = parse_signing_policy_value(value);
+        a.signing_policy_explicit = true;
+      } else if (s == "--version")
         a.package.version = need("--version");
       else if (s == "--manufacturer" || s == "--publisher")
         a.package.manufacturer = need("--manufacturer/--publisher");
@@ -452,10 +499,13 @@ namespace {
         std::cout
             << "Usage: fxe-pack <entry.ts> [--out PATH] [--name NAME] [--icon PATH]\n"
             << "                [--platform macos|win|linux] [--include GLOB ...]\n"
+            << "                [--signing-policy "
+               "unsigned-dev|signed-release|signed-and-notarized|verify-only]\n"
             << "                [--identity CODESIGN_ID] [--notarize-profile PROFILE]\n"
             << "                [--webauthn-rp-id RP_ID ...] [--webauthn-mode "
                "production|developer]\n"
-            << "                [--cert PATH_OR_SUBJECT] [--installer dmg|msi|msix|appimage|none]\n"
+            << "                [--cert PATH_OR_SUBJECT] [--installer "
+               "dmg|msi|msix|appimage|none]\n"
             << "                [--dmg|--msi|--msix|--appimage DEPRECATED]\n"
             << "                [--update-url URL] [--public-key KEY] [--channel "
                "stable|beta|alpha]\n"
@@ -473,12 +523,15 @@ namespace {
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.AppImage --platform linux "
                "--installer appimage\n"
             << "  fxe-pack examples/js/react_demo.ts --out my-app.tar.gz --platform linux\n"
-            << "\nSigning is performed only when requested: --identity signs macOS .app/.dmg "
-               "payloads,\n"
-            << "--identity/--cert verification runs after signing via codesign --verify or "
-               "signtool verify /pa /all,\n"
-            << "--notarize-profile submits signed macOS payloads with xcrun notarytool, and\n"
-            << "--cert signs Windows .exe/.msi/.msix output on Windows hosts.\n";
+            << "\nSigning policies:\n"
+            << "  unsigned-dev (default): build without signing; emits a NOTE.\n"
+            << "  signed-release: sign + verify release artifacts; requires --identity on "
+               "macOS,\n"
+            << "    --cert on Windows, and a future Linux signing path.\n"
+            << "  signed-and-notarized: macOS only; requires --identity and --notarize-profile,\n"
+            << "    then signs, verifies, notarizes, and staples.\n"
+            << "  verify-only: skip signing but verify an externally signed macOS or Windows "
+               "artifact.\n";
         std::exit(0);
       } else if (!s.empty() && s[0] == '-') {
         die("unknown flag: " + std::string(s));
@@ -496,10 +549,22 @@ namespace {
       die("--webauthn-rp-id requires --platform macos");
     if (!a.webauthn_mode.empty() && a.platform != "macos")
       die("--webauthn-mode requires --platform macos");
+    if (!a.signing_policy_explicit) {
+      if (!a.identity.empty() && !a.notarize_profile.empty()) {
+        a.signing_policy = SigningPolicy::SignedAndNotarized;
+      } else if (!a.identity.empty() || !a.cert.empty()) {
+        a.signing_policy = SigningPolicy::SignedRelease;
+      }
+      if (a.signing_policy != SigningPolicy::UnsignedDev) {
+        std::cerr << "fxe-pack: DEPRECATED: inferred signing policy "
+                  << signing_policy_value(a.signing_policy)
+                  << " from legacy flags; pass --signing-policy explicitly.\n";
+      }
+    }
     if (a.webauthn_mode.empty() && !a.webauthn_rp_ids.empty()) {
       // Unsigned developer builds keep the associated domain in developer mode;
-      // signed builds default to production entitlements.
-      a.webauthn_mode = a.identity.empty() ? "developer" : "production";
+      // signed release policies default to production entitlements.
+      a.webauthn_mode = policy_signs(a.signing_policy) ? "production" : "developer";
     }
     if (a.installer == InstallerFormat::Dmg && a.platform != "macos")
       die("--installer dmg requires --platform macos");
@@ -539,49 +604,95 @@ namespace {
   }
 
   void validate_requested_tools(const Args& a) {
-    if (!a.identity.empty()) {
-      if (a.platform != "macos")
-        die("--identity is only supported with --platform macos");
-      if (!is_macos_app_output(a) && !is_macos_dmg_output(a) &&
-          a.installer != InstallerFormat::Dmg) {
-        die("--identity requires macOS .app or .dmg output (use --out <name>.app, <name>.dmg, or "
-            "--installer dmg)");
-      }
+    if (!a.identity.empty() && a.signing_policy == SigningPolicy::UnsignedDev) {
+      std::cerr << "fxe-pack: NOTE: ignoring --identity under --signing-policy unsigned-dev\n";
+    }
+    if (!a.notarize_profile.empty() && a.signing_policy == SigningPolicy::UnsignedDev) {
+      std::cerr
+          << "fxe-pack: NOTE: ignoring --notarize-profile under --signing-policy unsigned-dev\n";
+    }
+    if (!a.cert.empty() && a.signing_policy == SigningPolicy::UnsignedDev) {
+      std::cerr << "fxe-pack: NOTE: ignoring --cert under --signing-policy unsigned-dev\n";
+    }
+    if (a.signing_policy == SigningPolicy::SignedAndNotarized && a.platform != "macos")
+      die("--signing-policy signed-and-notarized is only supported with --platform macos");
+    if ((a.signing_policy == SigningPolicy::SignedRelease ||
+         a.signing_policy == SigningPolicy::SignedAndNotarized ||
+         a.signing_policy == SigningPolicy::VerifyOnly) &&
+        a.platform == "macos" && !is_macos_app_output(a) && !is_macos_dmg_output(a) &&
+        a.installer != InstallerFormat::Dmg) {
+      die("--signing-policy " + signing_policy_value(a.signing_policy) +
+          " requires macOS .app or .dmg output (use --out <name>.app, <name>.dmg, or --installer "
+          "dmg)");
+    }
+    if (a.signing_policy == SigningPolicy::SignedRelease) {
+      if (a.platform == "macos") {
+        if (a.identity.empty())
+          die("--signing-policy signed-release requires --identity on macOS");
 #if !defined(__APPLE__)
-      die("--identity requires Apple's codesign tool and can only run on macOS hosts");
+        die("--signing-policy signed-release requires Apple's codesign tool and can only run on "
+            "macOS hosts");
+#else
+        if (!tool_exists("codesign"))
+          die("--signing-policy signed-release requires Apple's codesign tool, which was not "
+              "found in PATH");
+#endif
+      } else if (a.platform == "win") {
+        if (a.cert.empty())
+          die("--signing-policy signed-release requires --cert on Windows");
+#if !defined(_WIN32)
+        die("--signing-policy signed-release requires Windows signtool and can only run on "
+            "Windows hosts");
+#else
+        if (!tool_exists("signtool"))
+          die("--signing-policy signed-release requires signtool, which was not found in PATH");
+#endif
+      } else if (a.platform == "linux") {
+        die("--signing-policy signed-release requires a Linux GPG/minisign signing path, which "
+            "is TODO");
+      }
+    }
+    if (a.signing_policy == SigningPolicy::SignedAndNotarized) {
+      if (a.identity.empty())
+        die("--signing-policy signed-and-notarized requires --identity");
+      if (a.notarize_profile.empty())
+        die("--signing-policy signed-and-notarized requires --notarize-profile");
+#if !defined(__APPLE__)
+      die("--signing-policy signed-and-notarized requires macOS codesign/notarytool and can only "
+          "run on macOS hosts");
 #else
       if (!tool_exists("codesign"))
-        die("--identity requires Apple's codesign tool, which was not found in PATH");
-#endif
-    }
-    if (!a.notarize_profile.empty()) {
-      if (a.platform != "macos")
-        die("--notarize-profile is only supported with --platform macos");
-      if (!is_macos_app_output(a) && !is_macos_dmg_output(a) &&
-          a.installer != InstallerFormat::Dmg) {
-        die("--notarize-profile requires macOS .app or .dmg output (use --out <name>.app, "
-            "<name>.dmg, or --installer dmg)");
-      }
-#if !defined(__APPLE__)
-      die("--notarize-profile requires xcrun notarytool and can only run on macOS hosts");
-#else
+        die("--signing-policy signed-and-notarized requires Apple's codesign tool, which was not "
+            "found in PATH");
       if (!xcrun_tool_exists("notarytool"))
-        die("--notarize-profile requires xcrun notarytool, which was not found");
+        die("--signing-policy signed-and-notarized requires xcrun notarytool, which was not "
+            "found");
       if (!xcrun_tool_exists("stapler"))
-        die("--notarize-profile requires xcrun stapler, which was not found");
+        die("--signing-policy signed-and-notarized requires xcrun stapler, which was not found");
 #endif
-      if (a.identity.empty())
-        die("--notarize-profile requires --identity because notarization requires a signed app");
     }
-    if (!a.cert.empty()) {
-      if (a.platform != "win")
-        die("--cert is only supported with --platform win");
-#if !defined(_WIN32)
-      die("--cert requires Windows signtool and can only run on Windows hosts");
+    if (a.signing_policy == SigningPolicy::VerifyOnly) {
+      if (a.platform == "macos") {
+#if !defined(__APPLE__)
+        die("--signing-policy verify-only requires Apple's codesign tool and can only run on "
+            "macOS hosts");
 #else
-      if (!tool_exists("signtool"))
-        die("--cert requires signtool, which was not found in PATH");
+        if (!tool_exists("codesign"))
+          die("--signing-policy verify-only requires Apple's codesign tool, which was not found "
+              "in PATH");
 #endif
+      } else if (a.platform == "win") {
+#if !defined(_WIN32)
+        die("--signing-policy verify-only requires Windows signtool and can only run on Windows "
+            "hosts");
+#else
+        if (!tool_exists("signtool"))
+          die("--signing-policy verify-only requires signtool, which was not found in PATH");
+#endif
+      } else if (a.platform == "linux") {
+        die("--signing-policy verify-only requires a Linux signature verification path, which is "
+            "TODO");
+      }
     }
     if (a.installer == InstallerFormat::Dmg || is_macos_dmg_output(a)) {
 #if !defined(__APPLE__)
@@ -603,7 +714,7 @@ namespace {
       if (!tool_exists("makeappx.exe") && !tool_exists("makeappx"))
         die("makeappx.exe not found on PATH (Windows SDK MakeAppx is required)");
 #if defined(_WIN32)
-      if (!a.cert.empty() && !tool_exists("signtool"))
+      if (a.signing_policy == SigningPolicy::SignedRelease && !tool_exists("signtool"))
         die(".msix signing requires Windows SDK signtool, which was not found in PATH");
 #else
       if (a.installer != InstallerFormat::Msix)
@@ -932,8 +1043,12 @@ namespace {
 
   void verify_signtool_or_die(const fs::path& signed_target, const char* label);
   void sign_macos_app_or_die(const Args& a, const fs::path& app) {
-    if (a.identity.empty())
+    if (a.signing_policy == SigningPolicy::UnsignedDev)
       return;
+    if (a.signing_policy == SigningPolicy::VerifyOnly) {
+      verify_codesign_or_die(app, "app bundle");
+      return;
+    }
     std::ostringstream cmd;
     cmd << "codesign --force --deep --timestamp --options runtime --sign "
         << shell_quote(fs::path(a.identity));
@@ -957,7 +1072,7 @@ namespace {
   }
 
   void notarize_macos_app_or_die(const Args& a, const fs::path& app) {
-    if (a.notarize_profile.empty())
+    if (a.signing_policy != SigningPolicy::SignedAndNotarized)
       return;
 #if defined(__APPLE__)
     fs::path zip = fs::temp_directory_path() / (app.filename().string() + ".notarize.zip");
@@ -983,8 +1098,12 @@ namespace {
   }
 
   void sign_windows_exe_or_die(const Args& a, const fs::path& exe) {
-    if (a.cert.empty())
+    if (a.signing_policy == SigningPolicy::UnsignedDev)
       return;
+    if (a.signing_policy == SigningPolicy::VerifyOnly) {
+      verify_signtool_or_die(exe, "exe");
+      return;
+    }
 #if defined(_WIN32)
     std::ostringstream cmd;
     cmd << "signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 ";
@@ -1013,8 +1132,12 @@ namespace {
   }
 
   [[maybe_unused]] void sign_windows_package_or_die(const Args& a, const fs::path& package) {
-    if (a.cert.empty())
+    if (a.signing_policy == SigningPolicy::UnsignedDev)
       return;
+    if (a.signing_policy == SigningPolicy::VerifyOnly) {
+      verify_signtool_or_die(package, "package");
+      return;
+    }
 #if defined(_WIN32)
     std::ostringstream cmd;
     cmd << "signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "
@@ -1075,8 +1198,12 @@ namespace {
   }
 
   void sign_macos_dmg_or_die(const Args& a, const fs::path& dmg) {
-    if (a.identity.empty())
+    if (a.signing_policy == SigningPolicy::UnsignedDev)
       return;
+    if (a.signing_policy == SigningPolicy::VerifyOnly) {
+      verify_codesign_or_die(dmg, "dmg");
+      return;
+    }
     std::ostringstream cmd;
     cmd << "codesign --force --timestamp --sign " << shell_quote(fs::path(a.identity)) << " "
         << shell_quote(dmg);
@@ -1085,7 +1212,7 @@ namespace {
   }
 
   void notarize_macos_dmg_or_die(const Args& a, const fs::path& dmg) {
-    if (a.notarize_profile.empty())
+    if (a.signing_policy != SigningPolicy::SignedAndNotarized)
       return;
 #if defined(__APPLE__)
     std::ostringstream submit_cmd;
@@ -1311,8 +1438,7 @@ namespace {
       run_command_or_die(light.str(), "WiX light");
       fs::remove(wixobj);
     }
-    if (!a.cert.empty())
-      sign_windows_exe_or_die(a, out);
+    sign_windows_exe_or_die(a, out);
     fs::remove(wxs);
     fs::remove_all(payload);
     return out;
@@ -1344,7 +1470,8 @@ namespace {
         << "</DisplayName><PublisherDisplayName>" << xml_escape(a.package.manufacturer)
         << "</PublisherDisplayName><Logo>Assets\\StoreLogo.png</Logo></Properties>\n"
         << "<Resources><Resource Language=\"en-us\"/></Resources>\n"
-        << "<Dependencies><TargetDeviceFamily Name=\"Windows.Desktop\" MinVersion=\"10.0.17763.0\" "
+        << "<Dependencies><TargetDeviceFamily Name=\"Windows.Desktop\" "
+           "MinVersion=\"10.0.17763.0\" "
            "MaxVersionTested=\"10.0.22621.0\"/></Dependencies>\n"
         << "<Applications><Application Id=\"" << xml_escape(identity) << "\" Executable=\""
         << xml_escape(a.name) << ".exe\" EntryPoint=\"Windows.FullTrustApplication\">"
@@ -1509,14 +1636,14 @@ int main(int argc, char** argv) {
     std::cout << "fxe-pack: built " << kind << ": " << path.string() << " for " << a.platform
               << "\n";
   }
-  if (a.platform == "macos" && a.identity.empty()) {
-    std::cout << "fxe-pack: NOTE: output is unsigned and not notarized; pass --identity and "
-                 "--notarize-profile to sign/notarize macOS .app or .dmg output.\n";
-  } else if (a.platform == "macos" && a.notarize_profile.empty()) {
-    std::cout << "fxe-pack: NOTE: output is signed but not notarized; pass --notarize-profile to "
-                 "notarize macOS .app or .dmg output.\n";
-  } else if (a.platform == "win" && a.cert.empty()) {
-    std::cout << "fxe-pack: NOTE: output is unsigned; pass --cert on a Windows host to sign.\n";
+  if (a.signing_policy == SigningPolicy::UnsignedDev) {
+    std::cout << "fxe-pack: NOTE: output uses --signing-policy unsigned-dev and was not signed.\n";
+  } else if (a.signing_policy == SigningPolicy::SignedRelease && a.platform == "macos") {
+    std::cout << "fxe-pack: NOTE: output is signed but not notarized; use --signing-policy "
+                 "signed-and-notarized for notarized macOS release output.\n";
+  } else if (a.signing_policy == SigningPolicy::VerifyOnly) {
+    std::cout << "fxe-pack: NOTE: verification ran without signing due to --signing-policy "
+                 "verify-only.\n";
   }
   return 0;
 }

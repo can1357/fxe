@@ -348,10 +348,40 @@ declare module 'fxe-ui' {
     fallback?: RuntimeColor,
   ): RuntimeColor | undefined;
 
+  export type SvgAffine = readonly [number, number, number, number, number, number];
+  export interface SvgGradientStop {
+    offset: number;
+    color: number;
+  }
+  export type SvgPaint =
+    | { kind: 'solid'; color: number }
+    | {
+        kind: 'linear-gradient';
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        stops: SvgGradientStop[];
+        spread: 'pad' | 'reflect' | 'repeat';
+        gradientUnits: 'userSpaceOnUse' | 'objectBoundingBox';
+        transform: SvgAffine;
+      }
+    | {
+        kind: 'radial-gradient';
+        cx: number;
+        cy: number;
+        r: number;
+        fx: number;
+        fy: number;
+        stops: SvgGradientStop[];
+        spread: 'pad' | 'reflect' | 'repeat';
+        gradientUnits: 'userSpaceOnUse' | 'objectBoundingBox';
+        transform: SvgAffine;
+      };
   export interface SvgShape {
     path: import('fxe').Path;
-    fill?: number;
-    stroke?: number;
+    fill?: number | SvgPaint;
+    stroke?: number | SvgPaint;
     strokeWidth?: number;
     fillRule?: 'nonzero' | 'evenodd';
   }
