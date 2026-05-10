@@ -37,7 +37,12 @@
       "name": "libpng",
       "features": ["apng"]
     },
-    "libwebp"
+    {
+      "name": "libwebp",
+      "features": ["anim"]
+    },
+    "libjpeg-turbo",
+    "rlottie"
   ],
   "builtin-baseline": "6b07d2d37301e9e7c6fcf771536d2ff6585c5912"
 }

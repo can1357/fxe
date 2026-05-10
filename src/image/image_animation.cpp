@@ -1,10 +1,8 @@
 // Animated image decoding wired through libgif (GIF), libpng with the
-// APNG patch (animated PNG), and libwebp + libwebpdemux (animated WebP).
-// Static (single-frame) WebPs are handled transparently by the libwebp
-// animation decoder, which exposes them as a one-frame animation.
-//
-// rlottie is still a TODO; until it is wired in, Lottie JSON returns a
-// 1x1 transparent placeholder via load_lottie_placeholder().
+// APNG patch (animated PNG), libwebp + libwebpdemux (animated WebP), and
+// rlottie (Lottie JSON). Static (single-frame) WebPs are handled
+// transparently by the libwebp animation decoder, which exposes them as
+// a one-frame animation.
 
 #include <fxe/image_animation.hpp>
 #include <fxe/log.hpp>
@@ -16,7 +14,6 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -24,6 +21,7 @@
 
 #include <gif_lib.h>
 #include <png.h>
+#include <rlottie.h>
 #include <webp/decode.h>
 #include <webp/demux.h>
 
@@ -496,18 +494,67 @@ namespace fxe {
     return frames.size() - 1;
   }
 
-  animated_image load_lottie_placeholder(std::span<const u8> json, std::string_view) {
+  animated_image load_lottie(std::span<const u8> json, std::string_view source_name) {
     if (!looks_like_json(json))
       throw std::runtime_error("EIMG_FORMAT: expected Lottie JSON");
-    static std::once_flag warned_once;
-    std::call_once(warned_once, [] {
-      FXE_WARN("image.lottie", "rlottie integration not yet built; static frame returned");
-    });
+    std::string source(reinterpret_cast<const char*>(json.data()), json.size());
+    const std::string key = source_name.empty() ? std::string{} : std::string(source_name);
+    auto animation = rlottie::Animation::loadFromData(source, key, /*resourcePath=*/{},
+                                                      /*cachePolicy=*/false);
+    if (!animation)
+      throw std::runtime_error("EIMG_FORMAT: failed to parse Lottie JSON");
+
+    size_t width = 0;
+    size_t height = 0;
+    animation->size(width, height);
+    if (width == 0 || height == 0)
+      throw std::runtime_error("EIMG_FORMAT: Lottie has zero canvas size");
+
+    const size_t total_frames = animation->totalFrame();
+    const double frame_rate = animation->frameRate();
+    if (total_frames == 0 || !std::isfinite(frame_rate) || frame_rate <= 0.0)
+      throw std::runtime_error("EIMG_FORMAT: Lottie has no frames");
+
+    const u32 per_frame_delay_ms = static_cast<u32>(std::lround(1000.0 / frame_rate));
+    const usize pixel_count = static_cast<usize>(width) * height;
+
     animated_image out;
     out.format = animated_image_format::lottie;
-    out.frames.push_back(animated_frame{
-        .delay_ms = 0, .image = texture_data{.size = {1, 1}, .pixels = {r8g8b8a8{0, 0, 0, 0}}}});
-    out.duration_ms = 0;
+    out.frames.reserve(total_frames);
+
+    // rlottie renders into ARGB32-premultiplied with native byte order, which
+    // means BGRA bytes on little-endian. Convert each frame to our
+    // unpremultiplied RGBA storage.
+    std::vector<u32> scratch(pixel_count);
+    for (size_t i = 0; i < total_frames; ++i) {
+      std::fill(scratch.begin(), scratch.end(), 0u);
+      rlottie::Surface surface(scratch.data(), width, height,
+                               static_cast<size_t>(width) * sizeof(u32));
+      animation->renderSync(i, surface);
+
+      animated_frame frame;
+      frame.delay_ms = per_frame_delay_ms;
+      frame.image.size = {static_cast<u32>(width), static_cast<u32>(height)};
+      frame.image.pixels.resize(pixel_count);
+      for (usize p = 0; p < pixel_count; ++p) {
+        const u32 argb = scratch[p];
+        const u8 a = static_cast<u8>((argb >> 24) & 0xff);
+        u8 r = static_cast<u8>((argb >> 16) & 0xff);
+        u8 g = static_cast<u8>((argb >> 8) & 0xff);
+        u8 b = static_cast<u8>(argb & 0xff);
+        // Unpremultiply so the pixel matches the RGBA contract the rest of
+        // the engine expects from load_texture / decode_gif / decode_webp.
+        if (a > 0 && a < 255) {
+          r = static_cast<u8>(std::min<u32>(255u, (static_cast<u32>(r) * 255u + a / 2u) / a));
+          g = static_cast<u8>(std::min<u32>(255u, (static_cast<u32>(g) * 255u + a / 2u) / a));
+          b = static_cast<u8>(std::min<u32>(255u, (static_cast<u32>(b) * 255u + a / 2u) / a));
+        }
+        frame.image.pixels[p] = {r, g, b, a};
+      }
+      out.frames.push_back(std::move(frame));
+    }
+
+    out.duration_ms = saturating_duration_sum(out.frames);
     return out;
   }
 
@@ -522,7 +569,7 @@ namespace fxe {
     if (is_png(encoded))
       return decode_apng(encoded);
     if (looks_like_json(encoded))
-      return load_lottie_placeholder(encoded, source_name);
+      return load_lottie(encoded, source_name);
     throw std::runtime_error("EIMG_FORMAT: unsupported animated image format");
   }
 } // namespace fxe

@@ -29,6 +29,6 @@ namespace fxe {
 
   [[nodiscard]] animated_image load_animated_image(std::span<const u8> encoded,
                                                    std::string_view source_name = {});
-  [[nodiscard]] animated_image load_lottie_placeholder(std::span<const u8> json,
-                                                       std::string_view source_name = {});
+  [[nodiscard]] animated_image load_lottie(std::span<const u8> json,
+                                           std::string_view source_name = {});
 } // namespace fxe

@@ -6,8 +6,9 @@
 // unchanged. The text path in primitives.cpp dispatches on
 // `font_face_for(font)` and uses the font module for shaping + rendering.
 //
-// stb_image / stb_image_resize remain in use for image decode/resize.
-// stb_truetype is gone.
+// stb_image_resize is no longer pulled in here; resize lives in
+// fxe_image. load_texture / load_texture_resized moved to
+// src/image/static_decode.cpp so fxe_core stays codec-free.
 
 #include <fxe/log.hpp>
 #include <fxe/spritesheet.hpp>
@@ -32,10 +33,9 @@
 #define FXE_HAS_STB 0
 #endif
 
-#if FXE_HAS_STB
-#include <stb_image.h>
-#include <stb_image_resize2.h>
-#endif
+// Static-image decode + resize have moved to fxe_image
+// (src/image/static_decode.cpp). fxe_core no longer depends on
+// stb_image / stb_image_resize.
 
 namespace fxe {
   // Legacy-shape type kept around so callers compiling against the old
@@ -147,69 +147,9 @@ namespace fxe {
     return g_default;
   }
 
-  // --------------------------------------------------------------------------
-  // Image decode + resize. These remain backed by stb_image / stb_image_resize
-  // because they're tiny single-header libs and replacing them is
-  // out-of-scope for FONT_STACK_OVERHAUL.
-  // --------------------------------------------------------------------------
-  texture_data load_texture(std::span<const u8> encoded_rgba) {
-    if (encoded_rgba.empty())
-      throw std::runtime_error("load_texture: empty input");
-#if FXE_HAS_STB
-    int w = 0, h = 0, ch = 0;
-    stbi_uc* data = stbi_load_from_memory(
-        encoded_rgba.data(), static_cast<int>(encoded_rgba.size()), &w, &h, &ch, STBI_rgb_alpha);
-    if (!data) {
-      const char* why = stbi_failure_reason();
-      throw std::runtime_error(std::string("load_texture: stbi_load_from_memory failed: ") +
-                               (why ? why : "unknown"));
-    }
-    texture_data out;
-    out.size = {static_cast<u32>(w), static_cast<u32>(h)};
-    const usize count = static_cast<usize>(w) * static_cast<usize>(h);
-    out.pixels.resize(count);
-    std::memcpy(out.pixels.data(), data, count * 4);
-    stbi_image_free(data);
-    return out;
-#else
-    if (encoded_rgba.size() % 4 != 0)
-      throw std::runtime_error("load_texture: stb disabled; input must be raw RGBA bytes");
-    texture_data out;
-    out.size = {static_cast<u32>(encoded_rgba.size() / 4), 1};
-    out.pixels.resize(encoded_rgba.size() / 4);
-    for (usize i = 0; i != out.pixels.size(); ++i)
-      out.pixels[i] = {encoded_rgba[i * 4], encoded_rgba[i * 4 + 1], encoded_rgba[i * 4 + 2],
-                       encoded_rgba[i * 4 + 3]};
-    return out;
-#endif
-  }
-
-  texture_data load_texture_resized(std::span<const u8> encoded, math::uvec2 dst_size) {
-    if (dst_size.x == 0 || dst_size.y == 0)
-      throw std::runtime_error("load_texture_resized: zero destination size");
-    texture_data src = load_texture(encoded);
-    if (src.size.x == dst_size.x && src.size.y == dst_size.y)
-      return src;
-    texture_data dst;
-    dst.size = dst_size;
-    dst.pixels.resize(static_cast<usize>(dst_size.x) * dst_size.y);
-#if FXE_HAS_STB
-    stbir_resize_uint8_srgb(
-        reinterpret_cast<const unsigned char*>(src.pixels.data()), static_cast<int>(src.size.x),
-        static_cast<int>(src.size.y), 0, reinterpret_cast<unsigned char*>(dst.pixels.data()),
-        static_cast<int>(dst_size.x), static_cast<int>(dst_size.y), 0, STBIR_RGBA);
-    return dst;
-#else
-    for (u32 y = 0; y < dst_size.y; ++y) {
-      u32 sy = (y * src.size.y) / dst_size.y;
-      for (u32 x = 0; x < dst_size.x; ++x) {
-        u32 sx = (x * src.size.x) / dst_size.x;
-        dst.pixels[y * dst_size.x + x] = src.pixels[sy * src.size.x + sx];
-      }
-    }
-    return dst;
-#endif
-  }
+  // ------------------------------------------------------------------------
+  // load_texture / load_texture_resized live in fxe_image (static_decode.cpp).
+  // ------------------------------------------------------------------------
 
   // --------------------------------------------------------------------------
   // Legacy resolve_font_variant / resolve_font_glyph compat shims. Real text

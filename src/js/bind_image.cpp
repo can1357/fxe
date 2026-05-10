@@ -249,7 +249,7 @@ namespace fxe::js {
           return;
         }
         req.result = req.force_lottie
-                         ? load_lottie_placeholder(std::span<const u8>(req.encoded), req.path)
+                         ? load_lottie(std::span<const u8>(req.encoded), req.path)
                          : load_animated_image(std::span<const u8>(req.encoded), req.path);
       } catch (const std::exception& e) {
         req.error = e.what();

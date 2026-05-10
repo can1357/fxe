@@ -1,19 +1,24 @@
 #include "screenshot.hpp"
 #include <fxe/types.hpp>
 
+#include <csetjmp>
 #include <algorithm>
 #include <cstring>
+#include <string>
 #include <string_view>
 #include <vector>
+
+#include <png.h>
+#include <turbojpeg.h>
 
 #ifndef FXE_HAS_STB
 #define FXE_HAS_STB 0
 #endif
-
 #if FXE_HAS_STB
-// stb_image_write / stb_image_resize2 are implemented in src/core/stb_impl.cpp.
+// Resize stays on stb_image_resize2 (header-only, single-TU implementation
+// in src/core/stb_impl.cpp). PNG/JPEG encoding now uses libpng /
+// libjpeg-turbo directly.
 #include <stb_image_resize2.h>
-#include <stb_image_write.h>
 #endif
 
 namespace fxe::debug {
@@ -21,14 +26,6 @@ namespace fxe::debug {
     void set_error(std::string* err_out, std::string_view message) {
       if (err_out)
         *err_out = std::string(message);
-    }
-  } // namespace
-
-#if FXE_HAS_STB
-  namespace {
-    void byte_writer(void* ctx, void* data, int size) {
-      auto* out = static_cast<std::string*>(ctx);
-      out->append(static_cast<const char*>(data), static_cast<usize>(size));
     }
 
     // Copy a sub-rect of an RGBA8 image into a tightly-packed buffer.
@@ -41,6 +38,20 @@ namespace fxe::debug {
         std::memcpy(out.data() + static_cast<usize>(y) * row, row_src, row);
       }
     }
+
+    void png_write_to_string(png_structp png, png_bytep data, png_size_t size) {
+      auto* out = static_cast<std::string*>(png_get_io_ptr(png));
+      out->append(reinterpret_cast<const char*>(data), size);
+    }
+    void png_flush_noop(png_structp) {}
+
+    void png_error_fn(png_structp png, png_const_charp msg) {
+      auto* err = static_cast<std::string*>(png_get_error_ptr(png));
+      if (err)
+        *err = std::string("libpng: ") + (msg ? msg : "");
+      std::longjmp(png_jmpbuf(png), 1);
+    }
+    void png_warn_noop(png_structp, png_const_charp) noexcept {}
   } // namespace
 
   std::string encode_png_rgba8(const u8* pixels, u32 width, u32 height, u32 row_stride_bytes,
@@ -54,26 +65,42 @@ namespace fxe::debug {
       return {};
     }
 
-    const u32 tight = width * 4u;
-    const u8* src = pixels;
-    std::vector<u8> packed;
-    if (row_stride_bytes != tight) {
-      packed.resize(static_cast<usize>(tight) * height);
-      for (u32 y = 0; y < height; ++y) {
-        std::memcpy(packed.data() + static_cast<usize>(y) * tight,
-                    pixels + static_cast<usize>(y) * row_stride_bytes, tight);
-      }
-      src = packed.data();
+    std::string err_msg;
+    png_structp png =
+        png_create_write_struct(PNG_LIBPNG_VER_STRING, &err_msg, &png_error_fn, &png_warn_noop);
+    if (!png) {
+      set_error(err_out, "screenshot: png_create_write_struct failed");
+      return {};
+    }
+    png_infop info = png_create_info_struct(png);
+    if (!info) {
+      png_destroy_write_struct(&png, nullptr);
+      set_error(err_out, "screenshot: png_create_info_struct failed");
+      return {};
     }
 
     std::string out;
-    out.reserve(static_cast<usize>(tight) * height / 4);
-    int rc = stbi_write_png_to_func(&byte_writer, &out, static_cast<int>(width),
-                                    static_cast<int>(height), 4, src, static_cast<int>(tight));
-    if (rc == 0) {
-      set_error(err_out, "stb encode failed");
+    out.reserve(static_cast<usize>(width) * height);
+
+    if (setjmp(png_jmpbuf(png))) {
+      png_destroy_write_struct(&png, &info);
+      set_error(err_out, err_msg.empty() ? "libpng: encode failed" : err_msg);
       return {};
     }
+
+    png_set_write_fn(png, &out, &png_write_to_string, &png_flush_noop);
+    png_set_compression_level(png, 6);
+    png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
+                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    png_write_info(png, info);
+
+    std::vector<png_bytep> rows(height);
+    for (u32 y = 0; y < height; ++y) {
+      rows[y] = const_cast<png_bytep>(pixels + static_cast<usize>(y) * row_stride_bytes);
+    }
+    png_write_image(png, rows.data());
+    png_write_end(png, info);
+    png_destroy_write_struct(&png, &info);
     return out;
   }
 
@@ -89,26 +116,35 @@ namespace fxe::debug {
     }
     quality = std::clamp(quality, 1, 100);
 
-    // stb's JPEG writer wants 3-channel input. Pack RGB tightly, dropping A.
-    const u32 tight = width * 3u;
-    std::vector<u8> rgb(static_cast<usize>(tight) * height);
-    for (u32 y = 0; y < height; ++y) {
-      const u8* sr = pixels + static_cast<usize>(y) * row_stride_bytes;
-      u8* dr = rgb.data() + static_cast<usize>(y) * tight;
-      for (u32 x = 0; x < width; ++x) {
-        dr[x * 3 + 0] = sr[x * 4 + 0];
-        dr[x * 3 + 1] = sr[x * 4 + 1];
-        dr[x * 3 + 2] = sr[x * 4 + 2];
-      }
-    }
-
-    std::string out;
-    int rc = stbi_write_jpg_to_func(&byte_writer, &out, static_cast<int>(width),
-                                    static_cast<int>(height), 3, rgb.data(), quality);
-    if (rc == 0) {
-      set_error(err_out, "stb encode failed");
+    tjhandle handle = tj3Init(TJINIT_COMPRESS);
+    if (!handle) {
+      set_error(err_out, "screenshot: tj3Init failed");
       return {};
     }
+    if (tj3Set(handle, TJPARAM_QUALITY, quality) < 0 ||
+        tj3Set(handle, TJPARAM_SUBSAMP, TJSAMP_420) < 0) {
+      set_error(err_out, std::string("libjpeg-turbo: ") + tj3GetErrorStr(handle));
+      tj3Destroy(handle);
+      return {};
+    }
+
+    unsigned char* jpeg_buf = nullptr;
+    size_t jpeg_size = 0;
+    const int rc =
+        tj3Compress8(handle, pixels, static_cast<int>(width),
+                     static_cast<int>(row_stride_bytes), static_cast<int>(height), TJPF_RGBA,
+                     &jpeg_buf, &jpeg_size);
+    if (rc < 0) {
+      set_error(err_out, std::string("libjpeg-turbo: ") + tj3GetErrorStr(handle));
+      if (jpeg_buf)
+        tj3Free(jpeg_buf);
+      tj3Destroy(handle);
+      return {};
+    }
+
+    std::string out(reinterpret_cast<const char*>(jpeg_buf), jpeg_size);
+    tj3Free(jpeg_buf);
+    tj3Destroy(handle);
     return out;
   }
 
@@ -124,7 +160,6 @@ namespace fxe::debug {
       return false;
     }
 
-    // Clamp the crop rect to the source.
     if (cx >= src_width || cy >= src_height) {
       set_error(err_out, "screenshot: empty source rect");
       return false;
@@ -151,7 +186,7 @@ namespace fxe::debug {
       return true;
     }
 
-    // Pack the crop into a contiguous buffer then resample.
+#if FXE_HAS_STB
     std::vector<u8> cropped;
     copy_rect(pixels, src_stride_bytes, cx, cy, cw, ch, cropped);
 
@@ -165,20 +200,9 @@ namespace fxe::debug {
       return false;
     }
     return true;
-  }
 #else
-  std::string encode_png_rgba8(const u8*, u32, u32, u32, std::string* err_out) {
-    set_error(err_out, "screenshot: stb unavailable in this build");
-    return {};
-  }
-  std::string encode_jpeg_rgba8(const u8*, u32, u32, u32, int, std::string* err_out) {
-    set_error(err_out, "screenshot: stb unavailable in this build");
-    return {};
-  }
-  bool crop_resize_rgba8(const u8*, u32, u32, u32, u32, u32, u32, u32, u32, u32, std::vector<u8>&,
-                         std::string* err_out) {
-    set_error(err_out, "screenshot: stb unavailable in this build");
+    set_error(err_out, "screenshot: stb resize unavailable in this build");
     return false;
-  }
 #endif
+  }
 } // namespace fxe::debug

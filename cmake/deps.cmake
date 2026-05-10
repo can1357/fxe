@@ -71,6 +71,18 @@ endif()
 find_package(PNG REQUIRED)
 find_package(GIF REQUIRED)
 find_package(WebP CONFIG REQUIRED)
+find_package(libjpeg-turbo CONFIG REQUIRED)
+# libjpeg-turbo ships either `libjpeg-turbo::turbojpeg` (shared) or
+# `libjpeg-turbo::turbojpeg-static` depending on the triplet. Hide the
+# split behind a single alias used by fxe_image / fxe_debug.
+if(TARGET libjpeg-turbo::turbojpeg)
+    add_library(fxe::turbojpeg ALIAS libjpeg-turbo::turbojpeg)
+elseif(TARGET libjpeg-turbo::turbojpeg-static)
+    add_library(fxe::turbojpeg ALIAS libjpeg-turbo::turbojpeg-static)
+else()
+    message(FATAL_ERROR "libjpeg-turbo::turbojpeg target not found")
+endif()
+find_package(rlottie CONFIG REQUIRED)
 
 # spdlog — fast structured logger. Used by `fxe::log` (include/fxe/log.hpp)
 # for category-gated logging across the engine. Always fetched (vs. relying
