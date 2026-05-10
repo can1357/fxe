@@ -190,11 +190,18 @@ test('Window cursor, icon, drag region, and fullscreen methods validate safe inp
     win.setCursorPos(1, 2);
     assertNumberPair(win.cursorPos(), 'cursorPos');
     win.setCursorLock(false);
+    win.setRawMouseMotion(true);
+    win.setRawMouseMotion(false);
+    assertEqual(typeof win.isRawMouseMotionSupported(), 'boolean');
     win.setFullscreen(false);
     assertEqual(win.isFullscreen(), false);
 
     win.setIcon(new Uint8Array([255, 0, 0, 255]), 1, 1);
     win.setIcon(new Uint8ClampedArray([0, 0, 0, 0]), 1, 1);
+    const rgba = new Uint8Array(4 * 4 * 4);
+    rgba.fill(255);
+    assertEqual(typeof win.setCursorImage(rgba, 4, 4, 0, 0), 'boolean');
+    win.clearCursorImage();
     win.setDragRegion([[0, 0, 16, 16], [4, 4, 8, 8] as const]);
     win.setDragRegion([{ x: 1, y: 2, width: 3, height: 4 }]);
     win.setDragRegion([]);
@@ -206,6 +213,13 @@ test('Window cursor, icon, drag region, and fullscreen methods validate safe inp
       /Uint8Array/,
     );
     assertThrows(() => win.setIcon(new Uint8Array(3), 1, 1), /length too small/);
+    assertThrows(() => win.setCursorImage(rgba, 8, 8, 0, 0), /length too small/);
+    assertThrows(() => win.setCursorImage(rgba, 4, 4, 5, 0), /hotspot out of range/);
+    assertThrows(() => win.setCursorImage(rgba, 0, 4, 0, 0), /positive/);
+    assertThrows(
+      () => win.setCursorImage(new Uint16Array(64) as unknown as Uint8Array, 4, 4, 0, 0),
+      /Uint8Array/,
+    );
   });
 });
 

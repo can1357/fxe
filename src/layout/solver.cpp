@@ -1,5 +1,5 @@
-#include <fxe/layout.hpp>
 #include <algorithm>
+#include <fxe/layout.hpp>
 
 #include <yoga/Yoga.h>
 

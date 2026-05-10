@@ -533,6 +533,16 @@ declare namespace FXE {
     setCursorPos(x: number, y: number): void;
     cursorPos(): [number, number];
     setCursorLock(locked: boolean): void;
+    setRawMouseMotion(enabled: boolean): void;
+    isRawMouseMotionSupported(): boolean;
+    setCursorImage(
+      rgba: Uint8Array | Uint8ClampedArray,
+      width: number,
+      height: number,
+      hotX: number,
+      hotY: number,
+    ): boolean;
+    clearCursorImage(): void;
     clipboardText(): string;
     setClipboardText(text: string): void;
     readClipboardImage(): ClipboardImage | null;

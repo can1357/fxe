@@ -917,6 +917,10 @@ namespace fxe {
           c = nullptr;
         }
       }
+      if (custom_cursor_) {
+        glfwDestroyCursor(custom_cursor_);
+        custom_cursor_ = nullptr;
+      }
 #if defined(_WIN32)
       uninstall_win32_drop_target();
       clear_win32_icon();
@@ -1384,6 +1388,32 @@ namespace fxe {
       else
         glfwSetCursor(handle_, nullptr);
     }
+    bool set_cursor_image(const u8* rgba, int w, int h, int hot_x, int hot_y) override {
+      if (!rgba || w <= 0 || h <= 0)
+        return false;
+      if (hot_x < 0 || hot_x >= w || hot_y < 0 || hot_y >= h)
+        return false;
+      GLFWimage img{};
+      img.width = w;
+      img.height = h;
+      img.pixels = const_cast<unsigned char*>(rgba);
+      GLFWcursor* c = glfwCreateCursor(&img, hot_x, hot_y);
+      if (!c)
+        return false;
+      if (custom_cursor_)
+        glfwDestroyCursor(custom_cursor_);
+      custom_cursor_ = c;
+      glfwSetInputMode(handle_, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+      glfwSetCursor(handle_, custom_cursor_);
+      return true;
+    }
+    void clear_cursor_image() override {
+      if (custom_cursor_) {
+        glfwDestroyCursor(custom_cursor_);
+        custom_cursor_ = nullptr;
+      }
+      glfwSetCursor(handle_, nullptr);
+    }
     void set_cursor_visible(bool on) override {
       glfwSetInputMode(handle_, GLFW_CURSOR, on ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_HIDDEN);
     }
@@ -1396,15 +1426,14 @@ namespace fxe {
       return {x, y};
     }
     void set_cursor_lock(bool on) override {
-      if (on) {
-        glfwSetInputMode(handle_, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        if (glfwRawMouseMotionSupported())
-          glfwSetInputMode(handle_, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
-      } else {
-        if (glfwRawMouseMotionSupported())
-          glfwSetInputMode(handle_, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
-        glfwSetInputMode(handle_, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-      }
+      glfwSetInputMode(handle_, GLFW_CURSOR, on ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    }
+    void set_raw_mouse_motion(bool enabled) override {
+      if (glfwRawMouseMotionSupported())
+        glfwSetInputMode(handle_, GLFW_RAW_MOUSE_MOTION, enabled ? GLFW_TRUE : GLFW_FALSE);
+    }
+    [[nodiscard]] bool is_raw_mouse_motion_supported() const override {
+      return glfwRawMouseMotionSupported() == GLFW_TRUE;
     }
     std::string clipboard_text() const override {
       const char* s = glfwGetClipboardString(handle_);
@@ -2550,6 +2579,7 @@ namespace fxe {
     std::atomic<bool> redraw_requested_{true};
     redraw_handler redraw_handler_;
     std::array<GLFWcursor*, 11> cursors_{};
+    GLFWcursor* custom_cursor_ = nullptr;
     std::optional<math::ivec2> min_size_limit_;
     std::optional<math::ivec2> max_size_limit_;
     int saved_x_ = 100, saved_y_ = 100, saved_w_ = 1280, saved_h_ = 720;

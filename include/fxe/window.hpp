@@ -296,6 +296,23 @@ namespace fxe {
       return {};
     }
     virtual void set_cursor_lock(bool) {}
+    // Raw (unaccelerated) mouse motion. Independent of cursor lock; backends
+    // that don't support it return false from is_raw_mouse_motion_supported().
+    virtual void set_raw_mouse_motion(bool /*enabled*/) {}
+    [[nodiscard]] virtual bool is_raw_mouse_motion_supported() const {
+      return false;
+    }
+
+    // Software-defined cursor sourced from RGBA8 pixels (top-left origin).
+    // Returns false if the backend cannot create the cursor or arguments are
+    // invalid (rgba == nullptr, w == 0, h == 0, hot_x out of [0,w), hot_y out
+    // of [0,h)). On success, supersedes any prior set_cursor() shape until
+    // clear_cursor_image() is called.
+    virtual bool set_cursor_image(const u8* /*rgba*/, int /*w*/, int /*h*/, int /*hot_x*/,
+                                  int /*hot_y*/) {
+      return false;
+    }
+    virtual void clear_cursor_image() {}
     [[nodiscard]] virtual std::string clipboard_text() const {
       return {};
     }

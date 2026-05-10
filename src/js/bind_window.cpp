@@ -1385,6 +1385,68 @@ namespace fxe::js {
         return;
       w->set_cursor_lock(info.Length() >= 1 && info[0]->BooleanValue(iso));
     }
+    void win_set_raw_mouse_motion(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      w->set_raw_mouse_motion(info.Length() >= 1 && info[0]->BooleanValue(iso));
+    }
+    void win_is_raw_mouse_motion_supported(const FunctionCallbackInfo<Value>& info) {
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      info.GetReturnValue().Set(w->is_raw_mouse_motion_supported());
+    }
+    void win_set_cursor_image(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* w = unwrap_win(info.This());
+      if (!w || info.Length() < 5) {
+        (void)throw_type_error(iso, "setCursorImage(rgba, w, h, hotX, hotY)");
+        return;
+      }
+      if (!info[0]->IsTypedArray()) {
+        (void)throw_type_error(iso, "setCursorImage: rgba must be a typed array");
+        return;
+      }
+      auto ta = info[0].As<TypedArray>();
+      if (!info[0]->IsUint8Array() && !info[0]->IsUint8ClampedArray()) {
+        (void)throw_type_error(iso, "setCursorImage: rgba must be Uint8Array or Uint8ClampedArray");
+        return;
+      }
+      auto buf = ta->Buffer();
+      auto store = buf->GetBackingStore();
+      auto* base = static_cast<u8*>(store->Data()) + ta->ByteOffset();
+      int w_px = info[1]->Int32Value(ctx).FromMaybe(0);
+      int h_px = info[2]->Int32Value(ctx).FromMaybe(0);
+      int hot_x = info[3]->Int32Value(ctx).FromMaybe(0);
+      int hot_y = info[4]->Int32Value(ctx).FromMaybe(0);
+      if (w_px <= 0 || h_px <= 0) {
+        (void)throw_range_error(iso, "setCursorImage: width and height must be positive");
+        return;
+      }
+      usize expected = static_cast<usize>(w_px) * static_cast<usize>(h_px) * 4u;
+      if (ta->ByteLength() < expected) {
+        (void)throw_range_error(iso, "setCursorImage: rgba length too small for w*h*4");
+        return;
+      }
+      if (hot_x < 0 || hot_x >= w_px || hot_y < 0 || hot_y >= h_px) {
+        (void)throw_range_error(iso, "setCursorImage: hotspot out of range");
+        return;
+      }
+      try {
+        info.GetReturnValue().Set(w->set_cursor_image(base, w_px, h_px, hot_x, hot_y));
+      } catch (const std::exception& err) {
+        throw_native_error(iso, err);
+      }
+    }
+    void win_clear_cursor_image(const FunctionCallbackInfo<Value>& info) {
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      w->clear_cursor_image();
+    }
     void win_clipboard_text(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* w = unwrap_win(info.This());
@@ -2349,6 +2411,11 @@ namespace fxe::js {
     proto->Set(iso, "setCursorPos", FunctionTemplate::New(iso, win_set_cursor_pos));
     proto->Set(iso, "cursorPos", FunctionTemplate::New(iso, win_cursor_pos));
     proto->Set(iso, "setCursorLock", FunctionTemplate::New(iso, win_set_cursor_lock));
+    proto->Set(iso, "setRawMouseMotion", FunctionTemplate::New(iso, win_set_raw_mouse_motion));
+    proto->Set(iso, "isRawMouseMotionSupported",
+               FunctionTemplate::New(iso, win_is_raw_mouse_motion_supported));
+    proto->Set(iso, "setCursorImage", FunctionTemplate::New(iso, win_set_cursor_image));
+    proto->Set(iso, "clearCursorImage", FunctionTemplate::New(iso, win_clear_cursor_image));
     proto->Set(iso, "clipboardText", FunctionTemplate::New(iso, win_clipboard_text));
     proto->Set(iso, "setClipboardText", FunctionTemplate::New(iso, win_set_clipboard_text));
     proto->Set(iso, "readClipboardImage", FunctionTemplate::New(iso, win_read_clipboard_image));

@@ -1035,7 +1035,8 @@ int main(int argc, char** argv) {
     bool jsprof_started = false;
     if (opts.cpu_prof) {
       if (!opts.cpu_prof_native_only) {
-        auto r = host.debug_profiler_start();
+        auto r =
+            host.debug_profiler_start(static_cast<int>(1'000'000 / std::max(1, opts.cpu_prof_hz)));
         if (!r.ok) {
           std::fprintf(stderr, "fxe_run: --cpu-prof: V8 profiler start failed: %s\n",
                        r.message.c_str());

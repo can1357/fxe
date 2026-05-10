@@ -10,6 +10,7 @@
 
 #include "../debug/dispatch.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <fxe/debug.hpp>
 #include <fxe/v8_host.hpp>
@@ -164,10 +165,19 @@ namespace fxe::js {
       }
     }
 
-    json profiler_enable(dispatch_context& cx, const json&) {
+    int profiler_sampling_interval_us(const json& params) {
+      int interval = 1000;
+      if (params.is_object() && params.contains("samplingInterval") &&
+          params["samplingInterval"].is_number()) {
+        interval = std::max(1, static_cast<int>(params["samplingInterval"].get<double>()));
+      }
+      return interval;
+    }
+
+    json profiler_enable(dispatch_context& cx, const json& params) {
       if (!cx.host)
         no_host();
-      cx.host->debug_profiler_enable();
+      cx.host->debug_profiler_enable(profiler_sampling_interval_us(params));
       return json{json::object()};
     }
 
@@ -178,10 +188,10 @@ namespace fxe::js {
       return json{json::object()};
     }
 
-    json profiler_start(dispatch_context& cx, const json&) {
+    json profiler_start(dispatch_context& cx, const json& params) {
       if (!cx.host)
         no_host();
-      auto result = cx.host->debug_profiler_start();
+      auto result = cx.host->debug_profiler_start(profiler_sampling_interval_us(params));
       if (!result.ok)
         throw dispatch_error{err_code::service_unavailable, result.message, "profiler_unavailable"};
       return json{json::object()};

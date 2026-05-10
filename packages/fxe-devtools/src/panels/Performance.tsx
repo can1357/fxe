@@ -1,5 +1,5 @@
 /** @jsxImportSource fxe-ui */
-import { Button, Text, useState, View } from 'fxe-ui';
+import { Button, Text, TextInput, useState, View } from 'fxe-ui';
 import type { CdpClient } from '../cdp_client.ts';
 
 interface CpuProfile {
@@ -11,12 +11,13 @@ export function PerformancePanel({ cdp }: { cdp: CdpClient }) {
   const [recording, setRecording] = useState(false);
   const [profile, setProfile] = useState<CpuProfile | null>(null);
   const [status, setStatus] = useState('Idle');
+  const [samplingInterval, setSamplingInterval] = useState<number>(1000);
 
   const toggleRecording = async (): Promise<void> => {
     if (!recording) {
       setStatus('Starting profiler…');
       await cdp.send('Profiler.enable').catch(() => {});
-      await cdp.send('Profiler.start').catch(() => {});
+      await cdp.send('Profiler.start', { samplingInterval }).catch(() => {});
       setRecording(true);
       setStatus('Recording…');
       return;
@@ -33,10 +34,22 @@ export function PerformancePanel({ cdp }: { cdp: CdpClient }) {
 
   return (
     <View style={{ flexDirection: 'column', gap: 8, padding: 8 }}>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
+        <View style={{ width: 160, gap: 4 }}>
+          <Text style={{ color: 0x94a3b8ff, fontSize: 12 }}>Sampling Interval (µs)</Text>
+          <TextInput
+            value={String(samplingInterval)}
+            onChange={(value) =>
+              setSamplingInterval(Math.max(1, Number.parseInt(value, 10) || 1000))
+            }
+            style={{ width: '100%' }}
+          />
+        </View>
         <Button title={recording ? 'Stop' : 'Start'} onPress={() => void toggleRecording()} />
       </View>
-      <Text style={{ color: 0x94a3b8ff, fontSize: 13 }}>{status}</Text>
+      <Text style={{ color: 0x94a3b8ff, fontSize: 13 }}>
+        {status} · {samplingInterval}µs
+      </Text>
       <Text style={{ color: 0xe2e8f0ff, fontSize: 14 }}>
         {profile
           ? `Samples: ${profile.samples?.length ?? 0}, Nodes: ${profile.nodes?.length ?? 0}`

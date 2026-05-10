@@ -1250,8 +1250,8 @@ namespace fxe::js {
               // the input prose without doubled separators.
               continue;
             }
-            if (break_words &&
-                measured_text_width(token, pt, letter_spacing) > limit + 0.5f && token.size() > 1) {
+            if (break_words && measured_text_width(token, pt, letter_spacing) > limit + 0.5f &&
+                token.size() > 1) {
               auto pieces = break_long_word_native(token, pt, letter_spacing, limit);
               usize piece_start = token_start;
               for (usize p = 0; p + 1 < pieces.size(); ++p) {

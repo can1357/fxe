@@ -103,11 +103,11 @@ namespace fxe::js {
       std::string message;
     };
 
-    // CDP Profiler.* backing hooks. enable/disable are idempotent; start uses
-    // a 1 ms sampling interval and records individual samples for CDP clients.
-    void debug_profiler_enable();
+    // CDP Profiler.* backing hooks. enable/disable are idempotent; sampling
+    // interval defaults to 1000 µs (1 kHz); pass a different value to override.
+    void debug_profiler_enable(int sampling_interval_us = 1000);
     void debug_profiler_disable();
-    cpu_profile_result debug_profiler_start();
+    cpu_profile_result debug_profiler_start(int sampling_interval_us = 1000);
     cpu_profile_result debug_profiler_stop();
 
     // Returns a sorted list of own enumerable property names on the global.

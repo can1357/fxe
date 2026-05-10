@@ -373,6 +373,16 @@ class Page:
             return data
         return None if path is not None else data
 
+    async def profiler_start(self, interval_us: int | None = None) -> None:
+        await self._client.call("Profiler.enable")
+        params: dict[str, Any] = {}
+        if interval_us is not None:
+            params["samplingInterval"] = int(interval_us)
+        await self._client.call("Profiler.start", params)
+
+    async def profiler_stop(self) -> dict[str, Any]:
+        return await self._client.call("Profiler.stop")
+
     async def take_heap_snapshot(self, out_path: str) -> None:
         chunks: list[str] = []
 

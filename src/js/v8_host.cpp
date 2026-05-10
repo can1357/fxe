@@ -888,15 +888,25 @@ namespace fxe::js {
     };
   } // namespace
 
-  void host::debug_profiler_enable() {
+  namespace {
+    int normalize_sampling_interval_us(int interval_us) {
+      return interval_us > 0 ? interval_us : 1000;
+    }
+
+  } // namespace
+
+  void host::debug_profiler_enable(int sampling_interval_us) {
     auto* iso = p_->isolate;
-    if (!iso || p_->cpu_profiler)
+    if (!iso)
       return;
     v8::Isolate::Scope is(iso);
     v8::HandleScope hs(iso);
-    v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(iso);
-    p_->cpu_profiler.reset(v8::CpuProfiler::New(iso));
-    p_->cpu_profiler->SetSamplingInterval(1000);
+    auto interval_us = normalize_sampling_interval_us(sampling_interval_us);
+    if (!p_->cpu_profiler) {
+      v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(iso);
+      p_->cpu_profiler.reset(v8::CpuProfiler::New(iso));
+    }
+    p_->cpu_profiler->SetSamplingInterval(interval_us);
   }
 
   void host::debug_profiler_disable() {
@@ -913,17 +923,18 @@ namespace fxe::js {
     p_->cpu_profiler.reset();
   }
 
-  host::cpu_profile_result host::debug_profiler_start() {
+  host::cpu_profile_result host::debug_profiler_start(int sampling_interval_us) {
     auto* iso = p_->isolate;
     if (!iso)
       return {false, {}, "V8 isolate not attached"};
     v8::Isolate::Scope is(iso);
     v8::HandleScope hs(iso);
+    auto interval_us = normalize_sampling_interval_us(sampling_interval_us);
     if (!p_->cpu_profiler) {
       v8::CpuProfiler::UseDetailedSourcePositionsForProfiling(iso);
       p_->cpu_profiler.reset(v8::CpuProfiler::New(iso));
-      p_->cpu_profiler->SetSamplingInterval(1000);
     }
+    p_->cpu_profiler->SetSamplingInterval(interval_us);
     if (p_->cpu_profile_active)
       return {true, {}, {}};
     auto status = p_->cpu_profiler->StartProfiling("fxe"_v8(iso), v8::kLeafNodeLineNumbers,
