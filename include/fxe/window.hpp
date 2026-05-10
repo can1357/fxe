@@ -90,6 +90,9 @@ namespace fxe {
   std::vector<monitor_info> list_monitors();
   monitor_info primary_monitor();
 
+  void install_monitor_change_observer(std::function<void()> cb);
+  void uninstall_monitor_change_observer();
+
   // Synthetic input event delivered by the debug server's `inject()` path.
   // Mirrors the GLFW callback set, but expressed without leaking GLFW types
   // through the public header.

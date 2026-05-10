@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -73,6 +74,105 @@ namespace fxe::js {
       u64 token;
       Global<Function> fn;
     };
+
+    struct monitors_listener_state {
+      Isolate* isolate = nullptr;
+      Global<Context> context;
+      std::vector<Global<Function>> change_listeners;
+      bool installed = false;
+    };
+
+    monitors_listener_state& monitors_state() {
+      static monitors_listener_state state;
+      return state;
+    }
+
+    void reset_monitors_state() {
+      auto& state = monitors_state();
+      for (auto& listener : state.change_listeners)
+        listener.Reset();
+      state.change_listeners.clear();
+      state.context.Reset();
+      state.isolate = nullptr;
+      if (state.installed) {
+        uninstall_monitor_change_observer();
+        state.installed = false;
+      }
+    }
+
+    void monitors_reset_for_isolate(Isolate* iso) {
+      auto& state = monitors_state();
+      if (state.isolate != iso)
+        return;
+      reset_monitors_state();
+    }
+
+    struct monitors_resetter_register {
+      monitors_resetter_register() {
+        register_template_resetter(&monitors_reset_for_isolate);
+      }
+    };
+    static monitors_resetter_register s_monitors_resetter_register;
+
+    bool monitors_has_change_listeners() {
+      return !monitors_state().change_listeners.empty();
+    }
+
+    void maybe_uninstall_monitors_observer() {
+      auto& state = monitors_state();
+      if (!state.installed || monitors_has_change_listeners())
+        return;
+      uninstall_monitor_change_observer();
+      state.installed = false;
+    }
+
+    void dispatch_monitor_change_listeners() {
+      auto& state = monitors_state();
+      auto* iso = state.isolate;
+      if (!iso || state.context.IsEmpty() || state.change_listeners.empty())
+        return;
+      Isolate::Scope isolate_scope(iso);
+      HandleScope handle_scope(iso);
+      auto ctx = state.context.Get(iso);
+      if (ctx.IsEmpty())
+        return;
+      Context::Scope context_scope(ctx);
+      std::vector<Local<Function>> listeners;
+      listeners.reserve(state.change_listeners.size());
+      for (auto& entry : state.change_listeners) {
+        auto fn = entry.Get(iso);
+        if (!fn.IsEmpty())
+          listeners.push_back(fn);
+      }
+      for (auto fn : listeners) {
+        TryCatch try_catch(iso);
+        Local<Value> ignored;
+        (void)fn->Call(ctx, ctx->Global(), 0, nullptr).ToLocal(&ignored);
+      }
+    }
+
+    void ensure_monitors_observer_installed() {
+      auto& state = monitors_state();
+      if (state.installed)
+        return;
+      install_monitor_change_observer([] { dispatch_monitor_change_listeners(); });
+      state.installed = true;
+    }
+
+    bool remove_monitors_listener(Isolate* iso, Local<Function> fn) {
+      auto& listeners = monitors_state().change_listeners;
+      for (auto it = listeners.begin(); it != listeners.end(); ++it) {
+        auto stored = it->Get(iso);
+        if (!stored.IsEmpty() && stored->StrictEquals(fn)) {
+          it->Reset();
+          listeners.erase(it);
+          maybe_uninstall_monitors_observer();
+          return true;
+        }
+      }
+      maybe_uninstall_monitors_observer();
+      return false;
+    }
 
     struct win_holder : weak_holder<win_holder> {
       std::unique_ptr<window> owned;
@@ -2309,6 +2409,72 @@ namespace fxe::js {
       info.GetReturnValue().Set(monitor_to_js(iso, ctx, primary_monitor()));
     }
 
+    void monitors_listener_disposer(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto data = info.Data().As<Object>();
+      Local<Value> event_value;
+      if (!data->Get(ctx, "event"_v8(iso)).ToLocal(&event_value) || !event_value->IsString())
+        return;
+      if (utf8(iso, event_value) != "change")
+        return;
+      Local<Value> handler_value;
+      if (!data->Get(ctx, "handler"_v8(iso)).ToLocal(&handler_value) ||
+          !handler_value->IsFunction())
+        return;
+      (void)remove_monitors_listener(iso, handler_value.As<Function>());
+    }
+
+    void monitors_on(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction()) {
+        (void)throw_type_error(iso, "Monitors.on(event, handler)");
+        return;
+      }
+      auto event = utf8(iso, info[0]);
+      if (event != "change") {
+        (void)throw_type_error(iso, "Monitors.on: unknown event '" + event + "'");
+        return;
+      }
+      auto& state = monitors_state();
+      state.isolate = iso;
+      state.context.Reset(iso, ctx);
+      auto handler = info[1].As<Function>();
+      state.change_listeners.emplace_back(iso, handler);
+      ensure_monitors_observer_installed();
+      auto data = Object::New(iso);
+      (void)data->Set(ctx, "event"_v8(iso), str(iso, event));
+      (void)data->Set(ctx, "handler"_v8(iso), handler);
+      info.GetReturnValue().Set(
+          Function::New(ctx, monitors_listener_disposer, data).ToLocalChecked());
+    }
+
+    void monitors_off(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto& state = monitors_state();
+      if (info.Length() < 1 || !info[0]->IsString()) {
+        (void)throw_type_error(iso, "Monitors.off(event[, handler])");
+        return;
+      }
+      auto event = utf8(iso, info[0]);
+      if (event != "change") {
+        (void)throw_type_error(iso, "Monitors.off: unknown event '" + event + "'");
+        return;
+      }
+      if (info.Length() < 2 || info[1]->IsNullOrUndefined()) {
+        for (auto& listener : state.change_listeners)
+          listener.Reset();
+        state.change_listeners.clear();
+        maybe_uninstall_monitors_observer();
+        return;
+      }
+      if (!info[1]->IsFunction()) {
+        (void)throw_type_error(iso, "Monitors.off(event[, handler])");
+        return;
+      }
+      (void)remove_monitors_listener(iso, info[1].As<Function>());
+    }
     // ---- App namespace ------------------------------------------------------
 
     void app_run(const FunctionCallbackInfo<Value>& info) {
@@ -2459,6 +2625,8 @@ namespace fxe::js {
     auto mons = ObjectTemplate::New(iso);
     mons->Set(iso, "list", FunctionTemplate::New(iso, monitors_list));
     mons->Set(iso, "primary", FunctionTemplate::New(iso, monitors_primary));
+    mons->Set(iso, "on", FunctionTemplate::New(iso, monitors_on));
+    mons->Set(iso, "off", FunctionTemplate::New(iso, monitors_off));
     global->Set(iso, "Monitors", mons);
 
     // App namespace.

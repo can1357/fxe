@@ -716,8 +716,7 @@ namespace fxe::runtime {
     pugi::xml_node first_item;
     pugi::xml_node host_item;
     const std::string_view host_os = host_sparkle_os();
-    for (pugi::xml_node child = channel.child("item"); child;
-         child = child.next_sibling("item")) {
+    for (pugi::xml_node child = channel.child("item"); child; child = child.next_sibling("item")) {
       if (!first_item)
         first_item = child;
       if (!host_os.empty() && !host_item) {
@@ -738,8 +737,7 @@ namespace fxe::runtime {
       error_out = "appcast item missing enclosure";
       return std::nullopt;
     }
-    const std::string_view enclosure_url =
-        trim_ascii(enclosure.attribute("url").as_string());
+    const std::string_view enclosure_url = trim_ascii(enclosure.attribute("url").as_string());
     if (enclosure_url.empty()) {
       error_out = "appcast item missing enclosure url";
       return std::nullopt;
@@ -748,8 +746,7 @@ namespace fxe::runtime {
     update_manifest_v2 out;
     out.version = child_text(item, "sparkle:version");
     if (out.version.empty())
-      out.version =
-          std::string(trim_ascii(enclosure.attribute("sparkle:version").as_string()));
+      out.version = std::string(trim_ascii(enclosure.attribute("sparkle:version").as_string()));
     if (out.version.empty())
       out.version = child_text(item, "sparkle:shortVersionString");
     if (out.version.empty()) {
@@ -761,8 +758,8 @@ namespace fxe::runtime {
       if (const auto parsed = updater::parse_channel(channel_text))
         out.channel = *parsed;
     }
-    if (const std::string_view platform = normalize_sparkle_platform(
-            trim_ascii(enclosure.attribute("sparkle:os").as_string()));
+    if (const std::string_view platform =
+            normalize_sparkle_platform(trim_ascii(enclosure.attribute("sparkle:os").as_string()));
         !platform.empty()) {
       out.platform = std::string(platform);
     }
@@ -771,8 +768,8 @@ namespace fxe::runtime {
     update_manifest_v2::artifact artifact;
     artifact.kind = "full";
     artifact.url = std::string(enclosure_url);
-    artifact.sha256 = ascii_lower(std::string(
-        trim_ascii(enclosure.attribute("sparkle:installerSha256").as_string())));
+    artifact.sha256 = ascii_lower(
+        std::string(trim_ascii(enclosure.attribute("sparkle:installerSha256").as_string())));
     if (artifact.sha256.empty()) {
       error_out = "appcast item missing sha256";
       return std::nullopt;

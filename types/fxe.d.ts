@@ -601,9 +601,14 @@ declare namespace FXE {
     primary: boolean;
   }
 
+  type MonitorEventName = 'change';
+  type MonitorChangeListener = () => void;
+
   interface MonitorsNamespace {
     list(): MonitorInfo[];
     primary(): MonitorInfo;
+    on(event: 'change', handler: MonitorChangeListener): WindowDisposer;
+    off(event: 'change', handler?: MonitorChangeListener): void;
   }
 
   type UpdateChannel = 'stable' | 'beta' | 'alpha';
@@ -1341,6 +1346,8 @@ declare module 'fxe' {
   export type WindowDisposer = FXE.WindowDisposer;
   export type MonitorInfo = FXE.MonitorInfo;
   export type MonitorsNamespace = FXE.MonitorsNamespace;
+  export type MonitorEventName = FXE.MonitorEventName;
+  export type MonitorChangeListener = FXE.MonitorChangeListener;
   export type AppRunOptions = FXE.AppRunOptions;
   export type AppSecondInstanceCallback = FXE.AppSecondInstanceCallback;
   export type AppOpenUrlCallback = FXE.AppOpenUrlCallback;

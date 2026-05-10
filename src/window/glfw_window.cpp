@@ -8,6 +8,7 @@
 #include <fxe/types.hpp>
 #include <fxe/window.hpp>
 
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
@@ -764,6 +765,44 @@ namespace fxe {
   // ----------------------------------------------------------------------------
   // Monitor helpers (free functions in fxe::).
   // ----------------------------------------------------------------------------
+  struct monitor_change_observer_state {
+    std::mutex mutex;
+    std::function<void()> callback;
+    std::atomic<bool> pending{false};
+    bool glfw_callback_installed = false;
+  };
+
+  monitor_change_observer_state& monitor_change_state() {
+    static monitor_change_observer_state state;
+    return state;
+  }
+
+  static void dispatch_monitor_change_observer() {
+    auto& state = monitor_change_state();
+    state.pending.store(false, std::memory_order_release);
+    std::function<void()> callback;
+    {
+      std::lock_guard<std::mutex> lock(state.mutex);
+      callback = state.callback;
+    }
+    if (callback)
+      callback();
+  }
+
+  static void glfw_monitor_change_callback(GLFWmonitor* /*monitor*/, int /*event*/) {
+    auto& state = monitor_change_state();
+    std::function<void()> callback;
+    {
+      std::lock_guard<std::mutex> lock(state.mutex);
+      callback = state.callback;
+    }
+    if (!callback)
+      return;
+    if (state.pending.exchange(true, std::memory_order_acq_rel))
+      return;
+    fxe::os::post_main_thread_dispatch([] { dispatch_monitor_change_observer(); });
+  }
+
   static monitor_info make_monitor_info(GLFWmonitor* m, GLFWmonitor* primary) {
     monitor_info out{};
     if (!m)
@@ -798,6 +837,30 @@ namespace fxe {
   monitor_info primary_monitor() {
     GLFWmonitor* m = glfwGetPrimaryMonitor();
     return make_monitor_info(m, m);
+  }
+
+  void install_monitor_change_observer(std::function<void()> cb) {
+    auto& state = monitor_change_state();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.callback = std::move(cb);
+    state.pending.store(false, std::memory_order_release);
+    if (state.glfw_callback_installed)
+      return;
+    glfw_acquire();
+    glfwSetMonitorCallback(glfw_monitor_change_callback);
+    state.glfw_callback_installed = true;
+  }
+
+  void uninstall_monitor_change_observer() {
+    auto& state = monitor_change_state();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.callback = {};
+    state.pending.store(false, std::memory_order_release);
+    if (!state.glfw_callback_installed)
+      return;
+    glfwSetMonitorCallback(nullptr);
+    state.glfw_callback_installed = false;
+    glfw_release();
   }
 
   // ----------------------------------------------------------------------------
@@ -2669,6 +2732,10 @@ namespace fxe {
   monitor_info primary_monitor() {
     return {};
   }
+
+  void install_monitor_change_observer(std::function<void()> /*cb*/) {}
+
+  void uninstall_monitor_change_observer() {}
 
   class stub_window final : public window {
   public:

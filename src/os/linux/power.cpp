@@ -37,7 +37,12 @@ namespace fxe::os {
     std::atomic<bool> g_last_network_online{true};
     std::atomic<bool> g_last_on_battery{false};
     std::mutex g_inhibit_mu;
-    std::unordered_map<u64, int> g_sleep_inhibits;
+    struct sleep_inhibit_record {
+      enum class kind { login1_fd, power_manager_cookie } k = kind::login1_fd;
+      int fd = -1;
+      uint32_t cookie = 0;
+    };
+    std::unordered_map<u64, sleep_inhibit_record> g_sleep_inhibits;
     std::atomic<u64> g_next_inhibit_id{1};
 
     [[maybe_unused]] void emit_power(power_event event) {
@@ -177,7 +182,74 @@ namespace fxe::os {
       const u64 id = g_next_inhibit_id.fetch_add(1);
       {
         std::lock_guard<std::mutex> lock(g_inhibit_mu);
-        g_sleep_inhibits.emplace(id, fd);
+        g_sleep_inhibits.emplace(id, sleep_inhibit_record{
+                                         .k = sleep_inhibit_record::kind::login1_fd,
+                                         .fd = fd,
+                                     });
+      }
+      return power_inhibit_handle{id};
+    }
+    power_inhibit_handle power_manager_inhibit_sleep(std::string_view reason) {
+      DBusError err;
+      dbus_error_init(&err);
+      DBusConnection* conn = dbus_bus_get_private(DBUS_BUS_SESSION, &err);
+      if (dbus_error_is_set(&err)) {
+        dbus_error_free(&err);
+        return {};
+      }
+      if (!conn)
+        return {};
+      dbus_connection_set_exit_on_disconnect(conn, false);
+
+      DBusMessage* msg = dbus_message_new_method_call(
+          "org.freedesktop.PowerManagement", "/org/freedesktop/PowerManagement/Inhibit",
+          "org.freedesktop.PowerManagement.Inhibit", "Inhibit");
+      if (!msg) {
+        dbus_connection_close(conn);
+        dbus_connection_unref(conn);
+        return {};
+      }
+
+      const char* app = "fxe";
+      std::string why = reason.empty() ? "fxe requested sleep inhibit" : std::string(reason);
+      const char* why_ptr = why.c_str();
+      if (!dbus_message_append_args(msg, DBUS_TYPE_STRING, &app, DBUS_TYPE_STRING, &why_ptr,
+                                    DBUS_TYPE_INVALID)) {
+        dbus_message_unref(msg);
+        dbus_connection_close(conn);
+        dbus_connection_unref(conn);
+        return {};
+      }
+
+      DBusMessage* reply = dbus_connection_send_with_reply_and_block(conn, msg, -1, &err);
+      dbus_message_unref(msg);
+      dbus_connection_close(conn);
+      dbus_connection_unref(conn);
+
+      if (dbus_error_is_set(&err)) {
+        dbus_error_free(&err);
+        return {};
+      }
+      if (!reply)
+        return {};
+
+      DBusMessageIter iter;
+      uint32_t cookie = 0;
+      if (dbus_message_iter_init(reply, &iter) &&
+          dbus_message_iter_get_arg_type(&iter) == DBUS_TYPE_UINT32) {
+        dbus_message_iter_get_basic(&iter, &cookie);
+      }
+      dbus_message_unref(reply);
+      if (cookie == 0)
+        return {};
+
+      const u64 id = g_next_inhibit_id.fetch_add(1);
+      {
+        std::lock_guard<std::mutex> lock(g_inhibit_mu);
+        g_sleep_inhibits.emplace(id, sleep_inhibit_record{
+                                         .k = sleep_inhibit_record::kind::power_manager_cookie,
+                                         .cookie = cookie,
+                                     });
       }
       return power_inhibit_handle{id};
     }
@@ -254,6 +326,9 @@ namespace fxe::os {
     }
 #else
     power_inhibit_handle login1_inhibit_sleep(std::string_view, sleep_inhibit_kind) {
+      return {};
+    }
+    power_inhibit_handle power_manager_inhibit_sleep(std::string_view) {
       return {};
     }
     void ensure_dbus_monitor() {
@@ -335,26 +410,73 @@ namespace fxe::os {
   }
 
   power_inhibit_handle inhibit_sleep(std::string_view reason, sleep_inhibit_kind what) {
-    return login1_inhibit_sleep(reason, what);
+    power_inhibit_handle handle = login1_inhibit_sleep(reason, what);
+    if (handle || what == sleep_inhibit_kind::idle)
+      return handle;
+    return power_manager_inhibit_sleep(reason);
   }
 
   void release_sleep_inhibit(power_inhibit_handle handle) {
     if (!handle)
       return;
-    int fd = -1;
+    sleep_inhibit_record record;
+    bool found = false;
     {
       std::lock_guard<std::mutex> lock(g_inhibit_mu);
       auto it = g_sleep_inhibits.find(handle.id);
       if (it == g_sleep_inhibits.end())
         return;
-      fd = it->second;
+      record = it->second;
       g_sleep_inhibits.erase(it);
+      found = true;
     }
+    if (!found)
+      return;
 #if defined(FXE_HAS_DBUS) && FXE_HAS_DBUS
-    if (fd >= 0)
-      ::close(fd);
+    if (record.k == sleep_inhibit_record::kind::login1_fd) {
+      if (record.fd >= 0)
+        ::close(record.fd);
+      return;
+    }
+
+    DBusError err;
+    dbus_error_init(&err);
+    DBusConnection* conn = dbus_bus_get_private(DBUS_BUS_SESSION, &err);
+    if (dbus_error_is_set(&err)) {
+      dbus_error_free(&err);
+      return;
+    }
+    if (!conn)
+      return;
+    dbus_connection_set_exit_on_disconnect(conn, false);
+
+    DBusMessage* msg = dbus_message_new_method_call(
+        "org.freedesktop.PowerManagement", "/org/freedesktop/PowerManagement/Inhibit",
+        "org.freedesktop.PowerManagement.Inhibit", "UnInhibit");
+    if (!msg) {
+      dbus_connection_close(conn);
+      dbus_connection_unref(conn);
+      return;
+    }
+
+    uint32_t cookie = record.cookie;
+    if (!dbus_message_append_args(msg, DBUS_TYPE_UINT32, &cookie, DBUS_TYPE_INVALID)) {
+      dbus_message_unref(msg);
+      dbus_connection_close(conn);
+      dbus_connection_unref(conn);
+      return;
+    }
+
+    DBusMessage* reply = dbus_connection_send_with_reply_and_block(conn, msg, -1, &err);
+    dbus_message_unref(msg);
+    dbus_connection_close(conn);
+    dbus_connection_unref(conn);
+    if (reply)
+      dbus_message_unref(reply);
+    if (dbus_error_is_set(&err))
+      dbus_error_free(&err);
 #else
-    (void)fd;
+    (void)record;
 #endif
   }
 } // namespace fxe::os

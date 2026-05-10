@@ -381,6 +381,8 @@ namespace {
             << "  fxe-pack examples/js/react_demo.ts --out my-app.tar.gz --platform linux\n"
             << "\nSigning is performed only when requested: --identity signs macOS .app/.dmg "
                "payloads,\n"
+            << "--identity/--cert verification runs after signing via codesign --verify or "
+               "signtool verify /pa /all,\n"
             << "--notarize-profile submits signed macOS payloads with xcrun notarytool, and\n"
             << "--cert signs Windows .exe/.msi/.msix output on Windows hosts.\n";
         std::exit(0);
@@ -815,6 +817,9 @@ namespace {
     std::cout << "fxe-pack: compressed " << zst.string() << "\n";
   }
 
+  void verify_codesign_or_die(const fs::path& signed_target, const char* label);
+
+  void verify_signtool_or_die(const fs::path& signed_target, const char* label);
   void sign_macos_app_or_die(const Args& a, const fs::path& app) {
     if (a.identity.empty())
       return;
@@ -826,6 +831,18 @@ namespace {
       cmd << " --entitlements " << shell_quote(entitlements);
     cmd << " " << shell_quote(app);
     run_command_or_die(cmd.str(), "codesign");
+    verify_codesign_or_die(app, "app bundle");
+  }
+
+  void verify_codesign_or_die(const fs::path& signed_target, const char* label) {
+#if defined(__APPLE__)
+    std::ostringstream cmd;
+    cmd << "codesign --verify --deep --strict --verbose=2 " << shell_quote(signed_target);
+    run_command_or_die(cmd.str(), std::string("codesign verify (") + label + ")");
+#else
+    (void)signed_target;
+    (void)label;
+#endif
   }
 
   void notarize_macos_app_or_die(const Args& a, const fs::path& app) {
@@ -868,9 +885,21 @@ namespace {
       cmd << "/n " << command_quote(fs::path(a.cert)) << " ";
     cmd << command_quote(exe);
     run_command_or_die(cmd.str(), "signtool signing");
+    verify_signtool_or_die(exe, "exe");
 #else
     (void)a;
     (void)exe;
+#endif
+  }
+
+  void verify_signtool_or_die(const fs::path& signed_target, const char* label) {
+#if defined(_WIN32)
+    std::ostringstream cmd;
+    cmd << "signtool verify /pa /all " << command_quote(signed_target);
+    run_command_or_die(cmd.str(), std::string("signtool verify (") + label + ")");
+#else
+    (void)signed_target;
+    (void)label;
 #endif
   }
 
@@ -882,6 +911,7 @@ namespace {
     cmd << "signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "
         << command_quote(fs::path(a.cert)) << " " << command_quote(package);
     run_command_or_die(cmd.str(), "signtool package signing");
+    verify_signtool_or_die(package, "package");
 #else
     (void)a;
     (void)package;
@@ -942,6 +972,7 @@ namespace {
     cmd << "codesign --force --timestamp --sign " << shell_quote(fs::path(a.identity)) << " "
         << shell_quote(dmg);
     run_command_or_die(cmd.str(), "DMG codesign");
+    verify_codesign_or_die(dmg, "dmg");
   }
 
   void notarize_macos_dmg_or_die(const Args& a, const fs::path& dmg) {
