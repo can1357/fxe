@@ -4,6 +4,7 @@
 #include "../../uv_loop.hpp"
 #include <fxe/debug.hpp>
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_host.hpp>
 #include <fxe/v8_literals.hpp>
 #include <nlohmann/json.hpp>
@@ -19,6 +20,7 @@ namespace fxe::runtime {
     using json = fxe::debug::json;
     using namespace v8;
 
+    using namespace fxe::js;
     Local<String> str(Isolate* iso, std::string_view value) {
       return String::NewFromUtf8(iso, value.data(), NewStringType::kNormal,
                                  static_cast<int>(value.size()))
@@ -38,7 +40,7 @@ namespace fxe::runtime {
 
     Local<Promise> rejected(Isolate* iso, Local<Context> ctx, std::string_view message) {
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
-      (void)resolver->Reject(ctx, Exception::Error(str(iso, message)));
+      (void)resolver->Reject(ctx, Exception::Error(to_v8_string(iso, message)));
       return resolver->GetPromise();
     }
 
@@ -69,7 +71,7 @@ namespace fxe::runtime {
       }
       try {
         auto result = inspector_dispatch(iso, utf8_arg(iso, info[0]), utf8_arg(iso, info[1]));
-        info.GetReturnValue().Set(resolved(iso, ctx, str(iso, result)));
+        info.GetReturnValue().Set(resolved(iso, ctx, to_v8_string(iso, result)));
       } catch (const fxe::debug::dispatch_error& e) {
         info.GetReturnValue().Set(rejected(iso, ctx, e.message));
       } catch (const std::exception& e) {
@@ -86,7 +88,7 @@ namespace fxe::runtime {
       }
       auto url = std::string("ws://127.0.0.1:") + std::to_string(srv->bound_port()) +
                  "/devtools/page/fxe-main";
-      info.GetReturnValue().Set(str(iso, url));
+      info.GetReturnValue().Set(to_v8_string(iso, url));
     }
 
     struct wait_state {
@@ -134,8 +136,7 @@ namespace fxe::runtime {
       native = native_value.As<Object>();
     } else {
       native = Object::New(iso);
-      (void)global->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
-                                      static_cast<PropertyAttribute>(DontEnum));
+      define_prop(ctx, global, "__fxe_native"_v8, native, static_cast<PropertyAttribute>(DontEnum));
     }
 
     auto inspector = Object::New(iso);

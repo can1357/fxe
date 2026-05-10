@@ -212,11 +212,9 @@ namespace fxe::js {
           }
           auto view = make_float32_array(iso, chunk);
           auto info = Object::New(iso);
-          (void)info->Set(ctx, "frameCount"_v8(iso),
-                          Number::New(iso, static_cast<double>(chunk.frame_count)));
-          (void)info->Set(ctx, "channels"_v8(iso), Integer::NewFromUnsigned(iso, chunk.channels));
-          (void)info->Set(ctx, "sampleRate"_v8(iso),
-                          Integer::NewFromUnsigned(iso, chunk.sample_rate));
+          set_prop(ctx, info, "frameCount", static_cast<double>(chunk.frame_count));
+          set_prop(ctx, info, "channels", chunk.channels);
+          set_prop(ctx, info, "sampleRate", chunk.sample_rate);
           Local<Value> argv[] = {view, info};
           TryCatch try_catch(iso);
           (void)cb->Call(ctx, ctx->Global(), 2, argv);
@@ -298,34 +296,29 @@ namespace fxe::js {
     }
 
     bool read_number(Local<Context> ctx, Local<Object> opts, Local<String> key, double& out) {
-      Local<Value> v;
-      if (!opts->Get(ctx, key).ToLocal(&v) || v->IsUndefined())
-        return false;
-      out = v->NumberValue(ctx).FromMaybe(out);
-      return true;
+      if (auto v = get_prop<Local<Value>>(ctx, opts, key)) {
+        out = (*v)->NumberValue(ctx).FromMaybe(out);
+        return true;
+      }
+      return false;
     }
 
     bool read_bool(Isolate* iso, Local<Context> ctx, Local<Object> opts, Local<String> key,
                    bool& out) {
-      Local<Value> v;
-      if (!opts->Get(ctx, key).ToLocal(&v) || v->IsUndefined())
-        return false;
-      out = v->BooleanValue(iso);
-      return true;
+      if (auto v = get_prop<Local<Value>>(ctx, opts, key)) {
+        out = (*v)->BooleanValue(iso);
+        return true;
+      }
+      return false;
     }
 
     bool read_string(Isolate* iso, Local<Context> ctx, Local<Object> opts, Local<String> key,
                      std::string& out) {
-      Local<Value> v;
-      if (!opts->Get(ctx, key).ToLocal(&v) || v->IsUndefined())
-        return false;
-      if (!v->IsString())
-        return false;
-      String::Utf8Value s(iso, v);
-      if (!*s)
-        return false;
-      out.assign(*s, static_cast<usize>(s.length()));
-      return true;
+      if (auto v = get_prop<Local<String>>(ctx, opts, key)) {
+        out = to_std_string(iso, *v);
+        return true;
+      }
+      return false;
     }
 
     bool read_positive_u32(Local<Context> ctx, Local<Object> opts, Local<String> key,
@@ -351,10 +344,8 @@ namespace fxe::js {
         return false;
       if (!read_positive_u32(ctx, obj, "channels"_v8(iso), opts.channels))
         return false;
-      Local<Value> device_value;
-      auto device_key = "deviceId"_v8(iso);
-      if (obj->Get(ctx, device_key).ToLocal(&device_value) && !device_value->IsUndefined()) {
-        if (!device_value->IsString())
+      if (auto device_value = get_prop<Local<Value>>(ctx, obj, "deviceId")) {
+        if (!(*device_value)->IsString())
           return false;
         std::string device_id;
         if (!read_string(iso, ctx, obj, "deviceId"_v8(iso), device_id))
@@ -362,10 +353,6 @@ namespace fxe::js {
         opts.device_id = std::move(device_id);
       }
       return true;
-    }
-
-    Local<String> js_string(Isolate* iso, const char* s) {
-      return String::NewFromUtf8(iso, s, NewStringType::kNormal).ToLocalChecked();
     }
 
     const char* audio_code(audio::audio_error error) {
@@ -410,10 +397,10 @@ namespace fxe::js {
                                   const char* code, bool type_error = false) {
       std::string message = "audio: ";
       message += reason;
-      auto err = (type_error ? Exception::TypeError(js_string(iso, message.c_str()))
-                             : Exception::Error(js_string(iso, message.c_str())))
+      auto err = (type_error ? Exception::TypeError(to_v8(iso, message))
+                             : Exception::Error(to_v8(iso, message)))
                      .As<Object>();
-      (void)err->Set(ctx, "code"_v8(iso), js_string(iso, code));
+      set_prop(ctx, err, "code", code);
       return err;
     }
 
@@ -509,8 +496,8 @@ namespace fxe::js {
             iso, ctx, make_audio_error(iso, ctx, "expected string path", "EAUDIO_IO", true)));
         return;
       }
-      String::Utf8Value path(iso, info[0]);
-      if (!*path) {
+      auto path = from_v8<std::string>(ctx, info[0]);
+      if (!path) {
         info.GetReturnValue().Set(
             make_rejected(iso, ctx, make_audio_error(iso, ctx, "invalid path", "EAUDIO_IO", true)));
         return;
@@ -520,7 +507,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(make_rejected(iso, ctx, make_audio_error(iso, ctx, init_err)));
         return;
       }
-      auto handle = audio::load_from_path(std::string_view(*path, path.length()));
+      auto handle = audio::load_from_path(*path);
       if (!handle.valid()) {
         info.GetReturnValue().Set(
             make_rejected(iso, ctx, make_audio_error(iso, ctx, audio::last_error())));
@@ -606,10 +593,10 @@ namespace fxe::js {
       auto arr = Array::New(iso, static_cast<int>(devices.size()));
       for (usize i = 0; i < devices.size(); ++i) {
         auto obj = Object::New(iso);
-        (void)obj->Set(ctx, "id"_v8(iso), js_string(iso, devices[i].id.c_str()));
-        (void)obj->Set(ctx, "name"_v8(iso), js_string(iso, devices[i].name.c_str()));
-        (void)obj->Set(ctx, "isDefault"_v8(iso), Boolean::New(iso, devices[i].is_default));
-        (void)arr->Set(ctx, static_cast<u32>(i), obj);
+        set_prop(ctx, obj, "id", devices[i].id);
+        set_prop(ctx, obj, "name", devices[i].name);
+        set_prop(ctx, obj, "isDefault", devices[i].is_default);
+        set_index(ctx, arr, static_cast<u32>(i), obj);
       }
       info.GetReturnValue().Set(arr);
     }

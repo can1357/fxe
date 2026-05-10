@@ -14,12 +14,6 @@
 namespace fxe::js {
   using namespace v8;
   namespace {
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      if (v.IsEmpty() || !v->IsString())
-        return {};
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
 
     void cleanup_tray_listeners(Isolate* iso, fxe::os::tray_handle h);
 
@@ -72,8 +66,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "Tray must be called with new");
         return;
       }
-      std::string icon = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
-      std::string tip = info.Length() > 1 ? to_str(iso, info[1]) : std::string{};
+      std::string icon = info.Length() > 0 ? to_std_string_strict(iso, info[0]) : std::string{};
+      std::string tip = info.Length() > 1 ? to_std_string_strict(iso, info[1]) : std::string{};
       auto* h = new holder();
       h->h = fxe::os::tray_create(icon, tip);
       auto self = info.This();
@@ -111,7 +105,8 @@ namespace fxe::js {
         return;
       }
       info.GetReturnValue().Set(fxe::os::tray_set_image(
-          h->h, info.Length() > 0 ? to_str(info.GetIsolate(), info[0]) : std::string{}));
+          h->h,
+          info.Length() > 0 ? to_std_string_strict(info.GetIsolate(), info[0]) : std::string{}));
     }
 
     void tray_set_title_cb(const FunctionCallbackInfo<Value>& info) {
@@ -121,7 +116,8 @@ namespace fxe::js {
         return;
       }
       info.GetReturnValue().Set(fxe::os::tray_set_title(
-          h->h, info.Length() > 0 ? to_str(info.GetIsolate(), info[0]) : std::string{}));
+          h->h,
+          info.Length() > 0 ? to_std_string_strict(info.GetIsolate(), info[0]) : std::string{}));
     }
 
     void tray_set_tooltip_cb(const FunctionCallbackInfo<Value>& info) {
@@ -131,7 +127,8 @@ namespace fxe::js {
         return;
       }
       info.GetReturnValue().Set(fxe::os::tray_set_tooltip(
-          h->h, info.Length() > 0 ? to_str(info.GetIsolate(), info[0]) : std::string{}));
+          h->h,
+          info.Length() > 0 ? to_std_string_strict(info.GetIsolate(), info[0]) : std::string{}));
     }
 
     bool parse_tray_event(std::string_view name, fxe::os::tray_event_kind& out) {
@@ -172,7 +169,7 @@ namespace fxe::js {
         return;
       }
       fxe::os::tray_event_kind kind;
-      if (!parse_tray_event(to_str(iso, info[0]), kind)) {
+      if (!parse_tray_event(to_std_string_strict(iso, info[0]), kind)) {
         info.GetReturnValue().Set(Null(iso));
         return;
       }
@@ -200,7 +197,7 @@ namespace fxe::js {
       binding.h = h->h;
       binding.fn.Reset(iso, info[1].As<Function>());
       info.GetReturnValue().Set(
-          Function::New(ctx, tray_disposer_cb, Integer::New(iso, token)).ToLocalChecked());
+          Function::New(ctx, tray_disposer_cb, to_v8(iso, token)).ToLocalChecked());
     }
   } // namespace
 

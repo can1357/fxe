@@ -1,4 +1,5 @@
 #include "v8_code_cache.hpp"
+#include <fxe/v8_helpers.hpp>
 
 #include <cctype>
 #include <cstdint>
@@ -229,11 +230,6 @@ namespace fxe::js::v8_code_cache {
       std::filesystem::remove(path, ec);
     }
 
-    v8::Local<v8::String> make_string(v8::Isolate* iso, std::string_view source) {
-      return v8::String::NewFromUtf8(iso, source.data(), v8::NewStringType::kNormal,
-                                     static_cast<int>(source.size()))
-          .ToLocalChecked();
-    }
   } // namespace
 
   std::filesystem::path cache_dir() {
@@ -260,7 +256,7 @@ namespace fxe::js::v8_code_cache {
   v8::MaybeLocal<v8::Script> compile_script(v8::Local<v8::Context> ctx, std::string_view cache_id,
                                             std::string_view source, v8::ScriptOrigin& origin) {
     auto* iso = v8::Isolate::GetCurrent();
-    auto src_str = make_string(iso, source);
+    auto src_str = to_v8(iso, source);
     auto path = cache_id.empty() ? std::filesystem::path{} : file_for("scripts", cache_id);
 
     v8::Local<v8::Script> script;
@@ -301,7 +297,7 @@ namespace fxe::js::v8_code_cache {
 
   v8::MaybeLocal<v8::Module> compile_module(v8::Isolate* iso, std::string_view cache_id,
                                             std::string_view source, v8::ScriptOrigin& origin) {
-    auto src_str = make_string(iso, source);
+    auto src_str = to_v8(iso, source);
     auto path = cache_id.empty() ? std::filesystem::path{} : file_for("modules", cache_id);
 
     v8::Local<v8::Module> mod;

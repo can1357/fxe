@@ -35,24 +35,21 @@ namespace fxe::js {
       return v->NumberValue(ctx).FromMaybe(def);
     }
 
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-
     std::string value_repr(Isolate* iso, Local<Context> ctx, Local<Value> value) {
       Local<String> detail;
       if (value->ToDetailString(ctx).ToLocal(&detail))
-        return utf8(iso, detail);
-      return utf8(iso, value);
+        return to_std_string(iso, detail);
+      return to_std_string(iso, value);
     }
 
-    bool get_prop(Local<Context> ctx, Local<Object> obj, Local<String> key, Local<Value>& out,
-                  bool& present) {
-      present = obj->Has(ctx, key).FromMaybe(false);
+    template <typename K>
+    bool try_get_prop(Local<Context> ctx, Local<Object> obj, K&& key, Local<Value>& out,
+                      bool& present) {
+      auto k = ::fxe::js::to_v8(v8::Isolate::GetCurrent(), std::forward<K>(key));
+      present = obj->Has(ctx, k).FromMaybe(false);
       if (!present)
         return true;
-      return obj->Get(ctx, key).ToLocal(&out);
+      return obj->Get(ctx, k).ToLocal(&out);
     }
 
     bool parse_finite_number(Isolate* iso, Local<Context> ctx, Local<Value> value, const char* what,
@@ -71,7 +68,7 @@ namespace fxe::js {
                                     std::optional<float>& out) {
       Local<Value> value;
       bool present = false;
-      if (!get_prop(ctx, obj, key, value, present))
+      if (!try_get_prop(ctx, obj, key, value, present))
         return false;
       if (!present || value->IsUndefined())
         return true;
@@ -133,7 +130,7 @@ namespace fxe::js {
           out.value = 0.0f;
           return true;
         }
-        const std::string raw = utf8(iso, s);
+        const std::string raw = to_std_string(iso, s);
         float percent = 0.0f;
         if (parse_percent_string(raw, percent)) {
           out.kind = layout::LengthKind::percent;
@@ -150,7 +147,8 @@ namespace fxe::js {
       else if (s == "none"_v8)
         out = layout::Display::none;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported display '{}'", utf8(iso, s));
+        return throw_type_error(iso, "Layout.solve: unsupported display '{}'",
+                                to_std_string(iso, s));
       return true;
     }
 
@@ -165,7 +163,8 @@ namespace fxe::js {
       else if (s == "column-reverse"_v8)
         out = layout::FlexDirection::column_reverse;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported flexDirection '{}'", utf8(iso, s));
+        return throw_type_error(iso, "Layout.solve: unsupported flexDirection '{}'",
+                                to_std_string(iso, s));
       return true;
     }
 
@@ -177,7 +176,8 @@ namespace fxe::js {
       else if (s == "wrap-reverse"_v8)
         out = layout::FlexWrap::wrap_reverse;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported flexWrap '{}'", utf8(iso, s));
+        return throw_type_error(iso, "Layout.solve: unsupported flexWrap '{}'",
+                                to_std_string(iso, s));
       return true;
     }
 
@@ -195,7 +195,8 @@ namespace fxe::js {
       else if (s == "space-evenly"_v8)
         out = layout::Justify::space_evenly;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported justifyContent '{}'", utf8(iso, s));
+        return throw_type_error(iso, "Layout.solve: unsupported justifyContent '{}'",
+                                to_std_string(iso, s));
       return true;
     }
 
@@ -220,7 +221,8 @@ namespace fxe::js {
       else if (allow_space_values && s == "space-evenly"_v8)
         out = layout::Align::space_evenly;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported {} '{}'", field, utf8(iso, s));
+        return throw_type_error(iso, "Layout.solve: unsupported {} '{}'", field,
+                                to_std_string(iso, s));
       return true;
     }
 
@@ -231,7 +233,8 @@ namespace fxe::js {
       else if (s == "absolute"_v8)
         out = layout::PositionType::absolute;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported position '{}'", utf8(iso, s));
+        return throw_type_error(iso, "Layout.solve: unsupported position '{}'",
+                                to_std_string(iso, s));
       return true;
     }
 
@@ -243,7 +246,8 @@ namespace fxe::js {
       else if (s == "scroll"_v8)
         out = layout::Overflow::scroll;
       else
-        return throw_type_error(iso, "Layout.solve: unsupported overflow '{}'", utf8(iso, s));
+        return throw_type_error(iso, "Layout.solve: unsupported overflow '{}'",
+                                to_std_string(iso, s));
       return true;
     }
 
@@ -252,12 +256,12 @@ namespace fxe::js {
                                          Local<String> key, Parser&& parser, T& out) {
       Local<Value> value;
       bool present = false;
-      if (!get_prop(ctx, obj, key, value, present))
+      if (!try_get_prop(ctx, obj, key, value, present))
         return false;
       if (!present || value->IsUndefined())
         return true;
       if (!value->IsString())
-        return throw_type_error(iso, "Layout.solve: {} must be a string", utf8(iso, key));
+        return throw_type_error(iso, "Layout.solve: {} must be a string", to_std_string(iso, key));
       return parser(iso, value.As<String>(), out);
     }
 
@@ -265,7 +269,7 @@ namespace fxe::js {
                                     Local<String> key, layout::Length& out) {
       Local<Value> value;
       bool present = false;
-      if (!get_prop(ctx, obj, key, value, present))
+      if (!try_get_prop(ctx, obj, key, value, present))
         return false;
       if (!present || value->IsUndefined())
         return true;
@@ -293,49 +297,49 @@ namespace fxe::js {
       bool has_bottom = false;
       bool has_left = false;
 
-      if (!get_prop(ctx, obj, all_key, value, present))
+      if (!try_get_prop(ctx, obj, all_key, value, present))
         return false;
       if (present && !value->IsUndefined()) {
         if (!parse_length(iso, ctx, value, all))
           return false;
         has_all = true;
       }
-      if (!get_prop(ctx, obj, x_key, value, present))
+      if (!try_get_prop(ctx, obj, x_key, value, present))
         return false;
       if (present && !value->IsUndefined()) {
         if (!parse_length(iso, ctx, value, x))
           return false;
         has_x = true;
       }
-      if (!get_prop(ctx, obj, y_key, value, present))
+      if (!try_get_prop(ctx, obj, y_key, value, present))
         return false;
       if (present && !value->IsUndefined()) {
         if (!parse_length(iso, ctx, value, y))
           return false;
         has_y = true;
       }
-      if (!get_prop(ctx, obj, top_key, value, present))
+      if (!try_get_prop(ctx, obj, top_key, value, present))
         return false;
       if (present && !value->IsUndefined()) {
         if (!parse_length(iso, ctx, value, top))
           return false;
         has_top = true;
       }
-      if (!get_prop(ctx, obj, right_key, value, present))
+      if (!try_get_prop(ctx, obj, right_key, value, present))
         return false;
       if (present && !value->IsUndefined()) {
         if (!parse_length(iso, ctx, value, right))
           return false;
         has_right = true;
       }
-      if (!get_prop(ctx, obj, bottom_key, value, present))
+      if (!try_get_prop(ctx, obj, bottom_key, value, present))
         return false;
       if (present && !value->IsUndefined()) {
         if (!parse_length(iso, ctx, value, bottom))
           return false;
         has_bottom = true;
       }
-      if (!get_prop(ctx, obj, left_key, value, present))
+      if (!try_get_prop(ctx, obj, left_key, value, present))
         return false;
       if (present && !value->IsUndefined()) {
         if (!parse_length(iso, ctx, value, left))
@@ -472,7 +476,7 @@ namespace fxe::js {
 
       Local<Value> style_value;
       bool present = false;
-      if (!get_prop(ctx, obj, "style"_v8(iso), style_value, present))
+      if (!try_get_prop(ctx, obj, "style"_v8, style_value, present))
         return false;
       if (present && !style_value->IsUndefined()) {
         if (!parse_style(iso, ctx, style_value, out.style))
@@ -481,7 +485,7 @@ namespace fxe::js {
 
       Local<Value> children_value;
       present = false;
-      if (!get_prop(ctx, obj, "children"_v8(iso), children_value, present))
+      if (!try_get_prop(ctx, obj, "children"_v8, children_value, present))
         return false;
       if (present && !children_value->IsUndefined() && !children_value->IsNull()) {
         if (!children_value->IsArray())
@@ -489,18 +493,18 @@ namespace fxe::js {
         auto children = children_value.As<Array>();
         out.children.reserve(children->Length());
         for (u32 i = 0; i < children->Length(); ++i) {
-          Local<Value> child_value;
-          if (!children->Get(ctx, i).ToLocal(&child_value))
+          auto child_value = ::fxe::js::get_index<Local<Value>>(ctx, children, i);
+          if (!child_value)
             return false;
           auto& child = out.children.emplace_back();
-          if (!build_node(iso, ctx, child_value, state, child))
+          if (!build_node(iso, ctx, *child_value, state, child))
             return false;
         }
       }
 
       Local<Value> measure_value;
       present = false;
-      if (!get_prop(ctx, obj, "measure"_v8(iso), measure_value, present))
+      if (!try_get_prop(ctx, obj, "measure"_v8, measure_value, present))
         return false;
       if (!present || measure_value->IsUndefined() || measure_value->IsNull())
         return true;
@@ -508,23 +512,24 @@ namespace fxe::js {
       if (!expect_object(iso, measure_value, "measure", measure_obj))
         return false;
 
-      Local<Value> kind_value;
-      if (!measure_obj->Get(ctx, "kind"_v8(iso)).ToLocal(&kind_value) || !kind_value->IsString())
+      auto kind_value = ::fxe::js::get_prop<Local<String>>(ctx, measure_obj, "kind"_v8(iso));
+      if (!kind_value)
         return throw_type_error(iso, "Layout.solve: measure.kind must be a string");
-      auto kind_str = kind_value.As<String>();
+      auto kind_str = *kind_value;
       out.measure_is_leaf = true;
 
       if (kind_str == "text"_v8) {
-        Local<Value> text_value;
-        Local<Value> font_size_value;
-        if (!measure_obj->Get(ctx, "text"_v8(iso)).ToLocal(&text_value) || !text_value->IsString())
+        auto text_value = ::fxe::js::get_prop<Local<String>>(ctx, measure_obj, "text"_v8(iso));
+        if (!text_value)
           return throw_type_error(iso, "Layout.solve: text measure.text must be a string");
-        if (!measure_obj->Get(ctx, "fontSize"_v8(iso)).ToLocal(&font_size_value))
+        auto font_size_value =
+            ::fxe::js::get_prop<Local<Value>>(ctx, measure_obj, "fontSize"_v8(iso));
+        if (!font_size_value)
           return false;
         float font_size = 0.0f;
-        if (!parse_finite_number(iso, ctx, font_size_value, "measure.fontSize", font_size))
+        if (!parse_finite_number(iso, ctx, *font_size_value, "measure.fontSize", font_size))
           return false;
-        const std::string text = utf8(iso, text_value);
+        const std::string text = to_std_string(iso, *text_value);
         out.measure = [text, font_size](float, float) {
           const auto v = primitives::calc_text(text, get_font_info(), font_size);
           return layout::MeasureResult{v.x, v.y};
@@ -533,16 +538,14 @@ namespace fxe::js {
       }
 
       if (kind_str == "image"_v8) {
-        Local<Value> width_value;
-        Local<Value> height_value;
-        if (!measure_obj->Get(ctx, "width"_v8(iso)).ToLocal(&width_value) ||
-            !measure_obj->Get(ctx, "height"_v8(iso)).ToLocal(&height_value)) {
+        auto width_value = ::fxe::js::get_prop<Local<Value>>(ctx, measure_obj, "width"_v8(iso));
+        auto height_value = ::fxe::js::get_prop<Local<Value>>(ctx, measure_obj, "height"_v8(iso));
+        if (!width_value || !height_value)
           return false;
-        }
         float width = 0.0f;
         float height = 0.0f;
-        if (!parse_finite_number(iso, ctx, width_value, "measure.width", width) ||
-            !parse_finite_number(iso, ctx, height_value, "measure.height", height)) {
+        if (!parse_finite_number(iso, ctx, *width_value, "measure.width", width) ||
+            !parse_finite_number(iso, ctx, *height_value, "measure.height", height)) {
           return false;
         }
         out.measure = [width, height](float, float) {
@@ -552,12 +555,10 @@ namespace fxe::js {
       }
 
       if (kind_str == "js"_v8) {
-        Local<Value> fn_value;
-        if (!measure_obj->Get(ctx, "fn"_v8(iso)).ToLocal(&fn_value))
-          return false;
-        if (!fn_value->IsFunction())
+        auto fn_value = ::fxe::js::get_prop<Local<Function>>(ctx, measure_obj, "fn"_v8(iso));
+        if (!fn_value)
           return throw_type_error(iso, "Layout.solve: measure.fn must be a function");
-        auto fn = std::make_shared<Global<Function>>(iso, fn_value.As<Function>());
+        auto fn = std::make_shared<Global<Function>>(iso, *fn_value);
         out.measure = [iso, state, fn](float aw, float ah) {
           if (!state->pending_exception.IsEmpty())
             return layout::MeasureResult{};
@@ -570,9 +571,9 @@ namespace fxe::js {
 
           auto arg = Object::New(iso);
           if (std::isfinite(aw))
-            (void)arg->Set(ctx, "width"_v8(iso), Number::New(iso, static_cast<double>(aw)));
+            set_prop(ctx, arg, "width"_v8, static_cast<double>(aw));
           if (std::isfinite(ah))
-            (void)arg->Set(ctx, "height"_v8(iso), Number::New(iso, static_cast<double>(ah)));
+            set_prop(ctx, arg, "height"_v8, static_cast<double>(ah));
 
           Local<Value> argv[1] = {arg};
           Local<Function> local_fn = Local<Function>::New(iso, *fn);
@@ -586,19 +587,18 @@ namespace fxe::js {
             return set_pending_exception(state, tc.Exception()), layout::MeasureResult{};
           }
           auto ret_obj = ret.As<Object>();
-          Local<Value> width_value;
-          Local<Value> height_value;
-          if (!ret_obj->Get(ctx, "width"_v8(iso)).ToLocal(&width_value) ||
-              !ret_obj->Get(ctx, "height"_v8(iso)).ToLocal(&height_value)) {
+          auto width_value = ::fxe::js::get_prop<Local<Value>>(ctx, ret_obj, "width"_v8(iso));
+          auto height_value = ::fxe::js::get_prop<Local<Value>>(ctx, ret_obj, "height"_v8(iso));
+          if (!width_value || !height_value) {
             return set_pending_exception(state, tc.Exception()), layout::MeasureResult{};
           }
-          if (!width_value->IsNumber() || !height_value->IsNumber()) {
+          if (!(*width_value)->IsNumber() || !(*height_value)->IsNumber()) {
             (void)throw_type_error(
                 iso, "Layout.solve: measure.fn must return { width: number, height: number }");
             return set_pending_exception(state, tc.Exception()), layout::MeasureResult{};
           }
-          const double width = num(ctx, width_value);
-          const double height = num(ctx, height_value);
+          const double width = num(ctx, *width_value);
+          const double height = num(ctx, *height_value);
           if (!std::isfinite(width) || !std::isfinite(height)) {
             (void)throw_type_error(iso, "Layout.solve: measure.fn must return finite width/height");
             return set_pending_exception(state, tc.Exception()), layout::MeasureResult{};
@@ -609,28 +609,24 @@ namespace fxe::js {
       }
 
       return throw_type_error(iso, "Layout.solve: unsupported measure.kind '{}'",
-                              utf8(iso, kind_str));
+                              to_std_string(iso, kind_str));
     }
 
     Local<Object> result_to_v8(Isolate* iso, Local<Context> ctx, const layout::Result& result) {
       EscapableHandleScope hs(iso);
       auto obj = Object::New(iso);
-      (void)obj->Set(ctx, "x"_v8(iso), Number::New(iso, static_cast<double>(result.x)));
-      (void)obj->Set(ctx, "y"_v8(iso), Number::New(iso, static_cast<double>(result.y)));
-      (void)obj->Set(ctx, "width"_v8(iso), Number::New(iso, static_cast<double>(result.width)));
-      (void)obj->Set(ctx, "height"_v8(iso), Number::New(iso, static_cast<double>(result.height)));
-      (void)obj->Set(ctx, "paddingLeft"_v8(iso),
-                     Number::New(iso, static_cast<double>(result.padding_left)));
-      (void)obj->Set(ctx, "paddingTop"_v8(iso),
-                     Number::New(iso, static_cast<double>(result.padding_top)));
-      (void)obj->Set(ctx, "paddingRight"_v8(iso),
-                     Number::New(iso, static_cast<double>(result.padding_right)));
-      (void)obj->Set(ctx, "paddingBottom"_v8(iso),
-                     Number::New(iso, static_cast<double>(result.padding_bottom)));
+      set_prop(ctx, obj, "x"_v8, static_cast<double>(result.x));
+      set_prop(ctx, obj, "y"_v8, static_cast<double>(result.y));
+      set_prop(ctx, obj, "width"_v8, static_cast<double>(result.width));
+      set_prop(ctx, obj, "height"_v8, static_cast<double>(result.height));
+      set_prop(ctx, obj, "paddingLeft"_v8, static_cast<double>(result.padding_left));
+      set_prop(ctx, obj, "paddingTop"_v8, static_cast<double>(result.padding_top));
+      set_prop(ctx, obj, "paddingRight"_v8, static_cast<double>(result.padding_right));
+      set_prop(ctx, obj, "paddingBottom"_v8, static_cast<double>(result.padding_bottom));
       auto children = Array::New(iso, static_cast<int>(result.children.size()));
       for (u32 i = 0; i < result.children.size(); ++i)
-        (void)children->Set(ctx, i, result_to_v8(iso, ctx, result.children[i]));
-      (void)obj->Set(ctx, "children"_v8(iso), children);
+        set_index(ctx, children, i, result_to_v8(iso, ctx, result.children[i]));
+      set_prop(ctx, obj, "children"_v8, children);
       return hs.Escape(obj);
     }
   } // namespace

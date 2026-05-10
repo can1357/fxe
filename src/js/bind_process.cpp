@@ -86,21 +86,6 @@ namespace fxe::js {
       return *slot;
     }
 
-    Local<String> str(Isolate* iso, const std::string& s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-    Local<String> str(Isolate* iso, const char* s) {
-      return String::NewFromUtf8(iso, s).ToLocalChecked();
-    }
-
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      if (*u)
-        return std::string(*u, u.length());
-      return {};
-    }
-
 #if defined(_WIN32)
     std::string wide_to_utf8(const wchar_t* value, int length) {
       if (!value || length <= 0)
@@ -138,11 +123,11 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (!name->IsString())
         return Intercepted::kNo;
-      auto key = utf8(iso, name);
+      auto key = to_std_string(iso, name);
       std::string val;
       if (!env_value(key, val))
         return Intercepted::kNo;
-      info.GetReturnValue().Set(str(iso, val));
+      info.GetReturnValue().Set(to_v8_string(iso, val));
       return Intercepted::kYes;
     }
 
@@ -151,8 +136,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (!name->IsString())
         return Intercepted::kNo;
-      auto key = utf8(iso, name);
-      auto val = utf8(iso, value);
+      auto key = to_std_string(iso, name);
+      auto val = to_std_string(iso, value);
 #if defined(_WIN32)
       _putenv_s(key.c_str(), val.c_str());
 #else
@@ -165,7 +150,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (!name->IsString())
         return Intercepted::kNo;
-      auto key = utf8(iso, name);
+      auto key = to_std_string(iso, name);
       std::string val;
       if (!env_value(key, val))
         return Intercepted::kNo;
@@ -177,7 +162,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       if (!name->IsString())
         return Intercepted::kNo;
-      auto key = utf8(iso, name);
+      auto key = to_std_string(iso, name);
 #if defined(_WIN32)
       _putenv_s(key.c_str(), "");
 #else
@@ -221,7 +206,7 @@ namespace fxe::js {
 #endif
       auto arr = Array::New(iso, static_cast<int>(keys.size()));
       for (u32 i = 0; i < keys.size(); ++i)
-        (void)arr->Set(ctx, i, str(iso, keys[i]));
+        (void)arr->Set(ctx, i, to_v8_string(iso, keys[i]));
       info.GetReturnValue().Set(arr);
     }
 
@@ -240,7 +225,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       std::error_code ec;
       auto p = std::filesystem::current_path(ec);
-      info.GetReturnValue().Set(str(iso, ec ? std::string{} : p.generic_string()));
+      info.GetReturnValue().Set(to_v8_string(iso, ec ? std::string{} : p.generic_string()));
     }
 
     void process_chdir(const FunctionCallbackInfo<Value>& info) {
@@ -250,11 +235,11 @@ namespace fxe::js {
         (void)throw_type_error(iso, "chdir(path)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       std::error_code ec;
       std::filesystem::current_path(p, ec);
       if (ec) {
-        auto err = Exception::Error(str(iso, "chdir: " + ec.message())).As<Object>();
+        auto err = Exception::Error(to_v8_string(iso, "chdir: " + ec.message())).As<Object>();
         (void)err->Set(iso->GetCurrentContext(), "code"_v8(iso), "ENOENT"_v8(iso));
         iso->ThrowException(err);
       }
@@ -286,7 +271,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "on(event, fn)");
         return;
       }
-      auto event = utf8(iso, info[0]);
+      auto event = to_std_string(iso, info[0]);
       auto fn = info[1].As<Function>();
       auto& reg = listeners_for(iso);
       auto& vec = reg.events[event];
@@ -393,7 +378,7 @@ namespace fxe::js {
       if (value->IsNumber())
         return value->Int32Value(ctx).FromMaybe(SIGTERM);
       if (value->IsString()) {
-        auto name = utf8(iso, value);
+        auto name = to_std_string(iso, value);
         return signal_number_from_string(name, ok);
       }
       ok = false;
@@ -434,9 +419,9 @@ namespace fxe::js {
       }
 #else
       if (::kill(pid, sig) != 0) {
-        auto err =
-            Exception::Error(str(iso, std::string("kill: ") + std::strerror(errno))).As<Object>();
-        (void)err->Set(ctx, "code"_v8(iso), str(iso, errno == ESRCH ? "ESRCH" : "EPERM"));
+        auto err = Exception::Error(to_v8_string(iso, std::string("kill: ") + std::strerror(errno)))
+                       .As<Object>();
+        (void)err->Set(ctx, "code"_v8(iso), to_v8_string(iso, errno == ESRCH ? "ESRCH" : "EPERM"));
         iso->ThrowException(err);
         return;
       }
@@ -519,7 +504,7 @@ namespace fxe::js {
       }
       auto v = info[0];
       if (v->IsString()) {
-        auto s = utf8(iso, v);
+        auto s = to_std_string(iso, v);
         if (!s.empty())
           std::fwrite(s.data(), 1, s.size(), sink);
       } else if (v->IsArrayBufferView()) {
@@ -544,7 +529,7 @@ namespace fxe::js {
     bool stdin_emit(Isolate* iso, Local<Object> input, const std::string& event,
                     Local<Value> arg = Local<Value>()) {
       auto ctx = iso->GetCurrentContext();
-      auto key = str(iso, std::string("__fxe_stdin_") + event);
+      auto key = to_v8_string(iso, std::string("__fxe_stdin_") + event);
       Local<Value> slot;
       if (!input->Get(ctx, key).ToLocal(&slot) || !slot->IsArray())
         return true;
@@ -583,8 +568,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       Local<Value> encoding;
       if (input->Get(ctx, "readableEncoding"_v8(iso)).ToLocal(&encoding) && encoding->IsString()) {
-        return String::NewFromUtf8(iso, data, NewStringType::kNormal, static_cast<int>(size))
-            .ToLocalChecked();
+        return to_v8_string(iso, std::string_view(data, size));
       }
       auto ab = ArrayBuffer::New(iso, size);
       std::memcpy(ab->GetBackingStore()->Data(), data, size);
@@ -645,9 +629,10 @@ namespace fxe::js {
           break;
         (void)input->Set(ctx, "readable"_v8(iso), Boolean::New(iso, false));
         if (errno != EBADF) {
-          auto err = Exception::Error(str(iso, std::string("stdin read: ") + std::strerror(errno)))
+          auto err = Exception::Error(
+                         to_v8_string(iso, std::string("stdin read: ") + std::strerror(errno)))
                          .As<Object>();
-          (void)err->Set(ctx, "code"_v8(iso), str(iso, std::strerror(errno)));
+          (void)err->Set(ctx, "code"_v8(iso), to_v8_string(iso, std::strerror(errno)));
           (void)stdin_emit(iso, input, "error", err);
         }
         keep_polling = false;
@@ -681,7 +666,7 @@ namespace fxe::js {
       Local<Script> script;
       Local<Value> factory_value;
       Local<Value> result;
-      if (Script::Compile(ctx, str(iso, kResume)).ToLocal(&script) &&
+      if (Script::Compile(ctx, to_v8_string(iso, kResume)).ToLocal(&script) &&
           script->Run(ctx).ToLocal(&factory_value) && factory_value->IsFunction()) {
         Local<Value> argv[1] = {info.This()};
         (void)factory_value.As<Function>()->Call(ctx, info.This(), 1, argv).ToLocal(&result);
@@ -706,7 +691,7 @@ namespace fxe::js {
       Local<Script> script;
       Local<Value> factory_value;
       Local<Value> result;
-      if (Script::Compile(ctx, str(iso, kPause)).ToLocal(&script) &&
+      if (Script::Compile(ctx, to_v8_string(iso, kPause)).ToLocal(&script) &&
           script->Run(ctx).ToLocal(&factory_value) && factory_value->IsFunction()) {
         Local<Value> argv[1] = {info.This()};
         (void)factory_value.As<Function>()->Call(ctx, info.This(), 1, argv).ToLocal(&result);
@@ -733,13 +718,13 @@ namespace fxe::js {
         (void)throw_type_error(iso, "on(event, fn)");
         return;
       }
-      auto event = utf8(iso, info[0]);
+      auto event = to_std_string(iso, info[0]);
       if (event != "data" && event != "end" && event != "error") {
         info.GetReturnValue().Set(info.This());
         return;
       }
       auto ctx = iso->GetCurrentContext();
-      auto key = str(iso, std::string("__fxe_stdin_") + event);
+      auto key = to_v8_string(iso, std::string("__fxe_stdin_") + event);
       Local<Value> slot;
       Local<Array> listeners;
       if (info.This()->Get(ctx, key).ToLocal(&slot) && slot->IsArray()) {
@@ -843,7 +828,7 @@ namespace fxe::js {
         (void)throw_error(iso, "process.platform is unsupported for this build target");
         return;
       }
-      info.GetReturnValue().Set(str(iso, name));
+      info.GetReturnValue().Set(to_v8_string(iso, name));
     }
 
     void process_arch_getter(const FunctionCallbackInfo<Value>& info) {
@@ -854,7 +839,7 @@ namespace fxe::js {
         (void)throw_error(iso, "process.arch is unsupported for this build target");
         return;
       }
-      info.GetReturnValue().Set(str(iso, name));
+      info.GetReturnValue().Set(to_v8_string(iso, name));
     }
   } // namespace
 
@@ -909,10 +894,10 @@ namespace fxe::js {
         // unhandledRejection / exit hooks. We can't rethrow — the caller (e.g.
         // promise_reject_callback) is in a context where throwing is unsafe.
         if (tc.HasCaught()) {
-          String::Utf8Value u(iso, tc.Exception());
-          if (*u)
+          auto message = to_std_string(iso, tc.Exception());
+          if (!message.empty())
             FXE_ERROR("js.process", "process listener for '{}' threw: {}",
-                      std::string_view(event.data(), event.size()), *u);
+                      std::string_view(event.data(), event.size()), message);
           tc.Reset();
         }
       }
@@ -958,9 +943,9 @@ namespace fxe::js {
     proc->Set(iso, "pid", Integer::New(iso, static_cast<i32>(fxe_getpid())));
 
     auto versions = ObjectTemplate::New(iso);
-    versions->Set(iso, "fxe", String::NewFromUtf8(iso, FXE_VERSION).ToLocalChecked());
-    versions->Set(iso, "v8", String::NewFromUtf8(iso, V8::GetVersion()).ToLocalChecked());
-    versions->Set(iso, "dawn", String::NewFromUtf8(iso, FXE_DAWN_VERSION).ToLocalChecked());
+    versions->Set(iso, "fxe", to_v8(iso, FXE_VERSION));
+    versions->Set(iso, "v8", to_v8(iso, V8::GetVersion()));
+    versions->Set(iso, "dawn", to_v8(iso, FXE_DAWN_VERSION));
     proc->Set(iso, "versions", versions);
 
     auto release = ObjectTemplate::New(iso);
@@ -1008,7 +993,7 @@ namespace fxe::js {
           }
           auto arr = Array::New(iso, static_cast<int>(snap.size()));
           for (u32 i = 0; i < snap.size(); ++i)
-            (void)arr->Set(ctx, i, str(iso, snap[i]));
+            (void)arr->Set(ctx, i, to_v8_string(iso, snap[i]));
           info.GetReturnValue().Set(arr);
         }));
 

@@ -18,8 +18,8 @@
 
 #include <fxe/debug.hpp>
 #include <fxe/renderer.hpp>
-#include <fxe/v8_host.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/v8_host.hpp>
 #include <fxe/window.hpp>
 #if defined(FXE_DEBUG_HAS_WEBAUTHN)
 #include "../webauthn/debug_handlers.hpp"

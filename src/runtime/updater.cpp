@@ -12,8 +12,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <fxe/types.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/types.hpp>
 #include <limits>
 #include <mutex>
 #include <pugixml.hpp>
@@ -951,8 +951,7 @@ namespace fxe::runtime {
         first_item = child;
       if (!host_os.empty() && !host_item) {
         const pugi::xml_node enclosure = child.child("enclosure");
-        const std::string_view sparkle_os =
-            trim(enclosure.attribute("sparkle:os").as_string());
+        const std::string_view sparkle_os = trim(enclosure.attribute("sparkle:os").as_string());
         if (!sparkle_os.empty() && sparkle_os == host_os)
           host_item = child;
       }
@@ -998,8 +997,8 @@ namespace fxe::runtime {
     update_manifest_v2::artifact artifact;
     artifact.kind = "full";
     artifact.url = std::string(enclosure_url);
-    artifact.sha256 = ascii_lower(
-        std::string(trim(enclosure.attribute("sparkle:installerSha256").as_string())));
+    artifact.sha256 =
+        ascii_lower(std::string(trim(enclosure.attribute("sparkle:installerSha256").as_string())));
     if (artifact.sha256.empty()) {
       error_out = "appcast item missing sha256";
       return std::nullopt;

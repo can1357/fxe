@@ -18,32 +18,6 @@ namespace fxe::js {
 
   namespace {
     [[maybe_unused]] std::atomic_bool g_auto_self_test_ran{false};
-    Local<String> s(Isolate* iso, const char* str) {
-      return String::NewFromUtf8(iso, str, NewStringType::kNormal).ToLocalChecked();
-    }
-
-    std::string to_str(Isolate* iso, Local<Value> value) {
-      if (value.IsEmpty() || !value->IsString())
-        return {};
-      String::Utf8Value utf8(iso, value);
-      return *utf8 ? std::string(*utf8, utf8.length()) : std::string{};
-    }
-
-    std::string get_optional_string(Isolate* iso, Local<Context> ctx, Local<Object> obj,
-                                    const char* name) {
-      Local<Value> value;
-      if (!obj->Get(ctx, s(iso, name)).ToLocal(&value) || !value->IsString())
-        return {};
-      return to_str(iso, value);
-    }
-
-    bool get_optional_bool(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                           bool fallback) {
-      Local<Value> value;
-      if (!obj->Get(ctx, s(iso, name)).ToLocal(&value) || !value->IsBoolean())
-        return fallback;
-      return value->BooleanValue(iso);
-    }
 
     void crash_start_cb(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -55,33 +29,31 @@ namespace fxe::js {
 
       auto opts_obj = info[0].As<Object>();
       fxe::os::crash_options opts;
-      opts.product_name = get_optional_string(iso, ctx, opts_obj, "productName");
+      opts.product_name = get_prop<std::string>(ctx, opts_obj, "productName").value_or("");
       if (opts.product_name.empty()) {
         (void)throw_type_error(iso, "App.crashReporter.start requires options.productName");
         return;
       }
-      opts.product_version = get_optional_string(iso, ctx, opts_obj, "productVersion");
-      opts.submit_url = get_optional_string(iso, ctx, opts_obj, "submitURL");
-      opts.crash_dir = get_optional_string(iso, ctx, opts_obj, "crashDir");
-      opts.upload_to_server = get_optional_bool(iso, ctx, opts_obj, "uploadToServer", false);
+      opts.product_version = get_prop<std::string>(ctx, opts_obj, "productVersion").value_or("");
+      opts.submit_url = get_prop<std::string>(ctx, opts_obj, "submitURL").value_or("");
+      opts.crash_dir = get_prop<std::string>(ctx, opts_obj, "crashDir").value_or("");
+      opts.upload_to_server = get_prop_or<bool>(ctx, opts_obj, "uploadToServer", false);
       opts.include_full_memory_dump =
-          get_optional_bool(iso, ctx, opts_obj, "includeFullMemoryDump", false);
-      opts.include_stack_memory = get_optional_bool(iso, ctx, opts_obj, "includeStackMemory", true);
-      Local<Value> scrub_keys;
-      if (opts_obj->Get(ctx, "scrubAnnotationKeys"_v8(iso)).ToLocal(&scrub_keys) &&
-          scrub_keys->IsArray()) {
-        auto array = scrub_keys.As<Array>();
+          get_prop_or<bool>(ctx, opts_obj, "includeFullMemoryDump", false);
+      opts.include_stack_memory = get_prop_or<bool>(ctx, opts_obj, "includeStackMemory", true);
+      if (auto scrub_keys = get_prop<Local<Value>>(ctx, opts_obj, "scrubAnnotationKeys");
+          scrub_keys.has_value() && (*scrub_keys)->IsArray()) {
+        auto array = (*scrub_keys).As<Array>();
         u32 length = array->Length();
         opts.scrub_annotation_keys.reserve(length);
         for (u32 i = 0; i < length; ++i) {
-          Local<Value> entry;
-          if (!array->Get(ctx, i).ToLocal(&entry) || !entry->IsString())
-            continue;
-          opts.scrub_annotation_keys.push_back(to_str(iso, entry));
+          if (auto entry = get_index<Local<Value>>(ctx, array, i);
+              entry.has_value() && (*entry)->IsString())
+            opts.scrub_annotation_keys.push_back(to_std_string_strict(iso, *entry));
         }
       }
 
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::crash_start(opts)));
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::crash_start(opts)));
     }
 
     void crash_list_dumps_cb(const FunctionCallbackInfo<Value>& info) {
@@ -90,7 +62,7 @@ namespace fxe::js {
       std::vector<std::string> dumps = fxe::os::crash_detail::list_dump_paths();
       auto arr = Array::New(iso, static_cast<int>(dumps.size()));
       for (usize i = 0; i < dumps.size(); ++i) {
-        (void)arr->Set(ctx, static_cast<u32>(i), s(iso, dumps[i].c_str()));
+        set_index(ctx, arr, static_cast<u32>(i), dumps[i]);
       }
       info.GetReturnValue().Set(arr);
     }
@@ -99,10 +71,10 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto last = fxe::os::crash_get_last_dump_path();
       if (!last) {
-        info.GetReturnValue().Set(Null(iso));
+        info.GetReturnValue().Set(to_v8_null(iso));
         return;
       }
-      info.GetReturnValue().Set(s(iso, last->c_str()));
+      info.GetReturnValue().Set(to_v8_string(iso, *last));
     }
 
     void crash_self_test_cb(const FunctionCallbackInfo<Value>& info) {
@@ -112,22 +84,19 @@ namespace fxe::js {
         (void)throw_error(iso, result.error.c_str());
         return;
       }
-      info.GetReturnValue().Set(Boolean::New(iso, result.ok));
+      info.GetReturnValue().Set(to_v8(iso, result.ok));
     }
   } // namespace
 
   void install_crash_reporter_to(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
     HandleScope hs(iso);
     auto reporter = Object::New(iso);
-    (void)reporter->Set(ctx, "start"_v8(iso), Function::New(ctx, crash_start_cb).ToLocalChecked());
-    (void)reporter->Set(ctx, "listDumps"_v8(iso),
-                        Function::New(ctx, crash_list_dumps_cb).ToLocalChecked());
-    (void)reporter->Set(ctx, "getLastDumpPath"_v8(iso),
-                        Function::New(ctx, crash_get_last_dump_path_cb).ToLocalChecked());
-    (void)reporter->Set(ctx, "selfTest"_v8(iso),
-                        Function::New(ctx, crash_self_test_cb).ToLocalChecked());
-    (void)appObj->Set(ctx, "crashReporter"_v8(iso), reporter);
-    (void)appObj->Set(ctx, "crashReport"_v8(iso), reporter);
+    add_function(ctx, reporter, "start", crash_start_cb);
+    add_function(ctx, reporter, "listDumps", crash_list_dumps_cb);
+    add_function(ctx, reporter, "getLastDumpPath", crash_get_last_dump_path_cb);
+    add_function(ctx, reporter, "selfTest", crash_self_test_cb);
+    set_prop(ctx, appObj, "crashReporter", reporter);
+    set_prop(ctx, appObj, "crashReport", reporter);
 #ifndef NDEBUG
     if (const char* enabled = std::getenv("FXE_CRASH_SELF_TEST");
         enabled && std::string(enabled) == "1") {

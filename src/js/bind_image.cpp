@@ -57,15 +57,6 @@ namespace fxe::js {
     };
     static image_resetter_register s_image_resetter_register;
 
-    Local<String> str(Isolate* iso, const char* s) {
-      return String::NewFromUtf8(iso, s).ToLocalChecked();
-    }
-
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-
     texture_id ensure_holder_texture(image_holder* h) {
       if (!h || !h->tex)
         return null_texture;
@@ -201,7 +192,7 @@ namespace fxe::js {
 #endif
 
       if (!req->error.empty()) {
-        (void)resolver->Reject(ctx, Exception::Error(str(iso, req->error.c_str())));
+        (void)resolver->Reject(ctx, Exception::Error(to_v8_string(iso, req->error.c_str())));
         req->resolver.Reset();
         req->context.Reset();
         return;
@@ -273,7 +264,7 @@ namespace fxe::js {
 #endif
 
       if (!req->error.empty()) {
-        (void)resolver->Reject(ctx, Exception::Error(str(iso, req->error.c_str())));
+        (void)resolver->Reject(ctx, Exception::Error(to_v8_string(iso, req->error.c_str())));
         req->resolver.Reset();
         req->context.Reset();
         return;
@@ -308,10 +299,6 @@ namespace fxe::js {
       return new image_holder{{}, std::move(td)};
     }
 
-    void throw_type(Isolate* iso, const char* msg) {
-      (void)throw_type_error(iso, msg);
-    }
-
     [[nodiscard]] usize animated_frame_index_at(animated_image_holder* h, double time_ms) noexcept {
       if (!h || h->frames.empty() || !std::isfinite(time_ms) || h->duration_ms == 0)
         return 0;
@@ -338,15 +325,15 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString())
-        return throw_type(iso, "Image.load(path: string)");
+        return (void)throw_type_error(iso, "Image.load(path: string)");
       std::vector<u8> bytes;
-      if (!read_file_bytes(utf8(iso, info[0]), bytes))
-        return throw_type(iso, "Image.load: failed to read file");
+      if (!read_file_bytes(to_std_string(iso, info[0]), bytes))
+        return (void)throw_error(iso, "Image.load: failed to read file");
       try {
         auto* h = make_holder_from_decoded(bytes);
         info.GetReturnValue().Set(wrap_image(iso, ctx, h));
       } catch (const std::exception& e) {
-        throw_type(iso, e.what());
+        (void)throw_error(iso, e.what());
       }
     }
 
@@ -357,13 +344,14 @@ namespace fxe::js {
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       info.GetReturnValue().Set(resolver->GetPromise());
       if (info.Length() < 1 || !info[0]->IsString()) {
-        (void)resolver->Reject(ctx, Exception::TypeError("Image.loadAsync(path: string)"_v8(iso)));
+        (void)resolver->Reject(
+            ctx, Exception::TypeError(to_v8_string(iso, "Image.loadAsync(path: string)")));
         return;
       }
 
       auto req = std::make_unique<decode_request>();
       req->read_path = true;
-      req->path = utf8(iso, info[0]);
+      req->path = to_std_string(iso, info[0]);
       req->iso = iso;
       req->context.Reset(iso, ctx);
       req->resolver.Reset(iso, resolver);
@@ -389,13 +377,13 @@ namespace fxe::js {
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       info.GetReturnValue().Set(resolver->GetPromise());
       if (info.Length() < 1 || !info[0]->IsString()) {
-        (void)resolver->Reject(ctx,
-                               Exception::TypeError("Image.loadAnimated(path: string)"_v8(iso)));
+        (void)resolver->Reject(
+            ctx, Exception::TypeError(to_v8_string(iso, "Image.loadAnimated(path: string)")));
         return;
       }
 
       auto req = std::make_unique<animated_decode_request>();
-      req->path = utf8(iso, info[0]);
+      req->path = to_std_string(iso, info[0]);
       req->iso = iso;
       req->context.Reset(iso, ctx);
       req->resolver.Reset(iso, resolver);
@@ -422,13 +410,14 @@ namespace fxe::js {
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       info.GetReturnValue().Set(resolver->GetPromise());
       if (info.Length() < 1 || !info[0]->IsString()) {
-        (void)resolver->Reject(ctx, Exception::TypeError("Image.loadLottie(path: string)"_v8(iso)));
+        (void)resolver->Reject(
+            ctx, Exception::TypeError(to_v8_string(iso, "Image.loadLottie(path: string)")));
         return;
       }
 
       auto req = std::make_unique<animated_decode_request>();
       req->force_lottie = true;
-      req->path = utf8(iso, info[0]);
+      req->path = to_std_string(iso, info[0]);
       req->iso = iso;
       req->context.Reset(iso, ctx);
       req->resolver.Reset(iso, resolver);
@@ -454,7 +443,8 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3 || !info[0]->IsUint8Array() || !info[1]->IsNumber() ||
           !info[2]->IsNumber())
-        return throw_type(iso, "Image.fromPixels(rgba: Uint8Array, width: number, height: number)");
+        return (void)throw_type_error(
+            iso, "Image.fromPixels(rgba: Uint8Array, width: number, height: number)");
       auto u8a = info[0].As<Uint8Array>();
       std::vector<u8> bytes(u8a->ByteLength());
       u8a->CopyContents(bytes.data(), bytes.size());
@@ -462,7 +452,8 @@ namespace fxe::js {
       u32 h = info[2]->Uint32Value(ctx).FromMaybe(0);
       auto* holder = make_holder_from_raw(bytes.data(), bytes.size(), w, h);
       if (!holder)
-        return throw_type(iso, "Image.fromPixels: byte length mismatches width*height*4");
+        return (void)throw_range_error(iso,
+                                       "Image.fromPixels: byte length mismatches width*height*4");
       info.GetReturnValue().Set(wrap_image(iso, ctx, holder));
     }
 
@@ -471,7 +462,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsUint8Array())
-        return throw_type(iso, "Image.decode(encoded: Uint8Array)");
+        return (void)throw_type_error(iso, "Image.decode(encoded: Uint8Array)");
       auto u8a = info[0].As<Uint8Array>();
       std::vector<u8> bytes(u8a->ByteLength());
       u8a->CopyContents(bytes.data(), bytes.size());
@@ -547,10 +538,10 @@ namespace fxe::js {
         return;
       }
       if (info.Length() < 1 || !info[0]->IsNumber())
-        return throw_type(iso, "AnimatedImage.frame(t: number)");
+        return (void)throw_type_error(iso, "AnimatedImage.frame(t: number)");
       const double time_ms = info[0]->NumberValue(ctx).FromMaybe(0.0);
       if (!std::isfinite(time_ms))
-        return throw_type(iso, "AnimatedImage.frame: t must be a finite number");
+        return (void)throw_range_error(iso, "AnimatedImage.frame: t must be a finite number");
       const usize index = animated_frame_index_at(h, time_ms);
       info.GetReturnValue().Set(wrap_frame_image(iso, ctx, h, index));
     }
@@ -592,9 +583,9 @@ namespace fxe::js {
       auto arr = Array::New(iso, static_cast<int>(h->frames.size()));
       for (usize i = 0; i < h->frames.size(); ++i) {
         auto entry = Object::New(iso);
-        (void)entry->Set(ctx, "delayMs"_v8(iso), Integer::NewFromUnsigned(iso, h->delays_ms[i]));
-        (void)entry->Set(ctx, "image"_v8(iso), wrap_frame_image(iso, ctx, h, i));
-        (void)arr->Set(ctx, static_cast<uint32_t>(i), entry);
+        set_prop(ctx, entry, "delayMs", Integer::NewFromUnsigned(iso, h->delays_ms[i]));
+        set_prop(ctx, entry, "image", wrap_frame_image(iso, ctx, h, i));
+        set_index(ctx, arr, static_cast<uint32_t>(i), entry);
       }
       info.GetReturnValue().Set(arr);
     }

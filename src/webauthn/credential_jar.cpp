@@ -1,4 +1,5 @@
 #include "webauthn/credential_jar.hpp"
+#include "webauthn/mbedtls_util.hpp"
 
 #include <fxe/log.hpp>
 #include <fxe/webauthn.hpp>
@@ -105,12 +106,6 @@ namespace fxe::webauthn::detail {
         mbedtls_entropy_free(&entropy);
       }
     };
-
-    std::string mbedtls_err_str(int rc) {
-      std::array<char, 256> buf{};
-      mbedtls_strerror(rc, buf.data(), buf.size());
-      return buf.data();
-    }
 
     template <typename Fn> int with_busy_retry(Fn&& fn) {
       int rc = SQLITE_ERROR;

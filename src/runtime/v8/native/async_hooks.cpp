@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <mutex>
 #include <string_view>
@@ -13,6 +14,7 @@ namespace fxe::runtime {
   namespace {
     using namespace v8;
 
+    using namespace fxe::js;
     constexpr u32 k_isolate_slot_async_hooks = 3;
 
     struct async_hooks_state {
@@ -21,24 +23,12 @@ namespace fxe::runtime {
       std::unordered_map<int, Global<Object>> promise_resources;
       // v1: keyed by identity hash and cleaned on kAfter. Unobserved promises can
       // linger until isolate teardown; hash collisions overwrite older entries.
-      // RTLUfunctions.edit კომენტary to=functions.edit code  天天中彩票不? Let's see.
       std::mutex mutex;
       uint64_t next_async_id = 1;
     };
 
     async_hooks_state* get_state(Isolate* iso) {
       return static_cast<async_hooks_state*>(iso->GetData(k_isolate_slot_async_hooks));
-    }
-
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    void add_function(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                      FunctionCallback cb) {
-      auto fn = Function::New(ctx, cb).ToLocalChecked();
-      (void)obj->Set(ctx, str(iso, name), fn);
     }
 
     Local<Symbol> async_id_symbol(Isolate* iso) {
@@ -181,11 +171,11 @@ namespace fxe::runtime {
 
     Local<Object> make_async_hooks_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "getCurrentResource", get_current_resource_callback);
-      add_function(iso, ctx, ns, "setCurrentResource", set_current_resource_callback);
-      add_function(iso, ctx, ns, "executionAsyncId", execution_async_id_callback);
-      add_function(iso, ctx, ns, "triggerAsyncId", trigger_async_id_callback);
-      add_function(iso, ctx, ns, "nextAsyncId", next_async_id_callback);
+      add_function(ctx, ns, "getCurrentResource", get_current_resource_callback);
+      add_function(ctx, ns, "setCurrentResource", set_current_resource_callback);
+      add_function(ctx, ns, "executionAsyncId", execution_async_id_callback);
+      add_function(ctx, ns, "triggerAsyncId", trigger_async_id_callback);
+      add_function(ctx, ns, "nextAsyncId", next_async_id_callback);
       return ns;
     }
   } // namespace
@@ -206,10 +196,10 @@ namespace fxe::runtime {
       native = native_value.As<Object>();
     } else {
       native = Object::New(iso);
-      (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
-                                             static_cast<PropertyAttribute>(DontEnum));
+      define_prop(ctx, ctx->Global(), "__fxe_native"_v8, native,
+                  static_cast<PropertyAttribute>(DontEnum));
     }
-    (void)native->Set(ctx, "async_hooks"_v8(iso), make_async_hooks_namespace(iso, ctx));
+    set_prop(ctx, native, "async_hooks", make_async_hooks_namespace(iso, ctx));
   }
 
   void uninstall_native_async_hooks(Isolate* iso) {

@@ -59,16 +59,6 @@ extern "C" char** environ;
 namespace fxe::js {
   using namespace v8;
   namespace {
-    Local<String> s(Isolate* iso, const char* str) {
-      return String::NewFromUtf8(iso, str, NewStringType::kNormal).ToLocalChecked();
-    }
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      if (v.IsEmpty() || !v->IsString())
-        return {};
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-
     bool require_string_arg(const FunctionCallbackInfo<Value>& info, const char* message,
                             std::string& out) {
       auto* iso = info.GetIsolate();
@@ -76,15 +66,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, message);
         return false;
       }
-      out = to_str(iso, info[0]);
+      out = to_std_string(iso, info[0]);
       return true;
-    }
-
-    void throw_native_error(Isolate* iso, Local<Context> ctx, const char* code,
-                            const char* message) {
-      auto err = Exception::Error(s(iso, message)).As<Object>();
-      (void)err->Set(ctx, "code"_v8(iso), s(iso, code));
-      iso->ThrowException(err);
     }
 
     std::optional<std::filesystem::path> current_executable_path() {
@@ -284,16 +267,16 @@ namespace fxe::js {
     }
 
     void app_get_name(const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(s(info.GetIsolate(), FXE_APP_NAME));
+      info.GetReturnValue().Set(to_v8_string_internalized(info.GetIsolate(), FXE_APP_NAME));
     }
     void app_get_version(const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(s(info.GetIsolate(), FXE_APP_VERSION));
+      info.GetReturnValue().Set(to_v8_string_internalized(info.GetIsolate(), FXE_APP_VERSION));
     }
     void app_get_path(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      std::string kind = info.Length() > 0 ? to_str(iso, info[0]) : std::string{"userData"};
+      std::string kind = info.Length() > 0 ? to_std_string(iso, info[0]) : std::string{"userData"};
       auto p = fxe::os::get_path(kind);
-      info.GetReturnValue().Set(s(iso, p.c_str()));
+      info.GetReturnValue().Set(to_v8(iso, p));
     }
     void app_bookmark_persist(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -303,11 +286,11 @@ namespace fxe::js {
         return;
       auto blob = fxe::os::bookmark_persist(path);
       if (!blob) {
-        throw_native_error(iso, ctx, "ERR_FXE_BOOKMARK_PERSIST_FAILED",
-                           "App.bookmark.persist failed");
+        (void)throw_coded_error(iso, ctx, "ERR_FXE_BOOKMARK_PERSIST_FAILED",
+                                "App.bookmark.persist failed");
         return;
       }
-      info.GetReturnValue().Set(s(iso, blob->c_str()));
+      info.GetReturnValue().Set(to_v8(iso, *blob));
     }
 
     void app_bookmark_resolve(const FunctionCallbackInfo<Value>& info) {
@@ -318,13 +301,13 @@ namespace fxe::js {
         return;
       auto resolved = fxe::os::bookmark_resolve(blob);
       if (!resolved) {
-        throw_native_error(iso, ctx, "ERR_FXE_BOOKMARK_RESOLVE_FAILED",
-                           "App.bookmark.resolve failed");
+        (void)throw_coded_error(iso, ctx, "ERR_FXE_BOOKMARK_RESOLVE_FAILED",
+                                "App.bookmark.resolve failed");
         return;
       }
       Local<Object> result = Object::New(iso);
-      (void)result->Set(ctx, "path"_v8(iso), s(iso, resolved->first.c_str()));
-      (void)result->Set(ctx, "isStale"_v8(iso), Boolean::New(iso, resolved->second));
+      set_prop(ctx, result, "path", resolved->first);
+      set_prop(ctx, result, "isStale", resolved->second);
       info.GetReturnValue().Set(result);
     }
 
@@ -333,7 +316,7 @@ namespace fxe::js {
       std::string blob;
       if (!require_string_arg(info, "App.bookmark.startAccessing requires a bookmark string", blob))
         return;
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::bookmark_start_access(blob)));
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::bookmark_start_access(blob)));
     }
 
     void app_bookmark_stop_accessing(const FunctionCallbackInfo<Value>& info) {
@@ -346,18 +329,18 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
 
-      Local<Value> window_ctor_value;
-      if (!ctx->Global()->Get(ctx, "Window"_v8(iso)).ToLocal(&window_ctor_value)) {
+      auto window_ctor_value = get_prop<Local<Value>>(ctx, ctx->Global(), "Window");
+      if (!window_ctor_value) {
         // Preserve the pending V8 exception from global Window lookup.
         return;
       }
 
-      if (!window_ctor_value->IsFunction()) {
+      if (!(*window_ctor_value)->IsFunction()) {
         (void)throw_type_error(iso, "App.openWindow requires global Window constructor");
         return;
       }
 
-      auto window_ctor = window_ctor_value.As<Function>();
+      auto window_ctor = (*window_ctor_value).As<Function>();
       Local<Value> argv[] = {info[0]};
       Local<Object> window;
       if (!window_ctor
@@ -388,8 +371,7 @@ namespace fxe::js {
 
       auto exe_path = current_executable_path();
       if (!exe_path || !path_is_regular_file(*exe_path)) {
-        iso->ThrowException(
-            Exception::Error(s(iso, "App.openDevTools: failed to resolve fxe_run executable")));
+        (void)throw_error(iso, "App.openDevTools: failed to resolve fxe_run executable");
         return;
       }
 
@@ -402,8 +384,7 @@ namespace fxe::js {
       std::wstring entry_w = devtools_entry->wstring();
       std::wstring cdp_url_w = widen_utf8(cdp_url);
       if (exe_w.empty() || entry_w.empty() || cdp_url_w.empty()) {
-        iso->ThrowException(Exception::Error(
-            s(iso, "App.openDevTools: failed to prepare child process arguments")));
+        (void)throw_error(iso, "App.openDevTools: failed to prepare child process arguments");
         return;
       }
 
@@ -427,14 +408,13 @@ namespace fxe::js {
         int err = static_cast<int>(GetLastError());
         std::string message =
             std::string("App.openDevTools: spawn failed: ") + system_error_message(err);
-        iso->ThrowException(Exception::Error(s(iso, message.c_str())));
+        (void)throw_error(iso, "{}", message);
         return;
       }
       CloseHandle(process.hThread);
       CloseHandle(process.hProcess);
       Local<Object> result = Object::New(iso);
-      (void)result->Set(ctx, "pid"_v8(iso),
-                        Number::New(iso, static_cast<double>(process.dwProcessId)));
+      set_prop(ctx, result, "pid", static_cast<double>(process.dwProcessId));
       info.GetReturnValue().Set(result);
 #else
       auto child_env_storage = build_child_environment_storage();
@@ -457,7 +437,7 @@ namespace fxe::js {
       if (rc != 0) {
         std::string message = std::string("App.openDevTools: posix_spawn file actions failed: ") +
                               system_error_message(rc);
-        iso->ThrowException(Exception::Error(s(iso, message.c_str())));
+        (void)throw_error(iso, "{}", message);
         return;
       }
 
@@ -468,20 +448,20 @@ namespace fxe::js {
       if (rc != 0) {
         std::string message =
             std::string("App.openDevTools: spawn failed: ") + system_error_message(rc);
-        iso->ThrowException(Exception::Error(s(iso, message.c_str())));
+        (void)throw_error(iso, "{}", message);
         return;
       }
 
       Local<Object> result = Object::New(iso);
-      (void)result->Set(ctx, "pid"_v8(iso), Number::New(iso, static_cast<double>(pid)));
+      set_prop(ctx, result, "pid", static_cast<double>(pid));
       info.GetReturnValue().Set(result);
 #endif
     }
     void app_request_single_instance_lock(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      std::string id = info.Length() > 0 ? to_str(iso, info[0]) : std::string{"fxe"};
+      std::string id = info.Length() > 0 ? to_std_string(iso, info[0]) : std::string{"fxe"};
       bool ok = fxe::os::request_single_instance_lock(id);
-      info.GetReturnValue().Set(Boolean::New(iso, ok));
+      info.GetReturnValue().Set(to_v8(iso, ok));
     }
     void app_set_badge_count(const FunctionCallbackInfo<Value>& info) {
       int n = 0;
@@ -495,9 +475,8 @@ namespace fxe::js {
         return;
       auto* iso = info.GetIsolate();
       const auto win_id = info[0]->IntegerValue(iso->GetCurrentContext()).FromMaybe(0);
-      String::Utf8Value json(iso, info[1]);
       auto snap = std::make_shared<fxe::os::a11y::snapshot>();
-      snap->json = *json ? std::string(*json, json.length()) : std::string{};
+      snap->json = to_std_string(iso, info[1]);
       static std::atomic<uint64_t> g_gen{0};
       snap->generation = ++g_gen;
       fxe::os::a11y::install_snapshot(reinterpret_cast<void*>(static_cast<uintptr_t>(win_id)),
@@ -507,15 +486,14 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
-      (void)resolver->Resolve(ctx, Undefined(iso));
+      (void)resolver->Resolve(ctx, to_v8_undefined(iso));
       info.GetReturnValue().Set(resolver->GetPromise());
     }
     std::string get_obj_string(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                                const char* name) {
-      Local<Value> value;
-      if (!obj->Get(ctx, s(iso, name)).ToLocal(&value) || !value->IsString())
-        return {};
-      return to_str(iso, value);
+      if (auto value = get_prop<Local<String>>(ctx, obj, name))
+        return to_std_string(iso, *value);
+      return {};
     }
 
     std::string get_obj_string_any(Isolate* iso, Local<Context> ctx, Local<Object> obj,
@@ -526,26 +504,21 @@ namespace fxe::js {
       return get_obj_string(iso, ctx, obj, second);
     }
 
-    void set_obj_string(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                        const std::string& value) {
-      (void)obj->Set(ctx, s(iso, name), s(iso, value.c_str()));
+    void set_obj_string([[maybe_unused]] Isolate* iso, Local<Context> ctx, Local<Object> obj,
+                        const char* name, const std::string& value) {
+      set_prop(ctx, obj, name, value);
     }
 
     bool get_obj_bool(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
                       bool fallback = false) {
-      Local<Value> value;
-      if (!obj->Get(ctx, s(iso, name)).ToLocal(&value) || value->IsUndefined() || value->IsNull()) {
-        return fallback;
-      }
-      return value->BooleanValue(iso);
+      if (auto value = get_prop<Local<Value>>(ctx, obj, name))
+        return (*value)->BooleanValue(iso);
+      return fallback;
     }
 
-    i64 get_obj_int64(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                      i64 fallback = 0) {
-      Local<Value> value;
-      if (!obj->Get(ctx, s(iso, name)).ToLocal(&value) || !value->IsNumber())
-        return fallback;
-      return static_cast<i64>(value->IntegerValue(ctx).FromMaybe(fallback));
+    i64 get_obj_int64([[maybe_unused]] Isolate* iso, Local<Context> ctx, Local<Object> obj,
+                      const char* name, i64 fallback = 0) {
+      return get_prop_or<i64>(ctx, obj, name, fallback);
     }
 
     Local<Object> cookie_to_object(Isolate* iso, Local<Context> ctx, const fxe::net::cookie& c) {
@@ -554,10 +527,10 @@ namespace fxe::js {
       set_obj_string(iso, ctx, obj, "value", c.value);
       set_obj_string(iso, ctx, obj, "domain", c.domain);
       set_obj_string(iso, ctx, obj, "path", c.path.empty() ? std::string("/") : c.path);
-      (void)obj->Set(ctx, "expires"_v8(iso), Number::New(iso, static_cast<double>(c.expires)));
-      (void)obj->Set(ctx, "secure"_v8(iso), Boolean::New(iso, c.secure));
-      (void)obj->Set(ctx, "httpOnly"_v8(iso), Boolean::New(iso, c.http_only));
-      (void)obj->Set(ctx, "hostOnly"_v8(iso), Boolean::New(iso, c.host_only));
+      set_prop(ctx, obj, "expires", static_cast<double>(c.expires));
+      set_prop(ctx, obj, "secure", c.secure);
+      set_prop(ctx, obj, "httpOnly", c.http_only);
+      set_prop(ctx, obj, "hostOnly", c.host_only);
       set_obj_string(iso, ctx, obj, "sameSite", fxe::net::cookie_same_site_name(c.same_site));
       return obj;
     }
@@ -615,7 +588,7 @@ namespace fxe::js {
       auto cookies = fxe::net::http_client::instance().cookies().get_all(std::move(filter));
       auto arr = Array::New(iso, static_cast<int>(cookies.size()));
       for (u32 i = 0; i < cookies.size(); ++i)
-        (void)arr->Set(ctx, i, cookie_to_object(iso, ctx, cookies[i]));
+        set_index(ctx, arr, i, cookie_to_object(iso, ctx, cookies[i]));
       info.GetReturnValue().Set(arr);
     }
 
@@ -646,7 +619,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "App.session.cookies.remove requires a URL");
         return;
       }
-      (void)fxe::net::http_client::instance().cookies().remove(name, to_str(iso, info[1]));
+      (void)fxe::net::http_client::instance().cookies().remove(name, to_std_string(iso, info[1]));
     }
 
     void session_cookies_clear(const FunctionCallbackInfo<Value>&) {
@@ -661,25 +634,20 @@ namespace fxe::js {
     }
 
     void install_app_session_cookies(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
-      Local<Value> session_value;
       Local<Object> session;
-      if (appObj->Get(ctx, "session"_v8(iso)).ToLocal(&session_value) &&
-          session_value->IsObject()) {
-        session = session_value.As<Object>();
+      if (auto session_value = get_prop<Local<Object>>(ctx, appObj, "session")) {
+        session = *session_value;
       } else {
         session = Object::New(iso);
-        (void)appObj->Set(ctx, "session"_v8(iso), session);
+        set_prop(ctx, appObj, "session", session);
       }
       auto cookies = Object::New(iso);
-      auto set_fn = [&](const char* name, FunctionCallback cb) {
-        (void)cookies->Set(ctx, s(iso, name), Function::New(ctx, cb).ToLocalChecked());
-      };
-      set_fn("getAll", session_cookies_get_all);
-      set_fn("set", session_cookies_set);
-      set_fn("remove", session_cookies_remove);
-      set_fn("clear", session_cookies_clear);
-      set_fn("persist", session_cookies_persist);
-      (void)session->Set(ctx, "cookies"_v8(iso), cookies);
+      add_function(ctx, cookies, "getAll", session_cookies_get_all);
+      add_function(ctx, cookies, "set", session_cookies_set);
+      add_function(ctx, cookies, "remove", session_cookies_remove);
+      add_function(ctx, cookies, "clear", session_cookies_clear);
+      add_function(ctx, cookies, "persist", session_cookies_persist);
+      set_prop(ctx, session, "cookies", cookies);
     }
 
     bool bytes_from_value(Local<Value> value, std::vector<u8>& out) {
@@ -710,21 +678,16 @@ namespace fxe::js {
         return;
       }
       std::string error;
-      const bool ok = fxe::runtime::verify_manifest_signature(
-          to_str(iso, info[0]), to_str(iso, info[1]), to_str(iso, info[2]), error);
-      info.GetReturnValue().Set(Boolean::New(iso, ok));
+      const bool ok = fxe::runtime::verify_manifest_signature(to_std_string(iso, info[0]),
+                                                              to_std_string(iso, info[1]),
+                                                              to_std_string(iso, info[2]), error);
+      info.GetReturnValue().Set(to_v8(iso, ok));
     }
 
     void app_stage_update(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       Local<Object> result = Object::New(iso);
-      auto set_bool = [&](const char* name, bool value) {
-        (void)result->Set(ctx, s(iso, name), Boolean::New(iso, value));
-      };
-      auto set_string = [&](const char* name, const std::string& value) {
-        (void)result->Set(ctx, s(iso, name), s(iso, value.c_str()));
-      };
 
       if (info.Length() < 2 || !info[0]->IsObject()) {
         (void)throw_type_error(
@@ -783,13 +746,11 @@ namespace fxe::js {
       auto pending = fxe::runtime::updater::stage(d, error);
       if (!pending) {
         const std::string message = error.empty() ? "failed to stage update" : error;
-        auto err = Exception::Error(s(iso, message.c_str())).As<Object>();
-        (void)err->Set(ctx, "code"_v8(iso), "ERR_FXE_UPDATE_STAGE_FAILED"_v8(iso));
-        iso->ThrowException(err);
+        (void)throw_coded_error(iso, ctx, "ERR_FXE_UPDATE_STAGE_FAILED", "{}", message);
         return;
       }
-      set_bool("ok", true);
-      set_string("pendingPath", *pending);
+      set_prop(ctx, result, "ok", true);
+      set_prop(ctx, result, "pendingPath", *pending);
       info.GetReturnValue().Set(result);
     }
 
@@ -799,7 +760,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "App.update.setChannel requires stable, beta, or alpha");
         return;
       }
-      auto parsed = fxe::runtime::updater::parse_channel(to_str(iso, info[0]));
+      auto parsed = fxe::runtime::updater::parse_channel(to_std_string(iso, info[0]));
       if (!parsed) {
         (void)throw_type_error(iso, "App.update.setChannel requires stable, beta, or alpha");
         return;
@@ -813,8 +774,8 @@ namespace fxe::js {
 
     void app_get_update_channel(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      info.GetReturnValue().Set(
-          s(iso, fxe::runtime::updater::channel_name(fxe::runtime::updater::channel())));
+      info.GetReturnValue().Set(to_v8_string_internalized(
+          iso, fxe::runtime::updater::channel_name(fxe::runtime::updater::channel())));
     }
 
     void app_resolve_update_feed_url(const FunctionCallbackInfo<Value>& info) {
@@ -823,8 +784,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "App.__fxeResolveUpdateFeedUrl requires a URL");
         return;
       }
-      const auto resolved = fxe::runtime::updater::substitute_channel(to_str(iso, info[0]));
-      info.GetReturnValue().Set(s(iso, resolved.c_str()));
+      const auto resolved = fxe::runtime::updater::substitute_channel(to_std_string(iso, info[0]));
+      info.GetReturnValue().Set(to_v8(iso, resolved));
     }
 
     void app_update_device_id(const FunctionCallbackInfo<Value>& info) {
@@ -836,7 +797,7 @@ namespace fxe::js {
         (void)throw_error(iso, message.c_str());
         return;
       }
-      info.GetReturnValue().Set(s(iso, id.c_str()));
+      info.GetReturnValue().Set(to_v8(iso, id));
     }
 
     void app_update_rollout_eligible(const FunctionCallbackInfo<Value>& info) {
@@ -849,7 +810,7 @@ namespace fxe::js {
       int percent = info[0]->Int32Value(ctx).FromMaybe(0);
       std::string id;
       if (info.Length() > 1 && info[1]->IsString()) {
-        id = to_str(iso, info[1]);
+        id = to_std_string(iso, info[1]);
       } else {
         std::string error;
         id = fxe::runtime::updater::device_id(error);
@@ -859,8 +820,7 @@ namespace fxe::js {
           return;
         }
       }
-      info.GetReturnValue().Set(
-          Boolean::New(iso, fxe::runtime::updater::rollout_eligible(percent, id)));
+      info.GetReturnValue().Set(to_v8(iso, fxe::runtime::updater::rollout_eligible(percent, id)));
     }
 
     void app_update_rollback(const FunctionCallbackInfo<Value>& info) {
@@ -868,13 +828,11 @@ namespace fxe::js {
       std::string error;
       if (!fxe::runtime::updater::rollback(error)) {
         const std::string message = error.empty() ? "failed to roll back update" : error;
-        auto err = Exception::Error(s(iso, message.c_str())).As<Object>();
-        (void)err->Set(iso->GetCurrentContext(), "code"_v8(iso),
-                       "ERR_FXE_UPDATE_ROLLBACK_FAILED"_v8(iso));
-        iso->ThrowException(err);
+        (void)throw_coded_error(iso, iso->GetCurrentContext(), "ERR_FXE_UPDATE_ROLLBACK_FAILED",
+                                "{}", message);
         return;
       }
-      info.GetReturnValue().Set(Boolean::New(iso, true));
+      info.GetReturnValue().Set(to_v8(iso, true));
     }
 
     void app_update_history(const FunctionCallbackInfo<Value>& info) {
@@ -884,19 +842,18 @@ namespace fxe::js {
       auto history = fxe::runtime::updater::history(error);
       Local<Array> out = Array::New(iso, static_cast<int>(history.size()));
       for (usize i = 0; i < history.size(); ++i)
-        (void)out->Set(ctx, static_cast<u32>(i), s(iso, history[i].c_str()));
+        set_index(ctx, out, static_cast<u32>(i), history[i]);
       info.GetReturnValue().Set(out);
     }
 
     void app_update_mark_ready(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::runtime::updater::mark_ready()));
+      info.GetReturnValue().Set(to_v8(iso, fxe::runtime::updater::mark_ready()));
     }
 
     void app_update_has_pending_first_launch(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      info.GetReturnValue().Set(
-          Boolean::New(iso, fxe::runtime::updater::has_pending_first_launch()));
+      info.GetReturnValue().Set(to_v8(iso, fxe::runtime::updater::has_pending_first_launch()));
     }
 
     void app_apply_pending_update(const FunctionCallbackInfo<Value>& info) {
@@ -907,22 +864,20 @@ namespace fxe::js {
         (void)throw_error(iso, message.c_str());
         return;
       }
-      info.GetReturnValue().Set(Boolean::New(iso, true));
+      info.GetReturnValue().Set(to_v8(iso, true));
     }
 
     void app_relaunch(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() > 0 && info[0]->IsObject()) {
-        Local<Value> install_update;
-        if (info[0].As<Object>()->Get(ctx, "installUpdate"_v8(iso)).ToLocal(&install_update) &&
-            install_update->BooleanValue(iso)) {
+        if (auto install_update =
+                get_prop<Local<Value>>(ctx, info[0].As<Object>(), "installUpdate");
+            install_update && (*install_update)->BooleanValue(iso)) {
           std::string error;
           if (!fxe::runtime::updater::apply_pending(error)) {
             const std::string message = error.empty() ? "failed to apply pending update" : error;
-            auto err = Exception::Error(s(iso, message.c_str())).As<Object>();
-            (void)err->Set(ctx, "code"_v8(iso), "ERR_FXE_UPDATE_APPLY_FAILED"_v8(iso));
-            iso->ThrowException(err);
+            (void)throw_coded_error(iso, ctx, "ERR_FXE_UPDATE_APPLY_FAILED", "{}", message);
             return;
           }
         }
@@ -1121,7 +1076,7 @@ namespace fxe::js {
   };
 })
 )JS";
-      Local<String> source = s(iso, kSource);
+      Local<String> source = to_v8_string_internalized(iso, kSource);
       Local<Script> script;
       if (!Script::Compile(ctx, source).ToLocal(&script))
         return Local<Function>();
@@ -1212,7 +1167,7 @@ namespace fxe::js {
 })
 )JS";
       Local<Script> script;
-      if (!Script::Compile(ctx, s(iso, kSource)).ToLocal(&script))
+      if (!Script::Compile(ctx, to_v8_string_internalized(iso, kSource)).ToLocal(&script))
         return Local<Function>();
       Local<Value> value;
       if (!script->Run(ctx).ToLocal(&value) || !value->IsFunction())
@@ -1254,7 +1209,7 @@ namespace fxe::js {
 })
 )JS";
       Local<Script> script;
-      if (!Script::Compile(ctx, s(iso, kSource)).ToLocal(&script)) {
+      if (!Script::Compile(ctx, to_v8_string_internalized(iso, kSource)).ToLocal(&script)) {
         // Preserve the pending V8 exception from compiling the embedded bridge.
         return;
       }
@@ -1319,8 +1274,8 @@ namespace fxe::js {
         }
         auto arr = Array::New(iso, static_cast<int>(argv.size()));
         for (u32 i = 0; i < argv.size(); ++i)
-          (void)arr->Set(ctx, i, s(iso, argv[i].c_str()));
-        Local<Value> js_argv[2] = {arr, s(iso, cwd.c_str())};
+          set_index(ctx, arr, i, argv[i]);
+        Local<Value> js_argv[2] = {arr, to_v8(iso, cwd)};
         invoke_persistent_callback(refs, 2, js_argv);
       });
     }
@@ -1339,7 +1294,7 @@ namespace fxe::js {
           return;
         }
         HandleScope hs(iso);
-        Local<Value> js_argv[1] = {s(iso, url.c_str())};
+        Local<Value> js_argv[1] = {to_v8(iso, url)};
         invoke_persistent_callback(refs, 1, js_argv);
       });
     }
@@ -1358,7 +1313,7 @@ namespace fxe::js {
           return;
         }
         HandleScope hs(iso);
-        Local<Value> js_argv[1] = {s(iso, path.c_str())};
+        Local<Value> js_argv[1] = {to_v8(iso, path)};
         invoke_persistent_callback(refs, 1, js_argv);
       });
     }
@@ -1372,10 +1327,10 @@ namespace fxe::js {
       u32 len = arr->Length();
       out.reserve(len);
       for (u32 i = 0; i < len; ++i) {
-        Local<Value> item;
-        if (!arr->Get(ctx, i).ToLocal(&item))
+        auto item = get_index<Local<Value>>(ctx, arr, i);
+        if (!item)
           continue;
-        out.push_back(to_str(iso, item));
+        out.push_back(to_std_string(iso, *item));
       }
       return out;
     }
@@ -1391,19 +1346,19 @@ namespace fxe::js {
         raw.push_back(arg.data());
       bool ok = fxe::os::acquire_or_forward(static_cast<int>(raw.size()),
                                             raw.empty() ? nullptr : raw.data());
-      info.GetReturnValue().Set(Boolean::New(iso, ok));
+      info.GetReturnValue().Set(to_v8(iso, ok));
     }
 
     void app_set_default_protocol_client(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      std::string scheme = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::set_default_protocol_client(scheme)));
+      std::string scheme = info.Length() > 0 ? to_std_string(iso, info[0]) : std::string{};
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::set_default_protocol_client(scheme)));
     }
 
     void app_set_default_file_handler(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      std::string ext = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::set_default_file_handler(ext)));
+      std::string ext = info.Length() > 0 ? to_std_string(iso, info[0]) : std::string{};
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::set_default_file_handler(ext)));
     }
 
     void app_recent_documents_add(const FunctionCallbackInfo<Value>& info) {
@@ -1412,12 +1367,12 @@ namespace fxe::js {
         (void)throw_type_error(iso, "App.recentDocuments.add requires a path string");
         return;
       }
-      std::string path = to_str(iso, info[0]);
+      std::string path = to_std_string(iso, info[0]);
       if (path.empty()) {
         (void)throw_type_error(iso, "App.recentDocuments.add requires a non-empty path string");
         return;
       }
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::app::add_recent_document(path)));
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::app::add_recent_document(path)));
     }
 
     void app_recent_documents_list(const FunctionCallbackInfo<Value>& info) {
@@ -1426,30 +1381,25 @@ namespace fxe::js {
       auto documents = fxe::os::app::recent_documents();
       auto arr = Array::New(iso, static_cast<int>(documents.size()));
       for (u32 i = 0; i < documents.size(); ++i)
-        (void)arr->Set(ctx, i, s(iso, documents[i].c_str()));
+        set_index(ctx, arr, i, documents[i]);
       info.GetReturnValue().Set(arr);
     }
 
     void app_recent_documents_clear(const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(
-          Boolean::New(info.GetIsolate(), fxe::os::app::clear_recent_documents()));
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), fxe::os::app::clear_recent_documents()));
     }
 
     void install_app_recent_documents(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
       Local<Object> recent;
-      Local<Value> existing;
-      if (appObj->Get(ctx, "recentDocuments"_v8(iso)).ToLocal(&existing) && existing->IsObject()) {
-        recent = existing.As<Object>();
+      if (auto existing = get_prop<Local<Object>>(ctx, appObj, "recentDocuments")) {
+        recent = *existing;
       } else {
         recent = Object::New(iso);
-        (void)appObj->Set(ctx, "recentDocuments"_v8(iso), recent);
+        set_prop(ctx, appObj, "recentDocuments", recent);
       }
-      (void)recent->Set(ctx, "add"_v8(iso),
-                        Function::New(ctx, app_recent_documents_add).ToLocalChecked());
-      (void)recent->Set(ctx, "list"_v8(iso),
-                        Function::New(ctx, app_recent_documents_list).ToLocalChecked());
-      (void)recent->Set(ctx, "clear"_v8(iso),
-                        Function::New(ctx, app_recent_documents_clear).ToLocalChecked());
+      add_function(ctx, recent, "add", app_recent_documents_add);
+      add_function(ctx, recent, "list", app_recent_documents_list);
+      add_function(ctx, recent, "clear", app_recent_documents_clear);
     }
 
     void install_app_single_instance_bridge(Isolate* iso, Local<Context> ctx,
@@ -1518,7 +1468,7 @@ namespace fxe::js {
 })
 )JS";
       Local<Script> script;
-      if (!Script::Compile(ctx, s(iso, kSource)).ToLocal(&script)) {
+      if (!Script::Compile(ctx, to_v8_string_internalized(iso, kSource)).ToLocal(&script)) {
         // Preserve the pending V8 exception from compiling the embedded bridge.
         return;
       }
@@ -1592,7 +1542,8 @@ namespace fxe::js {
 )JS";
       v8::ScriptOrigin origin("<App.system poller>"_v8(iso));
       Local<Script> script;
-      if (!Script::Compile(ctx, s(iso, kSource), &origin).ToLocal(&script)) {
+      if (!Script::Compile(ctx, to_v8_string_internalized(iso, kSource), &origin)
+               .ToLocal(&script)) {
         // Preserve the pending V8 exception from compiling the embedded poller.
         return;
       }
@@ -1646,113 +1597,88 @@ namespace fxe::js {
   void install_app_extras_to(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
     HandleScope hs(iso);
     auto_rollback_unready_update_once();
-    auto set_fn = [&](const char* name, FunctionCallback cb) {
-      auto fn = Function::New(ctx, cb).ToLocalChecked();
-      (void)appObj->Set(ctx, s(iso, name), fn);
-    };
-    set_fn("getName", app_get_name);
-    set_fn("getVersion", app_get_version);
-    set_fn("getPath", app_get_path);
-    set_fn("requestSingleInstanceLock", app_request_single_instance_lock);
-    set_fn("setBadgeCount", app_set_badge_count);
-    set_fn("whenReady", app_when_ready);
-    set_fn("openWindow", app_open_window);
-    set_fn("openDevTools", app_open_devtools);
-    set_fn("relaunch", app_relaunch);
+    add_function(ctx, appObj, "getName", app_get_name);
+    add_function(ctx, appObj, "getVersion", app_get_version);
+    add_function(ctx, appObj, "getPath", app_get_path);
+    add_function(ctx, appObj, "requestSingleInstanceLock", app_request_single_instance_lock);
+    add_function(ctx, appObj, "setBadgeCount", app_set_badge_count);
+    add_function(ctx, appObj, "whenReady", app_when_ready);
+    add_function(ctx, appObj, "openWindow", app_open_window);
+    add_function(ctx, appObj, "openDevTools", app_open_devtools);
+    add_function(ctx, appObj, "relaunch", app_relaunch);
     Local<Object> bookmark = Object::New(iso);
-    (void)bookmark->Set(ctx, "persist"_v8(iso),
-                        Function::New(ctx, app_bookmark_persist).ToLocalChecked());
-    (void)bookmark->Set(ctx, "resolve"_v8(iso),
-                        Function::New(ctx, app_bookmark_resolve).ToLocalChecked());
-    (void)bookmark->Set(ctx, "startAccessing"_v8(iso),
-                        Function::New(ctx, app_bookmark_start_accessing).ToLocalChecked());
-    (void)bookmark->Set(ctx, "stopAccessing"_v8(iso),
-                        Function::New(ctx, app_bookmark_stop_accessing).ToLocalChecked());
-    (void)appObj->Set(ctx, "bookmark"_v8(iso), bookmark);
-    set_fn("__fxeVerifyUpdateSignature", app_verify_update_signature);
-    set_fn("__fxeStageUpdate", app_stage_update);
-    set_fn("__fxeSetUpdateChannel", app_set_update_channel);
-    set_fn("__fxeGetUpdateChannel", app_get_update_channel);
-    set_fn("__fxeResolveUpdateFeedUrl", app_resolve_update_feed_url);
-    set_fn("__fxeUpdateDeviceId", app_update_device_id);
-    set_fn("__fxeUpdateRolloutEligible", app_update_rollout_eligible);
-    set_fn("__fxeApplyPendingUpdate", app_apply_pending_update);
-    set_fn("__fxeUpdateAccessibilityTree", app_update_accessibility_tree);
+    add_function(ctx, bookmark, "persist", app_bookmark_persist);
+    add_function(ctx, bookmark, "resolve", app_bookmark_resolve);
+    add_function(ctx, bookmark, "startAccessing", app_bookmark_start_accessing);
+    add_function(ctx, bookmark, "stopAccessing", app_bookmark_stop_accessing);
+    set_prop(ctx, appObj, "bookmark", bookmark);
+    add_function(ctx, appObj, "__fxeVerifyUpdateSignature", app_verify_update_signature);
+    add_function(ctx, appObj, "__fxeStageUpdate", app_stage_update);
+    add_function(ctx, appObj, "__fxeSetUpdateChannel", app_set_update_channel);
+    add_function(ctx, appObj, "__fxeGetUpdateChannel", app_get_update_channel);
+    add_function(ctx, appObj, "__fxeResolveUpdateFeedUrl", app_resolve_update_feed_url);
+    add_function(ctx, appObj, "__fxeUpdateDeviceId", app_update_device_id);
+    add_function(ctx, appObj, "__fxeUpdateRolloutEligible", app_update_rollout_eligible);
+    add_function(ctx, appObj, "__fxeApplyPendingUpdate", app_apply_pending_update);
+    add_function(ctx, appObj, "__fxeUpdateAccessibilityTree", app_update_accessibility_tree);
     install_app_run_frame_bridge(iso, ctx, appObj);
     auto check_for_updates = make_check_for_updates(iso, ctx);
     if (!check_for_updates.IsEmpty())
-      (void)appObj->Set(ctx, "checkForUpdates"_v8(iso), check_for_updates);
+      set_prop(ctx, appObj, "checkForUpdates", check_for_updates);
     auto install_update = make_install_update(iso, ctx);
     if (!install_update.IsEmpty())
-      (void)appObj->Set(ctx, "installUpdate"_v8(iso), install_update);
+      set_prop(ctx, appObj, "installUpdate", install_update);
     Local<Object> update = Object::New(iso);
-    (void)update->Set(ctx, "setChannel"_v8(iso),
-                      Function::New(ctx, app_set_update_channel).ToLocalChecked());
-    (void)update->Set(ctx, "getChannel"_v8(iso),
-                      Function::New(ctx, app_get_update_channel).ToLocalChecked());
-    (void)update->Set(ctx, "rollback"_v8(iso),
-                      Function::New(ctx, app_update_rollback).ToLocalChecked());
-    (void)update->Set(ctx, "history"_v8(iso),
-                      Function::New(ctx, app_update_history).ToLocalChecked());
-    (void)update->Set(ctx, "markReady"_v8(iso),
-                      Function::New(ctx, app_update_mark_ready).ToLocalChecked());
-    (void)update->Set(ctx, "hasPendingFirstLaunch"_v8(iso),
-                      Function::New(ctx, app_update_has_pending_first_launch).ToLocalChecked());
+    add_function(ctx, update, "setChannel", app_set_update_channel);
+    add_function(ctx, update, "getChannel", app_get_update_channel);
+    add_function(ctx, update, "rollback", app_update_rollback);
+    add_function(ctx, update, "history", app_update_history);
+    add_function(ctx, update, "markReady", app_update_mark_ready);
+    add_function(ctx, update, "hasPendingFirstLaunch", app_update_has_pending_first_launch);
     if (!check_for_updates.IsEmpty())
-      (void)update->Set(ctx, "checkForUpdates"_v8(iso), check_for_updates);
+      set_prop(ctx, update, "checkForUpdates", check_for_updates);
     if (!install_update.IsEmpty())
-      (void)update->Set(ctx, "install"_v8(iso), install_update);
-    (void)appObj->Set(ctx, "update"_v8(iso), update);
+      set_prop(ctx, update, "install", install_update);
+    set_prop(ctx, appObj, "update", update);
     install_app_recent_documents(iso, ctx, appObj);
     install_app_session_cookies(iso, ctx, appObj);
     Local<Object> system = Object::New(iso);
-    auto add_system_fn = [&](const char* name, FunctionCallback cb) {
-      auto fn = Function::New(ctx, cb).ToLocalChecked();
-      (void)system->Set(ctx, s(iso, name), fn);
-    };
-    add_system_fn("prefersReducedMotion", [](const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(
-          Boolean::New(info.GetIsolate(), fxe::os::system_prefers_reduced_motion()));
+    add_function(ctx, system, "prefersReducedMotion", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), fxe::os::system_prefers_reduced_motion()));
     });
-    add_system_fn("prefersHighContrast", [](const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(
-          Boolean::New(info.GetIsolate(), fxe::os::system_prefers_high_contrast()));
+    add_function(ctx, system, "prefersHighContrast", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), fxe::os::system_prefers_high_contrast()));
     });
-    add_system_fn("fontScale", [](const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(Number::New(info.GetIsolate(), fxe::os::system_font_scale()));
+    add_function(ctx, system, "fontScale", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), fxe::os::system_font_scale()));
     });
-    add_system_fn("colorScheme", [](const FunctionCallbackInfo<Value>& info) {
-      auto* iso = info.GetIsolate();
-      std::string scheme = fxe::os::system_color_scheme();
-      info.GetReturnValue().Set(s(iso, scheme.c_str()));
+    add_function(ctx, system, "colorScheme", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), fxe::os::system_color_scheme()));
     });
-    add_system_fn("accentColor", [](const FunctionCallbackInfo<Value>& info) {
-      auto* iso = info.GetIsolate();
-      std::string accent = fxe::os::system_accent_color();
-      info.GetReturnValue().Set(s(iso, accent.c_str()));
+    add_function(ctx, system, "accentColor", [](const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), fxe::os::system_accent_color()));
     });
-    add_system_fn("platform", [](const FunctionCallbackInfo<Value>& info) {
-      auto* iso = info.GetIsolate();
+    add_function(ctx, system, "platform", [](const FunctionCallbackInfo<Value>& info) {
 #if defined(__APPLE__)
-      info.GetReturnValue().Set(s(iso, "macos"));
+      info.GetReturnValue().Set("macos"_v8(info.GetIsolate()));
 #elif defined(_WIN32)
-      info.GetReturnValue().Set(s(iso, "win"));
+      info.GetReturnValue().Set("win"_v8(info.GetIsolate()));
 #elif defined(__linux__)
-      info.GetReturnValue().Set(s(iso, "linux"));
+      info.GetReturnValue().Set("linux"_v8(info.GetIsolate()));
 #else
-      info.GetReturnValue().Set(s(iso, "other"));
+      info.GetReturnValue().Set("other"_v8(info.GetIsolate()));
 #endif
     });
-    (void)appObj->Set(ctx, "system"_v8(iso), system);
+    set_prop(ctx, appObj, "system", system);
     install_app_system_poller(iso, ctx, system);
 
     // ---- NEW: single-instance / deep-link / file-association bindings ----
-    set_fn("__fxeOnSecondInstance", app_install_second_instance_callback);
-    set_fn("__fxeOnOpenUrl", app_install_open_url_callback);
-    set_fn("__fxeOnOpenFile", app_install_open_file_callback);
-    set_fn("__fxeAcquireOrForward", app_acquire_or_forward);
-    set_fn("setAsDefaultProtocolClient", app_set_default_protocol_client);
-    set_fn("setAsDefaultFileHandler", app_set_default_file_handler);
+    add_function(ctx, appObj, "__fxeOnSecondInstance", app_install_second_instance_callback);
+    add_function(ctx, appObj, "__fxeOnOpenUrl", app_install_open_url_callback);
+    add_function(ctx, appObj, "__fxeOnOpenFile", app_install_open_file_callback);
+    add_function(ctx, appObj, "__fxeAcquireOrForward", app_acquire_or_forward);
+    add_function(ctx, appObj, "setAsDefaultProtocolClient", app_set_default_protocol_client);
+    add_function(ctx, appObj, "setAsDefaultFileHandler", app_set_default_file_handler);
     install_app_single_instance_bridge(iso, ctx, appObj);
   }
 } // namespace fxe::js

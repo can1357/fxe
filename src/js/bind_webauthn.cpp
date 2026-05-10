@@ -127,16 +127,6 @@ namespace fxe::js {
       return backend;
     }
 
-    Local<String> s8(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    std::string to_str(Isolate* iso, Local<Value> value) {
-      String::Utf8Value utf8(iso, value);
-      return *utf8 ? std::string(*utf8, utf8.length()) : std::string{};
-    }
-
     Local<Value> make_named_error(Isolate* iso, std::string_view name, std::string_view message) {
       auto ctx = iso->GetCurrentContext();
       std::string rendered(name);
@@ -144,8 +134,8 @@ namespace fxe::js {
         rendered += ": ";
         rendered += message;
       }
-      auto err = Exception::Error(s8(iso, rendered)).As<Object>();
-      (void)err->Set(ctx, "name"_v8(iso), s8(iso, name));
+      auto err = Exception::Error(to_v8_string(iso, rendered)).As<Object>();
+      (void)err->Set(ctx, "name"_v8(iso), to_v8_string(iso, name));
       return err;
     }
 
@@ -234,7 +224,8 @@ namespace fxe::js {
     bool get_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
                   Local<Value>& out) {
       Local<Value> value;
-      if (!obj->Get(ctx, key[0] == '\0' ? String::Empty(iso) : s8(iso, key)).ToLocal(&value) ||
+      if (!obj->Get(ctx, key[0] == '\0' ? String::Empty(iso) : to_v8_string(iso, key))
+               .ToLocal(&value) ||
           value->IsUndefined())
         return false;
       out = value;
@@ -246,7 +237,7 @@ namespace fxe::js {
       Local<Value> value;
       if (!get_prop(iso, ctx, parent, key, value) || !value->IsObject()) {
         iso->ThrowException(
-            Exception::TypeError(s8(iso, std::string(label) + " must be an object")));
+            Exception::TypeError(to_v8_string(iso, std::string(label) + " must be an object")));
         return false;
       }
       out = value.As<Object>();
@@ -258,10 +249,10 @@ namespace fxe::js {
       Local<Value> value;
       if (!get_prop(iso, ctx, parent, key, value) || !value->IsString()) {
         iso->ThrowException(
-            Exception::TypeError(s8(iso, std::string(label) + " must be a string")));
+            Exception::TypeError(to_v8_string(iso, std::string(label) + " must be a string")));
         return false;
       }
-      out = to_str(iso, value);
+      out = to_std_string_strict(iso, value);
       return true;
     }
 
@@ -287,7 +278,7 @@ namespace fxe::js {
     Local<Value> private_get_or_null(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                                      const char* key) {
       Local<Value> value;
-      if (obj->Get(ctx, s8(iso, key)).ToLocal(&value) && !value->IsUndefined())
+      if (obj->Get(ctx, to_v8_string(iso, key)).ToLocal(&value) && !value->IsUndefined())
         return value;
       return Null(iso);
     }
@@ -343,10 +334,10 @@ namespace fxe::js {
       auto fn = tpl->GetFunction(ctx).ToLocalChecked();
       Local<Value> argv[] = {make_external(iso, public_key_credential_ctor_token())};
       auto obj = fn->NewInstance(ctx, 1, argv).ToLocalChecked();
-      (void)obj->Set(ctx, "id"_v8(iso), s8(iso, id));
+      (void)obj->Set(ctx, "id"_v8(iso), to_v8_string(iso, id));
       (void)obj->Set(ctx, "rawId"_v8(iso), make_array_buffer(iso, raw_id));
       (void)obj->Set(ctx, "type"_v8(iso), "public-key"_v8(iso));
-      (void)obj->Set(ctx, "authenticatorAttachment"_v8(iso), s8(iso, attachment));
+      (void)obj->Set(ctx, "authenticatorAttachment"_v8(iso), to_v8_string(iso, attachment));
       (void)obj->Set(ctx, "response"_v8(iso), response);
       return obj;
     }
@@ -361,7 +352,7 @@ namespace fxe::js {
         authenticator_data = attestation->auth_data;
       auto transport_values = Array::New(iso, static_cast<int>(transports.size()));
       for (u32 i = 0; i < transports.size(); ++i)
-        (void)transport_values->Set(ctx, i, s8(iso, transports[i]));
+        (void)transport_values->Set(ctx, i, to_v8_string(iso, transports[i]));
       (void)obj->Set(ctx, "clientDataJSON"_v8(iso),
                      make_array_buffer(iso, response.client_data_json));
       (void)obj->Set(ctx, "attestationObject"_v8(iso),
@@ -436,7 +427,7 @@ namespace fxe::js {
         return true;
       if (!value->IsArray()) {
         iso->ThrowException(
-            Exception::TypeError(s8(iso, std::string(label) + " must be an array")));
+            Exception::TypeError(to_v8_string(iso, std::string(label) + " must be an array")));
         return false;
       }
       auto arr = value.As<Array>();
@@ -445,8 +436,8 @@ namespace fxe::js {
       for (u32 i = 0; i < arr->Length(); ++i) {
         Local<Value> item;
         if (!arr->Get(ctx, i).ToLocal(&item) || !item->IsObject()) {
-          iso->ThrowException(
-              Exception::TypeError(s8(iso, std::string(label) + " entries must be objects")));
+          iso->ThrowException(Exception::TypeError(
+              to_v8_string(iso, std::string(label) + " entries must be objects")));
           return false;
         }
         auto obj = item.As<Object>();
@@ -454,14 +445,14 @@ namespace fxe::js {
         if (!require_string(iso, ctx, obj, "type", type, (std::string(label) + "[].type").c_str()))
           return false;
         if (type != "public-key") {
-          iso->ThrowException(
-              Exception::TypeError(s8(iso, std::string(label) + "[].type must be 'public-key'")));
+          iso->ThrowException(Exception::TypeError(
+              to_v8_string(iso, std::string(label) + "[].type must be 'public-key'")));
           return false;
         }
         Local<Value> id_value;
         if (!get_prop(iso, ctx, obj, "id", id_value)) {
-          iso->ThrowException(
-              Exception::TypeError(s8(iso, std::string(label) + "[].id must be a BufferSource")));
+          iso->ThrowException(Exception::TypeError(
+              to_v8_string(iso, std::string(label) + "[].id must be a BufferSource")));
           return false;
         }
         std::vector<uint8_t> id;
@@ -525,7 +516,7 @@ namespace fxe::js {
                     iso)));
             return false;
           }
-          out.authenticator_attachment = to_str(iso, value);
+          out.authenticator_attachment = to_std_string_strict(iso, value);
         }
         if (get_prop(iso, ctx, selection, "userVerification", value)) {
           if (!value->IsString()) {
@@ -533,7 +524,7 @@ namespace fxe::js {
                 "publicKey.authenticatorSelection.userVerification must be a string"_v8(iso)));
             return false;
           }
-          out.user_verification = to_str(iso, value);
+          out.user_verification = to_std_string_strict(iso, value);
         }
         if (get_prop(iso, ctx, selection, "residentKey", value)) {
           if (!value->IsString()) {
@@ -541,7 +532,7 @@ namespace fxe::js {
                 "publicKey.authenticatorSelection.residentKey must be a string"_v8(iso)));
             return false;
           }
-          out.resident_key = to_str(iso, value);
+          out.resident_key = to_std_string_strict(iso, value);
         }
       }
 
@@ -552,7 +543,7 @@ namespace fxe::js {
               Exception::TypeError("publicKey.attestation must be a string"_v8(iso)));
           return false;
         }
-        out.attestation = to_str(iso, value);
+        out.attestation = to_std_string_strict(iso, value);
       }
       if (get_prop(iso, ctx, public_key, "timeout", value)) {
         if (!value->IsNumber()) {
@@ -594,7 +585,7 @@ namespace fxe::js {
               Exception::TypeError("publicKey.userVerification must be a string"_v8(iso)));
           return false;
         }
-        out.user_verification = to_str(iso, value);
+        out.user_verification = to_std_string_strict(iso, value);
       }
       if (get_prop(iso, ctx, public_key, "timeout", value)) {
         if (!value->IsNumber()) {
@@ -634,7 +625,7 @@ namespace fxe::js {
         return false;
       Local<Value> reason_value;
       if (signal->Get(ctx, "reason"_v8(iso)).ToLocal(&reason_value) && !reason_value->IsUndefined())
-        reason = to_str(iso, reason_value);
+        reason = to_std_string(iso, reason_value);
       return true;
     }
 
@@ -642,7 +633,7 @@ namespace fxe::js {
                        Local<Promise::Resolver> resolver, std::string_view fallback) {
       Local<Value> err = tc.HasCaught() ? tc.Exception() : Local<Value>();
       if (err.IsEmpty() || !err->IsNativeError())
-        err = Exception::TypeError(s8(iso, fallback));
+        err = Exception::TypeError(to_v8_string(iso, fallback));
       resolver->Reject(ctx, err).Check();
     }
 
@@ -773,7 +764,7 @@ namespace fxe::js {
           Local<Value> reason_value;
           if (signal->Get(ctx, "reason"_v8(iso)).ToLocal(&reason_value) &&
               !reason_value->IsUndefined()) {
-            state->abort_reason = to_str(iso, reason_value);
+            state->abort_reason = to_std_string(iso, reason_value);
           }
         }
       }
@@ -871,7 +862,7 @@ namespace fxe::js {
             std::string(user_verification_name(user_verification_rank(policy->user_verification)));
       }
       if (std::string error = webauthn::validate_creation_options(creation); !error.empty()) {
-        resolver->Reject(ctx, Exception::TypeError(s8(iso, error))).Check();
+        resolver->Reject(ctx, Exception::TypeError(to_v8_string(iso, error))).Check();
         return;
       }
 
@@ -982,7 +973,7 @@ namespace fxe::js {
             std::string(user_verification_name(user_verification_rank(policy->user_verification)));
       }
       if (std::string error = webauthn::validate_request_options(request); !error.empty()) {
-        resolver->Reject(ctx, Exception::TypeError(s8(iso, error))).Check();
+        resolver->Reject(ctx, Exception::TypeError(to_v8_string(iso, error))).Check();
         return;
       }
 

@@ -7,8 +7,9 @@
 
 #include <cstdint>
 #include <cstring>
-#include <fxe/types.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <map>
 #include <memory>
@@ -24,15 +25,7 @@
 namespace fxe::runtime {
   namespace {
     using namespace v8;
-
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    void throw_error(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::Error(str(iso, message)));
-    }
+    using namespace fxe::js;
 
     std::string string_arg(Isolate* iso, Local<Value> value) {
       String::Utf8Value utf8(iso, value);
@@ -41,43 +34,35 @@ namespace fxe::runtime {
       return std::string(*utf8, static_cast<usize>(utf8.length()));
     }
 
-    Local<Value> get_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key) {
-      auto maybe = obj->Get(ctx, str(iso, key));
-      if (maybe.IsEmpty())
-        return Undefined(iso);
-      return maybe.ToLocalChecked();
-    }
-
     std::string string_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
                             std::string fallback = {}) {
-      auto value = get_prop(iso, ctx, obj, key);
-      if (value->IsUndefined() || value->IsNull())
+      auto value = get_prop<Local<Value>>(ctx, obj, key);
+      if (!value || (*value)->IsNullOrUndefined())
         return fallback;
-      return string_arg(iso, value);
+      return string_arg(iso, *value);
     }
 
-    int int_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
-                 int fallback) {
-      auto value = get_prop(iso, ctx, obj, key);
-      if (value->IsUndefined() || value->IsNull())
+    int int_prop(Local<Context> ctx, Local<Object> obj, const char* key, int fallback) {
+      auto value = get_prop<Local<Value>>(ctx, obj, key);
+      if (!value || (*value)->IsNullOrUndefined())
         return fallback;
-      return value->Int32Value(ctx).FromMaybe(fallback);
+      return (*value)->Int32Value(ctx).FromMaybe(fallback);
     }
 
     bool bool_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
                    bool fallback) {
-      auto value = get_prop(iso, ctx, obj, key);
-      if (value->IsUndefined() || value->IsNull())
+      auto value = get_prop<Local<Value>>(ctx, obj, key);
+      if (!value || (*value)->IsNullOrUndefined())
         return fallback;
-      return value->BooleanValue(iso);
+      return (*value)->BooleanValue(iso);
     }
 
-    bool optional_uint32_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
+    bool optional_uint32_prop(Local<Context> ctx, Local<Object> obj, const char* key,
                               std::optional<u32>& out, std::string& err) {
-      auto value = get_prop(iso, ctx, obj, key);
-      if (value->IsUndefined() || value->IsNull())
+      auto value = get_prop<Local<Value>>(ctx, obj, key);
+      if (!value || (*value)->IsNullOrUndefined())
         return true;
-      const auto number = value->IntegerValue(ctx);
+      const auto number = (*value)->IntegerValue(ctx);
       if (number.IsNothing() || number.FromJust() < 0 || number.FromJust() > UINT32_MAX) {
         err = std::string("invalid HTTP/2 setting ") + key;
         return false;
@@ -86,38 +71,37 @@ namespace fxe::runtime {
       return true;
     }
 
-    std::optional<fxe::net::http2_settings> settings_prop(Isolate* iso, Local<Context> ctx,
-                                                          Local<Object> options, std::string& err) {
-      auto settings_value = get_prop(iso, ctx, options, "settings");
-      if (settings_value->IsUndefined() || settings_value->IsNull())
+    std::optional<fxe::net::http2_settings> settings_prop(Local<Context> ctx, Local<Object> options,
+                                                          std::string& err) {
+      auto settings_value = get_prop<Local<Value>>(ctx, options, "settings");
+      if (!settings_value || (*settings_value)->IsNullOrUndefined())
         return fxe::net::http2_settings{};
-      if (!settings_value->IsObject()) {
+      if (!(*settings_value)->IsObject()) {
         err = "HTTP/2 settings must be an object";
         return std::nullopt;
       }
-      auto settings_obj = settings_value.As<Object>();
+      auto settings_obj = (*settings_value).As<Object>();
       fxe::net::http2_settings settings;
-      if (!optional_uint32_prop(iso, ctx, settings_obj, "headerTableSize",
-                                settings.header_table_size, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "header_table_size",
-                                settings.header_table_size, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "enablePush", settings.enable_push, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "enable_push", settings.enable_push, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "maxConcurrentStreams",
-                                settings.max_concurrent_streams, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "max_concurrent_streams",
-                                settings.max_concurrent_streams, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "initialWindowSize",
-                                settings.initial_window_size, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "initial_window_size",
-                                settings.initial_window_size, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "maxFrameSize", settings.max_frame_size,
+      if (!optional_uint32_prop(ctx, settings_obj, "headerTableSize", settings.header_table_size,
                                 err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "max_frame_size", settings.max_frame_size,
+          !optional_uint32_prop(ctx, settings_obj, "header_table_size", settings.header_table_size,
                                 err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "maxHeaderListSize",
+          !optional_uint32_prop(ctx, settings_obj, "enablePush", settings.enable_push, err) ||
+          !optional_uint32_prop(ctx, settings_obj, "enable_push", settings.enable_push, err) ||
+          !optional_uint32_prop(ctx, settings_obj, "maxConcurrentStreams",
+                                settings.max_concurrent_streams, err) ||
+          !optional_uint32_prop(ctx, settings_obj, "max_concurrent_streams",
+                                settings.max_concurrent_streams, err) ||
+          !optional_uint32_prop(ctx, settings_obj, "initialWindowSize",
+                                settings.initial_window_size, err) ||
+          !optional_uint32_prop(ctx, settings_obj, "initial_window_size",
+                                settings.initial_window_size, err) ||
+          !optional_uint32_prop(ctx, settings_obj, "maxFrameSize", settings.max_frame_size, err) ||
+          !optional_uint32_prop(ctx, settings_obj, "max_frame_size", settings.max_frame_size,
+                                err) ||
+          !optional_uint32_prop(ctx, settings_obj, "maxHeaderListSize",
                                 settings.max_header_list_size, err) ||
-          !optional_uint32_prop(iso, ctx, settings_obj, "max_header_list_size",
+          !optional_uint32_prop(ctx, settings_obj, "max_header_list_size",
                                 settings.max_header_list_size, err))
         return std::nullopt;
       return settings;
@@ -151,24 +135,6 @@ namespace fxe::runtime {
         std::memcpy(backing->Data(), bytes.data(), bytes.size());
       return Uint8Array::New(buffer, 0, bytes.size());
     }
-
-    void set(Local<Context> ctx, Local<Object> obj, const char* key, Local<Value> value) {
-      (void)obj->Set(ctx, str(Isolate::GetCurrent(), key), value);
-    }
-
-    void set_string(Local<Context> ctx, Local<Object> obj, const char* key,
-                    std::string_view value) {
-      set(ctx, obj, key, str(Isolate::GetCurrent(), value));
-    }
-
-    void set_number(Local<Context> ctx, Local<Object> obj, const char* key, double value) {
-      set(ctx, obj, key, Number::New(Isolate::GetCurrent(), value));
-    }
-
-    void set_bool(Local<Context> ctx, Local<Object> obj, const char* key, bool value) {
-      set(ctx, obj, key, Boolean::New(Isolate::GetCurrent(), value));
-    }
-
     std::string header_value(const std::vector<std::pair<std::string, std::string>>& headers,
                              std::string_view lower_name) {
       for (const auto& [name, value] : headers) {
@@ -320,7 +286,7 @@ namespace fxe::runtime {
         auto options = info[1].As<Object>();
         reject_unauthorized = bool_prop(iso, ctx, options, "rejectUnauthorized", true);
         ca_pem = string_prop(iso, ctx, options, "ca");
-        auto parsed_settings = settings_prop(iso, ctx, options, err);
+        auto parsed_settings = settings_prop(ctx, options, err);
         if (!parsed_settings) {
           throw_error(iso, err);
           return;
@@ -362,8 +328,9 @@ namespace fxe::runtime {
       fxe::net::http2_request request;
       request.method = string_prop(iso, ctx, headers, ":method", "GET");
       request.path = string_prop(iso, ctx, headers, ":path", "/");
-      request.body = bytes_value(iso, ctx, get_prop(iso, ctx, headers, "__body"));
-      request.timeout_ms = int_prop(iso, ctx, headers, "__timeoutMs", 0);
+      auto body_value = get_prop<Local<Value>>(ctx, headers, "__body");
+      request.body = bytes_value(iso, ctx, body_value ? *body_value : Undefined(iso));
+      request.timeout_ms = int_prop(ctx, headers, "__timeoutMs", 0);
       auto debug_request_headers =
           headers_from_object(iso, ctx, headers, {"__body", "__timeoutMs"});
       request.headers =
@@ -521,21 +488,21 @@ namespace fxe::runtime {
       }
       if (!read->err.empty()) {
         auto out = Object::New(iso);
-        set_bool(ctx, out, "ok", false);
-        set_string(ctx, out, "error", read->err);
+        set_prop(ctx, out, "ok", false);
+        set_prop(ctx, out, "error", read->err);
         if (!read->code.empty())
-          set_string(ctx, out, "code", read->code);
+          set_prop(ctx, out, "code", read->code);
         info.GetReturnValue().Set(out);
         return;
       }
       auto out = Object::New(iso);
-      set_bool(ctx, out, "ok", true);
-      set_number(ctx, out, "status", read->response.status);
+      set_prop(ctx, out, "ok", true);
+      set_prop(ctx, out, "status", read->response.status);
       auto headers = Object::New(iso);
       for (const auto& [name, value] : read->response.headers)
-        set_string(ctx, headers, name.c_str(), value);
-      set(ctx, out, "headers", headers);
-      set(ctx, out, "body", uint8_array(iso, read->response.body));
+        set_prop(ctx, headers, name.c_str(), value);
+      set_prop(ctx, out, "headers", headers);
+      set_prop(ctx, out, "body", uint8_array(iso, read->response.body));
       info.GetReturnValue().Set(out);
     }
 
@@ -580,9 +547,9 @@ namespace fxe::runtime {
       fxe::net::http2_server_options server_options;
       server_options.cert_pem = string_prop(iso, ctx, options, "cert");
       server_options.key_pem = string_prop(iso, ctx, options, "key");
-      server_options.port = static_cast<u16>(int_prop(iso, ctx, options, "port", 0));
+      server_options.port = static_cast<u16>(int_prop(ctx, options, "port", 0));
       std::string err;
-      auto parsed_settings = settings_prop(iso, ctx, options, err);
+      auto parsed_settings = settings_prop(ctx, options, err);
       if (!parsed_settings) {
         throw_error(iso, err);
         return;
@@ -616,9 +583,9 @@ namespace fxe::runtime {
       }
       auto out = Object::New(iso);
       std::lock_guard<std::mutex> lock(server->mutex);
-      set_string(ctx, out, "address", "127.0.0.1");
-      set_string(ctx, out, "family", "IPv4");
-      set_number(ctx, out, "port", server->server->local_port());
+      set_prop(ctx, out, "address", "127.0.0.1");
+      set_prop(ctx, out, "family", "IPv4");
+      set_prop(ctx, out, "port", server->server->local_port());
       info.GetReturnValue().Set(out);
     }
 
@@ -648,15 +615,15 @@ namespace fxe::runtime {
         return;
       }
       auto out = Object::New(iso);
-      set_number(ctx, out, "id", static_cast<double>(request->id));
-      set_number(ctx, out, "streamId", request->stream_id);
-      set_string(ctx, out, "method", request->method);
-      set_string(ctx, out, "path", request->path);
+      set_prop(ctx, out, "id", static_cast<double>(request->id));
+      set_prop(ctx, out, "streamId", request->stream_id);
+      set_prop(ctx, out, "method", request->method);
+      set_prop(ctx, out, "path", request->path);
       auto headers = Object::New(iso);
       for (const auto& [name, value] : request->headers)
-        set_string(ctx, headers, name.c_str(), value);
-      set(ctx, out, "headers", headers);
-      set(ctx, out, "body", uint8_array(iso, request->body));
+        set_prop(ctx, headers, name.c_str(), value);
+      set_prop(ctx, out, "headers", headers);
+      set_prop(ctx, out, "body", uint8_array(iso, request->body));
       info.GetReturnValue().Set(out);
     }
 
@@ -675,7 +642,7 @@ namespace fxe::runtime {
       }
       fxe::net::http2_response response;
       auto headers_obj = info[2].As<Object>();
-      response.status = int_prop(iso, ctx, headers_obj, ":status", 200);
+      response.status = int_prop(ctx, headers_obj, ":status", 200);
       response.body = bytes_value(iso, ctx, info[3]);
       auto names = headers_obj->GetOwnPropertyNames(ctx).ToLocalChecked();
       for (u32 i = 0; i < names->Length(); ++i) {
@@ -727,7 +694,7 @@ namespace fxe::runtime {
     void add_function(Isolate* iso, Local<Context> ctx, Local<Object> ns, const char* name,
                       FunctionCallback callback) {
       auto fn = Function::New(ctx, callback).ToLocalChecked();
-      (void)ns->Set(ctx, str(iso, name), fn);
+      (void)ns->Set(ctx, to_v8_string(iso, name), fn);
     }
 
     Local<Object> make_http2_namespace(Isolate* iso, Local<Context> ctx) {
@@ -744,8 +711,8 @@ namespace fxe::runtime {
       add_function(iso, ctx, ns, "serverPoll", http2_server_poll);
       add_function(iso, ctx, ns, "serverRespond", http2_server_respond);
       add_function(iso, ctx, ns, "serverClose", http2_server_close);
-      set_bool(ctx, ns, "available", true);
-      set_bool(ctx, ns, "notImplemented", false);
+      set_prop(ctx, ns, "available", true);
+      set_prop(ctx, ns, "notImplemented", false);
       return ns;
     }
   } // namespace
@@ -756,8 +723,8 @@ namespace fxe::runtime {
     if (!global->Get(ctx, "__fxe_native"_v8(iso)).ToLocal(&native_value) ||
         !native_value->IsObject()) {
       native_value = Object::New(iso);
-      (void)global->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native_value,
-                                      static_cast<PropertyAttribute>(DontEnum));
+      define_prop(ctx, global, "__fxe_native"_v8, native_value,
+                  static_cast<PropertyAttribute>(DontEnum));
     }
     auto native = native_value.As<Object>();
     (void)native->Set(ctx, "http2"_v8(iso), make_http2_namespace(iso, ctx));

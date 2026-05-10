@@ -2,8 +2,8 @@
 
 #include "net/tls_client.hpp"
 
-#include <fxe/string_utils.hpp>
 #include <fxe/log.hpp>
+#include <fxe/string_utils.hpp>
 
 #include <algorithm>
 #include <array>

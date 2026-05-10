@@ -12,8 +12,8 @@
 #include <deque>
 #include <functional>
 #include <future>
-#include <fxe/types.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/types.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -25,6 +25,8 @@
 #include <utility>
 #include <vector>
 
+#include "monotonic.hpp"
+
 namespace fxe::net {
   namespace {
     constexpr int kReadPollTimeoutMs = 50;
@@ -34,12 +36,6 @@ namespace fxe::net {
       out.append(": ");
       out.append(nghttp2_strerror(rv));
       return out;
-    }
-
-    i64 monotonic_ms() {
-      using clock = std::chrono::steady_clock;
-      return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch())
-          .count();
     }
 
     bool is_connection_specific(std::string_view name) {

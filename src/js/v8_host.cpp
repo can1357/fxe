@@ -18,6 +18,7 @@
 #include <fxe/log.hpp>
 #include <fxe/types.hpp>
 #include <fxe/typescript.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_host.hpp>
 #include <fxe/v8_literals.hpp>
 #if FXE_HAS_NATIVE_TLS_HTTP2_DEPS
@@ -191,10 +192,11 @@ namespace fxe::js {
         if (invoked == 0) {
           // No listener — preserve the previous behavior of warning through
           // the console sink so dropped rejections aren't silently lost.
-          v8::String::Utf8Value utf8(iso, value);
-          const char* text = (*utf8 != nullptr) ? *utf8 : "<non-stringifiable rejection>";
+          auto text = to_std_string(iso, value);
+          const char* rendered = text.empty() ? "<non-stringifiable rejection>" : text.c_str();
           char buf[1024];
-          const int n = std::snprintf(buf, sizeof(buf), "Unhandled promise rejection: %s", text);
+          const int n =
+              std::snprintf(buf, sizeof(buf), "Unhandled promise rejection: %s", rendered);
           dispatch_console_sink(iso, "error",
                                 std::string_view(buf, n > 0 ? static_cast<size_t>(n) : 0));
         }
@@ -277,24 +279,14 @@ namespace fxe::js {
     constexpr u32 kIsolateSlotHostImpl = 0;
     constexpr u32 kIsolateSlotRuntimeId = 3;
 
-    std::string to_std_string(v8::Isolate* iso, v8::Local<v8::Value> v) {
-      if (v.IsEmpty())
-        return {};
-      v8::String::Utf8Value u(iso, v);
-      if (*u)
-        return std::string(*u, u.length());
-      return {};
-    }
-
     std::string console_arg_to_string(v8::Isolate* iso, v8::Local<v8::Context> ctx,
                                       v8::Local<v8::Value> value, bool prefer_error_stack) {
       if (!prefer_error_stack || value.IsEmpty() || !value->IsNativeError())
         return to_std_string(iso, value);
 
       v8::Local<v8::Object> error = value.As<v8::Object>();
-      v8::Local<v8::Value> stack;
-      if (error->Get(ctx, "stack"_v8(iso)).ToLocal(&stack) && stack->IsString()) {
-        auto rendered = to_std_string(iso, stack);
+      if (auto stack = get_prop<v8::Local<v8::String>>(ctx, error, "stack")) {
+        auto rendered = to_std_string(iso, *stack);
         if (!rendered.empty())
           return rendered;
       }
@@ -359,7 +351,7 @@ namespace fxe::js {
       static const auto start = clock::now();
       auto now = clock::now();
       double ms = std::chrono::duration<double, std::milli>(now - start).count();
-      args.GetReturnValue().Set(v8::Number::New(args.GetIsolate(), ms));
+      args.GetReturnValue().Set(to_v8(args.GetIsolate(), ms));
     }
 
     // Lightweight detection: is this source an ES module? Looks for top-level
@@ -369,12 +361,6 @@ namespace fxe::js {
       static const std::regex kEsm(R"(^[ \t]*(?:import|export)\b)",
                                    std::regex::ECMAScript | std::regex::multiline);
       return std::regex_search(src.begin(), src.end(), kEsm);
-    }
-
-    v8::Local<v8::String> str(v8::Isolate* iso, std::string_view s) {
-      return v8::String::NewFromUtf8(iso, s.data(), v8::NewStringType::kNormal,
-                                     static_cast<int>(s.size()))
-          .ToLocalChecked();
     }
 
     std::string inline_source_map_url(std::string_view js) {
@@ -392,7 +378,7 @@ namespace fxe::js {
       auto url = inline_source_map_url(js);
       if (url.empty())
         return v8::Local<v8::Value>();
-      return str(iso, url);
+      return to_v8_string(iso, url);
     }
 
     bool install_fxe_hmr_runtime(v8::Isolate* iso, v8::Local<v8::Context> ctx, std::string* error);
@@ -715,7 +701,7 @@ namespace fxe::js {
     v8::Context::Scope cs(ctx);
     v8::TryCatch tc(iso);
 
-    auto src = str(iso, expression);
+    auto src = to_v8_string(iso, expression);
     auto org = "<debug.evaluate>"_v8(iso);
     v8::ScriptOrigin sorigin(org);
     v8::Local<v8::Script> script;
@@ -765,29 +751,25 @@ namespace fxe::js {
 
     v8::TryCatch tc(iso);
     auto global = ctx->Global();
-    v8::Local<v8::Value> hmr_value;
-    if (!global->Get(ctx, "__fxe_hmr"_v8(iso)).ToLocal(&hmr_value) || !hmr_value->IsObject()) {
-      return {false, "__fxe_hmr is not an object"};
-    }
-    auto hmr = hmr_value.As<v8::Object>();
-    v8::Local<v8::Value> fire_value;
-    if (!hmr->Get(ctx, "fire"_v8(iso)).ToLocal(&fire_value) || !fire_value->IsFunction()) {
+    if (auto hmr = get_prop<v8::Local<v8::Object>>(ctx, global, "__fxe_hmr")) {
+      if (auto fire = get_prop<v8::Local<v8::Function>>(ctx, *hmr, "fire")) {
+        v8::Local<v8::Value> argv[] = {to_v8_string(iso, path)};
+        v8::Local<v8::Value> result;
+        if (!(*fire)->Call(ctx, *hmr, 1, argv).ToLocal(&result)) {
+          std::string msg = to_std_string(iso, tc.Exception());
+          v8::Local<v8::Value> stack;
+          if (tc.StackTrace(ctx).ToLocal(&stack))
+            msg += "\n" + to_std_string(iso, stack);
+          return {false, msg};
+        }
+        if (!result->IsNumber())
+          return {false, "__fxe_hmr.fire did not return a number"};
+        handlers_called = result->Int32Value(ctx).FromMaybe(-1);
+        return {true, {}};
+      }
       return {false, "__fxe_hmr.fire is not a function"};
     }
-    auto fire = fire_value.As<v8::Function>();
-    v8::Local<v8::Value> argv[] = {str(iso, path)};
-    v8::Local<v8::Value> result;
-    if (!fire->Call(ctx, hmr, 1, argv).ToLocal(&result)) {
-      std::string msg = to_std_string(iso, tc.Exception());
-      v8::Local<v8::Value> stack;
-      if (tc.StackTrace(ctx).ToLocal(&stack))
-        msg += "\n" + to_std_string(iso, stack);
-      return {false, msg};
-    }
-    if (!result->IsNumber())
-      return {false, "__fxe_hmr.fire did not return a number"};
-    handlers_called = result->Int32Value(ctx).FromMaybe(-1);
-    return {true, {}};
+    return {false, "__fxe_hmr is not an object"};
   }
 
   std::vector<std::string> host::loaded_module_paths() const {
@@ -841,10 +823,8 @@ namespace fxe::js {
       return out;
     out.reserve(names->Length());
     for (u32 i = 0; i < names->Length(); ++i) {
-      v8::Local<v8::Value> k;
-      if (!names->Get(ctx, i).ToLocal(&k))
-        continue;
-      out.push_back(to_std_string(iso, k));
+      if (auto k = get_index<v8::Local<v8::Value>>(ctx, names, i))
+        out.push_back(to_std_string(iso, *k));
     }
     return out;
   }
@@ -998,7 +978,7 @@ namespace fxe::js {
     auto ctx = p_->context.Get(iso);
     v8::Context::Scope cs(ctx);
     auto obj = make_window_object(iso, ctx, &win);
-    (void)ctx->Global()->Set(ctx, "window"_v8(iso), obj);
+    set_prop(ctx, ctx->Global(), "window", obj);
   }
 
   void host::install_renderer_global(renderer& r) {
@@ -1008,7 +988,7 @@ namespace fxe::js {
     auto ctx = p_->context.Get(iso);
     v8::Context::Scope cs(ctx);
     auto obj = make_renderer_object(iso, ctx, &r);
-    (void)ctx->Global()->Set(ctx, "renderer"_v8(iso), obj);
+    set_prop(ctx, ctx->Global(), "renderer", obj);
   }
 
   namespace {
@@ -1045,7 +1025,7 @@ namespace fxe::js {
     v8::Context::Scope cs(ctx);
 
     v8::TryCatch tc(iso);
-    auto org = str(iso, origin);
+    auto org = to_v8_string(iso, origin);
     v8::ScriptOrigin sorigin(org, /*line_offset*/ 0, /*col*/ 0,
                              /*shared_cross_origin*/ false, /*script_id*/ -1,
                              source_map_url_value(iso, source));
@@ -1309,9 +1289,9 @@ namespace fxe::js {
       }
 
       auto arr = v8::Array::New(iso, 3);
-      (void)arr->Set(ctx, 0, str(iso, out_file));
-      (void)arr->Set(ctx, 1, v8::Integer::New(iso, out_line));
-      (void)arr->Set(ctx, 2, v8::Integer::New(iso, out_col));
+      set_index(ctx, arr, 0, out_file);
+      set_index(ctx, arr, 1, out_line);
+      set_index(ctx, arr, 2, out_col);
       args.GetReturnValue().Set(arr);
     }
 
@@ -1338,10 +1318,10 @@ namespace fxe::js {
       std::string dirname = normalize_slashes(fp.parent_path().string());
       std::string filename = normalize_slashes(fp.string());
       bool is_main = p && !p->entry_path.empty() && p->entry_path == path;
-      (void)meta->CreateDataProperty(ctx, "url"_v8(iso), str(iso, url));
-      (void)meta->CreateDataProperty(ctx, "dirname"_v8(iso), str(iso, dirname));
-      (void)meta->CreateDataProperty(ctx, "filename"_v8(iso), str(iso, filename));
-      (void)meta->CreateDataProperty(ctx, "main"_v8(iso), v8::Boolean::New(iso, is_main));
+      (void)meta->CreateDataProperty(ctx, "url"_v8(iso), to_v8_string(iso, url));
+      (void)meta->CreateDataProperty(ctx, "dirname"_v8(iso), to_v8_string(iso, dirname));
+      (void)meta->CreateDataProperty(ctx, "filename"_v8(iso), to_v8_string(iso, filename));
+      (void)meta->CreateDataProperty(ctx, "main"_v8(iso), to_v8(iso, is_main));
     }
 
     constexpr const char k_prepare_stack_trace_js[] = R"JS(
@@ -1494,16 +1474,16 @@ Error.prepareStackTrace = function(err, frames) {
                                                 const std::string& path) {
       std::string text;
       if (!read_text_file(path, text)) {
-        iso->ThrowError(str(iso, "JSON module not found: " + path));
+        iso->ThrowError(to_v8_string(iso, "JSON module not found: " + path));
         return v8::MaybeLocal<v8::Module>();
       }
       v8::TryCatch tc(iso);
       v8::Local<v8::Value> parsed;
-      if (!v8::JSON::Parse(ctx, str(iso, text)).ToLocal(&parsed)) {
+      if (!v8::JSON::Parse(ctx, to_v8_string(iso, text)).ToLocal(&parsed)) {
         std::string msg = "JSON module parse error: " + path;
         if (tc.HasCaught())
           msg += ": " + to_std_string(iso, tc.Exception());
-        iso->ThrowError(str(iso, msg));
+        iso->ThrowError(to_v8_string(iso, msg));
         return v8::MaybeLocal<v8::Module>();
       }
       (void)parsed; // synthetic module re-parses on evaluation
@@ -1512,7 +1492,7 @@ Error.prepareStackTrace = function(err, frames) {
       };
       v8::MemorySpan<const v8::Local<v8::String>> exports_span(exports.data(), exports.size());
       auto mod = v8::Module::CreateSyntheticModule(
-          iso, str(iso, path), exports_span,
+          iso, to_v8_string(iso, path), exports_span,
           +[](v8::Local<v8::Context> ctx2, v8::Local<v8::Module> m) -> v8::MaybeLocal<v8::Value> {
             auto* iso2 = v8::Isolate::GetCurrent();
             auto& tbl = module_path_table();
@@ -1523,7 +1503,7 @@ Error.prepareStackTrace = function(err, frames) {
             if (!read_text_file(it->second, text))
               return v8::MaybeLocal<v8::Value>();
             v8::Local<v8::Value> v;
-            if (!v8::JSON::Parse(ctx2, str(iso2, text)).ToLocal(&v))
+            if (!v8::JSON::Parse(ctx2, to_v8(iso2, text)).ToLocal(&v))
               return v8::MaybeLocal<v8::Value>();
             auto key = "default"_v8(iso2);
             auto ok = m->SetSyntheticModuleExport(iso2, key, v);
@@ -1566,21 +1546,21 @@ Error.prepareStackTrace = function(err, frames) {
 
       std::string source;
       if (!read_text_file(path, source)) {
-        iso->ThrowError(str(iso, "module file not found: " + path));
+        iso->ThrowError(to_v8_string(iso, "module file not found: " + path));
         return v8::MaybeLocal<v8::Module>();
       }
 
       if (is_typescript_path(path)) {
         auto ts = transpile_typescript(iso, source, path);
         if (!ts.ok) {
-          iso->ThrowError(str(iso, "TypeScript transpile error: " + ts.message));
+          iso->ThrowError(to_v8_string(iso, "TypeScript transpile error: " + ts.message));
           return v8::MaybeLocal<v8::Module>();
         }
         source = std::move(ts.source);
         register_source_map_for(path, source, ts.source_map_line_offset);
       }
 
-      v8::ScriptOrigin origin(str(iso, path), /*line_offset*/ 0, /*col*/ 0,
+      v8::ScriptOrigin origin(to_v8_string(iso, path), /*line_offset*/ 0, /*col*/ 0,
                               /*shared_cross_origin*/ false, /*script_id*/ -1,
                               source_map_url_value(iso, source), /*opaque*/ false,
                               /*is_wasm*/ false, /*is_module*/ true);
@@ -1617,14 +1597,14 @@ Error.prepareStackTrace = function(err, frames) {
       if (is_typescript_path(asset.asset_path)) {
         auto ts = transpile_typescript(iso, source, asset.asset_path);
         if (!ts.ok) {
-          iso->ThrowError(str(iso, "TypeScript transpile error: " + ts.message));
+          iso->ThrowError(to_v8_string(iso, "TypeScript transpile error: " + ts.message));
           return v8::MaybeLocal<v8::Module>();
         }
         source = std::move(ts.source);
         register_source_map_for(asset.asset_path, source, ts.source_map_line_offset);
       }
 
-      v8::ScriptOrigin origin(str(iso, asset.asset_path), /*line_offset*/ 0, /*col*/ 0,
+      v8::ScriptOrigin origin(to_v8_string(iso, asset.asset_path), /*line_offset*/ 0, /*col*/ 0,
                               /*shared_cross_origin*/ false, /*script_id*/ -1,
                               source_map_url_value(iso, source), /*opaque*/ false,
                               /*is_wasm*/ false, /*is_module*/ true);
@@ -1667,8 +1647,7 @@ Error.prepareStackTrace = function(err, frames) {
                                               v8::Local<v8::FixedArray> /*import_attributes*/,
                                               v8::Local<v8::Module> referrer) {
       auto* iso = v8::Isolate::GetCurrent();
-      v8::String::Utf8Value sv(iso, specifier);
-      std::string_view spec(*sv ? *sv : "", *sv ? sv.length() : 0);
+      std::string spec = to_std_string(iso, specifier);
       auto* p = static_cast<host::impl*>(iso->GetData(kIsolateSlotHostImpl));
       if (spec == "fxe") {
         if (p)
@@ -1710,7 +1689,7 @@ Error.prepareStackTrace = function(err, frames) {
             record_dependency(asset->canonical_specifier);
           return mod;
         }
-        fxe::runtime::throw_node_compat_disabled(iso, spec);
+        throw_error(iso, "node compat disabled for specifier '{}'", spec);
         return v8::MaybeLocal<v8::Module>();
       }
       if (auto asset = resolve_embedded_bare_asset(spec, referrer_path)) {
@@ -1728,7 +1707,7 @@ Error.prepareStackTrace = function(err, frames) {
 
       if (resolve_synthetic_package_module(spec, resolved, error)) {
         if (!error.empty()) {
-          iso->ThrowError(str(iso, error));
+          iso->ThrowError(to_v8_string(iso, error));
           return v8::MaybeLocal<v8::Module>();
         }
         auto mod = compile_module_file(iso, ctx, p, resolved);
@@ -1737,7 +1716,7 @@ Error.prepareStackTrace = function(err, frames) {
         return mod;
       }
       if (!resolve_file_specifier(iso, spec, referrer_path, resolved, error)) {
-        iso->ThrowError(str(iso, error));
+        iso->ThrowError(to_v8_string(iso, error));
         return v8::MaybeLocal<v8::Module>();
       }
       auto mod = compile_module_file(iso, ctx, p, resolved);
@@ -1852,7 +1831,7 @@ Error.prepareStackTrace = function(err, frames) {
       }
       std::string error;
       if (!reload_hmr_module(iso, ctx, p, to_std_string(iso, args[0]), error)) {
-        iso->ThrowError(str(iso, error));
+        iso->ThrowError(to_v8_string(iso, error));
         return;
       }
       args.GetReturnValue().Set(v8::True(iso));
@@ -2133,45 +2112,39 @@ Error.prepareStackTrace = function(err, frames) {
 #endif
       install_hmr_native_bindings(isolate, ctx);
       fxe::runtime::install_node_compat(isolate, ctx);
-      auto fn = v8::Function::New(ctx, console_log_callback).ToLocalChecked();
       auto console_obj = v8::Object::New(isolate);
-      (void)console_obj->Set(ctx, "log"_v8(isolate), fn);
-      auto fn_warn = v8::Function::New(ctx, console_warn_callback).ToLocalChecked();
-      auto fn_err = v8::Function::New(ctx, console_error_callback).ToLocalChecked();
-      (void)console_obj->Set(ctx, "warn"_v8(isolate), fn_warn);
-      (void)console_obj->Set(ctx, "error"_v8(isolate), fn_err);
-      (void)console_obj->Set(ctx, "info"_v8(isolate), fn);
-      (void)console_obj->Set(ctx, "debug"_v8(isolate), fn);
-      (void)ctx->Global()->Set(ctx, "console"_v8(isolate), console_obj);
+      add_function(ctx, console_obj, "log", console_log_callback);
+      add_function(ctx, console_obj, "warn", console_warn_callback);
+      add_function(ctx, console_obj, "error", console_error_callback);
+      add_function(ctx, console_obj, "info", console_log_callback);
+      add_function(ctx, console_obj, "debug", console_log_callback);
+      set_prop(ctx, ctx->Global(), "console", console_obj);
 
       // performance.now() — monotonic ms since the host's first init.
-      auto perf_now = v8::Function::New(ctx, performance_now_callback).ToLocalChecked();
       auto performance_obj = v8::Object::New(isolate);
-      (void)performance_obj->Set(ctx, "now"_v8(isolate), perf_now);
-      (void)ctx->Global()->Set(ctx, "performance"_v8(isolate), performance_obj);
+      add_function(ctx, performance_obj, "now", performance_now_callback);
+      set_prop(ctx, ctx->Global(), "performance", performance_obj);
 
       if (!worker_mode) {
         // App extras (OS shims layered onto the existing App global).
-        v8::Local<v8::Value> appv;
-        if (ctx->Global()->Get(ctx, "App"_v8(isolate)).ToLocal(&appv) && appv->IsObject()) {
-          install_app_extras_to(isolate, ctx, appv.As<v8::Object>());
-          install_power_monitor_to(isolate, ctx, appv.As<v8::Object>());
-          install_crash_reporter_to(isolate, ctx, appv.As<v8::Object>());
+        if (auto appv = get_prop<v8::Local<v8::Object>>(ctx, ctx->Global(), "App")) {
+          install_app_extras_to(isolate, ctx, *appv);
+          install_power_monitor_to(isolate, ctx, *appv);
+          install_crash_reporter_to(isolate, ctx, *appv);
         }
         // performance.timeline layered on top of the bare performance object.
         install_performance_global(isolate, ctx->Global());
       }
 
-      auto hmr_reload = v8::Function::New(ctx, hmr_reload_callback).ToLocalChecked();
-      (void)ctx->Global()->Set(ctx, "__fxe_hmr_reload"_v8(isolate), hmr_reload);
+      add_function(ctx, ctx->Global(), "__fxe_hmr_reload", hmr_reload_callback);
       // HMR registry plus polling watch bridge. When a fired path is present in
       // the module cache, __fxe_hmr reloads that module before user handlers run.
       (void)install_fxe_hmr_runtime(isolate, ctx);
 
       auto vertex_topology = v8::Object::New(isolate);
-      (void)vertex_topology->Set(ctx, "Triangle"_v8(isolate), 0_v8(isolate));
-      (void)vertex_topology->Set(ctx, "Line"_v8(isolate), 1_v8(isolate));
-      (void)ctx->Global()->Set(ctx, "VertexTopology"_v8(isolate), vertex_topology);
+      set_prop(ctx, vertex_topology, "Triangle", 0);
+      set_prop(ctx, vertex_topology, "Line", 1);
+      set_prop(ctx, ctx->Global(), "VertexTopology", vertex_topology);
 
       if (!worker_mode) {
         // Build the synthetic `fxe` module exporting the engine globals. Each
@@ -2198,11 +2171,11 @@ Error.prepareStackTrace = function(err, frames) {
                   "Image"_v8(iso),      "Spritesheet"_v8(iso),
               };
               for (auto key : names) {
-                v8::Local<v8::Value> val;
-                if (!global->Get(ctx, key).ToLocal(&val)) {
+                auto val = get_prop<v8::Local<v8::Value>>(ctx, global, key);
+                if (!val.has_value()) {
                   return v8::MaybeLocal<v8::Value>();
                 }
-                v8::Maybe<bool> ok = mod->SetSyntheticModuleExport(iso, key, val);
+                v8::Maybe<bool> ok = mod->SetSyntheticModuleExport(iso, key, *val);
                 if (ok.IsNothing())
                   return v8::MaybeLocal<v8::Value>();
               }
@@ -2240,12 +2213,11 @@ Error.prepareStackTrace = function(err, frames) {
       isolate->SetHostInitializeImportMetaObjectCallback(&import_meta_callback);
 
       // Install __fxe_remap_frame native + Error.prepareStackTrace JS.
-      auto remap_fn = v8::Function::New(ctx, remap_frame_callback).ToLocalChecked();
-      (void)ctx->Global()->Set(ctx, "__fxe_remap_frame"_v8(isolate), remap_fn);
+      add_function(ctx, ctx->Global(), "__fxe_remap_frame", remap_frame_callback);
       v8::TryCatch tc(isolate);
       v8::ScriptOrigin pst_origin("<fxe-prepare-stack-trace>"_v8(isolate));
       v8::Local<v8::Script> pst_script;
-      if (v8::Script::Compile(ctx, str(isolate, k_prepare_stack_trace_js), &pst_origin)
+      if (v8::Script::Compile(ctx, to_v8(isolate, k_prepare_stack_trace_js), &pst_origin)
               .ToLocal(&pst_script)) {
         v8::Local<v8::Value> ignored;
         (void)pst_script->Run(ctx).ToLocal(&ignored);
@@ -2356,7 +2328,7 @@ Error.prepareStackTrace = function(err, frames) {
     v8::TryCatch tc(iso);
 
     // Build a module-flavoured ScriptOrigin.
-    auto org = str(iso, origin);
+    auto org = to_v8_string(iso, origin);
     v8::ScriptOrigin sorigin(org, /*line_offset*/ 0, /*col*/ 0,
                              /*shared_cross_origin*/ false, /*script_id*/ -1,
                              source_map_url_value(iso, source), /*opaque*/ false,

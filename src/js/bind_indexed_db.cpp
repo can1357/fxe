@@ -60,43 +60,9 @@ namespace fxe::js {
     constexpr u32 TAG_IDB_DATABASE = 0x49444241u;    // 'IDBA'
     // ============================== V8 helpers ==============================
 
-    Local<String> s(Isolate* iso, std::string_view sv) {
-      return String::NewFromUtf8(iso, sv.data(), NewStringType::kNormal,
-                                 static_cast<int>(sv.size()))
-          .ToLocalChecked();
-    }
-    Local<String> s(Isolate* iso, const char* z) {
-      return String::NewFromUtf8(iso, z ? z : "", NewStringType::kNormal).ToLocalChecked();
-    }
-
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      if (v.IsEmpty() || !v->IsString())
-        return {};
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, static_cast<usize>(u.length())) : std::string{};
-    }
-
-    void set_prop(Local<Context> ctx, Local<Object> obj, const char* key, Local<Value> v) {
-      auto* iso = Isolate::GetCurrent();
-      (void)obj->Set(ctx, s(iso, key), v);
-    }
-    void set_str(Local<Context> ctx, Local<Object> obj, const char* key, std::string_view v) {
-      set_prop(ctx, obj, key, s(Isolate::GetCurrent(), v));
-    }
-    void set_int(Local<Context> ctx, Local<Object> obj, const char* key, i64 v) {
-      set_prop(ctx, obj, key, Number::New(Isolate::GetCurrent(), static_cast<double>(v)));
-    }
-    void throw_msg(Isolate* iso, std::string_view msg, const char* name = "Error") {
-      auto err = Exception::Error(s(iso, msg)).As<Object>();
-      auto ctx = iso->GetCurrentContext();
-      (void)err->Set(ctx, "name"_v8(iso), s(iso, name));
-      iso->ThrowException(err);
-    }
-
     Local<Value> make_dom_error(Isolate* iso, std::string_view name, std::string_view msg) {
-      auto err = Exception::Error(s(iso, msg)).As<Object>();
-      auto ctx = iso->GetCurrentContext();
-      (void)err->Set(ctx, "name"_v8(iso), s(iso, name));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(iso->GetCurrentContext(), err, "name", name);
       return err;
     }
     // ============================== Key encoding ==============================
@@ -168,13 +134,13 @@ namespace fxe::js {
     bool encode_key(Isolate* iso, Local<Value> v, std::vector<u8>& out) {
       auto ctx = iso->GetCurrentContext();
       if (v.IsEmpty() || v->IsUndefined() || v->IsNull()) {
-        throw_msg(iso, "IndexedDB key is required", "DataError");
+        throw_named(iso, iso->GetCurrentContext(), "DataError", "IndexedDB key is required");
         return false;
       }
       if (v->IsNumber()) {
         double d = v->NumberValue(ctx).FromMaybe(std::nan(""));
         if (std::isnan(d)) {
-          throw_msg(iso, "IndexedDB key cannot be NaN", "DataError");
+          throw_named(iso, iso->GetCurrentContext(), "DataError", "IndexedDB key cannot be NaN");
           return false;
         }
         out.push_back(0x10);
@@ -186,7 +152,8 @@ namespace fxe::js {
       if (v->IsDate()) {
         double d = v.As<Date>()->ValueOf();
         if (std::isnan(d)) {
-          throw_msg(iso, "IndexedDB Date key cannot be NaN", "DataError");
+          throw_named(iso, iso->GetCurrentContext(), "DataError",
+                      "IndexedDB Date key cannot be NaN");
           return false;
         }
         out.push_back(0x20);
@@ -197,13 +164,8 @@ namespace fxe::js {
       }
       if (v->IsString()) {
         out.push_back(0x30);
-        String::Utf8Value u(iso, v);
-        if (!*u) {
-          out.push_back(0x00);
-          out.push_back(0x00);
-          return true;
-        }
-        encode_byte_run(reinterpret_cast<const u8*>(*u), static_cast<usize>(u.length()), out);
+        const auto text = to_std_string_strict(iso, v);
+        encode_byte_run(reinterpret_cast<const u8*>(text.data()), text.size(), out);
         return true;
       }
       if (v->IsArrayBuffer() || v->IsArrayBufferView()) {
@@ -220,8 +182,8 @@ namespace fxe::js {
         }
         return true;
       }
-      throw_msg(iso, "IndexedDB key must be number, string, Date, or ArrayBuffer (v1 omits arrays)",
-                "DataError");
+      throw_named(iso, iso->GetCurrentContext(), "DataError",
+                  "IndexedDB key must be number, string, Date, or ArrayBuffer (v1 omits arrays)");
       return false;
     }
 
@@ -242,9 +204,10 @@ namespace fxe::js {
         std::vector<u8> bytes;
         if (!decode_byte_run(data, len, pos, bytes))
           return Undefined(iso);
-        return String::NewFromUtf8(iso, reinterpret_cast<const char*>(bytes.data()),
-                                   NewStringType::kNormal, static_cast<int>(bytes.size()))
-            .ToLocalChecked();
+        return bytes.empty()
+                   ? to_v8_string(iso, std::string_view{})
+                   : to_v8_string(iso, std::string_view(reinterpret_cast<const char*>(bytes.data()),
+                                                        bytes.size()));
       }
       if (tag == 0x40) {
         std::vector<u8> bytes;
@@ -275,10 +238,9 @@ namespace fxe::js {
       if (!v->IsObject())
         return Undefined(iso);
       auto obj = v.As<Object>();
-      Local<Value> out;
-      if (!obj->Get(ctx, s(iso, seg)).ToLocal(&out))
-        return Undefined(iso);
-      return out;
+      if (auto out = get_prop<Local<Value>>(ctx, obj, seg))
+        return *out;
+      return Undefined(iso);
     }
 
     Local<Value> resolve_key_path(Isolate* iso, Local<Value> root, std::string_view path) {
@@ -314,16 +276,15 @@ namespace fxe::js {
         std::string_view seg = path.substr(
             start, dot == std::string_view::npos ? std::string_view::npos : dot - start);
         if (dot == std::string_view::npos) {
-          (void)cur->Set(ctx, s(iso, seg), value);
+          set_prop(ctx, cur, seg, value);
           return true;
         }
-        Local<Value> next;
-        if (!cur->Get(ctx, s(iso, seg)).ToLocal(&next) || !next->IsObject()) {
-          auto fresh = Object::New(iso);
-          (void)cur->Set(ctx, s(iso, seg), fresh);
-          cur = fresh;
+        if (auto next = get_prop<Local<Object>>(ctx, cur, seg)) {
+          cur = *next;
         } else {
-          cur = next.As<Object>();
+          auto fresh = Object::New(iso);
+          set_prop(ctx, cur, seg, fresh);
+          cur = fresh;
         }
         start = dot + 1;
       }
@@ -599,19 +560,17 @@ namespace fxe::js {
       state->bind(iso, inst);
       // Mirror key fields as JS-visible properties.
       if (state->has_lower) {
-        (void)inst->Set(ctx, "lower"_v8(iso),
-                        decode_key(iso, state->lower.data(), state->lower.size()));
+        set_prop(ctx, inst, "lower", decode_key(iso, state->lower.data(), state->lower.size()));
       } else {
-        (void)inst->Set(ctx, "lower"_v8(iso), Undefined(iso));
+        set_prop(ctx, inst, "lower", to_v8_undefined(iso));
       }
       if (state->has_upper) {
-        (void)inst->Set(ctx, "upper"_v8(iso),
-                        decode_key(iso, state->upper.data(), state->upper.size()));
+        set_prop(ctx, inst, "upper", decode_key(iso, state->upper.data(), state->upper.size()));
       } else {
-        (void)inst->Set(ctx, "upper"_v8(iso), Undefined(iso));
+        set_prop(ctx, inst, "upper", to_v8_undefined(iso));
       }
-      (void)inst->Set(ctx, "lowerOpen"_v8(iso), Boolean::New(iso, state->lower_open));
-      (void)inst->Set(ctx, "upperOpen"_v8(iso), Boolean::New(iso, state->upper_open));
+      set_prop(ctx, inst, "lowerOpen", state->lower_open);
+      set_prop(ctx, inst, "upperOpen", state->upper_open);
       return inst;
     }
 
@@ -624,7 +583,8 @@ namespace fxe::js {
     void key_range_only(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1) {
-        throw_msg(iso, "IDBKeyRange.only requires a value", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "IDBKeyRange.only requires a value");
         return;
       }
       key_range r;
@@ -639,7 +599,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1) {
-        throw_msg(iso, "IDBKeyRange.lowerBound requires a value", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "IDBKeyRange.lowerBound requires a value");
         return;
       }
       key_range r;
@@ -653,7 +614,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1) {
-        throw_msg(iso, "IDBKeyRange.upperBound requires a value", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "IDBKeyRange.upperBound requires a value");
         return;
       }
       key_range r;
@@ -667,7 +629,8 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2) {
-        throw_msg(iso, "IDBKeyRange.bound requires lower and upper", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "IDBKeyRange.bound requires lower and upper");
         return;
       }
       key_range r;
@@ -679,7 +642,8 @@ namespace fxe::js {
       r.upper_open = info.Length() > 3 && info[3]->BooleanValue(iso);
       int c = compare_blobs(r.lower.data(), r.lower.size(), r.upper.data(), r.upper.size());
       if (c > 0 || (c == 0 && (r.lower_open || r.upper_open))) {
-        throw_msg(iso, "IDBKeyRange.bound: lower must be <= upper", "DataError");
+        throw_named(iso, iso->GetCurrentContext(), "DataError",
+                    "IDBKeyRange.bound: lower must be <= upper");
         return;
       }
       info.GetReturnValue().Set(wrap_key_range(iso, ctx, std::move(r)));
@@ -718,7 +682,7 @@ namespace fxe::js {
     bool decode_query(Isolate* iso, Local<Value> v, key_range& out, bool allow_undefined) {
       if (v.IsEmpty() || v->IsUndefined() || v->IsNull()) {
         if (!allow_undefined) {
-          throw_msg(iso, "IndexedDB query is required", "TypeError");
+          throw_named(iso, iso->GetCurrentContext(), "TypeError", "IndexedDB query is required");
           return false;
         }
         return true;
@@ -771,10 +735,11 @@ namespace fxe::js {
     void invoke_listener(Isolate* iso, Local<Context> ctx, Local<Object> req, const char* prop_name,
                          Local<Value> arg) {
       Local<Value> handler;
-      if (!req->Get(ctx, s(iso, prop_name)).ToLocal(&handler))
+      if (auto handler_opt = get_prop<Local<Function>>(ctx, req, prop_name)) {
+        handler = *handler_opt;
+      } else {
         return;
-      if (!handler->IsFunction())
-        return;
+      }
       auto fn = handler.As<Function>();
       Local<Value> argv[1] = {arg};
       TryCatch tc(iso);
@@ -788,8 +753,8 @@ namespace fxe::js {
     void make_event(Isolate* iso, Local<Context> ctx, Local<Object> req, const char* type,
                     Local<Object>& out) {
       auto evt = Object::New(iso);
-      set_str(ctx, evt, "type", type);
-      (void)evt->Set(ctx, "target"_v8(iso), req);
+      set_prop(ctx, evt, "type", type);
+      set_prop(ctx, evt, "target", req);
       out = evt;
     }
 
@@ -807,33 +772,33 @@ namespace fxe::js {
       if (!transaction.IsEmpty())
         st->transaction.Reset(iso, transaction);
       set_native(iso, inst, st, TAG_IDB_REQUEST);
-      (void)inst->Set(ctx, "result"_v8(iso), Undefined(iso));
-      (void)inst->Set(ctx, "error"_v8(iso), Null(iso));
-      (void)inst->Set(ctx, "readyState"_v8(iso), "pending"_v8(iso));
-      (void)inst->Set(ctx, "source"_v8(iso),
-                      source.IsEmpty() ? Local<Value>(Null(iso)) : source.As<Value>());
-      (void)inst->Set(ctx, "transaction"_v8(iso),
-                      transaction.IsEmpty() ? Local<Value>(Null(iso)) : transaction.As<Value>());
-      (void)inst->Set(ctx, "onsuccess"_v8(iso), Null(iso));
-      (void)inst->Set(ctx, "onerror"_v8(iso), Null(iso));
+      set_prop(ctx, inst, "result", to_v8_undefined(iso));
+      set_prop(ctx, inst, "error", to_v8_null(iso));
+      set_prop(ctx, inst, "readyState", "pending");
+      set_prop(ctx, inst, "source",
+               source.IsEmpty() ? Local<Value>(to_v8_null(iso)) : source.As<Value>());
+      set_prop(ctx, inst, "transaction",
+               transaction.IsEmpty() ? Local<Value>(to_v8_null(iso)) : transaction.As<Value>());
+      set_prop(ctx, inst, "onsuccess", to_v8_null(iso));
+      set_prop(ctx, inst, "onerror", to_v8_null(iso));
       if (kind == request_kind::open) {
-        (void)inst->Set(ctx, "onupgradeneeded"_v8(iso), Null(iso));
-        (void)inst->Set(ctx, "onblocked"_v8(iso), Null(iso));
+        set_prop(ctx, inst, "onupgradeneeded", to_v8_null(iso));
+        set_prop(ctx, inst, "onblocked", to_v8_null(iso));
       }
       return inst;
     }
 
     void resolve_request(Isolate* iso, Local<Context> ctx, Local<Object> req, Local<Value> result) {
-      (void)req->Set(ctx, "result"_v8(iso), result);
-      (void)req->Set(ctx, "readyState"_v8(iso), "done"_v8(iso));
+      set_prop(ctx, req, "result", result);
+      set_prop(ctx, req, "readyState", "done");
       Local<Object> evt;
       make_event(iso, ctx, req, "success", evt);
       invoke_listener(iso, ctx, req, "onsuccess", evt);
     }
 
     void reject_request(Isolate* iso, Local<Context> ctx, Local<Object> req, Local<Value> error) {
-      (void)req->Set(ctx, "error"_v8(iso), error);
-      (void)req->Set(ctx, "readyState"_v8(iso), "done"_v8(iso));
+      set_prop(ctx, req, "error", error);
+      set_prop(ctx, req, "readyState", "done");
       Local<Object> evt;
       make_event(iso, ctx, req, "error", evt);
       invoke_listener(iso, ctx, req, "onerror", evt);
@@ -984,21 +949,21 @@ namespace fxe::js {
       set_native(iso, inst, st, TAG_IDB_TRANSACTION);
       auto names = Array::New(iso, static_cast<int>(store_names.size()));
       for (usize i = 0; i < store_names.size(); ++i)
-        (void)names->Set(ctx, static_cast<u32>(i), s(iso, store_names[i]));
-      (void)inst->Set(ctx, "objectStoreNames"_v8(iso), names);
-      (void)inst->Set(ctx, "mode"_v8(iso), s(iso, mode));
-      (void)inst->Set(ctx, "oncomplete"_v8(iso), Null(iso));
-      (void)inst->Set(ctx, "onerror"_v8(iso), Null(iso));
-      (void)inst->Set(ctx, "onabort"_v8(iso), Null(iso));
+        set_index(ctx, names, static_cast<u32>(i), store_names[i]);
+      set_prop(ctx, inst, "objectStoreNames", names);
+      set_prop(ctx, inst, "mode", mode);
+      set_prop(ctx, inst, "oncomplete", to_v8_null(iso));
+      set_prop(ctx, inst, "onerror", to_v8_null(iso));
+      set_prop(ctx, inst, "onabort", to_v8_null(iso));
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       st->done_resolver.Reset(iso, resolver);
-      (void)inst->Set(ctx, "done"_v8(iso), resolver->GetPromise());
+      set_prop(ctx, inst, "done", resolver->GetPromise());
       std::string err;
       if (!tx_begin(st, err)) {
         st->errored = true;
         st->finished = true;
         (void)resolver->Reject(ctx, make_dom_error(iso, "UnknownError", err));
-        throw_msg(iso, err);
+        throw_error(iso, err);
         return inst;
       }
       return inst;
@@ -1032,16 +997,16 @@ namespace fxe::js {
       set_native(iso, inst, h, TAG_IDB_STORE);
       h->bind(iso, inst);
       auto& meta = h->db->stores.at(name);
-      (void)inst->Set(ctx, "name"_v8(iso), s(iso, name));
-      (void)inst->Set(ctx, "keyPath"_v8(iso),
-                      meta.key_path ? s(iso, *meta.key_path).As<Value>() : Local<Value>(Null(iso)));
-      (void)inst->Set(ctx, "autoIncrement"_v8(iso), Boolean::New(iso, meta.auto_increment));
+      set_prop(ctx, inst, "name", name);
+      set_prop(ctx, inst, "keyPath",
+               meta.key_path ? to_v8(iso, *meta.key_path) : Local<Value>(to_v8_null(iso)));
+      set_prop(ctx, inst, "autoIncrement", meta.auto_increment);
       auto idx_names = Array::New(iso, static_cast<int>(meta.indexes.size()));
       u32 k = 0;
       for (auto& [iname, _] : meta.indexes)
-        (void)idx_names->Set(ctx, k++, s(iso, iname));
-      (void)inst->Set(ctx, "indexNames"_v8(iso), idx_names);
-      (void)inst->Set(ctx, "transaction"_v8(iso), tx_obj);
+        set_index(ctx, idx_names, k++, iname);
+      set_prop(ctx, inst, "indexNames", idx_names);
+      set_prop(ctx, inst, "transaction", tx_obj);
       return inst;
     }
 
@@ -1059,13 +1024,13 @@ namespace fxe::js {
       h->bind(iso, inst);
       auto& smeta = h->db->stores.at(store);
       auto& imeta = smeta.indexes.at(index);
-      (void)inst->Set(ctx, "name"_v8(iso), s(iso, index));
-      (void)inst->Set(ctx, "keyPath"_v8(iso), s(iso, imeta.key_path));
-      (void)inst->Set(ctx, "unique"_v8(iso), Boolean::New(iso, imeta.unique));
-      (void)inst->Set(ctx, "multiEntry"_v8(iso), Boolean::New(iso, imeta.multi));
+      set_prop(ctx, inst, "name", index);
+      set_prop(ctx, inst, "keyPath", imeta.key_path);
+      set_prop(ctx, inst, "unique", imeta.unique);
+      set_prop(ctx, inst, "multiEntry", imeta.multi);
       // objectStore reference
       auto store_obj = create_object_store_handle(iso, ctx, h->db, tx_obj, store);
-      (void)inst->Set(ctx, "objectStore"_v8(iso), store_obj);
+      set_prop(ctx, inst, "objectStore", store_obj);
       return inst;
     }
 
@@ -1165,7 +1130,8 @@ namespace fxe::js {
       auto tx = h->tx.Get(iso);
       auto* tx_st = unwrap_tx(tx);
       if (!tx_st || tx_st->finished || !tx_st->active) {
-        throw_msg(iso, "InvalidStateError: transaction is not active", "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: transaction is not active");
         return false;
       }
       return true;
@@ -1175,7 +1141,8 @@ namespace fxe::js {
       auto tx = h->tx.Get(iso);
       auto* tx_st = unwrap_tx(tx);
       if (!tx_st || tx_st->mode == "readonly") {
-        throw_msg(iso, "ReadOnlyError: transaction is read-only", "ReadOnlyError");
+        throw_named(iso, iso->GetCurrentContext(), "ReadOnlyError",
+                    "ReadOnlyError: transaction is read-only");
         return false;
       }
       return true;
@@ -1186,13 +1153,13 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_store(info.This());
       if (!h || h->is_index) {
-        throw_msg(iso, "store.put: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.put: invalid receiver");
         return;
       }
       if (!ensure_active_tx(iso, h) || !require_writable(iso, h))
         return;
       if (info.Length() < 1) {
-        throw_msg(iso, "store.put requires a value", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.put requires a value");
         return;
       }
       Local<Value> value = info[0];
@@ -1204,7 +1171,8 @@ namespace fxe::js {
 
       if (info.Length() >= 2 && !info[1]->IsUndefined() && !info[1]->IsNull()) {
         if (meta.key_path) {
-          throw_msg(iso, "DataError: explicit key not allowed when keyPath is set", "DataError");
+          throw_named(iso, iso->GetCurrentContext(), "DataError",
+                      "DataError: explicit key not allowed when keyPath is set");
           return;
         }
         if (!encode_key(iso, info[1], pk))
@@ -1215,7 +1183,8 @@ namespace fxe::js {
         Local<Value> k = resolve_key_path(iso, value, *meta.key_path);
         if (k.IsEmpty() || k->IsUndefined()) {
           if (!meta.auto_increment) {
-            throw_msg(iso, "DataError: keyPath did not resolve to a key", "DataError");
+            throw_named(iso, iso->GetCurrentContext(), "DataError",
+                        "DataError: keyPath did not resolve to a key");
             return;
           }
           i64 auto_k = next_auto_key(h->db.get(), meta);
@@ -1235,7 +1204,8 @@ namespace fxe::js {
         if (!encode_key(iso, derived_key, pk))
           return;
       } else {
-        throw_msg(iso, "DataError: store has no keyPath and no key was provided", "DataError");
+        throw_named(iso, iso->GetCurrentContext(), "DataError",
+                    "DataError: store has no keyPath and no key was provided");
         return;
       }
       (void)key_from_arg;
@@ -1244,7 +1214,7 @@ namespace fxe::js {
       std::vector<u8> blob;
       std::string sderr;
       if (!serialize_value(iso, ctx, value, blob, sderr)) {
-        throw_msg(iso, "DataCloneError: " + sderr, "DataCloneError");
+        throw_named(iso, iso->GetCurrentContext(), "DataCloneError", "DataCloneError: " + sderr);
         return;
       }
 
@@ -1257,7 +1227,7 @@ namespace fxe::js {
       }
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(h->db->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       bind_blob(stmt, 1, pk);
@@ -1273,7 +1243,7 @@ namespace fxe::js {
         return;
       }
       if (rc != SQLITE_DONE) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       // Update indexes.
@@ -1305,7 +1275,7 @@ namespace fxe::js {
       if (!ensure_active_tx(iso, h))
         return;
       if (info.Length() < 1) {
-        throw_msg(iso, "store.get requires a key");
+        throw_error(iso, "store.get requires a key");
         return;
       }
       key_range range;
@@ -1340,7 +1310,7 @@ namespace fxe::js {
 
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(h->db->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       stmt_guard sg{stmt};
@@ -1375,7 +1345,7 @@ namespace fxe::js {
       if (!ensure_active_tx(iso, h))
         return;
       if (info.Length() < 1) {
-        throw_msg(iso, "store.getKey requires a key");
+        throw_error(iso, "store.getKey requires a key");
         return;
       }
       key_range range;
@@ -1406,7 +1376,7 @@ namespace fxe::js {
 
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(h->db->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       stmt_guard sg{stmt};
@@ -1476,7 +1446,7 @@ namespace fxe::js {
 
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(h->db->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       stmt_guard sg{stmt};
@@ -1496,7 +1466,7 @@ namespace fxe::js {
           v = decode_key(iso, data, len);
         else if (!deserialize_value(iso, ctx, data, len).ToLocal(&v))
           v = Undefined(iso);
-        (void)arr->Set(ctx, i++, v);
+        set_index(ctx, arr, i++, v);
       }
       if (rc != SQLITE_DONE) {
         schedule_reject(iso, req, make_dom_error(iso, "UnknownError", sqlite3_errmsg(h->db->db)));
@@ -1544,7 +1514,7 @@ namespace fxe::js {
       }
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(h->db->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       stmt_guard sg{stmt};
@@ -1568,13 +1538,13 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_store(info.This());
       if (!h || h->is_index) {
-        throw_msg(iso, "store.delete: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.delete: invalid receiver");
         return;
       }
       if (!ensure_active_tx(iso, h) || !require_writable(iso, h))
         return;
       if (info.Length() < 1) {
-        throw_msg(iso, "store.delete requires a key", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.delete requires a key");
         return;
       }
       key_range range;
@@ -1589,7 +1559,7 @@ namespace fxe::js {
         sel += range.upper_open ? " AND k < ?2" : " AND k <= ?2";
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(h->db->db, sel.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       stmt_guard sg{stmt};
@@ -1638,7 +1608,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_store(info.This());
       if (!h || h->is_index) {
-        throw_msg(iso, "store.clear: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.clear: invalid receiver");
         return;
       }
       if (!ensure_active_tx(iso, h) || !require_writable(iso, h))
@@ -1669,37 +1639,39 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_store(info.This());
       if (!h || h->is_index) {
-        throw_msg(iso, "store.createIndex: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "store.createIndex: invalid receiver");
         return;
       }
       auto tx = h->tx.Get(iso);
       auto* tx_st = unwrap_tx(tx);
       if (!tx_st || tx_st->mode != "versionchange") {
-        throw_msg(iso, "InvalidStateError: createIndex requires versionchange transaction",
-                  "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: createIndex requires versionchange transaction");
         return;
       }
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsString()) {
-        throw_msg(iso, "store.createIndex(name, keyPath, opts?)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "store.createIndex(name, keyPath, opts?)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
-      std::string key_path = utf8(iso, info[1]);
+      std::string name = to_std_string_strict(iso, info[0]);
+      std::string key_path = to_std_string_strict(iso, info[1]);
       bool unique = false;
       bool multi = false;
       if (info.Length() >= 3 && info[2]->IsObject()) {
         auto opts = info[2].As<Object>();
-        Local<Value> v;
-        if (opts->Get(ctx, "unique"_v8(iso)).ToLocal(&v))
-          unique = v->BooleanValue(iso);
-        if (opts->Get(ctx, "multiEntry"_v8(iso)).ToLocal(&v))
-          multi = v->BooleanValue(iso);
+        if (auto unique_opt = get_prop<Local<Value>>(ctx, opts, "unique"))
+          unique = (*unique_opt)->BooleanValue(iso);
+        if (auto multi_opt = get_prop<Local<Value>>(ctx, opts, "multiEntry"))
+          multi = (*multi_opt)->BooleanValue(iso);
         (void)multi; // multiEntry deferred to v2
       }
 
       auto& meta = h->db->stores.at(h->name);
       if (meta.indexes.count(name)) {
-        throw_msg(iso, "ConstraintError: index already exists", "ConstraintError");
+        throw_named(iso, iso->GetCurrentContext(), "ConstraintError",
+                    "ConstraintError: index already exists");
         return;
       }
 
@@ -1708,7 +1680,7 @@ namespace fxe::js {
                         " (ik BLOB, pk BLOB, PRIMARY KEY(ik, pk))";
       std::string err;
       if (!exec_sql(h->db.get(), ddl.c_str(), err)) {
-        throw_msg(iso, err);
+        throw_error(iso, err);
         return;
       }
       sqlite3_stmt* ins = nullptr;
@@ -1723,7 +1695,7 @@ namespace fxe::js {
       sqlite3_bind_int(ins, 5, multi ? 1 : 0);
       if (sqlite3_step(ins) != SQLITE_DONE) {
         sqlite3_finalize(ins);
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       sqlite3_finalize(ins);
@@ -1778,8 +1750,8 @@ namespace fxe::js {
             sqlite3_step(del);
             sqlite3_finalize(del);
             meta.indexes.erase(name);
-            throw_msg(iso, "ConstraintError: unique index violation during backfill",
-                      "ConstraintError");
+            throw_named(iso, iso->GetCurrentContext(), "ConstraintError",
+                        "ConstraintError: unique index violation during backfill");
             return;
           }
         }
@@ -1793,24 +1765,26 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_store(info.This());
       if (!h || h->is_index) {
-        throw_msg(iso, "store.deleteIndex: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "store.deleteIndex: invalid receiver");
         return;
       }
       auto tx = h->tx.Get(iso);
       auto* tx_st = unwrap_tx(tx);
       if (!tx_st || tx_st->mode != "versionchange") {
-        throw_msg(iso, "InvalidStateError: deleteIndex requires versionchange transaction",
-                  "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: deleteIndex requires versionchange transaction");
         return;
       }
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_msg(iso, "store.deleteIndex(name)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.deleteIndex(name)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
+      std::string name = to_std_string_strict(iso, info[0]);
       auto& meta = h->db->stores.at(h->name);
       if (!meta.indexes.count(name)) {
-        throw_msg(iso, "NotFoundError: index does not exist", "NotFoundError");
+        throw_named(iso, iso->GetCurrentContext(), "NotFoundError",
+                    "NotFoundError: index does not exist");
         return;
       }
       std::string drop = "DROP TABLE idx_" + h->name + "_" + name;
@@ -1831,17 +1805,18 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_store(info.This());
       if (!h || h->is_index) {
-        throw_msg(iso, "store.index: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.index: invalid receiver");
         return;
       }
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_msg(iso, "store.index(name)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "store.index(name)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
+      std::string name = to_std_string_strict(iso, info[0]);
       auto& meta = h->db->stores.at(h->name);
       if (!meta.indexes.count(name)) {
-        throw_msg(iso, "NotFoundError: index does not exist", "NotFoundError");
+        throw_named(iso, iso->GetCurrentContext(), "NotFoundError",
+                    "NotFoundError: index does not exist");
         return;
       }
       info.GetReturnValue().Set(
@@ -1896,28 +1871,28 @@ namespace fxe::js {
           usize col1_len = static_cast<usize>(sqlite3_column_bytes(st->stmt, 1));
           st->last_ik.assign(col0, col0 + col0_len);
           st->last_pk.assign(col1, col1 + col1_len);
-          (void)cursor_obj->Set(ctx, "key"_v8(iso), decode_key(iso, col0, col0_len));
-          (void)cursor_obj->Set(ctx, "primaryKey"_v8(iso), decode_key(iso, col1, col1_len));
+          set_prop(ctx, cursor_obj, "key", decode_key(iso, col0, col0_len));
+          set_prop(ctx, cursor_obj, "primaryKey", decode_key(iso, col1, col1_len));
           if (st->has_value) {
             const auto* vdata = static_cast<const u8*>(sqlite3_column_blob(st->stmt, 2));
             usize vlen = static_cast<usize>(sqlite3_column_bytes(st->stmt, 2));
             Local<Value> v;
             if (!deserialize_value(iso, ctx, vdata, vlen).ToLocal(&v))
               v = Undefined(iso);
-            (void)cursor_obj->Set(ctx, "value"_v8(iso), v);
+            set_prop(ctx, cursor_obj, "value", v);
           }
         } else {
           // columns: k (and v for with-value)
           st->last_pk.assign(col0, col0 + col0_len);
-          (void)cursor_obj->Set(ctx, "key"_v8(iso), decode_key(iso, col0, col0_len));
-          (void)cursor_obj->Set(ctx, "primaryKey"_v8(iso), decode_key(iso, col0, col0_len));
+          set_prop(ctx, cursor_obj, "key", decode_key(iso, col0, col0_len));
+          set_prop(ctx, cursor_obj, "primaryKey", decode_key(iso, col0, col0_len));
           if (st->has_value) {
             const auto* vdata = static_cast<const u8*>(sqlite3_column_blob(st->stmt, 1));
             usize vlen = static_cast<usize>(sqlite3_column_bytes(st->stmt, 1));
             Local<Value> v;
             if (!deserialize_value(iso, ctx, vdata, vlen).ToLocal(&v))
               v = Undefined(iso);
-            (void)cursor_obj->Set(ctx, "value"_v8(iso), v);
+            set_prop(ctx, cursor_obj, "value", v);
           }
         }
         schedule_resolve(iso, req, cursor_obj);
@@ -1934,14 +1909,14 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* st = unwrap_cursor(info.This());
       if (!st) {
-        throw_msg(iso, "cursor.continue: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "cursor.continue: invalid receiver");
         return;
       }
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull()) {
-        throw_msg(
-            iso,
-            "cursor.continue(key) is not supported in v1; use store.openCursor with a IDBKeyRange",
-            "NotSupportedError");
+        throw_named(
+            iso, iso->GetCurrentContext(), "NotSupportedError",
+            "cursor.continue(key) is not supported in v1; use store.openCursor with a IDBKeyRange");
         return;
       }
       cursor_step(iso, ctx, info.This(), st);
@@ -1952,12 +1927,13 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* st = unwrap_cursor(info.This());
       if (!st) {
-        throw_msg(iso, "cursor.advance: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "cursor.advance: invalid receiver");
         return;
       }
       int n = info.Length() >= 1 ? info[0]->Int32Value(ctx).FromMaybe(0) : 0;
       if (n <= 0) {
-        throw_msg(iso, "cursor.advance(count) requires count > 0", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "cursor.advance(count) requires count > 0");
         return;
       }
       for (int i = 0; i < n - 1 && !st->exhausted; ++i) {
@@ -1974,17 +1950,18 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* st = unwrap_cursor(info.This());
       if (!st || st->exhausted) {
-        throw_msg(iso, "cursor.update: invalid receiver or no current row", "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "cursor.update: invalid receiver or no current row");
         return;
       }
       auto tx_st = unwrap_tx(st->tx.Get(iso));
       if (!tx_st || tx_st->mode == "readonly") {
-        throw_msg(iso, "ReadOnlyError: cursor.update requires writable transaction",
-                  "ReadOnlyError");
+        throw_named(iso, iso->GetCurrentContext(), "ReadOnlyError",
+                    "ReadOnlyError: cursor.update requires writable transaction");
         return;
       }
       if (info.Length() < 1) {
-        throw_msg(iso, "cursor.update requires a value", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "cursor.update requires a value");
         return;
       }
       Local<Value> value = info[0];
@@ -1995,21 +1972,21 @@ namespace fxe::js {
         std::vector<u8> dk;
         if (derived.IsEmpty() || derived->IsUndefined() || !encode_key(iso, derived, dk) ||
             dk != st->last_pk) {
-          throw_msg(iso, "DataError: cursor.update value's key must match current primaryKey",
-                    "DataError");
+          throw_named(iso, iso->GetCurrentContext(), "DataError",
+                      "DataError: cursor.update value's key must match current primaryKey");
           return;
         }
       }
       std::vector<u8> blob;
       std::string sderr;
       if (!serialize_value(iso, ctx, value, blob, sderr)) {
-        throw_msg(iso, "DataCloneError: " + sderr, "DataCloneError");
+        throw_named(iso, iso->GetCurrentContext(), "DataCloneError", "DataCloneError: " + sderr);
         return;
       }
       std::string sql = "UPDATE store_" + st->store_name + " SET v=?1 WHERE k=?2";
       sqlite3_stmt* upd = nullptr;
       if (sqlite3_prepare_v2(st->db->db, sql.c_str(), -1, &upd, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(st->db->db));
+        throw_error(iso, sqlite3_errmsg(st->db->db));
         return;
       }
       bind_blob(upd, 1, blob);
@@ -2036,13 +2013,14 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* st = unwrap_cursor(info.This());
       if (!st || st->exhausted) {
-        throw_msg(iso, "cursor.delete: invalid receiver or no current row", "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "cursor.delete: invalid receiver or no current row");
         return;
       }
       auto tx_st = unwrap_tx(st->tx.Get(iso));
       if (!tx_st || tx_st->mode == "readonly") {
-        throw_msg(iso, "ReadOnlyError: cursor.delete requires writable transaction",
-                  "ReadOnlyError");
+        throw_named(iso, iso->GetCurrentContext(), "ReadOnlyError",
+                    "ReadOnlyError: cursor.delete requires writable transaction");
         return;
       }
       auto& meta = st->db->stores.at(st->store_name);
@@ -2126,7 +2104,7 @@ namespace fxe::js {
 
       sqlite3_stmt* stmt = nullptr;
       if (sqlite3_prepare_v2(h->db->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
-        throw_msg(iso, sqlite3_errmsg(h->db->db));
+        throw_error(iso, sqlite3_errmsg(h->db->db));
         return;
       }
       if (range.has_lower)
@@ -2147,12 +2125,12 @@ namespace fxe::js {
       st->tx.Reset(iso, h->tx.Get(iso));
       set_native(iso, cursor, st, TAG_IDB_CURSOR);
       st->bind(iso, cursor);
-      (void)cursor->Set(ctx, "source"_v8(iso), info.This());
-      (void)cursor->Set(ctx, "direction"_v8(iso), s(iso, descending ? "prev" : "next"));
-      (void)cursor->Set(ctx, "key"_v8(iso), Null(iso));
-      (void)cursor->Set(ctx, "primaryKey"_v8(iso), Null(iso));
+      set_prop(ctx, cursor, "source", info.This());
+      set_prop(ctx, cursor, "direction", descending ? "prev" : "next");
+      set_prop(ctx, cursor, "key", to_v8_null(iso));
+      set_prop(ctx, cursor, "primaryKey", to_v8_null(iso));
       if (!keys_only)
-        (void)cursor->Set(ctx, "value"_v8(iso), Undefined(iso));
+        set_prop(ctx, cursor, "value", to_v8_undefined(iso));
 
       auto req = create_request(iso, ctx, request_kind::generic, info.This(), h->tx.Get(iso));
       st->request.Reset(iso, req);
@@ -2173,14 +2151,14 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* tx = unwrap_tx(info.This());
       if (!tx) {
-        throw_msg(iso, "tx.objectStore: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "tx.objectStore: invalid receiver");
         return;
       }
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_msg(iso, "tx.objectStore(name)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "tx.objectStore(name)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
+      std::string name = to_std_string_strict(iso, info[0]);
       bool found = false;
       for (auto& sn : tx->store_names)
         if (sn == name) {
@@ -2188,11 +2166,13 @@ namespace fxe::js {
           break;
         }
       if (!found) {
-        throw_msg(iso, "NotFoundError: store not in transaction's scope", "NotFoundError");
+        throw_named(iso, iso->GetCurrentContext(), "NotFoundError",
+                    "NotFoundError: store not in transaction's scope");
         return;
       }
       if (!tx->db->stores.count(name)) {
-        throw_msg(iso, "NotFoundError: store does not exist", "NotFoundError");
+        throw_named(iso, iso->GetCurrentContext(), "NotFoundError",
+                    "NotFoundError: store does not exist");
         return;
       }
       info.GetReturnValue().Set(create_object_store_handle(iso, ctx, tx->db, info.This(), name));
@@ -2246,15 +2226,15 @@ namespace fxe::js {
       h->db->open_connections += 1;
       set_native(iso, inst, h, TAG_IDB_DATABASE);
       h->bind(iso, inst);
-      (void)inst->Set(ctx, "name"_v8(iso), s(iso, db->name));
-      (void)inst->Set(ctx, "version"_v8(iso), Number::New(iso, static_cast<double>(db->version)));
+      set_prop(ctx, inst, "name", db->name);
+      set_prop(ctx, inst, "version", db->version);
       auto names = Array::New(iso);
       u32 i = 0;
       for (auto& [k, _] : db->stores)
-        (void)names->Set(ctx, i++, s(iso, k));
-      (void)inst->Set(ctx, "objectStoreNames"_v8(iso), names);
-      (void)inst->Set(ctx, "onversionchange"_v8(iso), Null(iso));
-      (void)inst->Set(ctx, "onclose"_v8(iso), Null(iso));
+        set_index(ctx, names, i++, k);
+      set_prop(ctx, inst, "objectStoreNames", names);
+      set_prop(ctx, inst, "onversionchange", to_v8_null(iso));
+      set_prop(ctx, inst, "onclose", to_v8_null(iso));
       return inst;
     }
 
@@ -2265,52 +2245,55 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_database(info.This());
       if (!h) {
-        throw_msg(iso, "db.createObjectStore: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "db.createObjectStore: invalid receiver");
         return;
       }
       // Look up the active versionchange tx via Symbol-keyed property.
       auto active_tx = info.This()->Get(ctx, "__fxe_active_tx"_v8(iso));
       if (active_tx.IsEmpty() || !active_tx.ToLocalChecked()->IsObject()) {
-        throw_msg(iso, "InvalidStateError: createObjectStore requires versionchange transaction",
-                  "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: createObjectStore requires versionchange transaction");
         return;
       }
       auto tx_obj = active_tx.ToLocalChecked().As<Object>();
       auto* tx_st = unwrap_tx(tx_obj);
       if (!tx_st || tx_st->mode != "versionchange") {
-        throw_msg(iso, "InvalidStateError: createObjectStore requires versionchange transaction",
-                  "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: createObjectStore requires versionchange transaction");
         return;
       }
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_msg(iso, "db.createObjectStore(name, opts?)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "db.createObjectStore(name, opts?)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
+      std::string name = to_std_string_strict(iso, info[0]);
       if (h->db->stores.count(name)) {
-        throw_msg(iso, "ConstraintError: object store already exists", "ConstraintError");
+        throw_named(iso, iso->GetCurrentContext(), "ConstraintError",
+                    "ConstraintError: object store already exists");
         return;
       }
       std::optional<std::string> key_path;
       bool auto_inc = false;
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto opts = info[1].As<Object>();
-        Local<Value> v;
-        if (opts->Get(ctx, "keyPath"_v8(iso)).ToLocal(&v)) {
+        if (auto key_path_value = get_prop<Local<Value>>(ctx, opts, "keyPath")) {
+          auto v = *key_path_value;
           if (v->IsString())
-            key_path = utf8(iso, v);
+            key_path = to_std_string_strict(iso, v);
           else if (v->IsArray())
             // Compound key paths not supported in v1.
             ;
         }
-        if (opts->Get(ctx, "autoIncrement"_v8(iso)).ToLocal(&v))
-          auto_inc = v->BooleanValue(iso);
+        if (auto auto_increment_opt = get_prop<Local<Value>>(ctx, opts, "autoIncrement"))
+          auto_inc = (*auto_increment_opt)->BooleanValue(iso);
       }
       // SQL: create store table + meta row.
       std::string ddl = "CREATE TABLE store_" + name + " (k BLOB PRIMARY KEY, v BLOB NOT NULL)";
       std::string err;
       if (!exec_sql(h->db.get(), ddl.c_str(), err)) {
-        throw_msg(iso, err);
+        throw_error(iso, err);
         return;
       }
       sqlite3_stmt* ins = nullptr;
@@ -2337,8 +2320,8 @@ namespace fxe::js {
       auto names = Array::New(iso);
       u32 i = 0;
       for (auto& [k, _] : h->db->stores)
-        (void)names->Set(ctx, i++, s(iso, k));
-      (void)info.This()->Set(ctx, "objectStoreNames"_v8(iso), names);
+        set_index(ctx, names, i++, k);
+      set_prop(ctx, info.This(), "objectStoreNames", names);
 
       info.GetReturnValue().Set(create_object_store_handle(iso, ctx, h->db, tx_obj, name));
     }
@@ -2351,24 +2334,25 @@ namespace fxe::js {
         return;
       auto active_tx = info.This()->Get(ctx, "__fxe_active_tx"_v8(iso));
       if (active_tx.IsEmpty() || !active_tx.ToLocalChecked()->IsObject()) {
-        throw_msg(iso, "InvalidStateError: deleteObjectStore requires versionchange transaction",
-                  "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: deleteObjectStore requires versionchange transaction");
         return;
       }
       auto tx_obj = active_tx.ToLocalChecked().As<Object>();
       auto* tx_st = unwrap_tx(tx_obj);
       if (!tx_st || tx_st->mode != "versionchange") {
-        throw_msg(iso, "InvalidStateError: deleteObjectStore requires versionchange transaction",
-                  "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: deleteObjectStore requires versionchange transaction");
         return;
       }
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_msg(iso, "db.deleteObjectStore(name)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "db.deleteObjectStore(name)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
+      std::string name = to_std_string_strict(iso, info[0]);
       if (!h->db->stores.count(name)) {
-        throw_msg(iso, "NotFoundError: store does not exist", "NotFoundError");
+        throw_named(iso, iso->GetCurrentContext(), "NotFoundError",
+                    "NotFoundError: store does not exist");
         return;
       }
       auto& meta = h->db->stores[name];
@@ -2393,8 +2377,8 @@ namespace fxe::js {
       auto names = Array::New(iso);
       u32 i = 0;
       for (auto& [k, _] : h->db->stores)
-        (void)names->Set(ctx, i++, s(iso, k));
-      (void)info.This()->Set(ctx, "objectStoreNames"_v8(iso), names);
+        set_index(ctx, names, i++, k);
+      set_prop(ctx, info.This(), "objectStoreNames", names);
     }
 
     void database_transaction(const FunctionCallbackInfo<Value>& info) {
@@ -2402,42 +2386,46 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_database(info.This());
       if (!h) {
-        throw_msg(iso, "db.transaction: invalid receiver", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "db.transaction: invalid receiver");
         return;
       }
       if (h->db->closed) {
-        throw_msg(iso, "InvalidStateError: database is closed", "InvalidStateError");
+        throw_named(iso, iso->GetCurrentContext(), "InvalidStateError",
+                    "InvalidStateError: database is closed");
         return;
       }
       if (info.Length() < 1) {
-        throw_msg(iso, "db.transaction(stores, mode?)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "db.transaction(stores, mode?)");
         return;
       }
       std::vector<std::string> store_names;
       if (info[0]->IsString()) {
-        store_names.push_back(utf8(iso, info[0]));
+        store_names.push_back(to_std_string_strict(iso, info[0]));
       } else if (info[0]->IsArray()) {
         auto arr = info[0].As<Array>();
         for (u32 i = 0; i < arr->Length(); ++i) {
           Local<Value> v;
           if (arr->Get(ctx, i).ToLocal(&v) && v->IsString())
-            store_names.push_back(utf8(iso, v));
+            store_names.push_back(to_std_string_strict(iso, v));
         }
       } else {
-        throw_msg(iso, "db.transaction: stores must be a string or array of strings", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "db.transaction: stores must be a string or array of strings");
         return;
       }
       for (auto& sn : store_names) {
         if (!h->db->stores.count(sn)) {
-          throw_msg(iso, "NotFoundError: store '" + sn + "' does not exist", "NotFoundError");
+          throw_named(iso, iso->GetCurrentContext(), "NotFoundError",
+                      "NotFoundError: store '" + sn + "' does not exist");
           return;
         }
       }
       std::string mode = "readonly";
       if (info.Length() >= 2 && info[1]->IsString())
-        mode = utf8(iso, info[1]);
+        mode = to_std_string_strict(iso, info[1]);
       if (mode != "readonly" && mode != "readwrite") {
-        throw_msg(iso, "TypeError: mode must be 'readonly' or 'readwrite'", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                    "TypeError: mode must be 'readonly' or 'readwrite'");
         return;
       }
       auto tx = create_transaction(iso, ctx, h->db, store_names, mode);
@@ -2510,7 +2498,7 @@ namespace fxe::js {
           return;
         }
         auto db_obj = create_database_handle(iso, ctx, p->db);
-        (void)db_obj->Set(ctx, "__fxe_active_tx"_v8(iso), tx);
+        set_prop(ctx, db_obj, "__fxe_active_tx", tx);
         sqlite3_stmt* upd = nullptr;
         sqlite3_prepare_v2(p->db->db, "UPDATE __meta SET user_version=?1", -1, &upd, nullptr);
         sqlite3_bind_int64(upd, 1, p->requested_version);
@@ -2518,29 +2506,26 @@ namespace fxe::js {
         sqlite3_finalize(upd);
         i64 old_version = p->db->version;
         p->db->version = p->requested_version;
-        (void)db_obj->Set(ctx, "version"_v8(iso),
-                          Number::New(iso, static_cast<double>(p->requested_version)));
+        set_prop(ctx, db_obj, "version", p->requested_version);
         auto evt = Object::New(iso);
-        set_str(ctx, evt, "type", "upgradeneeded");
-        (void)evt->Set(ctx, "target"_v8(iso), req);
-        (void)evt->Set(ctx, "oldVersion"_v8(iso),
-                       Number::New(iso, static_cast<double>(old_version)));
-        (void)evt->Set(ctx, "newVersion"_v8(iso),
-                       Number::New(iso, static_cast<double>(p->requested_version)));
-        (void)req->Set(ctx, "result"_v8(iso), db_obj);
-        (void)req->Set(ctx, "transaction"_v8(iso), tx);
+        set_prop(ctx, evt, "type", "upgradeneeded");
+        set_prop(ctx, evt, "target", req);
+        set_prop(ctx, evt, "oldVersion", old_version);
+        set_prop(ctx, evt, "newVersion", p->requested_version);
+        set_prop(ctx, req, "result", db_obj);
+        set_prop(ctx, req, "transaction", tx);
         invoke_listener(iso, ctx, req, "onupgradeneeded", evt);
         if (tc.HasCaught()) {
           // User handler threw; abort the tx and surface the error.
           auto* tx_st = unwrap_tx(tx);
           tx_abort_internal(iso, ctx, tx, tx_st);
-          (void)db_obj->Set(ctx, "__fxe_active_tx"_v8(iso), Undefined(iso));
+          set_prop(ctx, db_obj, "__fxe_active_tx", to_v8_undefined(iso));
           reject_request(iso, ctx, req, tc.Exception());
           return;
         }
         auto* tx_st = unwrap_tx(tx);
         tx_commit_internal(iso, ctx, tx, tx_st);
-        (void)db_obj->Set(ctx, "__fxe_active_tx"_v8(iso), Undefined(iso));
+        set_prop(ctx, db_obj, "__fxe_active_tx", to_v8_undefined(iso));
         if (tx_st && tx_st->errored) {
           reject_request(iso, ctx, req,
                          make_dom_error(iso, "AbortError", "versionchange transaction aborted"));
@@ -2567,15 +2552,16 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_msg(iso, "indexedDB.open(name, version?)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "indexedDB.open(name, version?)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
+      std::string name = to_std_string_strict(iso, info[0]);
       i64 requested_version = -1;
       if (info.Length() >= 2 && info[1]->IsNumber()) {
         requested_version = info[1]->IntegerValue(ctx).FromMaybe(0);
         if (requested_version <= 0) {
-          throw_msg(iso, "TypeError: version must be a positive integer", "TypeError");
+          throw_named(iso, iso->GetCurrentContext(), "TypeError",
+                      "TypeError: version must be a positive integer");
           return;
         }
       }
@@ -2605,10 +2591,10 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_msg(iso, "indexedDB.deleteDatabase(name)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "indexedDB.deleteDatabase(name)");
         return;
       }
-      std::string name = utf8(iso, info[0]);
+      std::string name = to_std_string_strict(iso, info[0]);
       auto req = create_request(iso, ctx, request_kind::open, Local<Object>(), Local<Object>());
       std::string err;
       auto fname = resolve_db_filename(name, err);
@@ -2647,13 +2633,13 @@ namespace fxe::js {
             if (entry.path().extension() == ".sqlite3") {
               auto stem = entry.path().stem().string();
               auto rec = Object::New(iso);
-              set_str(ctx, rec, "name", stem);
+              set_prop(ctx, rec, "name", stem);
               // version unknown without opening — report 0 unless cached
               auto& reg = registry_table()[iso];
               auto it = reg.by_name.find(stem);
               i64 v = it != reg.by_name.end() ? it->second->version : 0;
-              set_int(ctx, rec, "version", v);
-              (void)arr->Set(ctx, i++, rec);
+              set_prop(ctx, rec, "version", v);
+              set_index(ctx, arr, i++, rec);
             }
           }
         }
@@ -2664,7 +2650,7 @@ namespace fxe::js {
     void factory_cmp(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 2) {
-        throw_msg(iso, "indexedDB.cmp(a, b)", "TypeError");
+        throw_named(iso, iso->GetCurrentContext(), "TypeError", "indexedDB.cmp(a, b)");
         return;
       }
       std::vector<u8> a, b;

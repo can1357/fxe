@@ -131,7 +131,7 @@ namespace fxe::js {
       s.heap.push({entry->deadline, id});
       s.active.emplace(id, std::move(entry));
       wake_event_loop();
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(id)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(id)));
     }
 
     void set_timeout_cb(const FunctionCallbackInfo<Value>& info) {
@@ -160,7 +160,7 @@ namespace fxe::js {
       s.heap.push({entry->deadline, id});
       s.active.emplace(id, std::move(entry));
       wake_event_loop();
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(id)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(id)));
     }
 
     void clear_timer_cb(const FunctionCallbackInfo<Value>& info) {
@@ -201,7 +201,7 @@ namespace fxe::js {
       auto& s = state_for(iso);
       u64 id = s.next_raf_id++;
       s.raf_queue.emplace_back(id, Global<Function>(iso, info[0].As<Function>()));
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(id)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(id)));
     }
 
     void cancel_raf_cb(const FunctionCallbackInfo<Value>& info) {
@@ -357,7 +357,7 @@ namespace fxe::js {
         continue;
       }
       auto fn = kv.second.Get(iso);
-      Local<Value> argv[1] = {Number::New(iso, now_ms)};
+      Local<Value> argv[1] = {to_v8(iso, now_ms)};
       bool callback_failed = false;
       {
         TryCatch tc(iso);

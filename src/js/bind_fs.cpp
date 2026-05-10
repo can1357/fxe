@@ -52,18 +52,6 @@ namespace fxe::js {
     using namespace v8;
     namespace fs = std::filesystem;
 
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      if (*u)
-        return std::string(*u, u.length());
-      return {};
-    }
-
     // Map errno / std::error_code to a Node-ish code string.
     const char* node_error_code(const std::error_code& ec) {
       if (ec == std::errc::no_such_file_or_directory)
@@ -98,13 +86,13 @@ namespace fxe::js {
         msg.append(path);
         msg += "'";
       }
-      auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, "code"_v8(iso), str(iso, node_error_code(ec)));
-      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, ec.value()));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(ctx, err, "code", node_error_code(ec));
+      set_prop(ctx, err, "errno", ec.value());
       if (syscall)
-        (void)err->Set(ctx, "syscall"_v8(iso), str(iso, syscall));
+        set_prop(ctx, err, "syscall", syscall);
       if (!path.empty())
-        (void)err->Set(ctx, "path"_v8(iso), str(iso, path));
+        set_prop(ctx, err, "path", path);
       return err;
     }
 
@@ -112,15 +100,16 @@ namespace fxe::js {
                                    int errno_value, std::string_view syscall,
                                    std::string_view path) {
       auto ctx = iso->GetCurrentContext();
-      auto err = Exception::Error(str(iso, message.empty() ? "native operation failed" : message))
-                     .As<Object>();
+      auto err =
+          Exception::Error(to_v8_string(iso, message.empty() ? "native operation failed" : message))
+              .As<Object>();
       if (!code.empty())
-        (void)err->Set(ctx, "code"_v8(iso), str(iso, code));
-      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, errno_value));
+        set_prop(ctx, err, "code", code);
+      set_prop(ctx, err, "errno", errno_value);
       if (!syscall.empty())
-        (void)err->Set(ctx, "syscall"_v8(iso), str(iso, syscall));
+        set_prop(ctx, err, "syscall", syscall);
       if (!path.empty())
-        (void)err->Set(ctx, "path"_v8(iso), str(iso, path));
+        set_prop(ctx, err, "path", path);
       return err;
     }
 
@@ -148,8 +137,8 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       std::string msg = "Permission denied: ";
       msg.append(what);
-      auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, "name"_v8(iso), "PermissionDenied"_v8(iso));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(ctx, err, "name", "PermissionDenied");
       return err;
     }
 
@@ -164,7 +153,7 @@ namespace fxe::js {
     // any TypedArray / ArrayBuffer / DataView. Returns false if neither.
     bool extract_data(Isolate* iso, Local<Value> v, std::vector<u8>& out) {
       if (v->IsString()) {
-        auto s = utf8(iso, v);
+        auto s = to_std_string(iso, v);
         out.assign(s.begin(), s.end());
         return true;
       }
@@ -194,7 +183,7 @@ namespace fxe::js {
       if (opts.IsEmpty() || opts->IsNullOrUndefined())
         return read_encoding::raw;
       if (opts->IsString()) {
-        auto s = utf8(iso, opts);
+        auto s = to_std_string(iso, opts);
         if (s == "utf8" || s == "utf-8")
           return read_encoding::utf8;
         return read_encoding::raw;
@@ -202,9 +191,8 @@ namespace fxe::js {
       if (opts->IsObject()) {
         auto ctx = iso->GetCurrentContext();
         auto o = opts.As<Object>();
-        Local<Value> v;
-        if (o->Get(ctx, "encoding"_v8(iso)).ToLocal(&v) && v->IsString()) {
-          auto s = utf8(iso, v);
+        if (auto v = get_prop<Local<Value>>(ctx, o, "encoding"); v && (*v)->IsString()) {
+          auto s = to_std_string(iso, *v);
           if (s == "utf8" || s == "utf-8")
             return read_encoding::utf8;
         }
@@ -216,12 +204,10 @@ namespace fxe::js {
       if (opts.IsEmpty() || !opts->IsObject())
         return defv;
       auto ctx = iso->GetCurrentContext();
-      Local<Value> v;
-      if (!opts.As<Object>()->Get(ctx, str(iso, key)).ToLocal(&v))
+      auto v = get_prop<Local<Value>>(ctx, opts.As<Object>(), key);
+      if (!v || (*v)->IsUndefined())
         return defv;
-      if (v->IsUndefined())
-        return defv;
-      return v->BooleanValue(iso);
+      return (*v)->BooleanValue(iso);
     }
 
     // Reads file bytes. Sets ec on failure.
@@ -301,13 +287,13 @@ namespace fxe::js {
       } else {
         ec.clear();
       }
-      (void)out->Set(ctx, "size"_v8(iso), Number::New(iso, static_cast<double>(size)));
-      (void)out->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, is_file));
-      (void)out->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, is_dir));
-      (void)out->Set(ctx, "isSymbolicLink"_v8(iso), Boolean::New(iso, is_symlink));
-      (void)out->Set(ctx, "mtimeMs"_v8(iso), Number::New(iso, mtime_ms));
-      (void)out->Set(ctx, "atimeMs"_v8(iso), Number::New(iso, mtime_ms));
-      (void)out->Set(ctx, "ctimeMs"_v8(iso), Number::New(iso, mtime_ms));
+      set_prop(ctx, out, "size", static_cast<double>(size));
+      set_prop(ctx, out, "isFile", is_file);
+      set_prop(ctx, out, "isDirectory", is_dir);
+      set_prop(ctx, out, "isSymbolicLink", is_symlink);
+      set_prop(ctx, out, "mtimeMs", mtime_ms);
+      set_prop(ctx, out, "atimeMs", mtime_ms);
+      set_prop(ctx, out, "ctimeMs", mtime_ms);
       return out;
     }
 
@@ -326,14 +312,14 @@ namespace fxe::js {
         auto name = e.path().filename().generic_string();
         if (with_types) {
           auto o = Object::New(iso);
-          (void)o->Set(ctx, "name"_v8(iso), str(iso, name));
-          (void)o->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, e.is_regular_file(ec)));
-          (void)o->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, e.is_directory(ec)));
-          (void)o->Set(ctx, "isSymbolicLink"_v8(iso), Boolean::New(iso, e.is_symlink(ec)));
+          set_prop(ctx, o, "name", name);
+          set_prop(ctx, o, "isFile", e.is_regular_file(ec));
+          set_prop(ctx, o, "isDirectory", e.is_directory(ec));
+          set_prop(ctx, o, "isSymbolicLink", e.is_symlink(ec));
           ec.clear();
-          (void)arr->Set(ctx, i++, o);
+          set_index(ctx, arr, i++, o);
         } else {
-          (void)arr->Set(ctx, i++, str(iso, name));
+          set_index(ctx, arr, i++, name);
         }
       }
       return arr;
@@ -344,10 +330,10 @@ namespace fxe::js {
       if (opts.IsEmpty() || !opts->IsObject())
         return std::string(defv);
       auto ctx = iso->GetCurrentContext();
-      Local<Value> v;
-      if (!opts.As<Object>()->Get(ctx, str(iso, key)).ToLocal(&v) || !v->IsString())
+      auto v = get_prop<Local<Value>>(ctx, opts.As<Object>(), key);
+      if (!v || !(*v)->IsString())
         return std::string(defv);
-      return utf8(iso, v);
+      return to_std_string(iso, *v);
     }
 
     std::error_code errno_error() {
@@ -518,7 +504,7 @@ namespace fxe::js {
       auto tick = std::chrono::high_resolution_clock::now().time_since_epoch().count();
       std::ostringstream out;
       out << p.generic_string() << ".tmp." << tick << "." << counter.fetch_add(1);
-      return out.str();
+      return std::move(out).str();
     }
 
     std::vector<std::string> split_pattern(std::string pattern) {
@@ -610,7 +596,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto arr = Array::New(iso, static_cast<int>(values.size()));
       for (u32 i = 0; i < values.size(); ++i)
-        (void)arr->Set(ctx, i, str(iso, values[i]));
+        set_index(ctx, arr, i, values[i]);
       return arr;
     }
 
@@ -666,10 +652,10 @@ namespace fxe::js {
       auto result = Object::New(iso);
       auto* state = glob_iter_from(info.This());
       if (!state || state->index >= state->entries.size()) {
-        (void)result->Set(ctx, "done"_v8(iso), Boolean::New(iso, true));
+        set_prop(ctx, result, "done", true);
       } else {
-        (void)result->Set(ctx, "done"_v8(iso), Boolean::New(iso, false));
-        (void)result->Set(ctx, "value"_v8(iso), str(iso, state->entries[state->index++]));
+        set_prop(ctx, result, "done", false);
+        set_prop(ctx, result, "value", state->entries[state->index++]);
       }
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       (void)resolver->Resolve(ctx, result);
@@ -687,7 +673,7 @@ namespace fxe::js {
       obj->SetInternalField(0, make_external(iso, state));
       state->bind(iso, obj);
       auto fn = Function::New(ctx, glob_iter_async_iterator).ToLocalChecked();
-      (void)obj->Set(ctx, Symbol::GetAsyncIterator(iso), fn);
+      set_prop(ctx, obj, Symbol::GetAsyncIterator(iso), fn);
       return obj;
     }
 
@@ -700,7 +686,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "readFileSync(path, opts?)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       auto enc = info.Length() >= 2 ? read_encoding_from(iso, info[1]) : read_encoding::raw;
@@ -711,10 +697,8 @@ namespace fxe::js {
         return;
       }
       if (enc == read_encoding::utf8) {
-        info.GetReturnValue().Set(
-            String::NewFromUtf8(iso, reinterpret_cast<const char*>(bytes.data()),
-                                NewStringType::kNormal, static_cast<int>(bytes.size()))
-                .ToLocalChecked());
+        info.GetReturnValue().Set(to_v8_string(
+            iso, std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())));
       } else {
         info.GetReturnValue().Set(bytes_to_uint8(iso, bytes));
       }
@@ -727,7 +711,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "writeFileSync(path, data)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::vector<u8> data;
@@ -750,7 +734,7 @@ namespace fxe::js {
     void fs_exists_sync(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -765,7 +749,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "statSync(path)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -784,7 +768,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "readdirSync(path, opts?)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       bool with_types =
@@ -805,7 +789,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "mkdirSync(path, {recursive?})");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       bool recursive = info.Length() >= 2 ? bool_field(iso, info[1], "recursive", false) : false;
@@ -824,7 +808,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "rmSync(path, {recursive?, force?})");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       bool recursive = info.Length() >= 2 ? bool_field(iso, info[1], "recursive", false) : false;
@@ -845,8 +829,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "renameSync(from, to)");
         return;
       }
-      auto from = utf8(iso, info[0]);
-      auto to = utf8(iso, info[1]);
+      auto from = to_std_string(iso, info[0]);
+      auto to = to_std_string(iso, info[1]);
       if (!guard_fs(iso, from) || !guard_fs(iso, to))
         return;
       std::error_code ec;
@@ -862,7 +846,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "realpathSync(path)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -871,7 +855,7 @@ namespace fxe::js {
         throw_fs_error(iso, ec, p, "realpath");
         return;
       }
-      info.GetReturnValue().Set(str(iso, canonical.generic_string()));
+      info.GetReturnValue().Set(to_v8_string(iso, canonical.generic_string()));
     }
 
     void fs_copy_file_sync(const FunctionCallbackInfo<Value>& info) {
@@ -881,8 +865,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "copyFileSync(src, dest)");
         return;
       }
-      auto src = utf8(iso, info[0]);
-      auto dest = utf8(iso, info[1]);
+      auto src = to_std_string(iso, info[0]);
+      auto dest = to_std_string(iso, info[1]);
       if (!guard_fs(iso, src) || !guard_fs(iso, dest))
         return;
       std::error_code ec;
@@ -898,8 +882,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "cpSync(src, dest, opts?)");
         return;
       }
-      auto src = utf8(iso, info[0]);
-      auto dest = utf8(iso, info[1]);
+      auto src = to_std_string(iso, info[0]);
+      auto dest = to_std_string(iso, info[1]);
       if (!guard_fs(iso, src) || !guard_fs(iso, dest))
         return;
       bool dereference =
@@ -916,8 +900,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "symlinkSync(target, path, type?)");
         return;
       }
-      auto target = utf8(iso, info[0]);
-      auto link_path = utf8(iso, info[1]);
+      auto target = to_std_string(iso, info[0]);
+      auto link_path = to_std_string(iso, info[1]);
       auto guarded_target = guarded_symlink_target_path(target, link_path).generic_string();
       if (!guard_fs(iso, guarded_target) || !guard_fs(iso, link_path))
         return;
@@ -942,7 +926,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "readlinkSync(path)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -951,7 +935,7 @@ namespace fxe::js {
         throw_fs_error(iso, ec, p, "readlink");
         return;
       }
-      info.GetReturnValue().Set(str(iso, target.generic_string()));
+      info.GetReturnValue().Set(to_v8_string(iso, target.generic_string()));
     }
 
     void fs_link_sync(const FunctionCallbackInfo<Value>& info) {
@@ -961,8 +945,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "linkSync(existing, path)");
         return;
       }
-      auto existing = utf8(iso, info[0]);
-      auto new_path = utf8(iso, info[1]);
+      auto existing = to_std_string(iso, info[0]);
+      auto new_path = to_std_string(iso, info[1]);
       if (!guard_fs(iso, existing) || !guard_fs(iso, new_path))
         return;
       std::error_code ec;
@@ -978,7 +962,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "lstatSync(path)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -998,7 +982,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "accessSync(path, mode?)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       int mode = info.Length() >= 2 ? info[1]->Int32Value(ctx).FromMaybe(0) : 0;
@@ -1015,7 +999,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "chmodSync(path, mode)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -1031,7 +1015,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "lchmodSync(path, mode)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -1047,7 +1031,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "chownSync(path, uid, gid)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -1065,7 +1049,7 @@ namespace fxe::js {
                                              : "utimesSync(path, atime, mtime)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::error_code ec;
@@ -1088,7 +1072,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "writeFileAtomicSync(path, data)");
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs(iso, p))
         return;
       std::vector<u8> data;
@@ -1122,7 +1106,7 @@ namespace fxe::js {
       std::vector<std::string> entries;
       std::error_code ec;
       std::string denied;
-      auto pattern = utf8(iso, info[0]);
+      auto pattern = to_std_string(iso, info[0]);
       if (!glob_entries(iso, pattern, info.Length() >= 2 ? info[1] : Undefined(iso), entries, ec,
                         denied)) {
         if (!denied.empty())
@@ -1144,7 +1128,7 @@ namespace fxe::js {
       std::vector<std::string> entries;
       std::error_code ec;
       std::string denied;
-      auto pattern = utf8(iso, info[0]);
+      auto pattern = to_std_string(iso, info[0]);
       if (!glob_entries(iso, pattern, info.Length() >= 2 ? info[1] : Undefined(iso), entries, ec,
                         denied)) {
         if (!denied.empty())
@@ -1262,12 +1246,12 @@ namespace fxe::js {
     Local<Object> stat_record_to_object(Isolate* iso, const fs_stat_record& st) {
       auto ctx = iso->GetCurrentContext();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "size"_v8(iso), Number::New(iso, static_cast<double>(st.size)));
-      (void)out->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, st.is_file));
-      (void)out->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, st.is_dir));
-      (void)out->Set(ctx, "mtimeMs"_v8(iso), Number::New(iso, st.mtime_ms));
-      (void)out->Set(ctx, "atimeMs"_v8(iso), Number::New(iso, st.mtime_ms));
-      (void)out->Set(ctx, "ctimeMs"_v8(iso), Number::New(iso, st.mtime_ms));
+      set_prop(ctx, out, "size", static_cast<double>(st.size));
+      set_prop(ctx, out, "isFile", st.is_file);
+      set_prop(ctx, out, "isDirectory", st.is_dir);
+      set_prop(ctx, out, "mtimeMs", st.mtime_ms);
+      set_prop(ctx, out, "atimeMs", st.mtime_ms);
+      set_prop(ctx, out, "ctimeMs", st.mtime_ms);
       return out;
     }
 
@@ -1299,12 +1283,12 @@ namespace fxe::js {
       for (const auto& entry : entries) {
         if (with_types) {
           auto o = Object::New(iso);
-          (void)o->Set(ctx, "name"_v8(iso), str(iso, entry.name));
-          (void)o->Set(ctx, "isFile"_v8(iso), Boolean::New(iso, entry.is_file));
-          (void)o->Set(ctx, "isDirectory"_v8(iso), Boolean::New(iso, entry.is_dir));
-          (void)arr->Set(ctx, i++, o);
+          set_prop(ctx, o, "name", entry.name);
+          set_prop(ctx, o, "isFile", entry.is_file);
+          set_prop(ctx, o, "isDirectory", entry.is_dir);
+          set_index(ctx, arr, i++, o);
         } else {
-          (void)arr->Set(ctx, i++, str(iso, entry.name));
+          set_index(ctx, arr, i++, entry.name);
         }
       }
       return arr;
@@ -1400,7 +1384,7 @@ namespace fxe::js {
                                   const char* syscall) {
       auto ctx = iso->GetCurrentContext();
       auto err = make_error(iso, ec, path, syscall).As<Object>();
-      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, ec.value()));
+      set_prop(ctx, err, "errno", ec.value());
       return err;
     }
 
@@ -1417,13 +1401,13 @@ namespace fxe::js {
         msg.append(path);
         msg += "'";
       }
-      auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, "code"_v8(iso), str(iso, code ? code : "EIO"));
-      (void)err->Set(ctx, "errno"_v8(iso), Integer::New(iso, status));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(ctx, err, "code", code ? code : "EIO");
+      set_prop(ctx, err, "errno", status);
       if (syscall)
-        (void)err->Set(ctx, "syscall"_v8(iso), str(iso, syscall));
+        set_prop(ctx, err, "syscall", syscall);
       if (!path.empty())
-        (void)err->Set(ctx, "path"_v8(iso), str(iso, path));
+        set_prop(ctx, err, "path", path);
       return err;
     }
 #endif
@@ -1435,50 +1419,46 @@ namespace fxe::js {
         msg += ": ";
         msg.append(reason);
       }
-      auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, "name"_v8(iso), "AbortError"_v8(iso));
-      (void)err->Set(ctx, "code"_v8(iso), "ABORT_ERR"_v8(iso));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(ctx, err, "name", "AbortError");
+      set_prop(ctx, err, "code", "ABORT_ERR");
       return err;
     }
 
-    Local<Object> signal_from_options(Isolate* iso, Local<Context> ctx,
+    Local<Object> signal_from_options([[maybe_unused]] Isolate* iso, Local<Context> ctx,
                                       const FunctionCallbackInfo<Value>& info, int index) {
       if (info.Length() <= index || !info[index]->IsObject())
         return Local<Object>();
-      Local<Value> signal_value;
-      if (!info[index].As<Object>()->Get(ctx, "signal"_v8(iso)).ToLocal(&signal_value))
+      auto signal_value = get_prop<Local<Value>>(ctx, info[index].As<Object>(), "signal");
+      if (!signal_value || !(*signal_value)->IsObject())
         return Local<Object>();
-      if (!signal_value->IsObject())
-        return Local<Object>();
-      return signal_value.As<Object>();
+      return signal_value->As<Object>();
     }
 
     bool signal_is_aborted(Isolate* iso, Local<Context> ctx, Local<Object> signal) {
       if (signal.IsEmpty())
         return false;
-      Local<Value> aborted;
-      if (!signal->Get(ctx, "aborted"_v8(iso)).ToLocal(&aborted))
+      auto aborted = get_prop<Local<Value>>(ctx, signal, "aborted");
+      if (!aborted)
         return false;
-      return aborted->BooleanValue(iso);
+      return (*aborted)->BooleanValue(iso);
     }
 
     std::string signal_reason(Isolate* iso, Local<Context> ctx, Local<Object> signal) {
       if (signal.IsEmpty())
         return {};
-      Local<Value> reason;
-      if (!signal->Get(ctx, "reason"_v8(iso)).ToLocal(&reason) || reason->IsUndefined() ||
-          reason->IsNull())
+      auto reason = get_prop<Local<Value>>(ctx, signal, "reason");
+      if (!reason || (*reason)->IsUndefined() || (*reason)->IsNull())
         return {};
-      return utf8(iso, reason);
+      return to_std_string(iso, *reason);
     }
 
     void install_abort_listener(Isolate* iso, Local<Context> ctx, fs_async_work& work,
                                 Local<Object> signal) {
       if (signal.IsEmpty())
         return;
-      Local<Value> add_value;
-      if (!signal->Get(ctx, "addEventListener"_v8(iso)).ToLocal(&add_value) ||
-          !add_value->IsFunction())
+      auto add_value = get_prop<Local<Value>>(ctx, signal, "addEventListener");
+      if (!add_value || !(*add_value)->IsFunction())
         return;
       auto* listener_ctx = new fs_abort_listener_ctx{work.cancel, nullptr};
       auto data = make_external(iso, listener_ctx);
@@ -1502,7 +1482,7 @@ namespace fxe::js {
       Local<Value> argv[] = {"abort"_v8(iso), listener};
       TryCatch try_catch(iso);
       Local<Value> ignored;
-      (void)add_value.As<Function>()->Call(ctx, signal, 2, argv).ToLocal(&ignored);
+      (void)(*add_value).As<Function>()->Call(ctx, signal, 2, argv).ToLocal(&ignored);
       if (try_catch.HasCaught()) {
         try_catch.Reset();
         delete listener_ctx;
@@ -1519,9 +1499,8 @@ namespace fxe::js {
       if (work.signal.IsEmpty() || work.abort_listener.IsEmpty())
         return;
       auto signal = work.signal.Get(iso);
-      Local<Value> remove_value;
-      if (!signal->Get(ctx, "removeEventListener"_v8(iso)).ToLocal(&remove_value) ||
-          !remove_value->IsFunction()) {
+      auto remove_value = get_prop<Local<Value>>(ctx, signal, "removeEventListener");
+      if (!remove_value || !(*remove_value)->IsFunction()) {
         work.abort_listener.Reset();
         work.signal.Reset();
         return;
@@ -1530,7 +1509,7 @@ namespace fxe::js {
       Local<Value> argv[] = {"abort"_v8(iso), listener};
       TryCatch try_catch(iso);
       Local<Value> ignored;
-      (void)remove_value.As<Function>()->Call(ctx, signal, 2, argv).ToLocal(&ignored);
+      (void)(*remove_value).As<Function>()->Call(ctx, signal, 2, argv).ToLocal(&ignored);
       if (try_catch.HasCaught())
         try_catch.Reset();
       work.abort_listener.Reset();
@@ -1714,9 +1693,9 @@ namespace fxe::js {
       switch (work->kind) {
       case fs_async_kind::read_file:
         if (work->encoding == read_encoding::utf8) {
-          value = String::NewFromUtf8(iso, reinterpret_cast<const char*>(work->bytes.data()),
-                                      NewStringType::kNormal, static_cast<int>(work->bytes.size()))
-                      .ToLocalChecked();
+          value =
+              to_v8_string(iso, std::string_view(reinterpret_cast<const char*>(work->bytes.data()),
+                                                 work->bytes.size()));
         } else {
           value = bytes_to_uint8(iso, work->bytes);
         }
@@ -1730,7 +1709,7 @@ namespace fxe::js {
         break;
       case fs_async_kind::realpath:
       case fs_async_kind::readlink:
-        value = str(iso, work->text);
+        value = to_v8_string(iso, work->text);
         break;
       case fs_async_kind::exists:
         value = Boolean::New(iso, work->bool_result);
@@ -1812,9 +1791,9 @@ namespace fxe::js {
       switch (work->kind) {
       case fs_async_kind::read_file:
         if (work->encoding == read_encoding::utf8) {
-          value = String::NewFromUtf8(iso, reinterpret_cast<const char*>(work->bytes.data()),
-                                      NewStringType::kNormal, static_cast<int>(work->bytes.size()))
-                      .ToLocalChecked();
+          value =
+              to_v8_string(iso, std::string_view(reinterpret_cast<const char*>(work->bytes.data()),
+                                                 work->bytes.size()));
         } else {
           value = bytes_to_uint8(iso, work->bytes);
         }
@@ -1828,7 +1807,7 @@ namespace fxe::js {
         break;
       case fs_async_kind::realpath:
       case fs_async_kind::readlink:
-        value = str(iso, work->text);
+        value = to_v8_string(iso, work->text);
         break;
       case fs_async_kind::exists:
         value = Boolean::New(iso, work->bool_result);
@@ -1859,7 +1838,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("readFile(path, opts?)"_v8(iso))));
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       auto work = make_work(fs_async_kind::read_file, p, "open");
@@ -1876,7 +1855,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("writeFile(path, data)"_v8(iso))));
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       auto work = make_work(append ? fs_async_kind::append_file : fs_async_kind::write_file, p,
@@ -1903,7 +1882,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("stat(path)"_v8(iso))));
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       queue_fs_async(info, make_work(fs_async_kind::stat, p, "stat"),
@@ -1919,7 +1898,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("readdir(path)"_v8(iso))));
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       auto work = make_work(fs_async_kind::readdir, p, "scandir");
@@ -1936,7 +1915,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("mkdir(path)"_v8(iso))));
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       auto work = make_work(fs_async_kind::mkdir, p, "mkdir");
@@ -1952,7 +1931,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("rm(path)"_v8(iso))));
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       auto work = make_work(fs_async_kind::rm, p, "unlink");
@@ -1970,8 +1949,8 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("rename(from, to)"_v8(iso))));
         return;
       }
-      auto from = utf8(iso, info[0]);
-      auto to = utf8(iso, info[1]);
+      auto from = to_std_string(iso, info[0]);
+      auto to = to_std_string(iso, info[1]);
       if (!guard_fs_async(iso, ctx, info, from) || !guard_fs_async(iso, ctx, info, to))
         return;
       auto work = make_work(fs_async_kind::rename, from, "rename");
@@ -1988,7 +1967,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("realpath(path)"_v8(iso))));
         return;
       }
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       queue_fs_async(info, make_work(fs_async_kind::realpath, p, "realpath"),
@@ -1999,7 +1978,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, p))
         return;
       queue_fs_async(info, make_work(fs_async_kind::exists, p, "access"),
@@ -2015,8 +1994,8 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("copyFile(src, dest)"_v8(iso))));
         return;
       }
-      auto src = utf8(iso, info[0]);
-      auto dest = utf8(iso, info[1]);
+      auto src = to_std_string(iso, info[0]);
+      auto dest = to_std_string(iso, info[1]);
       if (!guard_fs_async(iso, ctx, info, src) || !guard_fs_async(iso, ctx, info, dest))
         return;
       auto work = make_work(fs_async_kind::copy_file, src, "copyfile");
@@ -2033,8 +2012,8 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("cp(src, dest, opts?)"_v8(iso))));
         return;
       }
-      auto src = utf8(iso, info[0]);
-      auto dest = utf8(iso, info[1]);
+      auto src = to_std_string(iso, info[0]);
+      auto dest = to_std_string(iso, info[1]);
       if (!guard_fs_async(iso, ctx, info, src) || !guard_fs_async(iso, ctx, info, dest))
         return;
       auto work = make_work(fs_async_kind::cp, src, "cp");
@@ -2053,15 +2032,15 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("symlink(target, path, type?)"_v8(iso))));
         return;
       }
-      auto target = utf8(iso, info[0]);
-      auto link_path = utf8(iso, info[1]);
+      auto target = to_std_string(iso, info[0]);
+      auto link_path = to_std_string(iso, info[1]);
       auto guarded_target = guarded_symlink_target_path(target, link_path).generic_string();
       if (!guard_fs_async(iso, ctx, info, guarded_target) ||
           !guard_fs_async(iso, ctx, info, link_path))
         return;
       auto work = make_work(fs_async_kind::symlink, target, "symlink");
       work->path2 = link_path;
-      work->text = info.Length() >= 3 && info[2]->IsString() ? utf8(iso, info[2]) : "";
+      work->text = info.Length() >= 3 && info[2]->IsString() ? to_std_string(iso, info[2]) : "";
       auto signal = signal_from_options(iso, ctx, info, 2);
       if (signal.IsEmpty())
         signal = signal_from_options(iso, ctx, info, 3);
@@ -2077,8 +2056,8 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("link(existing, path)"_v8(iso))));
         return;
       }
-      auto existing = utf8(iso, info[0]);
-      auto new_path = utf8(iso, info[1]);
+      auto existing = to_std_string(iso, info[0]);
+      auto new_path = to_std_string(iso, info[1]);
       if (!guard_fs_async(iso, ctx, info, existing) || !guard_fs_async(iso, ctx, info, new_path))
         return;
       auto work = make_work(fs_async_kind::link, existing, "link");
@@ -2095,7 +2074,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("access(path, mode?)"_v8(iso))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       auto work = make_work(fs_async_kind::access, path, "access");
@@ -2116,7 +2095,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("chmod(path, mode)"_v8(iso))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       auto work = make_work(fs_async_kind::chmod, path, "chmod");
@@ -2133,7 +2112,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("lchmod(path, mode)"_v8(iso))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       auto work = make_work(fs_async_kind::lchmod, path, "lchmod");
@@ -2150,7 +2129,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("chown(path, uid, gid)"_v8(iso))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       auto work = make_work(fs_async_kind::chown, path, "chown");
@@ -2164,13 +2143,13 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(
-            rejected(iso, ctx,
-                     Exception::TypeError(str(iso, nofollow ? "lutimes(path, atime, mtime)"
+        info.GetReturnValue().Set(rejected(
+            iso, ctx,
+            Exception::TypeError(to_v8_string(iso, nofollow ? "lutimes(path, atime, mtime)"
                                                             : "utimes(path, atime, mtime)"))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       auto work = make_work(nofollow ? fs_async_kind::lutimes : fs_async_kind::utimes, path,
@@ -2197,7 +2176,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("writeFileAtomic(path, data)"_v8(iso))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       auto work = make_work(fs_async_kind::write_file_atomic, path, "writeFileAtomic");
@@ -2248,7 +2227,7 @@ namespace fxe::js {
             rejected(iso, ctx, Exception::TypeError("readlink(path)"_v8(iso))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       queue_fs_async(info, make_work(fs_async_kind::readlink, path, "readlink"),
@@ -2263,7 +2242,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(rejected(iso, ctx, Exception::TypeError("lstat(path)"_v8(iso))));
         return;
       }
-      auto path = utf8(iso, info[0]);
+      auto path = to_std_string(iso, info[0]);
       if (!guard_fs_async(iso, ctx, info, path))
         return;
       queue_fs_async(info, make_work(fs_async_kind::lstat, path, "lstat"),
@@ -2354,14 +2333,13 @@ namespace fxe::js {
         return;
       }
 
-      const std::string path = utf8(iso, info[0]);
+      const std::string path = to_std_string(iso, info[0]);
       if (!guard_fs(iso, path))
         return;
       bool recursive = false;
       if (!options->IsUndefined() && options->IsObject()) {
-        Local<Value> recursive_value;
-        if (options.As<Object>()->Get(ctx, "recursive"_v8(iso)).ToLocal(&recursive_value))
-          recursive = recursive_value->BooleanValue(iso);
+        if (auto recursive_value = get_prop<Local<Value>>(ctx, options.As<Object>(), "recursive"))
+          recursive = (*recursive_value)->BooleanValue(iso);
       }
 
       auto* state = new fs_watch_state();
@@ -2383,8 +2361,8 @@ namespace fxe::js {
                   auto ctx = state->context.Get(iso);
                   Context::Scope scope(ctx);
                   auto cb = state->callback.Get(iso);
-                  Local<Value> argv[] = {str(iso, watch_event_name(event_kind)),
-                                         str(iso, watch_basename(event_path))};
+                  Local<Value> argv[] = {to_v8_string(iso, watch_event_name(event_kind)),
+                                         to_v8_string(iso, watch_basename(event_path))};
                   Local<Value> ignored;
                   (void)cb->Call(ctx, Undefined(iso), 2, argv).ToLocal(&ignored);
                 });

@@ -1,6 +1,7 @@
 #include "runtime/v8/native/zlib.hpp"
 
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <zlib.h>
 
@@ -15,32 +16,17 @@ namespace fxe::runtime {
   namespace {
     using namespace v8;
 
+    using namespace fxe::js;
     constexpr usize kGrowChunk = 64u * 1024u;
 
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    void add_function(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                      FunctionCallback cb) {
-      auto fn = Function::New(ctx, cb).ToLocalChecked();
-      (void)obj->Set(ctx, str(iso, name), fn);
-    }
-
-    bool get_property(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                      Local<Value>& out) {
-      return obj->Get(ctx, str(iso, name)).ToLocal(&out) && !out->IsUndefined() && !out->IsNull();
-    }
-
-    int int_option(Isolate* iso, Local<Context> ctx, Local<Value> opts_value, const char* name,
-                   int fallback) {
+    int int_option(Local<Context> ctx, Local<Value> opts_value, const char* name, int fallback) {
       if (opts_value.IsEmpty() || !opts_value->IsObject())
         return fallback;
-      Local<Value> value;
-      if (!get_property(iso, ctx, opts_value.As<Object>(), name, value))
-        return fallback;
-      return value->Int32Value(ctx).FromMaybe(fallback);
+      if (auto value = get_prop<Local<Value>>(ctx, opts_value.As<Object>(), name)) {
+        if (!(*value)->IsUndefined() && !(*value)->IsNull())
+          return (*value)->Int32Value(ctx).FromMaybe(fallback);
+      }
+      return fallback;
     }
 
     const char* zlib_code_name(int code) {
@@ -62,26 +48,6 @@ namespace fxe::runtime {
       }
     }
 
-    void throw_js_error(Isolate* iso, Local<Context> ctx, std::string_view message,
-                        std::string_view code) {
-      auto err_value = Exception::Error(str(iso, message));
-      if (!err_value->IsObject()) {
-        iso->ThrowException(err_value);
-        return;
-      }
-      auto err = err_value.As<Object>();
-      (void)err->Set(ctx, "code"_v8(iso), str(iso, code));
-      iso->ThrowException(err);
-    }
-
-    void throw_type_error(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::TypeError(str(iso, message)));
-    }
-
-    void throw_range_error(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::RangeError(str(iso, message)));
-    }
-
     void throw_zlib_error(Isolate* iso, Local<Context> ctx, std::string_view op, int code,
                           const z_stream& stream) {
       std::string message(op);
@@ -92,7 +58,7 @@ namespace fxe::runtime {
         const char* zmsg = zError(code);
         message += zmsg ? zmsg : "zlib failure";
       }
-      throw_js_error(iso, ctx, message, zlib_code_name(code));
+      throw_coded_error(iso, ctx, zlib_code_name(code), message);
     }
 
     bool fill_input(z_stream& stream, const Bytef* data, usize size, usize& consumed) {
@@ -246,17 +212,17 @@ namespace fxe::runtime {
                                  const FunctionCallbackInfo<Value>& info, int default_window_bits) {
       Local<Value> opts = info.Length() > 1 ? info[1] : Undefined(iso);
       sync_options out;
-      out.level = int_option(iso, ctx, opts, "level", Z_DEFAULT_COMPRESSION);
-      out.window_bits = int_option(iso, ctx, opts, "windowBits", default_window_bits);
-      out.mem_level = int_option(iso, ctx, opts, "memLevel", 8);
-      out.strategy = int_option(iso, ctx, opts, "strategy", Z_DEFAULT_STRATEGY);
+      out.level = int_option(ctx, opts, "level", Z_DEFAULT_COMPRESSION);
+      out.window_bits = int_option(ctx, opts, "windowBits", default_window_bits);
+      out.mem_level = int_option(ctx, opts, "memLevel", 8);
+      out.strategy = int_option(ctx, opts, "strategy", Z_DEFAULT_STRATEGY);
       return out;
     }
 
     int inflate_window_bits(Isolate* iso, Local<Context> ctx,
                             const FunctionCallbackInfo<Value>& info, int fallback) {
       Local<Value> opts = info.Length() > 1 ? info[1] : Undefined(iso);
-      return int_option(iso, ctx, opts, "windowBits", fallback);
+      return int_option(ctx, opts, "windowBits", fallback);
     }
 
     void deflate_sync_impl(const FunctionCallbackInfo<Value>& info, std::string_view op,
@@ -376,14 +342,14 @@ namespace fxe::runtime {
 
     Local<Object> make_zlib_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "deflateSync", deflate_sync);
-      add_function(iso, ctx, ns, "inflateSync", inflate_sync_callback);
-      add_function(iso, ctx, ns, "gzipSync", gzip_sync);
-      add_function(iso, ctx, ns, "gunzipSync", gunzip_sync);
-      add_function(iso, ctx, ns, "deflateRawSync", deflate_raw_sync);
-      add_function(iso, ctx, ns, "inflateRawSync", inflate_raw_sync);
-      add_function(iso, ctx, ns, "crc32", crc32_callback);
-      add_function(iso, ctx, ns, "adler32", adler32_callback);
+      add_function(ctx, ns, "deflateSync", deflate_sync);
+      add_function(ctx, ns, "inflateSync", inflate_sync_callback);
+      add_function(ctx, ns, "gzipSync", gzip_sync);
+      add_function(ctx, ns, "gunzipSync", gunzip_sync);
+      add_function(ctx, ns, "deflateRawSync", deflate_raw_sync);
+      add_function(ctx, ns, "inflateRawSync", inflate_raw_sync);
+      add_function(ctx, ns, "crc32", crc32_callback);
+      add_function(ctx, ns, "adler32", adler32_callback);
       return ns;
     }
   } // namespace
@@ -396,9 +362,9 @@ namespace fxe::runtime {
       native = native_value.As<Object>();
     } else {
       native = Object::New(iso);
-      (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
-                                             static_cast<PropertyAttribute>(DontEnum));
+      define_prop(ctx, ctx->Global(), "__fxe_native"_v8, native,
+                  static_cast<PropertyAttribute>(DontEnum));
     }
-    (void)native->Set(ctx, "zlib"_v8(iso), make_zlib_namespace(iso, ctx));
+    set_prop(ctx, native, "zlib", make_zlib_namespace(iso, ctx));
   }
 } // namespace fxe::runtime

@@ -249,21 +249,6 @@ namespace fxe::js {
       return json{json::object()};
     }
 
-    v8::Local<v8::String> v8_string(v8::Isolate* iso, std::string_view s) {
-      return v8::String::NewFromUtf8(iso, s.data(), v8::NewStringType::kNormal,
-                                     static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    std::string to_std_string(v8::Isolate* iso, v8::Local<v8::Value> value) {
-      if (value.IsEmpty())
-        return {};
-      v8::String::Utf8Value utf8(iso, value);
-      if (!*utf8)
-        return {};
-      return std::string(*utf8, utf8.length());
-    }
-
     bool hmr_path_arg(const v8::FunctionCallbackInfo<v8::Value>& info, std::string& out) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1 || !info[0]->IsString()) {
@@ -289,7 +274,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto out = v8::Array::New(iso, static_cast<int>(evicted.size()));
       for (u32 i = 0; i < evicted.size(); ++i)
-        (void)out->Set(ctx, i, v8_string(iso, evicted[i]));
+        set_index(ctx, out, i, evicted[i]);
       info.GetReturnValue().Set(out);
     }
 
@@ -315,23 +300,20 @@ namespace fxe::js {
 
   void install_hmr_native_bindings(v8::Isolate* iso, v8::Local<v8::Context> ctx) {
     auto global = ctx->Global();
-    v8::Local<v8::Value> native_value;
     v8::Local<v8::Object> native;
     auto native_key = "__fxe_native"_v8(iso);
-    if (global->Get(ctx, native_key).ToLocal(&native_value) && native_value->IsObject()) {
-      native = native_value.As<v8::Object>();
+    if (auto native_obj = get_prop<v8::Local<v8::Object>>(ctx, global, native_key)) {
+      native = *native_obj;
     } else {
       native = v8::Object::New(iso);
-      (void)global->DefineOwnProperty(ctx, native_key, native,
-                                      static_cast<v8::PropertyAttribute>(v8::DontEnum));
+      define_prop(ctx, global, native_key, native,
+                  static_cast<v8::PropertyAttribute>(v8::DontEnum));
     }
 
     auto hmr = v8::Object::New(iso);
-    (void)hmr->Set(ctx, "invalidate"_v8(iso),
-                   v8::Function::New(ctx, hmr_invalidate_callback).ToLocalChecked());
-    (void)hmr->Set(ctx, "reimport"_v8(iso),
-                   v8::Function::New(ctx, hmr_reimport_callback).ToLocalChecked());
-    (void)native->Set(ctx, "hmr"_v8(iso), hmr);
+    add_function(ctx, hmr, "invalidate"_v8, hmr_invalidate_callback);
+    add_function(ctx, hmr, "reimport"_v8, hmr_reimport_callback);
+    set_prop(ctx, native, "hmr"_v8, hmr);
   }
 
   // Called by host::host(). The static-init pattern is unreliable for

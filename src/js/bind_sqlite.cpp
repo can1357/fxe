@@ -114,21 +114,11 @@ namespace fxe::js {
 
     // --- utilities -----------------------------------------------------------
 
-    Local<String> s(Isolate* iso, std::string_view sv) {
-      return String::NewFromUtf8(iso, sv.data(), NewStringType::kNormal,
-                                 static_cast<int>(sv.size()))
-          .ToLocalChecked();
-    }
-
-    Local<String> s(Isolate* iso, const char* z) {
-      return String::NewFromUtf8(iso, z ? z : "", NewStringType::kNormal).ToLocalChecked();
-    }
-
     [[nodiscard]] bool throw_sqlite(Isolate* iso, sqlite3* db, const char* fallback = nullptr) {
       const char* msg = db ? sqlite3_errmsg(db) : fallback;
       if (!msg || !*msg)
         msg = fallback ? fallback : "sqlite error";
-      auto err = Exception::Error(s(iso, msg));
+      auto err = Exception::Error(to_v8(iso, msg));
       if (db && err->IsObject()) {
         auto ctx = iso->GetCurrentContext();
         auto o = err.As<Object>();
@@ -454,7 +444,8 @@ namespace fxe::js {
       int n = sqlite3_column_count(sh->stmt);
       for (int i = 0; i < n; ++i) {
         const auto& name = sh->column_names[static_cast<usize>(i)];
-        (void)row->Set(ctx, s(iso, name), column_value(iso, ctx, sh->stmt, i, safe_integers));
+        (void)row->Set(ctx, to_v8_string(iso, name),
+                       column_value(iso, ctx, sh->stmt, i, safe_integers));
       }
       return row;
     }
@@ -602,15 +593,15 @@ namespace fxe::js {
       if (!sh)
         return;
       if (sh->finalized || !sh->stmt) {
-        info.GetReturnValue().Set(s(iso, sh->sql));
+        info.GetReturnValue().Set(to_v8_string(iso, sh->sql));
         return;
       }
       char* expanded = sqlite3_expanded_sql(sh->stmt);
       if (expanded) {
-        info.GetReturnValue().Set(s(iso, expanded));
+        info.GetReturnValue().Set(to_v8_string(iso, expanded ? expanded : ""));
         sqlite3_free(expanded);
       } else {
-        info.GetReturnValue().Set(s(iso, sh->sql));
+        info.GetReturnValue().Set(to_v8_string(iso, sh->sql));
       }
     }
 
@@ -719,7 +710,7 @@ namespace fxe::js {
       auto arr = Array::New(iso, n);
       for (int i = 0; i < n; ++i) {
         const char* nm = sqlite3_column_name(sh->stmt, i);
-        (void)arr->Set(ctx, static_cast<u32>(i), s(iso, nm ? nm : ""));
+        (void)arr->Set(ctx, static_cast<u32>(i), to_v8(iso, nm ? nm : ""));
       }
       info.GetReturnValue().Set(arr);
     }
@@ -1145,7 +1136,7 @@ namespace fxe::js {
         return;
       }
       const char* fn = sqlite3_db_filename(dh->db, "main");
-      info.GetReturnValue().Set(s(iso, fn ? fn : ""));
+      info.GetReturnValue().Set(to_v8(iso, fn ? fn : ""));
     }
 
     void db_get_handle(const FunctionCallbackInfo<Value>& info) {
@@ -1159,7 +1150,7 @@ namespace fxe::js {
     bool read_bool_opt(Isolate* iso, Local<Context> ctx, Local<Object> opts, const char* key,
                        bool def) {
       Local<Value> v;
-      if (opts->Get(ctx, s(iso, key)).ToLocal(&v) && !v->IsUndefined())
+      if (opts->Get(ctx, to_v8(iso, key)).ToLocal(&v) && !v->IsUndefined())
         return v->BooleanValue(iso);
       return def;
     }
@@ -1232,7 +1223,7 @@ namespace fxe::js {
       dh->bind(iso, self);
 
       // Stash filename for diagnostics.
-      (void)self->Set(ctx, "filename"_v8(iso), s(iso, filename));
+      (void)self->Set(ctx, "filename"_v8(iso), to_v8_string(iso, filename));
     }
 
     void db_static_deserialize(const FunctionCallbackInfo<Value>& info) {
@@ -1355,7 +1346,7 @@ namespace fxe::js {
       auto o = Object::New(iso);
       auto ctx = iso->GetCurrentContext();
       auto put = [&](const char* name, int val) {
-        (void)o->Set(ctx, s(iso, name), Integer::New(iso, val));
+        (void)o->Set(ctx, to_v8(iso, name), Integer::New(iso, val));
       };
       put("SQLITE_OPEN_READONLY", SQLITE_OPEN_READONLY);
       put("SQLITE_OPEN_READWRITE", SQLITE_OPEN_READWRITE);
@@ -1378,7 +1369,7 @@ namespace fxe::js {
 
     Local<Function> build_version_fn(Isolate* /*iso*/, Local<Context> ctx) {
       auto fn = Function::New(ctx, [](const FunctionCallbackInfo<Value>& info) {
-                  info.GetReturnValue().Set(s(info.GetIsolate(), sqlite3_libversion()));
+                  info.GetReturnValue().Set(to_v8(info.GetIsolate(), sqlite3_libversion()));
                 }).ToLocalChecked();
       return fn;
     }
@@ -1409,7 +1400,7 @@ namespace fxe::js {
       auto version = build_version_fn(iso, ctx);
 
       auto set = [&](const char* name, Local<Value> v) -> bool {
-        auto m = mod->SetSyntheticModuleExport(iso, s(iso, name), v);
+        auto m = mod->SetSyntheticModuleExport(iso, to_v8(iso, name), v);
         return m.IsJust() && m.FromJust();
       };
       if (!set("Database", db_fn))

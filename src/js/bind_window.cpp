@@ -44,33 +44,13 @@
 #include "runtime/uv_loop.hpp"
 #include "weak_holder.hpp"
 #include <fxe/v8_helpers.hpp>
+#include <fxe/v8_template_cache.hpp>
 
 namespace fxe::js {
   namespace {
     using namespace v8;
-    using TplGlobal = Global<FunctionTemplate>;
-    std::unordered_map<Isolate*, TplGlobal>& win_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-    void throw_native_error(Isolate* iso, const std::exception& err) {
-      (void)throw_error(iso, err.what());
-    }
-
-    void win_reset_for_isolate(Isolate* iso) {
-      auto& t = win_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-    struct win_resetter_register {
-      win_resetter_register() {
-        register_template_resetter(&win_reset_for_isolate);
-      }
-    };
-    static win_resetter_register s_win_resetter_register;
+    struct win_tag {};
+    using win_tpl_cache = template_isolate_cache<win_tag>;
 
     struct listener_entry {
       u64 token;
@@ -240,31 +220,7 @@ namespace fxe::js {
       return id > 0 ? static_cast<uint64_t>(id) : 0;
     }
 
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string();
-    }
-
     // ---- option-bag helpers -------------------------------------------------
-
-    bool get_prop(Local<Context> ctx, Local<Object> o, Local<String> a, Local<Value>& out,
-                  Local<String> b = {}) {
-      Local<Value> v;
-      if (o->Get(ctx, a).ToLocal(&v) && !v->IsUndefined()) {
-        out = v;
-        return true;
-      }
-      if (!b.IsEmpty() && o->Get(ctx, b).ToLocal(&v) && !v->IsUndefined()) {
-        out = v;
-        return true;
-      }
-      return false;
-    }
 
     int next_window_capability_id() {
       static std::atomic<int> next{1};
@@ -283,13 +239,13 @@ namespace fxe::js {
       out.clear();
       out.reserve(length);
       for (u32 i = 0; i < length; ++i) {
-        Local<Value> item;
-        if (!array->Get(ctx, i).ToLocal(&item) || !item->IsString()) {
+        auto item = get_index<Local<Value>>(ctx, array, i);
+        if (!item || !(*item)->IsString()) {
           (void)throw_type_error(iso,
                                  std::string("permissions.") + name + " entries must be strings");
           return false;
         }
-        out.push_back(utf8(iso, item));
+        out.push_back(to_std_string(iso, *item));
       }
       return true;
     }
@@ -297,18 +253,18 @@ namespace fxe::js {
     template <typename AllowList>
     bool parse_string_allowlist(Isolate* iso, Local<Context> ctx, Local<Object> perms,
                                 Local<String> key, const char* name, AllowList& out) {
-      Local<Value> value;
-      if (!perms->Get(ctx, key).ToLocal(&value) || value->IsUndefined())
+      auto value = get_prop<Local<Value>>(ctx, perms, key);
+      if (!value || (*value)->IsUndefined())
         return true;
-      if (value->IsBoolean()) {
-        if (value->BooleanValue(iso))
+      if ((*value)->IsBoolean()) {
+        if ((*value)->BooleanValue(iso))
           out = std::nullopt;
         else
           out = std::vector<std::string>{};
         return true;
       }
       std::vector<std::string> entries;
-      if (!read_string_array(iso, ctx, value, entries, name))
+      if (!read_string_array(iso, ctx, *value, entries, name))
         return false;
       out = std::move(entries);
       return true;
@@ -317,14 +273,14 @@ namespace fxe::js {
     template <typename BoolAllow>
     bool parse_boolean_allow(Isolate* iso, Local<Context> ctx, Local<Object> perms,
                              Local<String> key, const char* name, BoolAllow& out) {
-      Local<Value> value;
-      if (!perms->Get(ctx, key).ToLocal(&value) || value->IsUndefined())
+      auto value = get_prop<Local<Value>>(ctx, perms, key);
+      if (!value || (*value)->IsUndefined())
         return true;
-      if (!value->IsBoolean()) {
+      if (!(*value)->IsBoolean()) {
         (void)throw_type_error(iso, std::string("permissions.") + name + " must be boolean");
         return false;
       }
-      if (value->BooleanValue(iso))
+      if ((*value)->BooleanValue(iso))
         out = std::nullopt;
       else
         out = false;
@@ -342,11 +298,11 @@ namespace fxe::js {
     bool
     parse_webauthn_permissions(Isolate* iso, Local<Context> ctx, Local<Object> perms,
                                std::optional<fxe::runtime::capability_set::webauthn_policy>& out) {
-      Local<Value> value;
-      if (!perms->Get(ctx, "webauthn"_v8(iso)).ToLocal(&value) || value->IsUndefined())
+      auto value = get_prop<Local<Value>>(ctx, perms, "webauthn"_v8(iso));
+      if (!value || (*value)->IsUndefined())
         return true;
-      if (value->IsBoolean()) {
-        if (value->BooleanValue(iso)) {
+      if ((*value)->IsBoolean()) {
+        if ((*value)->BooleanValue(iso)) {
           // Phase 1 dev sugar: empty rp_ids + allow_virtual_authenticator means
           // allow any RP ID through the virtual authenticator.
           fxe::runtime::capability_set::webauthn_policy policy;
@@ -357,57 +313,60 @@ namespace fxe::js {
         }
         return true;
       }
-      if (!value->IsObject()) {
+      if (!(*value)->IsObject()) {
         (void)throw_type_error(iso, "permissions.webauthn must be boolean or an object");
         return false;
       }
 
-      auto obj = value.As<Object>();
+      auto obj = (*value).As<Object>();
       fxe::runtime::capability_set::webauthn_policy policy;
-      Local<Value> field;
-      if (!obj->Get(ctx, "rpIds"_v8(iso)).ToLocal(&field) || !field->IsArray()) {
+      auto rp_ids = get_prop<Local<Value>>(ctx, obj, "rpIds"_v8(iso));
+      if (!rp_ids || !(*rp_ids)->IsArray()) {
         (void)throw_type_error(iso, "permissions.webauthn.rpIds must be a string[]");
         return false;
       }
-      if (!read_string_array(iso, ctx, field, policy.rp_ids, "webauthn.rpIds"))
+      if (!read_string_array(iso, ctx, *rp_ids, policy.rp_ids, "webauthn.rpIds"))
         return false;
 
-      if (obj->Get(ctx, "attestation"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
-        if (!field->IsString()) {
+      if (auto field = get_prop<Local<Value>>(ctx, obj, "attestation"_v8(iso));
+          field && !(*field)->IsUndefined()) {
+        if (!(*field)->IsString()) {
           (void)throw_type_error(iso, "permissions.webauthn.attestation must be a string");
           return false;
         }
-        policy.attestation = utf8(iso, field);
+        policy.attestation = to_std_string(iso, *field);
         if (!is_webauthn_attestation_value(policy.attestation)) {
           (void)throw_type_error(
               iso, "permissions.webauthn.attestation must be 'none', 'indirect', or 'direct'");
           return false;
         }
       }
-      if (obj->Get(ctx, "userVerification"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
-        if (!field->IsString()) {
+      if (auto field = get_prop<Local<Value>>(ctx, obj, "userVerification"_v8(iso));
+          field && !(*field)->IsUndefined()) {
+        if (!(*field)->IsString()) {
           (void)throw_type_error(iso, "permissions.webauthn.userVerification must be a string");
           return false;
         }
-        policy.user_verification = utf8(iso, field);
+        policy.user_verification = to_std_string(iso, *field);
         if (!is_webauthn_user_verification_value(policy.user_verification)) {
           (void)throw_type_error(iso, "permissions.webauthn.userVerification must be "
                                       "'discouraged', 'preferred', or 'required'");
           return false;
         }
       }
-      if (obj->Get(ctx, "transports"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
-        if (!read_string_array(iso, ctx, field, policy.transports, "webauthn.transports"))
+      if (auto field = get_prop<Local<Value>>(ctx, obj, "transports"_v8(iso));
+          field && !(*field)->IsUndefined()) {
+        if (!read_string_array(iso, ctx, *field, policy.transports, "webauthn.transports"))
           return false;
       }
-      if (obj->Get(ctx, "allowVirtualAuthenticator"_v8(iso)).ToLocal(&field) &&
-          !field->IsUndefined()) {
-        if (!field->IsBoolean()) {
+      if (auto field = get_prop<Local<Value>>(ctx, obj, "allowVirtualAuthenticator"_v8(iso));
+          field && !(*field)->IsUndefined()) {
+        if (!(*field)->IsBoolean()) {
           (void)throw_type_error(iso,
                                  "permissions.webauthn.allowVirtualAuthenticator must be boolean");
           return false;
         }
-        policy.allow_virtual_authenticator = field->BooleanValue(iso);
+        policy.allow_virtual_authenticator = (*field)->BooleanValue(iso);
       }
       if (policy.rp_ids.empty() && !policy.allow_virtual_authenticator) {
         (void)throw_type_error(iso, "permissions.webauthn.rpIds must be non-empty unless "
@@ -441,7 +400,7 @@ namespace fxe::js {
         Local<String> name = frame->GetScriptNameOrSourceURL();
         if (name.IsEmpty())
           continue;
-        auto s = utf8(iso, name);
+        auto s = to_std_string(iso, name);
         if (!s.empty() && !s.starts_with("<"))
           return s;
       }
@@ -688,98 +647,100 @@ namespace fxe::js {
     Local<Object> build_event_payload(Isolate* iso, Local<Context> ctx, const input_event& ev,
                                       const char* name) {
       auto o = Object::New(iso);
-      auto set = [&](Local<String> k, Local<Value> v) { (void)o->Set(ctx, k, v); };
-      set("type"_v8(iso), str(iso, name));
+      auto set = [&](Local<String> k, auto&& v) {
+        set_prop(ctx, o, k, std::forward<decltype(v)>(v));
+      };
+      set("type"_v8(iso), to_v8_string(iso, name));
       using K = input_event::kind_t;
       switch (ev.kind) {
       case K::key_down:
       case K::key_up:
-        set("key"_v8(iso), Integer::New(iso, ev.key));
-        set("scancode"_v8(iso), Integer::New(iso, ev.scancode));
-        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
+        set("key"_v8(iso), to_v8(iso, ev.key));
+        set("scancode"_v8(iso), to_v8(iso, ev.scancode));
+        set("modifiers"_v8(iso), to_v8(iso, ev.modifiers));
         break;
       case K::key_char:
-        set("key"_v8(iso), Integer::New(iso, ev.key));
-        set("scancode"_v8(iso), Integer::New(iso, ev.scancode));
-        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
+        set("key"_v8(iso), to_v8(iso, ev.key));
+        set("scancode"_v8(iso), to_v8(iso, ev.scancode));
+        set("modifiers"_v8(iso), to_v8(iso, ev.modifiers));
         set("codepoint"_v8(iso), Integer::NewFromUnsigned(iso, ev.codepoint));
         break;
       case K::mouse_move:
-        set("x"_v8(iso), Number::New(iso, ev.x));
-        set("y"_v8(iso), Number::New(iso, ev.y));
-        set("dx"_v8(iso), Number::New(iso, ev.dx));
-        set("dy"_v8(iso), Number::New(iso, ev.dy));
-        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
+        set("x"_v8(iso), to_v8(iso, ev.x));
+        set("y"_v8(iso), to_v8(iso, ev.y));
+        set("dx"_v8(iso), to_v8(iso, ev.dx));
+        set("dy"_v8(iso), to_v8(iso, ev.dy));
+        set("modifiers"_v8(iso), to_v8(iso, ev.modifiers));
         break;
       case K::mouse_button_down:
       case K::mouse_button_up:
-        set("x"_v8(iso), Number::New(iso, ev.x));
-        set("y"_v8(iso), Number::New(iso, ev.y));
-        set("button"_v8(iso), Integer::New(iso, ev.button));
-        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
+        set("x"_v8(iso), to_v8(iso, ev.x));
+        set("y"_v8(iso), to_v8(iso, ev.y));
+        set("button"_v8(iso), to_v8(iso, ev.button));
+        set("modifiers"_v8(iso), to_v8(iso, ev.modifiers));
         break;
       case K::mouse_wheel:
-        set("x"_v8(iso), Number::New(iso, ev.x));
-        set("y"_v8(iso), Number::New(iso, ev.y));
-        set("dx"_v8(iso), Number::New(iso, ev.dx));
-        set("dy"_v8(iso), Number::New(iso, ev.dy));
-        set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
-        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
-        set("precision"_v8(iso), Boolean::New(iso, ev.precision));
+        set("x"_v8(iso), to_v8(iso, ev.x));
+        set("y"_v8(iso), to_v8(iso, ev.y));
+        set("dx"_v8(iso), to_v8(iso, ev.dx));
+        set("dy"_v8(iso), to_v8(iso, ev.dy));
+        set("modifiers"_v8(iso), to_v8(iso, ev.modifiers));
+        set("phase"_v8(iso), to_v8_string(iso, scroll_phase_name(ev.scroll_phase)));
+        set("precision"_v8(iso), to_v8(iso, ev.precision));
         break;
       case K::gesture_pinch_begin:
       case K::gesture_pinch_change:
       case K::gesture_pinch_end:
         set("type"_v8(iso), "pinch"_v8(iso));
-        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
-        set("magnification"_v8(iso), Number::New(iso, static_cast<double>(ev.magnification)));
+        set("phase"_v8(iso), to_v8_string(iso, scroll_phase_name(ev.scroll_phase)));
+        set("magnification"_v8(iso), to_v8(iso, static_cast<double>(ev.magnification)));
         break;
       case K::gesture_rotate_begin:
       case K::gesture_rotate_change:
       case K::gesture_rotate_end:
         set("type"_v8(iso), "rotate"_v8(iso));
-        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
-        set("rotation"_v8(iso), Number::New(iso, static_cast<double>(ev.rotation_radians)));
+        set("phase"_v8(iso), to_v8_string(iso, scroll_phase_name(ev.scroll_phase)));
+        set("rotation"_v8(iso), to_v8(iso, static_cast<double>(ev.rotation_radians)));
         break;
       case K::gesture_swipe:
         set("type"_v8(iso), "swipe"_v8(iso));
-        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
-        set("dx"_v8(iso), Integer::New(iso, ev.swipe_dx));
-        set("dy"_v8(iso), Integer::New(iso, ev.swipe_dy));
+        set("phase"_v8(iso), to_v8_string(iso, scroll_phase_name(ev.scroll_phase)));
+        set("dx"_v8(iso), to_v8(iso, ev.swipe_dx));
+        set("dy"_v8(iso), to_v8(iso, ev.swipe_dy));
         break;
       case K::window_resize:
-        set("width"_v8(iso), Integer::New(iso, ev.width));
-        set("height"_v8(iso), Integer::New(iso, ev.height));
+        set("width"_v8(iso), to_v8(iso, ev.width));
+        set("height"_v8(iso), to_v8(iso, ev.height));
         break;
       case K::window_move:
-        set("x"_v8(iso), Integer::New(iso, ev.pos_x));
-        set("y"_v8(iso), Integer::New(iso, ev.pos_y));
+        set("x"_v8(iso), to_v8(iso, ev.pos_x));
+        set("y"_v8(iso), to_v8(iso, ev.pos_y));
         break;
       case K::window_scale:
-        set("scaleX"_v8(iso), Number::New(iso, static_cast<double>(ev.scale_x)));
-        set("scaleY"_v8(iso), Number::New(iso, static_cast<double>(ev.scale_y)));
+        set("scaleX"_v8(iso), to_v8(iso, static_cast<double>(ev.scale_x)));
+        set("scaleY"_v8(iso), to_v8(iso, static_cast<double>(ev.scale_y)));
         break;
       case K::drop_files: {
         auto arr = Array::New(iso, static_cast<int>(ev.paths.size()));
         for (usize i = 0; i < ev.paths.size(); ++i)
-          (void)arr->Set(ctx, static_cast<u32>(i), str(iso, ev.paths[i]));
+          set_index(ctx, arr, static_cast<u32>(i), ev.paths[i]);
         set("paths"_v8(iso), arr);
         break;
       }
       case K::drag_enter:
       case K::drag_over: {
-        set("x"_v8(iso), Number::New(iso, ev.x));
-        set("y"_v8(iso), Number::New(iso, ev.y));
+        set("x"_v8(iso), to_v8(iso, ev.x));
+        set("y"_v8(iso), to_v8(iso, ev.y));
         auto arr = Array::New(iso, static_cast<int>(ev.paths.size()));
         for (usize i = 0; i < ev.paths.size(); ++i)
-          (void)arr->Set(ctx, static_cast<u32>(i), str(iso, ev.paths[i]));
+          set_index(ctx, arr, static_cast<u32>(i), ev.paths[i]);
         set("paths"_v8(iso), arr);
         break;
       }
       case K::drag_leave:
         break;
       case K::message: {
-        set("channel"_v8(iso), str(iso, ev.message_channel));
+        set("channel"_v8(iso), to_v8_string(iso, ev.message_channel));
         auto arr = Array::New(iso, static_cast<int>(ev.message_args_serialised.size()));
         for (usize i = 0; i < ev.message_args_serialised.size(); ++i) {
           Local<Value> value;
@@ -787,15 +748,15 @@ namespace fxe::js {
             (void)throw_error(iso, "Window message payload could not be deserialized");
             return o;
           }
-          (void)arr->Set(ctx, static_cast<u32>(i), value);
+          set_index(ctx, arr, static_cast<u32>(i), value);
         }
         set("args"_v8(iso), arr);
         break;
       }
       case K::compose:
-        set("preedit"_v8(iso), str(iso, ev.preedit));
-        set("cursor"_v8(iso), Integer::New(iso, ev.cursor));
-        set("committed"_v8(iso), str(iso, ev.committed));
+        set("preedit"_v8(iso), to_v8_string(iso, ev.preedit));
+        set("cursor"_v8(iso), to_v8(iso, ev.cursor));
+        set("committed"_v8(iso), to_v8_string(iso, ev.committed));
         break;
       default:
         break;
@@ -834,7 +795,7 @@ namespace fxe::js {
           Local<Value> result;
           if (!fn->Call(ctx, ctx->Global(), 1, argv).ToLocal(&result)) {
             if (tc.HasCaught()) {
-              auto exc = utf8(iso, tc.Exception());
+              auto exc = to_std_string(iso, tc.Exception());
               FXE_ERROR("js.window", "uncaught in window handler ({}): {}", name, exc);
               tc.Reset();
             }
@@ -864,7 +825,19 @@ namespace fxe::js {
         auto o = info[0].As<Object>();
         Local<Value> v;
         auto get = [&](Local<String> a, Local<String> b = {}) -> bool {
-          return get_prop(ctx, o, a, v, b);
+          if (auto primary = fxe::js::get_prop<Local<Value>>(ctx, o, a);
+              primary && !(*primary)->IsUndefined()) {
+            v = *primary;
+            return true;
+          }
+          if (!b.IsEmpty()) {
+            if (auto secondary = fxe::js::get_prop<Local<Value>>(ctx, o, b);
+                secondary && !(*secondary)->IsUndefined()) {
+              v = *secondary;
+              return true;
+            }
+          }
+          return false;
         };
         if (get("width"_v8(iso)) && v->IsNumber())
           desc.width = v->Uint32Value(ctx).FromMaybe(desc.width);
@@ -897,9 +870,7 @@ namespace fxe::js {
         if (get("maxHeight"_v8(iso), "max_height"_v8(iso)) && v->IsNumber())
           desc.max_height = v->Int32Value(ctx).FromMaybe(0);
         if (get("title"_v8(iso)) && v->IsString()) {
-          String::Utf8Value u(iso, v);
-          if (*u)
-            h->title.assign(*u, u.length());
+          h->title = to_std_string(iso, v);
           desc.title = h->title;
         }
         if (get("preload"_v8(iso)) && !v->IsNull()) {
@@ -908,7 +879,7 @@ namespace fxe::js {
             (void)throw_type_error(iso, "WindowOptions.preload must be a string");
             return;
           }
-          preload = utf8(iso, v);
+          preload = to_std_string(iso, v);
         }
         Local<Value> iso_v;
         if (get("isolate"_v8(iso)) && !v->IsNullOrUndefined()) {
@@ -918,7 +889,7 @@ namespace fxe::js {
             (void)throw_type_error(iso, "WindowOptions.isolate must be 'shared' or 'own'");
             return;
           }
-          isolate_mode = utf8(iso, iso_v);
+          isolate_mode = to_std_string(iso, iso_v);
           if (isolate_mode != "shared" && isolate_mode != "own") {
             delete h;
             (void)throw_type_error(iso, "WindowOptions.isolate must be 'shared' or 'own'");
@@ -975,7 +946,7 @@ namespace fxe::js {
       }
       auto self = info.This();
       set_native(iso, self, h->owned.get(), TAG_WINDOW);
-      self->SetInternalField(2, Number::New(iso, static_cast<double>(h->isolate_runtime_id)));
+      self->SetInternalField(2, to_v8(iso, static_cast<double>(h->isolate_runtime_id)));
       holder_map()[h->owned.get()] = h;
       h->capability_id = next_window_capability_id();
       fxe::runtime::register_window_capabilities(h->capability_id, policy);
@@ -1001,7 +972,7 @@ namespace fxe::js {
     void win_get_isolate_id(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto id = window_runtime_id(iso, info.HolderV2());
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(id)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(id)));
     }
 
     // ---- pre-existing methods ----------------------------------------------
@@ -1029,8 +1000,8 @@ namespace fxe::js {
         return;
       auto sz = w->framebuffer_size();
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Integer::NewFromUnsigned(iso, sz.x));
-      (void)arr->Set(ctx, 1, Integer::NewFromUnsigned(iso, sz.y));
+      set_index(ctx, arr, 0, sz.x);
+      set_index(ctx, arr, 1, sz.y);
       info.GetReturnValue().Set(arr);
     }
     void win_set_vsync(const FunctionCallbackInfo<Value>& info) {
@@ -1093,7 +1064,7 @@ namespace fxe::js {
         }
         args.push_back(std::move(bytes));
       }
-      w->post_message(utf8(iso, info[0]), std::move(args));
+      w->post_message(to_std_string(iso, info[0]), std::move(args));
     }
 
     // ---- new window methods -------------------------------------------------
@@ -1103,7 +1074,7 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 1)
         return;
-      auto s = utf8(iso, info[0]);
+      auto s = to_std_string(iso, info[0]);
       w->set_title(s);
     }
     void win_title(const FunctionCallbackInfo<Value>& info) {
@@ -1111,7 +1082,7 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       if (!w)
         return;
-      info.GetReturnValue().Set(str(iso, w->get_title()));
+      info.GetReturnValue().Set(to_v8_string(iso, w->get_title()));
     }
     void win_set_size(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -1132,8 +1103,8 @@ namespace fxe::js {
         return;
       auto sz = w->content_size();
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Integer::NewFromUnsigned(iso, sz.x));
-      (void)arr->Set(ctx, 1, Integer::NewFromUnsigned(iso, sz.y));
+      set_index(ctx, arr, 0, sz.x);
+      set_index(ctx, arr, 1, sz.y);
       info.GetReturnValue().Set(arr);
     }
     void win_set_position(const FunctionCallbackInfo<Value>& info) {
@@ -1155,8 +1126,8 @@ namespace fxe::js {
         return;
       auto p = w->position();
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Integer::New(iso, p.x));
-      (void)arr->Set(ctx, 1, Integer::New(iso, p.y));
+      set_index(ctx, arr, 0, p.x);
+      set_index(ctx, arr, 1, p.y);
       info.GetReturnValue().Set(arr);
     }
     void win_bounds(const FunctionCallbackInfo<Value>& info) {
@@ -1168,10 +1139,10 @@ namespace fxe::js {
         return;
       auto bounds = w->get_bounds();
       auto obj = Object::New(iso);
-      (void)obj->Set(ctx, "x"_v8(iso), Integer::New(iso, bounds.x));
-      (void)obj->Set(ctx, "y"_v8(iso), Integer::New(iso, bounds.y));
-      (void)obj->Set(ctx, "width"_v8(iso), Integer::New(iso, bounds.z));
-      (void)obj->Set(ctx, "height"_v8(iso), Integer::New(iso, bounds.w));
+      set_prop(ctx, obj, "x"_v8, bounds.x);
+      set_prop(ctx, obj, "y"_v8, bounds.y);
+      set_prop(ctx, obj, "width"_v8, bounds.z);
+      set_prop(ctx, obj, "height"_v8, bounds.w);
       info.GetReturnValue().Set(obj);
     }
     void win_set_min_size(const FunctionCallbackInfo<Value>& info) {
@@ -1195,8 +1166,8 @@ namespace fxe::js {
         return;
       }
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Integer::New(iso, size->x));
-      (void)arr->Set(ctx, 1, Integer::New(iso, size->y));
+      set_index(ctx, arr, 0, size->x);
+      set_index(ctx, arr, 1, size->y);
       info.GetReturnValue().Set(arr);
     }
     void win_set_max_size(const FunctionCallbackInfo<Value>& info) {
@@ -1220,8 +1191,8 @@ namespace fxe::js {
         return;
       }
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Integer::New(iso, size->x));
-      (void)arr->Set(ctx, 1, Integer::New(iso, size->y));
+      set_index(ctx, arr, 0, size->x);
+      set_index(ctx, arr, 1, size->y);
       info.GetReturnValue().Set(arr);
     }
     void win_set_opacity(const FunctionCallbackInfo<Value>& info) {
@@ -1264,7 +1235,7 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       if (!w)
         return;
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(w->opacity())));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(w->opacity())));
     }
     void win_set_always_on_top(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -1310,7 +1281,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "setTitleBarStyle: expected style string");
         return;
       }
-      auto name = utf8(iso, info[0]);
+      auto name = to_std_string(iso, info[0]);
       title_bar_style style;
       if (!parse_title_bar_style(name, style)) {
         (void)throw_type_error(iso, "setTitleBarStyle: unknown style '" + name + "'");
@@ -1329,7 +1300,7 @@ namespace fxe::js {
       try {
         info.GetReturnValue().Set(w->set_traffic_light_position(x, y));
       } catch (const std::exception& err) {
-        throw_native_error(iso, err);
+        (void)throw_error(iso, err.what());
       }
     }
     void win_set_window_controls_overlay(const FunctionCallbackInfo<Value>& info) {
@@ -1343,7 +1314,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(
             w->set_window_controls_overlay(info.Length() >= 1 && info[0]->BooleanValue(iso)));
       } catch (const std::exception& err) {
-        throw_native_error(iso, err);
+        (void)throw_error(iso, err.what());
       }
     }
     void win_set_vibrancy(const FunctionCallbackInfo<Value>& info) {
@@ -1357,7 +1328,7 @@ namespace fxe::js {
         try {
           info.GetReturnValue().Set(w->set_vibrancy(nullptr));
         } catch (const std::exception& err) {
-          throw_native_error(iso, err);
+          (void)throw_error(iso, err.what());
         }
         return;
       }
@@ -1365,7 +1336,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "setVibrancy: expected 'sidebar', 'titlebar', 'menu', or null");
         return;
       }
-      auto name = utf8(iso, info[0]);
+      auto name = to_std_string(iso, info[0]);
       if (!parse_vibrancy_kind(name)) {
         (void)throw_type_error(iso, "setVibrancy: unknown kind '" + name + "'");
         return;
@@ -1373,7 +1344,7 @@ namespace fxe::js {
       try {
         info.GetReturnValue().Set(w->set_vibrancy(name.c_str()));
       } catch (const std::exception& err) {
-        throw_native_error(iso, err);
+        (void)throw_error(iso, err.what());
       }
     }
     void win_vibrancy_capabilities(const FunctionCallbackInfo<Value>& info) {
@@ -1386,13 +1357,13 @@ namespace fxe::js {
       }
       const auto caps = w->get_vibrancy_capabilities();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "supported"_v8(iso), Boolean::New(iso, caps.supported));
-      (void)out->Set(ctx, "mica"_v8(iso), Boolean::New(iso, caps.mica));
-      (void)out->Set(ctx, "acrylic"_v8(iso), Boolean::New(iso, caps.acrylic));
-      (void)out->Set(ctx, "tabbed"_v8(iso), Boolean::New(iso, caps.tabbed));
-      (void)out->Set(ctx, "blurBehind"_v8(iso), Boolean::New(iso, caps.blur_behind));
-      (void)out->Set(ctx, "darkMode"_v8(iso), Boolean::New(iso, caps.dark_mode));
-      (void)out->Set(ctx, "systemAccent"_v8(iso), Boolean::New(iso, caps.system_accent));
+      set_prop(ctx, out, "supported"_v8, caps.supported);
+      set_prop(ctx, out, "mica"_v8, caps.mica);
+      set_prop(ctx, out, "acrylic"_v8, caps.acrylic);
+      set_prop(ctx, out, "tabbed"_v8, caps.tabbed);
+      set_prop(ctx, out, "blurBehind"_v8, caps.blur_behind);
+      set_prop(ctx, out, "darkMode"_v8, caps.dark_mode);
+      set_prop(ctx, out, "systemAccent"_v8, caps.system_accent);
       info.GetReturnValue().Set(out);
     }
 
@@ -1408,11 +1379,13 @@ namespace fxe::js {
       float radius = 24.0f;
       if (info.Length() >= 1 && info[0]->IsObject() && !info[0]->IsNullOrUndefined()) {
         auto opts = info[0].As<Object>();
-        Local<Value> field;
-        if (opts->Get(ctx, "enabled"_v8(iso)).ToLocal(&field) && !field->IsUndefined())
-          enabled = field->BooleanValue(iso);
-        if (opts->Get(ctx, "radius"_v8(iso)).ToLocal(&field) && field->IsNumber()) {
-          const double v = field->NumberValue(ctx).FromMaybe(24.0);
+        if (auto field = get_prop<Local<Value>>(ctx, opts, "enabled"_v8(iso));
+            field && !(*field)->IsUndefined()) {
+          enabled = (*field)->BooleanValue(iso);
+        }
+        if (auto field = get_prop<Local<Value>>(ctx, opts, "radius"_v8(iso));
+            field && (*field)->IsNumber()) {
+          const double v = (*field)->NumberValue(ctx).FromMaybe(24.0);
           if (std::isfinite(v) && v > 0.0)
             radius = static_cast<float>(v);
         }
@@ -1434,7 +1407,7 @@ namespace fxe::js {
 #endif
         info.GetReturnValue().Set(w->set_blur_behind(enabled));
       } catch (const std::exception& err) {
-        throw_native_error(iso, err);
+        (void)throw_error(iso, err.what());
       }
     }
     void win_set_visible(const FunctionCallbackInfo<Value>& info) {
@@ -1474,7 +1447,7 @@ namespace fxe::js {
       try {
         info.GetReturnValue().Set(w->set_icon(base, wd, ht));
       } catch (const std::exception& err) {
-        throw_native_error(iso, err);
+        (void)throw_error(iso, err.what());
       }
     }
     void win_minimize(const FunctionCallbackInfo<Value>& info) {
@@ -1528,14 +1501,14 @@ namespace fxe::js {
       int monitor = -1;
       if (info.Length() >= 2 && info[1]->IsObject() && !info[1]->IsNullOrUndefined()) {
         auto options = info[1].As<Object>();
-        Local<Value> field;
-        if (options->Get(ctx, "mode"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
-          if (!field->IsString()) {
+        if (auto field = get_prop<Local<Value>>(ctx, options, "mode"_v8(iso));
+            field && !(*field)->IsUndefined()) {
+          if (!(*field)->IsString()) {
             (void)throw_type_error(
                 iso, "setFullscreen: options.mode must be 'borderless' or 'exclusive'");
             return;
           }
-          auto s = field.As<String>();
+          auto s = (*field).As<String>();
           if (s == "exclusive"_v8) {
             mode = fullscreen_mode::exclusive;
           } else if (s == "borderless"_v8) {
@@ -1546,12 +1519,13 @@ namespace fxe::js {
             return;
           }
         }
-        if (options->Get(ctx, "monitorIndex"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
-          if (!field->IsNumber()) {
+        if (auto field = get_prop<Local<Value>>(ctx, options, "monitorIndex"_v8(iso));
+            field && !(*field)->IsUndefined()) {
+          if (!(*field)->IsNumber()) {
             (void)throw_type_error(iso, "setFullscreen: options.monitorIndex must be a number");
             return;
           }
-          monitor = field->Int32Value(ctx).FromMaybe(-1);
+          monitor = (*field)->Int32Value(ctx).FromMaybe(-1);
         }
       } else if (info.Length() >= 2 && !info[1]->IsUndefined()) {
         if (!info[1]->IsNumber()) {
@@ -1574,7 +1548,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "setCursor: expected string");
         return;
       }
-      auto name = utf8(iso, info[0]);
+      auto name = to_std_string(iso, info[0]);
       cursor_kind k;
       if (!parse_cursor(name, k)) {
         (void)throw_type_error(iso, "setCursor: unknown kind '" + name + "'");
@@ -1608,8 +1582,8 @@ namespace fxe::js {
         return;
       auto p = w->cursor_pos();
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(p.x)));
-      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(p.y)));
+      set_index(ctx, arr, 0, static_cast<double>(p.x));
+      set_index(ctx, arr, 1, static_cast<double>(p.y));
       info.GetReturnValue().Set(arr);
     }
     void win_set_cursor_lock(const FunctionCallbackInfo<Value>& info) {
@@ -1657,9 +1631,8 @@ namespace fxe::js {
     }
     void win_dpi_scale(const FunctionCallbackInfo<Value>& info) {
       auto* w = unwrap_win(info.This());
-      info.GetReturnValue().Set(
-          w ? Number::New(info.GetIsolate(), static_cast<double>(w->dpi_scale()))
-            : Number::New(info.GetIsolate(), 1.0));
+      info.GetReturnValue().Set(w ? to_v8(info.GetIsolate(), static_cast<double>(w->dpi_scale()))
+                                  : to_v8(info.GetIsolate(), 1.0));
     }
     void win_has_dpi_scale_override(const FunctionCallbackInfo<Value>& info) {
       auto* w = unwrap_win(info.This());
@@ -1719,7 +1692,7 @@ namespace fxe::js {
       try {
         info.GetReturnValue().Set(w->set_cursor_image(base, w_px, h_px, hot_x, hot_y));
       } catch (const std::exception& err) {
-        throw_native_error(iso, err);
+        (void)throw_error(iso, err.what());
       }
     }
     void win_clear_cursor_image(const FunctionCallbackInfo<Value>& info) {
@@ -1734,14 +1707,14 @@ namespace fxe::js {
       if (!w)
         return;
       auto s = w->clipboard_text();
-      info.GetReturnValue().Set(str(iso, s));
+      info.GetReturnValue().Set(to_v8_string(iso, s));
     }
     void win_set_clipboard_text(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* w = unwrap_win(info.This());
       if (!w || info.Length() < 1)
         return;
-      w->set_clipboard_text(utf8(iso, info[0]));
+      w->set_clipboard_text(to_std_string(iso, info[0]));
     }
 
     void win_read_clipboard_image(const FunctionCallbackInfo<Value>& info) {
@@ -1765,9 +1738,9 @@ namespace fxe::js {
         std::memcpy(store->Data(), image.data.data(), image.data.size());
       auto ab = ArrayBuffer::New(iso, std::move(store));
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "width"_v8(iso), Integer::NewFromUnsigned(iso, image.width));
-      (void)out->Set(ctx, "height"_v8(iso), Integer::NewFromUnsigned(iso, image.height));
-      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(ab, 0, image.data.size()));
+      set_prop(ctx, out, "width"_v8, image.width);
+      set_prop(ctx, out, "height"_v8, image.height);
+      set_prop(ctx, out, "data"_v8, Uint8Array::New(ab, 0, image.data.size()));
       info.GetReturnValue().Set(out);
     }
 
@@ -1785,21 +1758,19 @@ namespace fxe::js {
       }
 
       auto object = info[0].As<Object>();
-      Local<Value> width_value;
-      Local<Value> height_value;
-      Local<Value> data_value;
-      if (!object->Get(ctx, "width"_v8(iso)).ToLocal(&width_value) ||
-          !object->Get(ctx, "height"_v8(iso)).ToLocal(&height_value) ||
-          !object->Get(ctx, "data"_v8(iso)).ToLocal(&data_value) || !data_value->IsTypedArray() ||
-          (!data_value->IsUint8Array() && !data_value->IsUint8ClampedArray())) {
+      auto width_value = get_prop<Local<Value>>(ctx, object, "width"_v8(iso));
+      auto height_value = get_prop<Local<Value>>(ctx, object, "height"_v8(iso));
+      auto data_value = get_prop<Local<Value>>(ctx, object, "data"_v8(iso));
+      if (!width_value || !height_value || !data_value || !(*data_value)->IsTypedArray() ||
+          (!(*data_value)->IsUint8Array() && !(*data_value)->IsUint8ClampedArray())) {
         (void)throw_type_error(iso,
                                "writeClipboardImage: data must be Uint8Array or Uint8ClampedArray");
         return;
       }
 
-      int width = width_value->Int32Value(ctx).FromMaybe(0);
-      int height = height_value->Int32Value(ctx).FromMaybe(0);
-      auto data = data_value.As<TypedArray>();
+      int width = (*width_value)->Int32Value(ctx).FromMaybe(0);
+      int height = (*height_value)->Int32Value(ctx).FromMaybe(0);
+      auto data = (*data_value).As<TypedArray>();
       if (width <= 0 || height <= 0 ||
           static_cast<usize>(width) >
               std::numeric_limits<usize>::max() / static_cast<usize>(height) / 4u ||
@@ -1829,7 +1800,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(Null(iso));
         return;
       }
-      info.GetReturnValue().Set(str(iso, *value));
+      info.GetReturnValue().Set(to_v8_string(iso, *value));
     }
 
     void win_set_clipboard_html(const FunctionCallbackInfo<Value>& info) {
@@ -1839,7 +1810,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(false);
         return;
       }
-      info.GetReturnValue().Set(w->set_clipboard_html(utf8(iso, info[0])));
+      info.GetReturnValue().Set(w->set_clipboard_html(to_std_string(iso, info[0])));
     }
 
     void win_clipboard_rtf(const FunctionCallbackInfo<Value>& info) {
@@ -1854,7 +1825,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(Null(iso));
         return;
       }
-      info.GetReturnValue().Set(str(iso, *value));
+      info.GetReturnValue().Set(to_v8_string(iso, *value));
     }
 
     void win_set_clipboard_rtf(const FunctionCallbackInfo<Value>& info) {
@@ -1864,7 +1835,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(false);
         return;
       }
-      info.GetReturnValue().Set(w->set_clipboard_rtf(utf8(iso, info[0])));
+      info.GetReturnValue().Set(w->set_clipboard_rtf(to_std_string(iso, info[0])));
     }
 
     void win_clipboard_mime(const FunctionCallbackInfo<Value>& info) {
@@ -1874,7 +1845,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(Null(iso));
         return;
       }
-      auto bytes = w->clipboard_mime(utf8(iso, info[0]));
+      auto bytes = w->clipboard_mime(to_std_string(iso, info[0]));
       if (!bytes) {
         info.GetReturnValue().Set(Null(iso));
         return;
@@ -1903,7 +1874,7 @@ namespace fxe::js {
       std::vector<u8> bytes(data->ByteLength());
       if (!bytes.empty())
         data->CopyContents(bytes.data(), bytes.size());
-      info.GetReturnValue().Set(w->set_clipboard_mime(utf8(iso, info[0]), bytes));
+      info.GetReturnValue().Set(w->set_clipboard_mime(to_std_string(iso, info[0]), bytes));
     }
 
     void win_set_drag_region(const FunctionCallbackInfo<Value>& info) {
@@ -1918,17 +1889,18 @@ namespace fxe::js {
         u32 n = arr->Length();
         rects.reserve(n);
         for (u32 i = 0; i < n; ++i) {
-          Local<Value> el;
-          if (!arr->Get(ctx, i).ToLocal(&el))
+          auto el_value = get_index<Local<Value>>(ctx, arr, i);
+          if (!el_value)
             continue;
+          auto el = *el_value;
           int x = 0, y = 0, ww = 0, hh = 0;
           if (el->IsArray()) {
             auto a = el.As<Array>();
             auto get_i = [&](u32 idx) -> int {
-              Local<Value> v;
-              if (!a->Get(ctx, idx).ToLocal(&v))
+              auto value = get_index<Local<Value>>(ctx, a, idx);
+              if (!value)
                 return 0;
-              return v->Int32Value(ctx).FromMaybe(0);
+              return (*value)->Int32Value(ctx).FromMaybe(0);
             };
             x = get_i(0);
             y = get_i(1);
@@ -1937,10 +1909,10 @@ namespace fxe::js {
           } else if (el->IsObject()) {
             auto o = el.As<Object>();
             auto get_i = [&](Local<String> k) -> int {
-              Local<Value> v;
-              if (!o->Get(ctx, k).ToLocal(&v))
+              auto value = get_prop<Local<Value>>(ctx, o, k);
+              if (!value)
                 return 0;
-              return v->Int32Value(ctx).FromMaybe(0);
+              return (*value)->Int32Value(ctx).FromMaybe(0);
             };
             x = get_i("x"_v8(iso));
             y = get_i("y"_v8(iso));
@@ -1971,37 +1943,35 @@ namespace fxe::js {
       auto object = info[0].As<Object>();
       drag_payload payload;
 
-      Local<Value> files_value;
-      if (object->Get(ctx, "files"_v8(iso)).ToLocal(&files_value) && files_value->IsArray()) {
-        auto files = files_value.As<Array>();
+      if (auto files_value = get_prop<Local<Value>>(ctx, object, "files"_v8(iso));
+          files_value && (*files_value)->IsArray()) {
+        auto files = (*files_value).As<Array>();
         const u32 count = files->Length();
         payload.files.reserve(count);
         for (u32 i = 0; i < count; ++i) {
-          Local<Value> value;
-          if (files->Get(ctx, i).ToLocal(&value) && value->IsString())
-            payload.files.push_back(utf8(iso, value));
+          if (auto value = get_index<Local<Value>>(ctx, files, i); value && (*value)->IsString())
+            payload.files.push_back(to_std_string(iso, *value));
         }
       }
 
-      Local<Value> text_value;
-      if (object->Get(ctx, "text"_v8(iso)).ToLocal(&text_value) && text_value->IsString())
-        payload.text = utf8(iso, text_value);
+      if (auto text_value = get_prop<Local<Value>>(ctx, object, "text"_v8(iso));
+          text_value && (*text_value)->IsString()) {
+        payload.text = to_std_string(iso, *text_value);
+      }
 
       auto parse_drag_image = [&](Local<Value> value, image_data& out) -> bool {
         if (!value->IsObject())
           return false;
         auto object = value.As<Object>();
-        Local<Value> width_value;
-        Local<Value> height_value;
-        Local<Value> data_value;
-        if (!object->Get(ctx, "width"_v8(iso)).ToLocal(&width_value) ||
-            !object->Get(ctx, "height"_v8(iso)).ToLocal(&height_value) ||
-            !object->Get(ctx, "data"_v8(iso)).ToLocal(&data_value) || !data_value->IsTypedArray() ||
-            (!data_value->IsUint8Array() && !data_value->IsUint8ClampedArray()))
+        auto width_value = get_prop<Local<Value>>(ctx, object, "width"_v8(iso));
+        auto height_value = get_prop<Local<Value>>(ctx, object, "height"_v8(iso));
+        auto data_value = get_prop<Local<Value>>(ctx, object, "data"_v8(iso));
+        if (!width_value || !height_value || !data_value || !(*data_value)->IsTypedArray() ||
+            (!(*data_value)->IsUint8Array() && !(*data_value)->IsUint8ClampedArray()))
           return false;
-        int width = width_value->Int32Value(ctx).FromMaybe(0);
-        int height = height_value->Int32Value(ctx).FromMaybe(0);
-        auto data = data_value.As<TypedArray>();
+        int width = (*width_value)->Int32Value(ctx).FromMaybe(0);
+        int height = (*height_value)->Int32Value(ctx).FromMaybe(0);
+        auto data = (*data_value).As<TypedArray>();
         if (width <= 0 || height <= 0 ||
             static_cast<usize>(width) >
                 std::numeric_limits<usize>::max() / static_cast<usize>(height) / 4u ||
@@ -2014,21 +1984,22 @@ namespace fxe::js {
         return true;
       };
 
-      Local<Value> html_value;
-      if (object->Get(ctx, "html"_v8(iso)).ToLocal(&html_value) && html_value->IsString())
-        payload.html = utf8(iso, html_value);
+      if (auto html_value = get_prop<Local<Value>>(ctx, object, "html"_v8(iso));
+          html_value && (*html_value)->IsString()) {
+        payload.html = to_std_string(iso, *html_value);
+      }
 
-      Local<Value> icon_value;
       image_data icon;
-      if (object->Get(ctx, "icon"_v8(iso)).ToLocal(&icon_value) &&
-          parse_drag_image(icon_value, icon))
+      if (auto icon_value = get_prop<Local<Value>>(ctx, object, "icon"_v8(iso));
+          icon_value && parse_drag_image(*icon_value, icon)) {
         payload.icon = std::move(icon);
+      }
 
-      Local<Value> image_value;
       image_data image;
-      if (object->Get(ctx, "image"_v8(iso)).ToLocal(&image_value) &&
-          parse_drag_image(image_value, image))
+      if (auto image_value = get_prop<Local<Value>>(ctx, object, "image"_v8(iso));
+          image_value && parse_drag_image(*image_value, image)) {
         payload.image = std::move(image);
+      }
 
       if (payload.files.empty() && !payload.text && !payload.html && !payload.image) {
         info.GetReturnValue().Set(false);
@@ -2038,7 +2009,7 @@ namespace fxe::js {
       try {
         info.GetReturnValue().Set(w->start_drag(payload));
       } catch (const std::exception& err) {
-        throw_native_error(iso, err);
+        (void)throw_error(iso, err.what());
       }
     }
 
@@ -2050,21 +2021,21 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto data = info.Data().As<Object>();
-      Local<Value> v;
-      if (!data->Get(ctx, "win"_v8(iso)).ToLocal(&v) || !v->IsExternal())
+      auto v = get_prop<Local<Value>>(ctx, data, "win"_v8(iso));
+      if (!v || !(*v)->IsExternal())
         return;
-      auto* w = external_ptr<window>(v);
+      auto* w = external_ptr<window>(*v);
       auto* h = lookup_holder(w);
       if (!h)
         return;
-      Local<Value> ev_v;
-      if (!data->Get(ctx, "event"_v8(iso)).ToLocal(&ev_v))
+      auto ev_v = get_prop<Local<Value>>(ctx, data, "event"_v8(iso));
+      if (!ev_v)
         return;
-      auto event = utf8(iso, ev_v);
-      Local<Value> tok_v;
-      if (!data->Get(ctx, "token"_v8(iso)).ToLocal(&tok_v))
+      auto event = to_std_string(iso, *ev_v);
+      auto tok_v = get_prop<Local<Value>>(ctx, data, "token"_v8(iso));
+      if (!tok_v)
         return;
-      double tok_d = tok_v->NumberValue(ctx).FromMaybe(0.0);
+      double tok_d = (*tok_v)->NumberValue(ctx).FromMaybe(0.0);
       u64 token = static_cast<u64>(tok_d);
       auto it = h->listeners.find(event);
       if (it == h->listeners.end())
@@ -2092,7 +2063,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "on(event, handler)");
         return;
       }
-      auto event = utf8(iso, info[0]);
+      auto event = to_std_string(iso, info[0]);
       if (!is_known_event(event)) {
         (void)throw_type_error(iso, "on: unknown event '" + event + "'");
         return;
@@ -2103,9 +2074,9 @@ namespace fxe::js {
 
       // Build disposer.
       auto data = Object::New(iso);
-      (void)data->Set(ctx, "win"_v8(iso), make_external(iso, w));
-      (void)data->Set(ctx, "event"_v8(iso), str(iso, event));
-      (void)data->Set(ctx, "token"_v8(iso), Number::New(iso, static_cast<double>(token)));
+      set_prop(ctx, data, "win"_v8, make_external(iso, w));
+      set_prop(ctx, data, "event"_v8, event);
+      set_prop(ctx, data, "token"_v8, static_cast<double>(token));
       auto disp = Function::New(ctx, listener_disposer, data).ToLocalChecked();
       info.GetReturnValue().Set(disp);
     }
@@ -2120,7 +2091,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "off(event[, handler])");
         return;
       }
-      auto event = utf8(iso, info[0]);
+      auto event = to_std_string(iso, info[0]);
       auto it = h->listeners.find(event);
       if (it == h->listeners.end())
         return;
@@ -2151,7 +2122,7 @@ namespace fxe::js {
       if (!h)
         return;
       if (info.Length() >= 1 && info[0]->IsString()) {
-        auto event = utf8(iso, info[0]);
+        auto event = to_std_string(iso, info[0]);
         auto it = h->listeners.find(event);
         if (it != h->listeners.end()) {
           for (auto& e : it->second)
@@ -2198,13 +2169,14 @@ namespace fxe::js {
       if (!v->IsObject())
         return true;
       auto opts = v.As<Object>();
-      Local<Value> x;
       double fps = 0.0;
-      if (opts->Get(ctx, "fps"_v8(iso)).ToLocal(&x) && x->IsNumber()) {
-        fps = x->NumberValue(ctx).FromMaybe(0.0);
+      if (auto x = get_prop<Local<Value>>(ctx, opts, "fps"_v8(iso)); x && (*x)->IsNumber()) {
+        fps = (*x)->NumberValue(ctx).FromMaybe(0.0);
       }
-      if (fps <= 0.0 && opts->Get(ctx, "animate"_v8(iso)).ToLocal(&x) && x->BooleanValue(iso)) {
-        fps = 60.0;
+      if (fps <= 0.0) {
+        if (auto x = get_prop<Local<Value>>(ctx, opts, "animate"_v8(iso));
+            x && (*x)->BooleanValue(iso))
+          fps = 60.0;
       }
       out.frame_period = fps > 0.0 ? 1.0 / fps : 0.0;
       return true;
@@ -2316,7 +2288,7 @@ namespace fxe::js {
         Local<Value> result;
         if (!cb->Call(ctx, ctx->Global(), 1, argv).ToLocal(&result)) {
           if (tc.HasCaught()) {
-            auto exc = utf8(iso, tc.Exception());
+            auto exc = to_std_string(iso, tc.Exception());
             FXE_ERROR("js.window", "uncaught in onFrame: {}", exc);
             tc.Reset();
           }
@@ -2543,20 +2515,22 @@ namespace fxe::js {
 
     Local<Object> monitor_to_js(Isolate* iso, Local<Context> ctx, const monitor_info& m) {
       auto o = Object::New(iso);
-      auto set = [&](Local<String> k, Local<Value> v) { (void)o->Set(ctx, k, v); };
-      set("name"_v8(iso), str(iso, m.name));
-      set("x"_v8(iso), Integer::New(iso, m.x));
-      set("y"_v8(iso), Integer::New(iso, m.y));
-      set("width"_v8(iso), Integer::New(iso, m.width));
-      set("height"_v8(iso), Integer::New(iso, m.height));
-      set("workX"_v8(iso), Integer::New(iso, m.work_x));
-      set("workY"_v8(iso), Integer::New(iso, m.work_y));
-      set("workWidth"_v8(iso), Integer::New(iso, m.work_width));
-      set("workHeight"_v8(iso), Integer::New(iso, m.work_height));
-      set("scaleX"_v8(iso), Number::New(iso, static_cast<double>(m.scale_x)));
-      set("scaleY"_v8(iso), Number::New(iso, static_cast<double>(m.scale_y)));
-      set("refreshHz"_v8(iso), Integer::New(iso, m.refresh_hz));
-      set("primary"_v8(iso), Boolean::New(iso, m.primary));
+      auto set = [&](Local<String> k, auto&& v) {
+        set_prop(ctx, o, k, std::forward<decltype(v)>(v));
+      };
+      set("name"_v8(iso), to_v8_string(iso, m.name));
+      set("x"_v8(iso), to_v8(iso, m.x));
+      set("y"_v8(iso), to_v8(iso, m.y));
+      set("width"_v8(iso), to_v8(iso, m.width));
+      set("height"_v8(iso), to_v8(iso, m.height));
+      set("workX"_v8(iso), to_v8(iso, m.work_x));
+      set("workY"_v8(iso), to_v8(iso, m.work_y));
+      set("workWidth"_v8(iso), to_v8(iso, m.work_width));
+      set("workHeight"_v8(iso), to_v8(iso, m.work_height));
+      set("scaleX"_v8(iso), to_v8(iso, static_cast<double>(m.scale_x)));
+      set("scaleY"_v8(iso), to_v8(iso, static_cast<double>(m.scale_y)));
+      set("refreshHz"_v8(iso), to_v8(iso, m.refresh_hz));
+      set("primary"_v8(iso), to_v8(iso, m.primary));
       return o;
     }
 
@@ -2567,7 +2541,7 @@ namespace fxe::js {
       auto mons = list_monitors();
       auto arr = Array::New(iso, static_cast<int>(mons.size()));
       for (usize i = 0; i < mons.size(); ++i)
-        (void)arr->Set(ctx, static_cast<u32>(i), monitor_to_js(iso, ctx, mons[i]));
+        set_index(ctx, arr, static_cast<u32>(i), monitor_to_js(iso, ctx, mons[i]));
       info.GetReturnValue().Set(arr);
     }
 
@@ -2582,16 +2556,15 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       auto data = info.Data().As<Object>();
-      Local<Value> event_value;
-      if (!data->Get(ctx, "event"_v8(iso)).ToLocal(&event_value) || !event_value->IsString())
+      auto event_value = get_prop<Local<Value>>(ctx, data, "event"_v8(iso));
+      if (!event_value || !(*event_value)->IsString())
         return;
-      if (utf8(iso, event_value) != "change")
+      if (to_std_string(iso, *event_value) != "change")
         return;
-      Local<Value> handler_value;
-      if (!data->Get(ctx, "handler"_v8(iso)).ToLocal(&handler_value) ||
-          !handler_value->IsFunction())
+      auto handler_value = get_prop<Local<Value>>(ctx, data, "handler"_v8(iso));
+      if (!handler_value || !(*handler_value)->IsFunction())
         return;
-      (void)remove_monitors_listener(iso, handler_value.As<Function>());
+      (void)remove_monitors_listener(iso, (*handler_value).As<Function>());
     }
 
     void monitors_on(const FunctionCallbackInfo<Value>& info) {
@@ -2601,7 +2574,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "Monitors.on(event, handler)");
         return;
       }
-      auto event = utf8(iso, info[0]);
+      auto event = to_std_string(iso, info[0]);
       if (event != "change") {
         (void)throw_type_error(iso, "Monitors.on: unknown event '" + event + "'");
         return;
@@ -2613,8 +2586,8 @@ namespace fxe::js {
       state.change_listeners.emplace_back(iso, handler);
       ensure_monitors_observer_installed();
       auto data = Object::New(iso);
-      (void)data->Set(ctx, "event"_v8(iso), str(iso, event));
-      (void)data->Set(ctx, "handler"_v8(iso), handler);
+      set_prop(ctx, data, "event"_v8, event);
+      set_prop(ctx, data, "handler"_v8, handler);
       info.GetReturnValue().Set(
           Function::New(ctx, monitors_listener_disposer, data).ToLocalChecked());
     }
@@ -2626,7 +2599,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "Monitors.off(event[, handler])");
         return;
       }
-      auto event = utf8(iso, info[0]);
+      auto event = to_std_string(iso, info[0]);
       if (event != "change") {
         (void)throw_type_error(iso, "Monitors.off: unknown event '" + event + "'");
         return;
@@ -2679,7 +2652,7 @@ namespace fxe::js {
           obj = hh->self_strong.Get(iso);
         else
           obj = make_window_object(iso, ctx, wins[i]);
-        (void)arr->Set(ctx, static_cast<u32>(i), obj);
+        set_index(ctx, arr, static_cast<u32>(i), obj);
       }
       info.GetReturnValue().Set(arr);
     }
@@ -2794,7 +2767,7 @@ namespace fxe::js {
              FunctionTemplate::New(iso, win_supports_native_gestures));
 
     global->Set(iso, "Window", tpl);
-    win_tpl_table()[iso].Reset(iso, tpl);
+    win_tpl_cache::install(iso, tpl);
 
     // Monitors namespace.
     auto mons = ObjectTemplate::New(iso);
@@ -2813,6 +2786,6 @@ namespace fxe::js {
   }
 
   Local<Object> make_window_object(Isolate* iso, Local<Context> ctx, window* w) {
-    return wrap(iso, ctx, win_tpl_table()[iso].Get(iso), w, TAG_WINDOW);
+    return wrap(iso, ctx, win_tpl_cache::resolve(iso), w, TAG_WINDOW);
   }
 } // namespace fxe::js

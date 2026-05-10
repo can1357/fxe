@@ -20,6 +20,7 @@
 
 #ifdef FXE_ENABLE_NODE_COMPAT
 #include <fxe/generated/unenv_assets.hpp>
+#include <fxe/v8_helpers.hpp>
 #endif
 #include <algorithm>
 #include <array>
@@ -81,11 +82,7 @@ namespace fxe::runtime {
   namespace {
     using namespace v8;
 
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
+    using namespace fxe::js;
     std::string_view without_node_prefix(std::string_view specifier) {
       constexpr std::string_view prefix = "node:";
       if (specifier.starts_with(prefix))
@@ -423,7 +420,8 @@ export default strict;
     v8::TryCatch tc(iso);
     v8::ScriptOrigin origin("<fxe-node-compat-prelude>"_v8(iso));
     Local<Script> script;
-    if (!Script::Compile(ctx, str(iso, node_js::k_prelude_source), &origin).ToLocal(&script))
+    if (!Script::Compile(ctx, to_v8_string(iso, node_js::k_prelude_source), &origin)
+             .ToLocal(&script))
       return;
     Local<Value> ignored;
     (void)script->Run(ctx).ToLocal(&ignored);
@@ -456,15 +454,6 @@ export default strict;
 
   std::optional<node_compat_asset> resolve_unenv_pathe_asset() {
     return make_unenv_asset("vendor:pathe", "node_modules/pathe/dist/index.mjs");
-  }
-
-  void throw_node_compat_disabled(Isolate* iso, std::string_view specifier) {
-    std::string msg;
-    msg.reserve(specifier.size() + sizeof("node compat disabled for specifier ''"));
-    msg.append("node compat disabled for specifier '");
-    msg.append(specifier);
-    msg.append("'");
-    iso->ThrowException(Exception::Error(str(iso, msg)));
   }
 
   std::string node_compat_module_status_json(std::string_view specifier) {

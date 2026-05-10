@@ -33,17 +33,6 @@ namespace fxe::js {
     std::unordered_map<u32, fxe::os::power_inhibit_handle> g_inhibits;
     std::atomic<u32> g_next_inhibit{1};
 
-    Local<String> s(Isolate* iso, const char* value) {
-      return String::NewFromUtf8(iso, value, NewStringType::kNormal).ToLocalChecked();
-    }
-
-    std::string to_str(Isolate* iso, Local<Value> value) {
-      if (value.IsEmpty() || !value->IsString())
-        return {};
-      String::Utf8Value utf8(iso, value);
-      return *utf8 ? std::string(*utf8, utf8.length()) : std::string{};
-    }
-
     const char* power_event_name(fxe::os::power_event event) {
       switch (event) {
       case fxe::os::power_event::suspend:
@@ -182,7 +171,7 @@ namespace fxe::js {
         return;
       }
 
-      std::string event = to_str(iso, info[0]);
+      std::string event = to_std_string(iso, info[0]);
       if (!valid_event(event)) {
         (void)throw_type_error(iso, "powerMonitor.on received an unknown event");
         return;
@@ -235,7 +224,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "App.power.inhibitSleep requires options.reason");
         return;
       }
-      std::string reason = to_str(iso, reason_value);
+      std::string reason = to_std_string(iso, reason_value);
       if (reason.empty()) {
         (void)throw_type_error(iso, "App.power.inhibitSleep requires a non-empty options.reason");
         return;
@@ -277,7 +266,7 @@ namespace fxe::js {
     auto power = Object::New(iso);
     auto set_fn = [&](const char* name, FunctionCallback cb) {
       auto fn = Function::New(ctx, cb).ToLocalChecked();
-      (void)power->Set(ctx, s(iso, name), fn);
+      (void)power->Set(ctx, to_v8(iso, name), fn);
     };
     set_fn("on", power_on);
     set_fn("isOnBattery", is_on_battery);

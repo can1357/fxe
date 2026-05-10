@@ -1,6 +1,7 @@
 #include "bind_global_shortcut.hpp"
 #include "../os/os.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -9,13 +10,6 @@
 namespace fxe::js {
   using namespace v8;
   namespace {
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      if (v.IsEmpty() || !v->IsString())
-        return {};
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-
     // Per-isolate registry of accelerator -> persistent JS callback. The
     // callback is invoked on the main thread via the os-shim dispatch pump.
     struct registry {
@@ -33,7 +27,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(false);
         return;
       }
-      std::string acc = to_str(iso, info[0]);
+      std::string acc = to_std_string_strict(iso, info[0]);
       if (acc.empty()) {
         info.GetReturnValue().Set(false);
         return;
@@ -61,7 +55,7 @@ namespace fxe::js {
 
     void gs_unregister(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      std::string acc = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
+      std::string acc = info.Length() > 0 ? to_std_string_strict(iso, info[0]) : std::string{};
       if (acc.empty())
         return;
       fxe::os::global_shortcut_unregister(acc);

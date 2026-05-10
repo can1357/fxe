@@ -28,11 +28,6 @@ namespace fxe::js {
     using namespace v8;
     namespace md = fxe::markdown;
 
-    Local<String> v8_str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
 #if FXE_HAS_TREESITTER
     std::vector<u32> utf8_byte_to_utf16_units(std::string_view s) {
       std::vector<u32> out(s.size() + 1, 0);
@@ -71,55 +66,53 @@ namespace fxe::js {
     Local<Object> node_to_v8(Isolate* iso, Local<Context> ctx, const md::node& n) {
       EscapableHandleScope hs(iso);
       auto obj = Object::New(iso);
-      auto set = [&](Local<String> key, Local<Value> val) { (void)obj->Set(ctx, key, val); };
-
-      set("type"_v8(iso), v8_str(iso, md::kind_tag(n.kind)));
+      set_prop(ctx, obj, "type"_v8, md::kind_tag(n.kind));
 
       switch (n.kind) {
       case md::node_kind::heading:
-        set("level"_v8(iso), Integer::New(iso, n.heading_level));
+        set_prop(ctx, obj, "level"_v8, n.heading_level);
         break;
       case md::node_kind::list:
-        set("ordered"_v8(iso), Boolean::New(iso, n.ordered));
-        set("tight"_v8(iso), Boolean::New(iso, n.tight));
+        set_prop(ctx, obj, "ordered"_v8, n.ordered);
+        set_prop(ctx, obj, "tight"_v8, n.tight);
         if (n.ordered)
-          set("start"_v8(iso), Integer::New(iso, n.list_start));
+          set_prop(ctx, obj, "start"_v8, n.list_start);
         break;
       case md::node_kind::list_item:
         if (n.task) {
-          set("task"_v8(iso), Boolean::New(iso, true));
-          set("checked"_v8(iso), Boolean::New(iso, n.checked));
+          set_prop(ctx, obj, "task"_v8, true);
+          set_prop(ctx, obj, "checked"_v8, n.checked);
         }
         break;
       case md::node_kind::code_block:
-        set("info"_v8(iso), v8_str(iso, n.info));
-        set("lang"_v8(iso), v8_str(iso, n.lang));
+        set_prop(ctx, obj, "info"_v8, n.info);
+        set_prop(ctx, obj, "lang"_v8, n.lang);
         break;
       case md::node_kind::link:
-        set("href"_v8(iso), v8_str(iso, n.href));
+        set_prop(ctx, obj, "href"_v8, n.href);
         if (!n.title.empty())
-          set("title"_v8(iso), v8_str(iso, n.title));
+          set_prop(ctx, obj, "title"_v8, n.title);
         if (n.autolink)
-          set("autolink"_v8(iso), Boolean::New(iso, true));
+          set_prop(ctx, obj, "autolink"_v8, true);
         break;
       case md::node_kind::image:
-        set("src"_v8(iso), v8_str(iso, n.src));
+        set_prop(ctx, obj, "src"_v8, n.src);
         if (!n.title.empty())
-          set("title"_v8(iso), v8_str(iso, n.title));
+          set_prop(ctx, obj, "title"_v8, n.title);
         break;
       case md::node_kind::wikilink:
-        set("target"_v8(iso), v8_str(iso, n.wikilink_target));
+        set_prop(ctx, obj, "target"_v8, n.wikilink_target);
         break;
       case md::node_kind::table_cell:
         if (!n.align.empty())
-          set("align"_v8(iso), v8_str(iso, n.align));
+          set_prop(ctx, obj, "align"_v8, n.align);
         break;
       case md::node_kind::text:
       case md::node_kind::entity:
       case md::node_kind::raw_html:
       case md::node_kind::html_block:
       case md::node_kind::null_char:
-        set("text"_v8(iso), v8_str(iso, n.text));
+        set_prop(ctx, obj, "text"_v8, n.text);
         break;
       default:
         break;
@@ -135,10 +128,9 @@ namespace fxe::js {
           n.kind == md::node_kind::latex_math;
       if (!is_leaf || !n.children.empty()) {
         auto arr = Array::New(iso, static_cast<int>(n.children.size()));
-        for (uint32_t i = 0; i < n.children.size(); ++i) {
-          (void)arr->Set(ctx, i, node_to_v8(iso, ctx, *n.children[i]));
-        }
-        set("children"_v8(iso), arr);
+        for (uint32_t i = 0; i < n.children.size(); ++i)
+          set_index(ctx, arr, i, node_to_v8(iso, ctx, *n.children[i]));
+        set_prop(ctx, obj, "children"_v8, arr);
       }
 
       return hs.Escape(obj);
@@ -151,13 +143,11 @@ namespace fxe::js {
         return throw_type_error(iso, "Markdown.parse: opts must be an object");
       }
       auto o = v.As<Object>();
-      Local<Value> dialect_v;
-      if (o->Get(ctx, "dialect"_v8(iso)).ToLocal(&dialect_v) && !dialect_v->IsUndefined() &&
-          !dialect_v->IsNull()) {
-        if (!dialect_v->IsString())
+      if (auto dialect_v = get_prop<Local<Value>>(ctx, o, "dialect"_v8(iso));
+          dialect_v && !(*dialect_v)->IsUndefined() && !(*dialect_v)->IsNull()) {
+        if (!(*dialect_v)->IsString())
           return throw_type_error(iso, "Markdown.parse: opts.dialect must be a string");
-        String::Utf8Value u(iso, dialect_v);
-        std::string_view sv(*u ? *u : "", *u ? static_cast<size_t>(u.length()) : 0);
+        const std::string sv = to_std_string(iso, *dialect_v);
         if (sv == "commonmark") {
           out.flags = md::dialect_commonmark;
         } else if (sv == "github" || sv == "gfm") {
@@ -167,11 +157,10 @@ namespace fxe::js {
                                   "Markdown.parse: opts.dialect must be 'commonmark' or 'github'");
         }
       }
-      Local<Value> flags_v;
-      if (o->Get(ctx, "flags"_v8(iso)).ToLocal(&flags_v) && !flags_v->IsUndefined() &&
-          !flags_v->IsNull()) {
+      if (auto flags_v = get_prop<Local<Value>>(ctx, o, "flags"_v8(iso));
+          flags_v && !(*flags_v)->IsUndefined() && !(*flags_v)->IsNull()) {
         // Explicit flags override the dialect baseline.
-        out.flags = flags_v->Uint32Value(ctx).FromMaybe(out.flags);
+        out.flags = (*flags_v)->Uint32Value(ctx).FromMaybe(out.flags);
       }
       return true;
     }
@@ -184,8 +173,8 @@ namespace fxe::js {
         (void)throw_type_error(iso, "Markdown.parse(source: string, opts?)");
         return;
       }
-      String::Utf8Value src(iso, info[0]);
-      std::string_view source(*src ? *src : "", *src ? static_cast<size_t>(src.length()) : 0);
+      const std::string source_storage = to_std_string(iso, info[0]);
+      std::string_view source = source_storage;
       md::parse_options opts;
       if (info.Length() >= 2 && !read_opts(iso, ctx, info[1], opts))
         return;
@@ -201,9 +190,7 @@ namespace fxe::js {
     // Markdown.FLAG_* mirrors fxe::markdown::parse_flags so JS callers can
     // assemble a custom flag set without depending on magic numbers.
     void install_flag_constants(Isolate* iso, Local<ObjectTemplate> ns) {
-      auto add = [&](const char* name, uint32_t value) {
-        ns->Set(iso, name, Integer::NewFromUnsigned(iso, value));
-      };
+      auto add = [&](const char* name, uint32_t value) { ns->Set(iso, name, to_v8(iso, value)); };
       add("FLAG_COLLAPSE_WHITESPACE", md::flag_collapse_whitespace);
       add("FLAG_PERMISSIVE_ATX_HEADERS", md::flag_permissive_atx_headers);
       add("FLAG_PERMISSIVE_URL_AUTOLINKS", md::flag_permissive_url_autolinks);
@@ -238,12 +225,11 @@ namespace fxe::js {
         (void)throw_type_error(iso, "Markdown.highlight(source: string, language: string)");
         return;
       }
-      String::Utf8Value src(iso, info[0]);
-      String::Utf8Value lang(iso, info[1]);
+      const std::string src_storage = to_std_string(iso, info[0]);
+      const std::string lang_storage = to_std_string(iso, info[1]);
 #if FXE_HAS_TREESITTER
-      std::string_view src_view(*src ? *src : "", *src ? static_cast<size_t>(src.length()) : 0);
-      std::string_view lang_view(*lang ? *lang : "",
-                                 *lang ? static_cast<size_t>(lang.length()) : 0);
+      std::string_view src_view = src_storage;
+      std::string_view lang_view = lang_storage;
       auto r = fxe::highlight::tokenize(src_view, lang_view);
       if (!r) {
         info.GetReturnValue().SetNull();
@@ -251,22 +237,22 @@ namespace fxe::js {
       }
       const auto byte_to_utf16 = utf8_byte_to_utf16_units(src_view);
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "language"_v8(iso), v8_str(iso, r->language));
+      set_prop(ctx, out, "language"_v8, r->language);
       auto arr = Array::New(iso, static_cast<int>(r->tokens.size()));
       for (uint32_t i = 0; i < r->tokens.size(); ++i) {
         auto t = Object::New(iso);
         const auto start = byte_to_utf16[std::min<usize>(r->tokens[i].start, src_view.size())];
         const auto end = byte_to_utf16[std::min<usize>(r->tokens[i].end, src_view.size())];
-        (void)t->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, start));
-        (void)t->Set(ctx, "end"_v8(iso), Integer::NewFromUnsigned(iso, end));
-        (void)t->Set(ctx, "name"_v8(iso), v8_str(iso, r->tokens[i].name));
-        (void)arr->Set(ctx, i, t);
+        set_prop(ctx, t, "start"_v8, start);
+        set_prop(ctx, t, "end"_v8, end);
+        set_prop(ctx, t, "name"_v8, r->tokens[i].name);
+        set_index(ctx, arr, i, t);
       }
-      (void)out->Set(ctx, "tokens"_v8(iso), arr);
+      set_prop(ctx, out, "tokens"_v8, arr);
       info.GetReturnValue().Set(out);
 #else
-      (void)src;
-      (void)lang;
+      (void)src_storage;
+      (void)lang_storage;
       info.GetReturnValue().SetNull();
 #endif
     }
@@ -279,7 +265,7 @@ namespace fxe::js {
       auto langs = fxe::highlight::supported_languages();
       auto arr = Array::New(iso, static_cast<int>(langs.size()));
       for (uint32_t i = 0; i < langs.size(); ++i)
-        (void)arr->Set(ctx, i, v8_str(iso, langs[i]));
+        set_index(ctx, arr, i, langs[i]);
       info.GetReturnValue().Set(arr);
 #else
       (void)ctx;

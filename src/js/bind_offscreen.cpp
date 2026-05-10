@@ -10,6 +10,7 @@
 #include <fxe/spritesheet.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
+#include <fxe/v8_template_cache.hpp>
 
 #include <cstring>
 #include <exception>
@@ -23,36 +24,12 @@ namespace fxe::js {
 
   namespace {
     using namespace v8;
-    using TplGlobal = Global<FunctionTemplate>;
-
-    std::unordered_map<Isolate*, TplGlobal>& offscreen_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-
-    void offscreen_reset_for_isolate(Isolate* iso) {
-      auto& t = offscreen_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-
-    struct offscreen_resetter_register {
-      offscreen_resetter_register() {
-        register_template_resetter(&offscreen_reset_for_isolate);
-      }
-    };
-    static offscreen_resetter_register s_offscreen_resetter_register;
+    struct offscreen_tag {};
+    using offscreen_tpl_cache = template_isolate_cache<offscreen_tag>;
 
     struct offscreen_holder : weak_holder<offscreen_holder> {
       std::unique_ptr<offscreen_renderer> owned;
     };
-
-    void throw_type(Isolate* iso, const char* msg) {
-      (void)throw_type_error(iso, msg);
-    }
 
     offscreen_renderer* unwrap_offscreen(Local<Object> self) {
       auto* r = static_cast<renderer*>(unwrap(self, TAG_RENDERER));
@@ -65,25 +42,24 @@ namespace fxe::js {
       if (value.IsEmpty() || !value->IsObject())
         return;
       auto o = value.As<Object>();
-      Local<Value> v;
-      if (o->Get(ctx, "width"_v8(iso)).ToLocal(&v))
-        opts.width = v->Uint32Value(ctx).FromMaybe(0);
-      if (o->Get(ctx, "height"_v8(iso)).ToLocal(&v))
-        opts.height = v->Uint32Value(ctx).FromMaybe(0);
-      if (o->Get(ctx, "multisample"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-        opts.multisample = v->Uint32Value(ctx).FromMaybe(opts.multisample);
-      if (o->Get(ctx, "mipLevels"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-        opts.mip_levels = v->Uint32Value(ctx).FromMaybe(opts.mip_levels);
-      if (o->Get(ctx, "enableDepth"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-        opts.enable_depth = v->BooleanValue(iso);
+      if (auto v = get_prop<Local<Value>>(ctx, o, "width"_v8(iso)))
+        opts.width = (*v)->Uint32Value(ctx).FromMaybe(0);
+      if (auto v = get_prop<Local<Value>>(ctx, o, "height"_v8(iso)))
+        opts.height = (*v)->Uint32Value(ctx).FromMaybe(0);
+      if (auto v = get_prop<Local<Value>>(ctx, o, "multisample"_v8(iso)); v && !(*v)->IsUndefined())
+        opts.multisample = (*v)->Uint32Value(ctx).FromMaybe(opts.multisample);
+      if (auto v = get_prop<Local<Value>>(ctx, o, "mipLevels"_v8(iso)); v && !(*v)->IsUndefined())
+        opts.mip_levels = (*v)->Uint32Value(ctx).FromMaybe(opts.mip_levels);
+      if (auto v = get_prop<Local<Value>>(ctx, o, "enableDepth"_v8(iso)); v && !(*v)->IsUndefined())
+        opts.enable_depth = (*v)->BooleanValue(iso);
       // `parent`: existing Renderer/OffscreenRenderer whose device this
       // offscreen will share. Required for cross-renderer sampling, e.g.
       // when the offscreen's color attachment will be bound on the main
       // window renderer via `bindUserTexture(...)`.
-      if (o->Get(ctx, "parent"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull() &&
-          v->IsObject()) {
+      if (auto v = get_prop<Local<Value>>(ctx, o, "parent"_v8(iso));
+          v && !(*v)->IsUndefined() && !(*v)->IsNull() && (*v)->IsObject()) {
 #if FXE_HAS_WGPU
-        auto* parent_r = static_cast<renderer*>(unwrap(v.As<Object>(), TAG_RENDERER));
+        auto* parent_r = static_cast<renderer*>(unwrap((*v).As<Object>(), TAG_RENDERER));
         if (auto* dpa = dynamic_cast<dawn_pipeline_device_access*>(parent_r)) {
           opts.parent_device = dpa->device();
           opts.parent_queue = dpa->queue();
@@ -97,7 +73,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "OffscreenRenderer must be invoked with new");
+        (void)throw_type_error(iso, "OffscreenRenderer must be invoked with new");
         return;
       }
       offscreen_options opts;
@@ -105,8 +81,8 @@ namespace fxe::js {
       if (info.Length() >= 1)
         read_options(iso, ctx, info[0], opts, ok);
       if (!ok) {
-        throw_type(iso,
-                   "OffscreenRenderer({ width, height, multisample?, mipLevels?, enableDepth? })");
+        (void)throw_type_error(
+            iso, "OffscreenRenderer({ width, height, multisample?, mipLevels?, enableDepth? })");
         return;
       }
 
@@ -191,9 +167,8 @@ namespace fxe::js {
       if (info.Length() == 1 && info[0]->IsArray()) {
         auto a = info[0].As<Array>();
         for (u32 i = 0; i < 4 && i < a->Length(); ++i) {
-          Local<Value> v;
-          if (a->Get(ctx, i).ToLocal(&v))
-            c[i] = static_cast<float>(v->NumberValue(ctx).FromMaybe(static_cast<double>(c[i])));
+          if (auto v = get_index<Local<Value>>(ctx, a, i))
+            c[i] = static_cast<float>((*v)->NumberValue(ctx).FromMaybe(static_cast<double>(c[i])));
         }
       } else {
         for (int i = 0; i < info.Length() && i < 4; ++i)
@@ -278,6 +253,6 @@ namespace fxe::js {
     proto->Set(iso, "bindUserTexture", FunctionTemplate::New(iso, offscreen_bind_user_texture));
 
     global->Set(iso, "OffscreenRenderer", tpl);
-    offscreen_tpl_table()[iso].Reset(iso, tpl);
+    offscreen_tpl_cache::install(iso, tpl);
   }
 } // namespace fxe::js

@@ -5,6 +5,7 @@
 #include "bind_render_stats.hpp"
 #include <fxe/command_buffer.hpp>
 #include <fxe/render_stats.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 
 #include <cstdint>
@@ -21,9 +22,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       const auto& s = current_render_stats();
       auto out = Object::New(iso);
-      auto put = [&](Local<String> k, u64 v) {
-        (void)out->Set(ctx, k, Number::New(iso, static_cast<double>(v)));
-      };
+      auto put = [&](Local<String> k, u64 v) { set_prop(ctx, out, k, v); };
       put("verticesSubmitted"_v8(iso), s.vertices_submitted);
       put("indicesSubmitted"_v8(iso), s.indices_submitted);
       put("queueCalls"_v8(iso), s.queue_calls);

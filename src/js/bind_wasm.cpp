@@ -50,20 +50,8 @@ namespace fxe::js {
       delete st;
     }
 
-    Local<String> s8(Isolate* iso, const char* s) {
-      return String::NewFromUtf8(iso, s).ToLocalChecked();
-    }
-
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      Local<String> s;
-      if (!v->ToString(iso->GetCurrentContext()).ToLocal(&s))
-        return {};
-      String::Utf8Value u(iso, s);
-      return std::string(*u ? *u : "", *u ? u.length() : 0);
-    }
-
     Local<Value> type_error(Isolate* iso, const char* msg) {
-      return Exception::TypeError(s8(iso, msg));
+      return Exception::TypeError(to_v8_string(iso, msg));
     }
 
     // Match the WebAssembly Web API MIME check: essence (substring before
@@ -150,7 +138,7 @@ namespace fxe::js {
           return;
         }
       }
-      std::string ct = ct_v->IsString() ? to_str(iso, ct_v) : "";
+      std::string ct = ct_v->IsString() ? to_std_string_strict(iso, ct_v) : "";
       if (!mime_is_wasm(ct)) {
         st->streaming->Abort(type_error(
             iso, "WebAssembly.compileStreaming: invalid MIME type, expected application/wasm"));
@@ -161,7 +149,7 @@ namespace fxe::js {
       // Optional source URL for stack traces.
       Local<Value> urlv;
       if (resp->Get(ctx, "url"_v8(iso)).ToLocal(&urlv) && urlv->IsString()) {
-        std::string url = to_str(iso, urlv);
+        std::string url = to_std_string_strict(iso, urlv);
         st->streaming->SetUrl(url.c_str(), url.size());
       }
 

@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
-#include <fxe/types.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/types.hpp>
 #include <mutex>
 #include <string>
 #include <unordered_map>

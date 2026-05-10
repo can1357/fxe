@@ -107,22 +107,18 @@ namespace fxe::js {
     primitives::paint_value decode_paint(Isolate* iso, Local<Context> ctx, Local<Value> v) {
       if (v->IsObject() && !v->IsArray() && !v->IsFloat32Array() && !v->IsNumber()) {
         auto obj = v.As<Object>();
-        Local<Value> marker;
-        if (obj->Get(ctx, "__fxePaint"_v8(iso)).ToLocal(&marker) &&
-            marker->Uint32Value(ctx).FromMaybe(0) == PAINT_KIND_PROP) {
+        if (auto marker = get_prop<u32>(ctx, obj, "__fxePaint"_v8(iso));
+            marker && *marker == PAINT_KIND_PROP) {
           primitives::paint_value paint;
-          Local<Value> kind_v;
-          if (obj->Get(ctx, "kind"_v8(iso)).ToLocal(&kind_v))
-            paint.kind = static_cast<primitives::paint_kind>(kind_v->Uint32Value(ctx).FromMaybe(0));
-          Local<Value> p0_v;
-          if (obj->Get(ctx, "p0"_v8(iso)).ToLocal(&p0_v))
-            (void)decode_vec4(p0_v, paint.p0);
-          Local<Value> p1_v;
-          if (obj->Get(ctx, "p1"_v8(iso)).ToLocal(&p1_v))
-            (void)decode_vec4(p1_v, paint.p1);
-          Local<Value> stops_v;
-          if (obj->Get(ctx, "stops"_v8(iso)).ToLocal(&stops_v) && stops_v->IsFloat32Array()) {
-            auto stops = stops_v.As<Float32Array>();
+          if (auto kind = get_prop<u32>(ctx, obj, "kind"_v8(iso)))
+            paint.kind = static_cast<primitives::paint_kind>(*kind);
+          if (auto p0 = get_prop<Local<Value>>(ctx, obj, "p0"_v8(iso)))
+            (void)decode_vec4(*p0, paint.p0);
+          if (auto p1 = get_prop<Local<Value>>(ctx, obj, "p1"_v8(iso)))
+            (void)decode_vec4(*p1, paint.p1);
+          if (auto stops_v = get_prop<Local<Value>>(ctx, obj, "stops"_v8(iso));
+              stops_v && (*stops_v)->IsFloat32Array()) {
+            auto stops = (*stops_v).As<Float32Array>();
             std::vector<float> raw(stops->Length());
             stops->CopyContents(raw.data(), raw.size() * sizeof(float));
             for (usize i = 0; i + 4 < raw.size(); i += 5) {
@@ -213,11 +209,12 @@ namespace fxe::js {
       return v->NumberValue(ctx).FromMaybe(def);
     }
 
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
+    void copy_tag_chars(std::array<char, 4>& tag, Isolate* iso, Local<Value> v) {
+      auto text = to_std_string(iso, v);
+      const usize n = std::min(tag.size(), text.size());
+      for (usize i = 0; i < n; ++i)
+        tag[i] = text[i];
     }
-
     // Helper: argument prelude. Returns nullptr (and throws) on missing cb.
     command_sink* get_cb(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -580,7 +577,7 @@ namespace fxe::js {
         next = 2;
       }
       float d = float(num(ctx, info[next]));
-      auto text = utf8(iso, info[next + 1]);
+      auto text = to_std_string(iso, info[next + 1]);
       u32 font_id = 0;
       primitives::text_style style{};
       // Trailing args: either an opts object (array form) or scalar (size, color).
@@ -588,21 +585,19 @@ namespace fxe::js {
         auto v = info[next + 2];
         if (v->IsObject() && !v->IsNumber()) {
           auto o = v.As<Object>();
-          Local<Value> field;
-          if (o->Get(ctx, "color"_v8(iso)).ToLocal(&field))
-            style.color = decode_color(iso, ctx, field);
-          if (o->Get(ctx, "size"_v8(iso)).ToLocal(&field) && field->IsNumber())
-            style.pt = float(field->NumberValue(ctx).FromMaybe(16.0));
-          if (o->Get(ctx, "pt"_v8(iso)).ToLocal(&field) && field->IsNumber())
-            style.pt = static_cast<float>(
-                field->NumberValue(ctx).FromMaybe(static_cast<double>(style.pt)));
-          if (o->Get(ctx, "fontId"_v8(iso)).ToLocal(&field) && field->IsNumber())
-            font_id = static_cast<u32>(field->NumberValue(ctx).FromMaybe(0.0));
-          if (o->Get(ctx, "lineHeight"_v8(iso)).ToLocal(&field) && field->IsNumber())
-            style.line_height = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+          if (auto field = get_prop<Local<Value>>(ctx, o, "color"_v8(iso)))
+            style.color = decode_color(iso, ctx, *field);
+          if (auto size = get_prop<float>(ctx, o, "size"_v8(iso)))
+            style.pt = *size;
+          if (auto pt = get_prop<float>(ctx, o, "pt"_v8(iso)))
+            style.pt = *pt;
+          if (auto id = get_prop<u32>(ctx, o, "fontId"_v8(iso)))
+            font_id = *id;
+          if (auto line_height = get_prop<float>(ctx, o, "lineHeight"_v8(iso)))
+            style.line_height = *line_height;
           // features: ["liga", "calt"] or [["ss01", 1], ...]
-          if (o->Get(ctx, "features"_v8(iso)).ToLocal(&field) && field->IsArray()) {
-            auto a = field.As<Array>();
+          if (auto field = get_prop<Local<Array>>(ctx, o, "features"_v8(iso))) {
+            auto a = *field;
             const u32 n = a->Length();
             for (u32 i = 0; i < n; ++i) {
               Local<Value> el;
@@ -611,17 +606,12 @@ namespace fxe::js {
               std::array<char, 4> tag{' ', ' ', ' ', ' '};
               u32 val = 1;
               if (el->IsString()) {
-                String::Utf8Value u(iso, el);
-                for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
-                  tag[k] = (*u)[k];
+                copy_tag_chars(tag, iso, el);
               } else if (el->IsArray()) {
                 auto pair = el.As<Array>();
                 Local<Value> tv;
-                if (pair->Get(ctx, 0).ToLocal(&tv) && tv->IsString()) {
-                  String::Utf8Value u(iso, tv);
-                  for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
-                    tag[k] = (*u)[k];
-                }
+                if (pair->Get(ctx, 0).ToLocal(&tv) && tv->IsString())
+                  copy_tag_chars(tag, iso, tv);
                 Local<Value> vv;
                 if (pair->Get(ctx, 1).ToLocal(&vv) && vv->IsNumber()) {
                   val = static_cast<u32>(vv->NumberValue(ctx).FromMaybe(1.0));
@@ -631,9 +621,9 @@ namespace fxe::js {
             }
           }
           // variations: { wght: 600, wdth: 110 }
-          if (o->Get(ctx, "variations"_v8(iso)).ToLocal(&field) && field->IsObject() &&
-              !field->IsArray()) {
-            auto vobj = field.As<Object>();
+          if (auto field = get_prop<Local<Value>>(ctx, o, "variations"_v8(iso));
+              field && (*field)->IsObject() && !(*field)->IsArray()) {
+            auto vobj = (*field).As<Object>();
             Local<Array> keys;
             if (vobj->GetOwnPropertyNames(ctx).ToLocal(&keys)) {
               const u32 n = keys->Length();
@@ -641,10 +631,8 @@ namespace fxe::js {
                 Local<Value> kk;
                 if (!keys->Get(ctx, i).ToLocal(&kk) || !kk->IsString())
                   continue;
-                String::Utf8Value u(iso, kk);
                 std::array<char, 4> tag{' ', ' ', ' ', ' '};
-                for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
-                  tag[k] = (*u)[k];
+                copy_tag_chars(tag, iso, kk);
                 Local<Value> vv;
                 if (!vobj->Get(ctx, kk).ToLocal(&vv) || !vv->IsNumber())
                   continue;
@@ -662,10 +650,10 @@ namespace fxe::js {
       const auto* font = resolve_font_id(font_id);
       auto out = primitives::draw_text(*cb, at, d, text, font ? *font : get_font_info(), style);
       auto arr = Array::New(iso, 4);
-      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(out.x)));
-      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(out.y)));
-      (void)arr->Set(ctx, 2, Number::New(iso, static_cast<double>(out.z)));
-      (void)arr->Set(ctx, 3, Number::New(iso, static_cast<double>(out.w)));
+      set_index(ctx, arr, 0, static_cast<double>(out.x));
+      set_index(ctx, arr, 1, static_cast<double>(out.y));
+      set_index(ctx, arr, 2, static_cast<double>(out.z));
+      set_index(ctx, arr, 3, static_cast<double>(out.w));
       info.GetReturnValue().Set(arr);
     }
 
@@ -708,24 +696,24 @@ namespace fxe::js {
         if (!runs->Get(ctx, i).ToLocal(&ev) || !ev->IsObject())
           continue;
         auto o = ev.As<Object>();
-        Local<Value> field;
         math::vec2 at{0, 0};
-        if (o->Get(ctx, k_x).ToLocal(&field) && field->IsNumber())
-          at.x = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
-        if (o->Get(ctx, k_y).ToLocal(&field) && field->IsNumber())
-          at.y = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+        if (auto x = get_prop<float>(ctx, o, k_x))
+          at.x = *x;
+        if (auto y = get_prop<float>(ctx, o, k_y))
+          at.y = *y;
         float depth = 0.0f;
-        if (o->Get(ctx, k_depth).ToLocal(&field) && field->IsNumber())
-          depth = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
+        if (auto z = get_prop<float>(ctx, o, k_depth))
+          depth = *z;
         std::string text;
-        if (o->Get(ctx, k_text).ToLocal(&field) && !field->IsUndefined()) {
-          text = utf8(iso, field);
+        if (auto value = get_prop<Local<Value>>(ctx, o, k_text);
+            value && !(*value)->IsUndefined()) {
+          text = to_std_string(iso, *value);
         }
         primitives::text_style style{};
-        if (o->Get(ctx, k_size).ToLocal(&field) && field->IsNumber())
-          style.pt = static_cast<float>(field->NumberValue(ctx).FromMaybe(16.0));
-        if (o->Get(ctx, k_color).ToLocal(&field) && !field->IsUndefined())
-          style.color = decode_color(iso, ctx, field);
+        if (auto pt = get_prop<float>(ctx, o, k_size))
+          style.pt = *pt;
+        if (auto value = get_prop<Local<Value>>(ctx, o, k_color); value && !(*value)->IsUndefined())
+          style.color = decode_color(iso, ctx, *value);
         (void)primitives::draw_text(*cb, at, depth, text, default_font, style);
       }
     }
@@ -736,31 +724,33 @@ namespace fxe::js {
       if (!v->IsObject() || v->IsNumber())
         return;
       auto o = v.As<Object>();
-      Local<Value> field;
-      if (o->Get(ctx, "color"_v8(iso)).ToLocal(&field) && !field->IsUndefined())
-        style.color = decode_color(iso, ctx, field);
-      if (o->Get(ctx, "size"_v8(iso)).ToLocal(&field) && field->IsNumber())
-        style.pt = static_cast<float>(field->NumberValue(ctx).FromMaybe(16.0));
-      if (o->Get(ctx, "pt"_v8(iso)).ToLocal(&field) && field->IsNumber())
-        style.pt = static_cast<float>(field->NumberValue(ctx).FromMaybe(16.0));
-      if (out_font_id && o->Get(ctx, "fontId"_v8(iso)).ToLocal(&field) && field->IsNumber())
-        *out_font_id = static_cast<u32>(field->NumberValue(ctx).FromMaybe(0.0));
-      if (o->Get(ctx, "lineHeight"_v8(iso)).ToLocal(&field) && field->IsNumber())
-        style.line_height = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
-      if (o->Get(ctx, "tabSize"_v8(iso)).ToLocal(&field) && field->IsNumber())
-        style.tab_size = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
-      if (o->Get(ctx, "tabOriginX"_v8(iso)).ToLocal(&field) && field->IsNumber())
-        style.tab_origin_x = static_cast<float>(field->NumberValue(ctx).FromMaybe(0.0));
-      if (o->Get(ctx, "showWhitespace"_v8(iso)).ToLocal(&field) && field->IsBoolean()) {
-        style.whitespace = field->BooleanValue(iso) ? primitives::whitespace_glyphs::visible
-                                                    : primitives::whitespace_glyphs::none;
+      if (auto field = get_prop<Local<Value>>(ctx, o, "color"_v8(iso));
+          field && !(*field)->IsUndefined())
+        style.color = decode_color(iso, ctx, *field);
+      if (auto size = get_prop<float>(ctx, o, "size"_v8(iso)))
+        style.pt = *size;
+      if (auto pt = get_prop<float>(ctx, o, "pt"_v8(iso)))
+        style.pt = *pt;
+      if (out_font_id) {
+        if (auto font_id = get_prop<u32>(ctx, o, "fontId"_v8(iso)))
+          *out_font_id = *font_id;
       }
-      if (o->Get(ctx, "bold"_v8(iso)).ToLocal(&field) && field->BooleanValue(iso))
+      if (auto line_height = get_prop<float>(ctx, o, "lineHeight"_v8(iso)))
+        style.line_height = *line_height;
+      if (auto tab_size = get_prop<float>(ctx, o, "tabSize"_v8(iso)))
+        style.tab_size = *tab_size;
+      if (auto tab_origin_x = get_prop<float>(ctx, o, "tabOriginX"_v8(iso)))
+        style.tab_origin_x = *tab_origin_x;
+      if (auto show = get_prop<bool>(ctx, o, "showWhitespace"_v8(iso))) {
+        style.whitespace =
+            *show ? primitives::whitespace_glyphs::visible : primitives::whitespace_glyphs::none;
+      }
+      if (auto bold = get_prop<bool>(ctx, o, "bold"_v8(iso)); bold && *bold)
         style.flags |= primitives::text_bold;
-      if (o->Get(ctx, "italic"_v8(iso)).ToLocal(&field) && field->BooleanValue(iso))
+      if (auto italic = get_prop<bool>(ctx, o, "italic"_v8(iso)); italic && *italic)
         style.flags |= primitives::text_italic;
-      if (o->Get(ctx, "features"_v8(iso)).ToLocal(&field) && field->IsArray()) {
-        auto a = field.As<Array>();
+      if (auto field = get_prop<Local<Array>>(ctx, o, "features"_v8(iso))) {
+        auto a = *field;
         const u32 n = a->Length();
         for (u32 i = 0; i < n; ++i) {
           Local<Value> el;
@@ -769,17 +759,12 @@ namespace fxe::js {
           std::array<char, 4> tag{' ', ' ', ' ', ' '};
           u32 val = 1;
           if (el->IsString()) {
-            String::Utf8Value u(iso, el);
-            for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
-              tag[k] = (*u)[k];
+            copy_tag_chars(tag, iso, el);
           } else if (el->IsArray()) {
             auto pair = el.As<Array>();
             Local<Value> tv;
-            if (pair->Get(ctx, 0).ToLocal(&tv) && tv->IsString()) {
-              String::Utf8Value u(iso, tv);
-              for (usize k = 0; k < 4 && k < static_cast<usize>(u.length()); ++k)
-                tag[k] = (*u)[k];
-            }
+            if (pair->Get(ctx, 0).ToLocal(&tv) && tv->IsString())
+              copy_tag_chars(tag, iso, tv);
             Local<Value> vv;
             if (pair->Get(ctx, 1).ToLocal(&vv) && vv->IsNumber())
               val = static_cast<u32>(vv->NumberValue(ctx).FromMaybe(1.0));
@@ -826,10 +811,9 @@ namespace fxe::js {
         if (!spans_arr->Get(ctx, i).ToLocal(&ev) || !ev->IsObject())
           continue;
         auto o = ev.As<Object>();
-        Local<Value> field;
         std::string text;
-        if (o->Get(ctx, k_text).ToLocal(&field) && !field->IsUndefined())
-          text = utf8(iso, field);
+        if (auto value = get_prop<Local<Value>>(ctx, o, k_text); value && !(*value)->IsUndefined())
+          text = to_std_string(iso, *value);
         if (text.empty())
           continue;
         primitives::text_span sp;
@@ -842,10 +826,10 @@ namespace fxe::js {
           if (const auto* f = resolve_font_id(font_id))
             sp.font = f;
         }
-        if (o->Get(ctx, k_underline).ToLocal(&field))
-          sp.underline = field->BooleanValue(iso);
-        if (o->Get(ctx, k_strikethrough).ToLocal(&field))
-          sp.strikethrough = field->BooleanValue(iso);
+        if (auto underline = get_prop<bool>(ctx, o, k_underline))
+          sp.underline = *underline;
+        if (auto strike = get_prop<bool>(ctx, o, k_strikethrough))
+          sp.strikethrough = *strike;
         texts.emplace_back(std::move(text));
         sp.text = texts.back();
         spans.push_back(sp);
@@ -854,10 +838,10 @@ namespace fxe::js {
       auto out = primitives::draw_text_spans(*cb, math::vec2{x, y}, depth, spans,
                                              fb_font ? *fb_font : get_font_info());
       auto arr = Array::New(iso, 4);
-      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(out.x)));
-      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(out.y)));
-      (void)arr->Set(ctx, 2, Number::New(iso, static_cast<double>(out.z)));
-      (void)arr->Set(ctx, 3, Number::New(iso, static_cast<double>(out.w)));
+      set_index(ctx, arr, 0, static_cast<double>(out.x));
+      set_index(ctx, arr, 1, static_cast<double>(out.y));
+      set_index(ctx, arr, 2, static_cast<double>(out.z));
+      set_index(ctx, arr, 3, static_cast<double>(out.w));
       info.GetReturnValue().Set(arr);
     }
 
@@ -1049,17 +1033,17 @@ namespace fxe::js {
     Local<Object> make_paint(Isolate* iso, Local<Context> ctx, primitives::paint_kind kind,
                              math::vec4 p0, math::vec4 p1, Local<Value> stops_v) {
       auto o = Object::New(iso);
-      (void)o->Set(ctx, "__fxePaint"_v8(iso), Integer::NewFromUnsigned(iso, PAINT_KIND_PROP));
-      (void)o->Set(ctx, "kind"_v8(iso), Integer::NewFromUnsigned(iso, static_cast<u32>(kind)));
+      set_prop(ctx, o, "__fxePaint"_v8, PAINT_KIND_PROP);
+      set_prop(ctx, o, "kind"_v8, static_cast<u32>(kind));
       auto a0 = Array::New(iso, 4);
       auto a1 = Array::New(iso, 4);
       for (int i = 0; i < 4; ++i) {
-        (void)a0->Set(ctx, static_cast<u32>(i), Number::New(iso, static_cast<double>(p0[i])));
-        (void)a1->Set(ctx, static_cast<u32>(i), Number::New(iso, static_cast<double>(p1[i])));
+        set_index(ctx, a0, static_cast<u32>(i), static_cast<double>(p0[i]));
+        set_index(ctx, a1, static_cast<u32>(i), static_cast<double>(p1[i]));
       }
-      (void)o->Set(ctx, "p0"_v8(iso), a0);
-      (void)o->Set(ctx, "p1"_v8(iso), a1);
-      (void)o->Set(ctx, "stops"_v8(iso), stops_v);
+      set_prop(ctx, o, "p0"_v8, a0);
+      set_prop(ctx, o, "p1"_v8, a1);
+      set_prop(ctx, o, "stops"_v8, stops_v);
       return o;
     }
 
@@ -1290,23 +1274,16 @@ namespace fxe::js {
                                          const wrapped_text_native& wrapped) {
       auto obj = Object::New(iso);
       auto lines = Array::New(iso, static_cast<int>(wrapped.lines.size()));
-      for (usize i = 0; i < wrapped.lines.size(); ++i) {
-        (void)lines->Set(ctx, static_cast<u32>(i),
-                         String::NewFromUtf8(iso, wrapped.lines[i].c_str(), NewStringType::kNormal,
-                                             static_cast<int>(wrapped.lines[i].size()))
-                             .ToLocalChecked());
-      }
+      for (usize i = 0; i < wrapped.lines.size(); ++i)
+        set_index(ctx, lines, static_cast<u32>(i), wrapped.lines[i]);
       auto starts = Array::New(iso, static_cast<int>(wrapped.starts.size()));
-      for (usize i = 0; i < wrapped.starts.size(); ++i) {
-        (void)starts->Set(ctx, static_cast<u32>(i),
-                          Integer::NewFromUnsigned(iso, wrapped.starts[i]));
-      }
-      (void)obj->Set(ctx, "lines"_v8(iso), lines);
-      (void)obj->Set(ctx, "width"_v8(iso), Number::New(iso, static_cast<double>(wrapped.width)));
-      (void)obj->Set(ctx, "height"_v8(iso), Number::New(iso, static_cast<double>(wrapped.height)));
-      (void)obj->Set(ctx, "lineHeight"_v8(iso),
-                     Number::New(iso, static_cast<double>(wrapped.line_height)));
-      (void)obj->Set(ctx, "lineStartIndices"_v8(iso), starts);
+      for (usize i = 0; i < wrapped.starts.size(); ++i)
+        set_index(ctx, starts, static_cast<u32>(i), wrapped.starts[i]);
+      set_prop(ctx, obj, "lines"_v8, lines);
+      set_prop(ctx, obj, "width"_v8, static_cast<double>(wrapped.width));
+      set_prop(ctx, obj, "height"_v8, static_cast<double>(wrapped.height));
+      set_prop(ctx, obj, "lineHeight"_v8, static_cast<double>(wrapped.line_height));
+      set_prop(ctx, obj, "lineStartIndices"_v8, starts);
       return obj;
     }
 
@@ -1314,7 +1291,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      const auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      const auto text = info.Length() >= 1 ? to_std_string(iso, info[0]) : std::string{};
       if (!is_ascii(text)) {
         info.GetReturnValue().Set(Null(iso));
         return;
@@ -1337,7 +1314,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      const auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      const auto text = info.Length() >= 1 ? to_std_string(iso, info[0]) : std::string{};
       if (!is_ascii(text)) {
         info.GetReturnValue().Set(Null(iso));
         return;
@@ -1349,14 +1326,14 @@ namespace fxe::js {
           std::max(0.0, std::min(std::trunc(idx_value), static_cast<double>(text.size()))));
       const float x =
           measured_text_width(std::string_view(text).substr(0, clamped), pt, letter_spacing);
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(x)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(x)));
     }
 
     void p_glyphIndexAtNative(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      const auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      const auto text = info.Length() >= 1 ? to_std_string(iso, info[0]) : std::string{};
       if (!is_ascii(text)) {
         info.GetReturnValue().Set(Null(iso));
         return;
@@ -1369,7 +1346,7 @@ namespace fxe::js {
         return;
       }
       if (!std::isfinite(x)) {
-        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, static_cast<u32>(text.size())));
+        info.GetReturnValue().Set(to_v8(iso, static_cast<u32>(text.size())));
         return;
       }
       usize lo = 0;
@@ -1386,19 +1363,19 @@ namespace fxe::js {
         else
           lo = mid + 1;
       }
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, static_cast<u32>(lo)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<u32>(lo)));
     }
 
     void p_calcText(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto text = info.Length() >= 1 ? utf8(iso, info[0]) : std::string{};
+      auto text = info.Length() >= 1 ? to_std_string(iso, info[0]) : std::string{};
       float pt = info.Length() >= 2 ? float(num(ctx, info[1], 16.0)) : 16.0f;
       auto v = primitives::calc_text(text, get_font_info(), pt);
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(v.x)));
-      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(v.y)));
+      set_index(ctx, arr, 0, static_cast<double>(v.x));
+      set_index(ctx, arr, 1, static_cast<double>(v.y));
       info.GetReturnValue().Set(arr);
     }
     void p_drain(const FunctionCallbackInfo<Value>& info) {
@@ -1775,7 +1752,7 @@ namespace fxe::js {
       // Mix the two generations into one Number. Both fit comfortably in
       // the safe integer range under realistic eviction rates.
       const double combined = static_cast<double>(mask_gen) + static_cast<double>(color_gen) * 1e9;
-      info.GetReturnValue().Set(Number::New(iso, combined));
+      info.GetReturnValue().Set(to_v8(iso, combined));
     }
   } // namespace
 

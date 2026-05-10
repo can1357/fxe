@@ -42,16 +42,6 @@ namespace fxe::js {
       return table;
     }
 
-    Local<String> s(Isolate* iso, std::string_view sv) {
-      return String::NewFromUtf8(iso, sv.data(), NewStringType::kNormal,
-                                 static_cast<int>(sv.size()))
-          .ToLocalChecked();
-    }
-
-    Local<String> s(Isolate* iso, const char* z) {
-      return String::NewFromUtf8(iso, z ? z : "", NewStringType::kNormal).ToLocalChecked();
-    }
-
     bool is_reserved_name(std::string_view name) {
       return name == "setItem" || name == "getItem" || name == "removeItem" || name == "clear" ||
              name == "key" || name == "length";
@@ -61,7 +51,7 @@ namespace fxe::js {
       const char* msg = db ? sqlite3_errmsg(db) : fallback;
       if (!msg || !*msg)
         msg = fallback;
-      auto err = Exception::Error(s(iso, msg));
+      auto err = Exception::Error(to_v8(iso, msg));
       if (db && err->IsObject()) {
         auto ctx = iso->GetCurrentContext();
         auto obj = err.As<Object>();
@@ -310,7 +300,7 @@ namespace fxe::js {
         return Intercepted::kYes;
       if (!found)
         return Intercepted::kNo;
-      info.GetReturnValue().Set(s(iso, value));
+      info.GetReturnValue().Set(to_v8_string(iso, value));
       return Intercepted::kYes;
     }
 
@@ -380,7 +370,7 @@ namespace fxe::js {
         return;
       auto arr = Array::New(iso, static_cast<int>(keys.size()));
       for (u32 i = 0; i < keys.size(); ++i)
-        (void)arr->Set(ctx, i, s(iso, keys[i]));
+        (void)arr->Set(ctx, i, to_v8_string(iso, keys[i]));
       info.GetReturnValue().Set(arr);
     }
 
@@ -414,7 +404,7 @@ namespace fxe::js {
       if (!area || !get_value(iso, *area, maybe_key.FromJust(), value, found))
         return;
       if (found)
-        info.GetReturnValue().Set(s(iso, value));
+        info.GetReturnValue().Set(to_v8_string(iso, value));
       else
         info.GetReturnValue().Set(Null(iso));
     }
@@ -456,7 +446,7 @@ namespace fxe::js {
       if (!area || !key_at(iso, *area, index, key, found))
         return;
       if (found)
-        info.GetReturnValue().Set(s(iso, key));
+        info.GetReturnValue().Set(to_v8_string(iso, key));
       else
         info.GetReturnValue().Set(Null(iso));
     }

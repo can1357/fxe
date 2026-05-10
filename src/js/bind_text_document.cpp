@@ -12,6 +12,7 @@
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
+#include <fxe/v8_template_cache.hpp>
 #include <unordered_map>
 #include <utility>
 #include <v8.h>
@@ -23,25 +24,8 @@ namespace fxe::js {
 
     constexpr u32 TAG_TEXT_DOCUMENT = 0x54584F44u; // 'TXOD'
 
-    using TplGlobal = Global<FunctionTemplate>;
-    std::unordered_map<Isolate*, TplGlobal>& td_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-    void td_reset_for_isolate(Isolate* iso) {
-      auto& t = td_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-    struct td_resetter_register {
-      td_resetter_register() {
-        register_template_resetter(&td_reset_for_isolate);
-      }
-    };
-    static td_resetter_register s_td_resetter_register;
+    struct td_tag {};
+    using td_tpl_cache = template_isolate_cache<td_tag>;
 
     struct js_listener {
       Isolate* iso = nullptr;
@@ -88,31 +72,16 @@ namespace fxe::js {
       return static_cast<td_holder*>(unwrap(v.As<Object>(), TAG_TEXT_DOCUMENT));
     }
 
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-
-    Local<String> u16_to_v8(Isolate* iso, std::u16string_view s) {
-      // V8 String::NewFromTwoByte accepts uint16_t*; char16_t is layout-
-      // compatible.
-      return String::NewFromTwoByte(iso, reinterpret_cast<const uint16_t*>(s.data()),
-                                    NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
     std::u16string v8_to_u16(Isolate* iso, Local<Value> v) {
       // Round-trip via UTF-8 (V8's String::Write was removed; UTF-8 path
-      // also handles non-string coercions safely via Utf8Value).
+      // also handles non-string coercions safely via ToString).
       if (v.IsEmpty())
         return {};
-      String::Utf8Value u(iso, v);
+      std::string utf8 = to_std_string(iso, v);
       std::u16string out;
-      const char* p = *u;
-      if (!p)
-        return out;
-      const char* end = p + u.length();
-      out.reserve(static_cast<usize>(u.length()));
+      const char* p = utf8.data();
+      const char* end = p + utf8.size();
+      out.reserve(utf8.size());
       while (p < end) {
         char32_t cp;
         unsigned char c = static_cast<unsigned char>(*p);
@@ -155,10 +124,10 @@ namespace fxe::js {
 
     Local<Object> make_edit_object(Isolate* iso, Local<Context> ctx, const text_document_edit& e) {
       auto o = Object::New(iso);
-      (void)o->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, e.start));
-      (void)o->Set(ctx, "removed"_v8(iso), Integer::NewFromUnsigned(iso, e.removed));
-      (void)o->Set(ctx, "inserted"_v8(iso), u16_to_v8(iso, e.inserted));
-      (void)o->Set(ctx, "deleted"_v8(iso), u16_to_v8(iso, e.deleted));
+      set_prop(ctx, o, "start", e.start);
+      set_prop(ctx, o, "removed", e.removed);
+      set_prop(ctx, o, "inserted", e.inserted);
+      set_prop(ctx, o, "deleted", e.deleted);
       return o;
     }
 
@@ -174,7 +143,7 @@ namespace fxe::js {
       auto self = info.This();
       text_document* doc;
       if (info.Length() >= 1 && info[0]->IsString()) {
-        std::string init = utf8(iso, info[0]);
+        std::string init = to_std_string(iso, info[0]);
         doc = new text_document(std::string_view{init});
       } else {
         doc = new text_document();
@@ -195,28 +164,28 @@ namespace fxe::js {
         (void)throw_type_error(iso, "invalid TextDocument");
         return;
       }
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->length()));
+      info.GetReturnValue().Set(to_v8(iso, d->length()));
     }
     void td_line_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_doc(info.This());
       if (!d)
         return;
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->line_count()));
+      info.GetReturnValue().Set(to_v8(iso, d->line_count()));
     }
     void td_revision(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_doc(info.This());
       if (!d)
         return;
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->revision()));
+      info.GetReturnValue().Set(to_v8(iso, d->revision()));
     }
     void td_piece_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_doc(info.This());
       if (!d)
         return;
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->piece_count()));
+      info.GetReturnValue().Set(to_v8(iso, d->piece_count()));
     }
 
     void td_text(const FunctionCallbackInfo<Value>& info) {
@@ -225,8 +194,7 @@ namespace fxe::js {
       auto* d = unwrap_doc(info.This());
       if (!d)
         return;
-      auto s = d->slice(0, d->length());
-      info.GetReturnValue().Set(u16_to_v8(iso, s));
+      info.GetReturnValue().Set(to_v8(iso, d->slice(0, d->length())));
     }
     void td_slice(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -238,7 +206,7 @@ namespace fxe::js {
       const u32 a = to_u32(ctx, info.Length() >= 1 ? info[0] : Undefined(iso).As<Value>(), 0);
       const u32 b =
           to_u32(ctx, info.Length() >= 2 ? info[1] : Undefined(iso).As<Value>(), d->length());
-      info.GetReturnValue().Set(u16_to_v8(iso, d->slice(a, b)));
+      info.GetReturnValue().Set(to_v8(iso, d->slice(a, b)));
     }
     void td_char_code_at(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -247,7 +215,7 @@ namespace fxe::js {
       if (!d)
         return;
       const u32 off = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->code_unit_at(off)));
+      info.GetReturnValue().Set(to_v8(iso, d->code_unit_at(off)));
     }
 
     void td_line_to_offset(const FunctionCallbackInfo<Value>& info) {
@@ -257,7 +225,7 @@ namespace fxe::js {
       if (!d)
         return;
       const u32 line = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->line_to_offset(line)));
+      info.GetReturnValue().Set(to_v8(iso, d->line_to_offset(line)));
     }
     void td_offset_to_line(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -266,7 +234,7 @@ namespace fxe::js {
       if (!d)
         return;
       const u32 off = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, d->offset_to_line(off)));
+      info.GetReturnValue().Set(to_v8(iso, d->offset_to_line(off)));
     }
     void td_line_range(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -278,8 +246,8 @@ namespace fxe::js {
       const u32 line = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
       auto r = d->line_range(line);
       auto o = Object::New(iso);
-      (void)o->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, r.start));
-      (void)o->Set(ctx, "end"_v8(iso), Integer::NewFromUnsigned(iso, r.end));
+      set_prop(ctx, o, "start", r.start);
+      set_prop(ctx, o, "end", r.end);
       info.GetReturnValue().Set(o);
     }
     void td_line_text(const FunctionCallbackInfo<Value>& info) {
@@ -290,7 +258,7 @@ namespace fxe::js {
       if (!d)
         return;
       const u32 line = info.Length() >= 1 ? to_u32(ctx, info[0]) : 0;
-      info.GetReturnValue().Set(u16_to_v8(iso, d->line_text(line)));
+      info.GetReturnValue().Set(to_v8(iso, d->line_text(line)));
     }
     void td_offset_to_line_col(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -303,8 +271,8 @@ namespace fxe::js {
       const u32 line = d->offset_to_line(off);
       const u32 lstart = d->line_to_offset(line);
       auto o = Object::New(iso);
-      (void)o->Set(ctx, "line"_v8(iso), Integer::NewFromUnsigned(iso, line));
-      (void)o->Set(ctx, "col"_v8(iso), Integer::NewFromUnsigned(iso, off - lstart));
+      set_prop(ctx, o, "line", line);
+      set_prop(ctx, o, "col", off - lstart);
       info.GetReturnValue().Set(o);
     }
     void td_line_col_to_offset(const FunctionCallbackInfo<Value>& info) {
@@ -318,7 +286,7 @@ namespace fxe::js {
       const u32 lstart = d->line_to_offset(line);
       const auto r = d->line_range(line);
       const u32 off = std::min(lstart + col, r.end);
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, off));
+      info.GetReturnValue().Set(to_v8(iso, off));
     }
 
     // replace(start, end, text) → { start, removed, inserted, deleted }
@@ -361,25 +329,23 @@ namespace fxe::js {
       auto k_removed = "removed"_v8(iso);
       auto k_inserted = "inserted"_v8(iso);
       for (u32 i = 0; i < n; ++i) {
-        Local<Value> ev;
-        if (!arr->Get(ctx, i).ToLocal(&ev) || !ev->IsObject())
-          continue;
-        auto o = ev.As<Object>();
-        text_document_edit e;
-        Local<Value> f;
-        if (o->Get(ctx, k_start).ToLocal(&f))
-          e.start = to_u32(ctx, f);
-        if (o->Get(ctx, k_removed).ToLocal(&f))
-          e.removed = to_u32(ctx, f);
-        if (o->Get(ctx, k_inserted).ToLocal(&f) && f->IsString())
-          e.inserted = v8_to_u16(iso, f);
-        in.push_back(std::move(e));
+        if (auto ev = get_index<Local<Value>>(ctx, arr, i); ev && (*ev)->IsObject()) {
+          auto o = (*ev).As<Object>();
+          text_document_edit e;
+          if (auto f = get_prop<Local<Value>>(ctx, o, k_start))
+            e.start = to_u32(ctx, *f);
+          if (auto f = get_prop<Local<Value>>(ctx, o, k_removed))
+            e.removed = to_u32(ctx, *f);
+          if (auto f = get_prop<Local<Value>>(ctx, o, k_inserted); f && (*f)->IsString())
+            e.inserted = v8_to_u16(iso, *f);
+          in.push_back(std::move(e));
+        }
       }
       try {
         auto applied = d->apply_batch(in);
         auto out = Array::New(iso, static_cast<int>(applied.size()));
         for (u32 i = 0; i < applied.size(); ++i)
-          (void)out->Set(ctx, i, make_edit_object(iso, ctx, applied[i]));
+          set_index(ctx, out, i, make_edit_object(iso, ctx, applied[i]));
         info.GetReturnValue().Set(out);
       } catch (const std::exception& ex) {
         (void)throw_range_error(iso, ex.what());
@@ -407,7 +373,7 @@ namespace fxe::js {
         Local<Function> cb = raw->fn.Get(iso);
         auto arr = Array::New(iso, static_cast<int>(edits.size()));
         for (u32 i = 0; i < edits.size(); ++i)
-          (void)arr->Set(ctx, i, make_edit_object(iso, ctx, edits[i]));
+          set_index(ctx, arr, i, make_edit_object(iso, ctx, edits[i]));
         Local<Value> argv[1] = {arr};
         Local<Object> recv = h->self ? h->self->Get(iso) : ctx->Global();
         TryCatch try_catch(iso);
@@ -462,21 +428,20 @@ namespace fxe::js {
       bool ci = false;
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
-        Local<Value> f;
-        if (o->Get(ctx, "from"_v8(iso)).ToLocal(&f))
-          from = to_u32(ctx, f);
-        if (o->Get(ctx, "limit"_v8(iso)).ToLocal(&f))
-          limit = to_u32(ctx, f, 0xFFFFFFFFu);
-        if (o->Get(ctx, "caseInsensitive"_v8(iso)).ToLocal(&f))
-          ci = f->BooleanValue(iso);
+        if (auto f = get_prop<Local<Value>>(ctx, o, "from"_v8(iso)))
+          from = to_u32(ctx, *f);
+        if (auto f = get_prop<Local<Value>>(ctx, o, "limit"_v8(iso)))
+          limit = to_u32(ctx, *f, 0xFFFFFFFFu);
+        if (auto f = get_prop<Local<Value>>(ctx, o, "caseInsensitive"_v8(iso)))
+          ci = (*f)->BooleanValue(iso);
       }
       auto matches = d->search_literal(needle, from, limit, ci);
       auto out = Array::New(iso, static_cast<int>(matches.size()));
       for (u32 i = 0; i < matches.size(); ++i) {
         auto o = Object::New(iso);
-        (void)o->Set(ctx, "start"_v8(iso), Integer::NewFromUnsigned(iso, matches[i].start));
-        (void)o->Set(ctx, "end"_v8(iso), Integer::NewFromUnsigned(iso, matches[i].end));
-        (void)out->Set(ctx, i, o);
+        set_prop(ctx, o, "start", matches[i].start);
+        set_prop(ctx, o, "end", matches[i].end);
+        set_index(ctx, out, i, o);
       }
       info.GetReturnValue().Set(out);
     }
@@ -510,7 +475,7 @@ namespace fxe::js {
     TD_GETTER("unsubscribe", td_unsubscribe);
     TD_GETTER("searchLiteral", td_search_literal);
     global->Set(iso, "TextDocument", tpl);
-    td_tpl_table()[iso].Reset(iso, tpl);
+    td_tpl_cache::install(iso, tpl);
   }
 #undef TD_GETTER
 

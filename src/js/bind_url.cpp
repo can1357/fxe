@@ -14,8 +14,8 @@
 #include <cstdint>
 #include <cstring>
 #include <fxe/js_bindings.hpp>
-#include <fxe/types.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <memory>
@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include <fxe/v8_template_cache.hpp>
 #include <v8.h>
 
 namespace fxe::js {
@@ -33,38 +34,10 @@ namespace fxe::js {
     constexpr u32 TAG_URL = 0x55524C5Fu;       // 'URL_'
     constexpr u32 TAG_URLSEARCH = 0x55534552u; // 'USER' (URL Search)
 
-    using TplGlobal = Global<FunctionTemplate>;
-    std::unordered_map<Isolate*, TplGlobal>& url_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-    std::unordered_map<Isolate*, TplGlobal>& usp_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-    void url_reset_for_isolate(Isolate* iso) {
-      auto& t = url_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-    void usp_reset_for_isolate(Isolate* iso) {
-      auto& t = usp_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-    struct url_resetter_register {
-      url_resetter_register() {
-        register_template_resetter(&url_reset_for_isolate);
-        register_template_resetter(&usp_reset_for_isolate);
-      }
-    };
-    static url_resetter_register s_url_resetter_register;
+    struct url_tag {};
+    using url_tpl_cache = template_isolate_cache<url_tag>;
+    struct usp_tag {};
+    using usp_tpl_cache = template_isolate_cache<usp_tag>;
 
     // ---------------- URL parsing -------------------------------------------
 
@@ -384,24 +357,6 @@ namespace fxe::js {
       return out;
     }
 
-    Local<String> s8(Isolate* iso, const std::string& s) {
-      return String::NewFromUtf8(iso, s.c_str(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      auto ctx = iso->GetCurrentContext();
-      Local<String> s;
-      if (!v->ToString(ctx).ToLocal(&s))
-        return {};
-      String::Utf8Value u(iso, s);
-      return std::string(*u ? *u : "", *u ? u.length() : 0);
-    }
-
-    void throw_type(Isolate* iso, const char* msg) {
-      (void)throw_type_error(iso, msg);
-    }
-
     // ---------------- url_data <-> object plumbing --------------------------
 
     struct url_holder : weak_holder<url_holder> {
@@ -415,7 +370,7 @@ namespace fxe::js {
     };
 
     Local<Object> wrap_usp(Isolate* iso, Local<Context> ctx, std::unique_ptr<usp_data> d) {
-      auto tpl = usp_tpl_table()[iso].Get(iso);
+      auto tpl = usp_tpl_cache::resolve(iso);
       Local<Object> obj = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       auto* h = new usp_holder{{}, std::move(d)};
       set_native(iso, obj, h->data.get(), TAG_URLSEARCH);
@@ -436,21 +391,21 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (!info.IsConstructCall()) {
-        throw_type(iso, "URL must be called with new");
+        (void)throw_type_error(iso, "URL must be called with new");
         return;
       }
       if (info.Length() < 1) {
-        throw_type(iso, "URL: missing url");
+        (void)throw_type_error(iso, "URL: missing url");
         return;
       }
-      std::string input = to_str(iso, info[0]);
+      std::string input = to_std_string(iso, info[0]);
       url_data base{};
       url_data* base_ptr = nullptr;
       if (info.Length() >= 2 && !info[1]->IsUndefined() && !info[1]->IsNull()) {
-        std::string base_str = to_str(iso, info[1]);
+        std::string base_str = to_std_string(iso, info[1]);
         url_data b;
         if (!parse_url(base_str, nullptr, b)) {
-          throw_type(iso, "URL: invalid base");
+          (void)throw_type_error(iso, "URL: invalid base");
           return;
         }
         base = b;
@@ -458,7 +413,7 @@ namespace fxe::js {
       }
       auto d = std::make_unique<url_data>();
       if (!parse_url(input, base_ptr, *d)) {
-        throw_type(iso, "URL: invalid url");
+        (void)throw_type_error(iso, "URL: invalid url");
         return;
       }
       // Replace `this`'s instance bookkeeping by re-wrapping. We installed
@@ -476,7 +431,7 @@ namespace fxe::js {
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      info.GetReturnValue().Set(s8(iso, serialize_url(*d)));
+      info.GetReturnValue().Set(to_v8_string(iso, serialize_url(*d)));
     }
     void url_set_href(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
       auto* iso = info.GetIsolate();
@@ -484,8 +439,8 @@ namespace fxe::js {
       if (!d)
         return;
       url_data next;
-      if (!parse_url(to_str(iso, v), nullptr, next)) {
-        throw_type(iso, "URL.href: invalid url");
+      if (!parse_url(to_std_string(iso, v), nullptr, next)) {
+        (void)throw_type_error(iso, "URL.href: invalid url");
         return;
       }
       *d = std::move(next);
@@ -497,7 +452,7 @@ namespace fxe::js {
     auto* d = unwrap_url(info.HolderV2());                                                         \
     if (!d)                                                                                        \
       return;                                                                                      \
-    info.GetReturnValue().Set(s8(iso, d->FIELD));                                                  \
+    info.GetReturnValue().Set(to_v8_string(iso, d->FIELD));                                        \
   }
 
     URL_STRING_GETTER(protocol, protocol)
@@ -520,7 +475,7 @@ namespace fxe::js {
         h += ":";
         h += d->port;
       }
-      info.GetReturnValue().Set(s8(iso, h));
+      info.GetReturnValue().Set(to_v8_string(iso, h));
     }
 
     void url_get_origin(Local<Name>, const PropertyCallbackInfo<Value>& info) {
@@ -528,7 +483,7 @@ namespace fxe::js {
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      info.GetReturnValue().Set(s8(iso, serialize_origin(*d)));
+      info.GetReturnValue().Set(to_v8_string(iso, serialize_origin(*d)));
     }
 
     void url_set_search(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
@@ -536,7 +491,7 @@ namespace fxe::js {
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      std::string s = to_str(iso, v);
+      std::string s = to_std_string(iso, v);
       if (s.empty())
         d->search.clear();
       else if (s.front() == '?')
@@ -549,7 +504,7 @@ namespace fxe::js {
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      std::string s = to_str(iso, v);
+      std::string s = to_std_string(iso, v);
       if (s.empty())
         d->hash.clear();
       else if (s.front() == '#')
@@ -562,7 +517,7 @@ namespace fxe::js {
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      std::string s = to_str(iso, v);
+      std::string s = to_std_string(iso, v);
       if (d->is_special && (s.empty() || s.front() != '/'))
         s = "/" + s;
       d->pathname = s;
@@ -572,21 +527,21 @@ namespace fxe::js {
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      d->hostname = ascii_lower(to_str(iso, v));
+      d->hostname = ascii_lower(to_std_string(iso, v));
     }
     void url_set_port(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      d->port = to_str(iso, v);
+      d->port = to_std_string(iso, v);
     }
     void url_set_protocol(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
       auto* iso = info.GetIsolate();
       auto* d = unwrap_url(info.HolderV2());
       if (!d)
         return;
-      std::string s = ascii_lower(to_str(iso, v));
+      std::string s = ascii_lower(to_std_string(iso, v));
       if (!s.empty() && s.back() != ':')
         s.push_back(':');
       d->protocol = s;
@@ -599,7 +554,7 @@ namespace fxe::js {
       auto* d = unwrap_url(info.This());
       if (!d)
         return;
-      info.GetReturnValue().Set(s8(iso, serialize_url(*d)));
+      info.GetReturnValue().Set(to_v8_string(iso, serialize_url(*d)));
     }
 
     void url_get_search_params(Local<Name>, const PropertyCallbackInfo<Value>& info) {
@@ -623,13 +578,13 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "URLSearchParams must be called with new");
+        (void)throw_type_error(iso, "URLSearchParams must be called with new");
         return;
       }
       auto data = std::make_unique<usp_data>();
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull()) {
         if (info[0]->IsString()) {
-          std::string s = to_str(iso, info[0]);
+          std::string s = to_std_string(iso, info[0]);
           if (!s.empty() && s.front() == '?')
             s.erase(0, 1);
           usp_parse(s, *data);
@@ -642,7 +597,7 @@ namespace fxe::js {
             auto e = entry.As<Array>();
             Local<Value> k, v;
             if (e->Get(ctx, 0).ToLocal(&k) && e->Get(ctx, 1).ToLocal(&v))
-              data->pairs.emplace_back(to_str(iso, k), to_str(iso, v));
+              data->pairs.emplace_back(to_std_string(iso, k), to_std_string(iso, v));
           }
         } else if (info[0]->IsObject()) {
           auto o = info[0].As<Object>();
@@ -655,7 +610,7 @@ namespace fxe::js {
               Local<Value> v;
               if (!o->Get(ctx, k).ToLocal(&v))
                 continue;
-              data->pairs.emplace_back(to_str(iso, k), to_str(iso, v));
+              data->pairs.emplace_back(to_std_string(iso, k), to_std_string(iso, v));
             }
           }
         }
@@ -673,10 +628,10 @@ namespace fxe::js {
       auto* d = unwrap_usp(info.This());
       if (!d || info.Length() < 1)
         return;
-      std::string k = to_str(iso, info[0]);
+      std::string k = to_std_string(iso, info[0]);
       for (auto& [pk, pv] : d->pairs)
         if (pk == k) {
-          info.GetReturnValue().Set(s8(iso, pv));
+          info.GetReturnValue().Set(to_v8_string(iso, pv));
           return;
         }
       info.GetReturnValue().SetNull();
@@ -688,12 +643,12 @@ namespace fxe::js {
       auto* d = unwrap_usp(info.This());
       if (!d || info.Length() < 1)
         return;
-      std::string k = to_str(iso, info[0]);
+      std::string k = to_std_string(iso, info[0]);
       Local<Array> out = Array::New(iso);
       u32 n = 0;
       for (auto& [pk, pv] : d->pairs)
         if (pk == k)
-          out->Set(ctx, n++, s8(iso, pv)).Check();
+          out->Set(ctx, n++, to_v8_string(iso, pv)).Check();
       info.GetReturnValue().Set(out);
     }
     void usp_has(const FunctionCallbackInfo<Value>& info) {
@@ -702,7 +657,7 @@ namespace fxe::js {
       auto* d = unwrap_usp(info.This());
       if (!d || info.Length() < 1)
         return;
-      std::string k = to_str(iso, info[0]);
+      std::string k = to_std_string(iso, info[0]);
       for (auto& [pk, pv] : d->pairs)
         if (pk == k) {
           info.GetReturnValue().Set(true);
@@ -716,8 +671,8 @@ namespace fxe::js {
       auto* d = unwrap_usp(info.This());
       if (!d || info.Length() < 2)
         return;
-      std::string k = to_str(iso, info[0]);
-      std::string v = to_str(iso, info[1]);
+      std::string k = to_std_string(iso, info[0]);
+      std::string v = to_std_string(iso, info[1]);
       bool replaced = false;
       auto it = d->pairs.begin();
       while (it != d->pairs.end()) {
@@ -741,7 +696,7 @@ namespace fxe::js {
       auto* d = unwrap_usp(info.This());
       if (!d || info.Length() < 2)
         return;
-      d->pairs.emplace_back(to_str(iso, info[0]), to_str(iso, info[1]));
+      d->pairs.emplace_back(to_std_string(iso, info[0]), to_std_string(iso, info[1]));
     }
     void usp_delete(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -749,7 +704,7 @@ namespace fxe::js {
       auto* d = unwrap_usp(info.This());
       if (!d || info.Length() < 1)
         return;
-      std::string k = to_str(iso, info[0]);
+      std::string k = to_std_string(iso, info[0]);
       auto it = d->pairs.begin();
       while (it != d->pairs.end()) {
         if (it->first == k)
@@ -764,7 +719,7 @@ namespace fxe::js {
       auto* d = unwrap_usp(info.This());
       if (!d)
         return;
-      info.GetReturnValue().Set(s8(iso, usp_serialize(*d)));
+      info.GetReturnValue().Set(to_v8_string(iso, usp_serialize(*d)));
     }
     void usp_for_each(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -776,7 +731,7 @@ namespace fxe::js {
       auto fn = info[0].As<Function>();
       Local<Object> self = info.This();
       for (auto& [pk, pv] : d->pairs) {
-        Local<Value> argv[3] = {s8(iso, pv), s8(iso, pk), self};
+        Local<Value> argv[3] = {to_v8_string(iso, pv), to_v8_string(iso, pk), self};
         Local<Value> ignored;
         (void)fn->Call(ctx, Undefined(iso), 3, argv).ToLocal(&ignored);
       }
@@ -810,7 +765,7 @@ namespace fxe::js {
     uproto->Set(iso, "toJSON", FunctionTemplate::New(iso, url_to_string));
 
     global->Set(iso, "URL", utpl);
-    url_tpl_table()[iso].Reset(iso, utpl);
+    url_tpl_cache::install(iso, utpl);
 
     // URLSearchParams
     auto stpl = FunctionTemplate::New(iso, usp_ctor);
@@ -827,7 +782,7 @@ namespace fxe::js {
     sproto->Set(iso, "forEach", FunctionTemplate::New(iso, usp_for_each));
 
     global->Set(iso, "URLSearchParams", stpl);
-    usp_tpl_table()[iso].Reset(iso, stpl);
+    usp_tpl_cache::install(iso, stpl);
   }
 
 } // namespace fxe::js

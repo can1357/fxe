@@ -17,8 +17,8 @@
 #include <cstring>
 #include <deque>
 #include <fxe/js_bindings.hpp>
-#include <fxe/types.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <memory>
@@ -96,19 +96,6 @@ namespace fxe::js {
 
     // ---------------- Helpers -----------------------------------------------
 
-    Local<String> s8(Isolate* iso, const std::string& s) {
-      return String::NewFromUtf8(iso, s.c_str(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      auto ctx = iso->GetCurrentContext();
-      Local<String> s;
-      if (!v->ToString(ctx).ToLocal(&s))
-        return {};
-      String::Utf8Value u(iso, s);
-      return std::string(*u ? *u : "", *u ? u.length() : 0);
-    }
-
     std::string header_value(const net::header_list& headers, std::string_view key) {
       const std::string want = ascii_lower(std::string(key));
       for (auto it = headers.rbegin(); it != headers.rend(); ++it) {
@@ -117,14 +104,9 @@ namespace fxe::js {
       }
       return {};
     }
-
-    void throw_type(Isolate* iso, const char* m) {
-      (void)throw_type_error(iso, m);
-    }
-
-    bool is_readable_stream_like(Isolate* iso, Local<Context> ctx, Local<Object> obj) {
-      Local<Value> get_reader;
-      return obj->Get(ctx, "getReader"_v8(iso)).ToLocal(&get_reader) && get_reader->IsFunction();
+    bool is_readable_stream_like(Local<Context> ctx, Local<Object> obj) {
+      auto get_reader = get_prop<Local<Value>>(ctx, obj, "getReader");
+      return get_reader.has_value() && (*get_reader)->IsFunction();
     }
 
     Local<Value> make_stream_body_not_supported_error(Isolate* iso, Local<Context> ctx) {
@@ -132,22 +114,22 @@ namespace fxe::js {
                      "fetch: ReadableStream body is not yet supported in this build (use Blob or "
                      "ArrayBuffer; ERR_FXE_FETCH_STREAM_BODY)"_v8(iso))
                      .As<Object>();
-      (void)err->Set(ctx, "code"_v8(iso), "ERR_FXE_FETCH_STREAM_BODY"_v8(iso));
+      set_prop(ctx, err, "code", "ERR_FXE_FETCH_STREAM_BODY");
       return err;
     }
 
     Local<Value> make_permission_denied(Isolate* iso, std::string_view what) {
       std::string msg = "Permission denied: ";
       msg.append(what);
-      auto err = Exception::Error(s8(iso, msg)).As<Object>();
-      (void)err->Set(iso->GetCurrentContext(), "name"_v8(iso), "PermissionDenied"_v8(iso));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(iso->GetCurrentContext(), err, "name", "PermissionDenied");
       return err;
     }
 
     Local<Value> make_named_error(Isolate* iso, std::string_view name, std::string_view message) {
       std::string msg(message);
-      auto err = Exception::Error(s8(iso, msg)).As<Object>();
-      (void)err->Set(iso->GetCurrentContext(), "name"_v8(iso), s8(iso, std::string(name)));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(iso->GetCurrentContext(), err, "name", std::string(name));
       return err;
     }
 
@@ -203,13 +185,15 @@ namespace fxe::js {
       if (v->IsArray()) {
         auto a = v.As<Array>();
         for (u32 i = 0; i < a->Length(); ++i) {
-          Local<Value> entry;
-          if (!a->Get(ctx, i).ToLocal(&entry) || !entry->IsArray())
+          auto item = get_index<Local<Value>>(ctx, a, i);
+          if (!item.has_value() || !(*item)->IsArray())
             continue;
-          auto e = entry.As<Array>();
-          Local<Value> k, vv;
-          if (e->Get(ctx, 0).ToLocal(&k) && e->Get(ctx, 1).ToLocal(&vv))
-            d.entries.emplace_back(ascii_lower(to_str(iso, k)), to_str(iso, vv));
+          auto e = (*item).As<Array>();
+          auto key = get_index<Local<Value>>(ctx, e, 0);
+          auto value = get_index<Local<Value>>(ctx, e, 1);
+          if (key.has_value() && value.has_value())
+            d.entries.emplace_back(ascii_lower(to_std_string(iso, *key)),
+                                   to_std_string(iso, *value));
         }
       } else if (v->IsObject()) {
         // Could be another Headers — recover via tag.
@@ -223,13 +207,13 @@ namespace fxe::js {
         if (!o->GetOwnPropertyNames(ctx).ToLocal(&names))
           return;
         for (u32 i = 0; i < names->Length(); ++i) {
-          Local<Value> k;
-          if (!names->Get(ctx, i).ToLocal(&k))
+          auto key = get_index<Local<Value>>(ctx, names, i);
+          if (!key.has_value())
             continue;
-          Local<Value> vv;
-          if (!o->Get(ctx, k).ToLocal(&vv))
+          auto value = get_prop<Local<Value>>(ctx, o, *key);
+          if (!value.has_value())
             continue;
-          d.entries.emplace_back(ascii_lower(to_str(iso, k)), to_str(iso, vv));
+          d.entries.emplace_back(ascii_lower(to_std_string(iso, *key)), to_std_string(iso, *value));
         }
       }
     }
@@ -238,7 +222,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "Headers must be called with new");
+        (void)throw_type_error(iso, "Headers must be called with new");
         return;
       }
       auto d = std::make_unique<headers_data>();
@@ -257,7 +241,7 @@ namespace fxe::js {
       auto* d = unwrap_headers(info.This());
       if (!d || info.Length() < 1)
         return;
-      std::string k = ascii_lower(to_str(iso, info[0]));
+      std::string k = ascii_lower(to_std_string(iso, info[0]));
       std::string out;
       bool found = false;
       for (auto& [pk, pv] : d->entries)
@@ -268,7 +252,7 @@ namespace fxe::js {
           found = true;
         }
       if (found)
-        info.GetReturnValue().Set(s8(iso, out));
+        info.GetReturnValue().Set(to_v8_string(iso, out));
       else
         info.GetReturnValue().SetNull();
     }
@@ -278,7 +262,7 @@ namespace fxe::js {
       auto* d = unwrap_headers(info.This());
       if (!d || info.Length() < 1)
         return;
-      std::string k = ascii_lower(to_str(iso, info[0]));
+      std::string k = ascii_lower(to_std_string(iso, info[0]));
       for (auto& [pk, pv] : d->entries)
         if (pk == k) {
           info.GetReturnValue().Set(true);
@@ -292,8 +276,8 @@ namespace fxe::js {
       auto* d = unwrap_headers(info.This());
       if (!d || info.Length() < 2)
         return;
-      std::string k = ascii_lower(to_str(iso, info[0]));
-      std::string v = to_str(iso, info[1]);
+      std::string k = ascii_lower(to_std_string(iso, info[0]));
+      std::string v = to_std_string(iso, info[1]);
       bool replaced = false;
       auto it = d->entries.begin();
       while (it != d->entries.end()) {
@@ -316,7 +300,8 @@ namespace fxe::js {
       auto* d = unwrap_headers(info.This());
       if (!d || info.Length() < 2)
         return;
-      d->entries.emplace_back(ascii_lower(to_str(iso, info[0])), to_str(iso, info[1]));
+      d->entries.emplace_back(ascii_lower(to_std_string(iso, info[0])),
+                              to_std_string(iso, info[1]));
     }
     void headers_delete(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -324,7 +309,7 @@ namespace fxe::js {
       auto* d = unwrap_headers(info.This());
       if (!d || info.Length() < 1)
         return;
-      std::string k = ascii_lower(to_str(iso, info[0]));
+      std::string k = ascii_lower(to_std_string(iso, info[0]));
       auto it = d->entries.begin();
       while (it != d->entries.end()) {
         if (it->first == k)
@@ -343,7 +328,7 @@ namespace fxe::js {
       auto fn = info[0].As<Function>();
       Local<Object> self = info.This();
       for (auto& [pk, pv] : d->entries) {
-        Local<Value> argv[3] = {s8(iso, pv), s8(iso, pk), self};
+        Local<Value> argv[3] = {to_v8_string(iso, pv), to_v8_string(iso, pk), self};
         Local<Value> ignored;
         (void)fn->Call(ctx, Undefined(iso), 3, argv).ToLocal(&ignored);
       }
@@ -384,14 +369,14 @@ namespace fxe::js {
         info.GetReturnValue().SetUndefined();
         return;
       }
-      info.GetReturnValue().Set(s8(iso, d->reason));
+      info.GetReturnValue().Set(to_v8_string(iso, d->reason));
     }
     void abort_signal_add_listener(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction())
         return;
-      if (to_str(iso, info[0]) != "abort")
+      if (to_std_string(iso, info[0]) != "abort")
         return;
       auto* d = unwrap_abort_signal(info.This());
       if (!d)
@@ -404,7 +389,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction())
         return;
-      if (to_str(iso, info[0]) != "abort")
+      if (to_std_string(iso, info[0]) != "abort")
         return;
       auto* d = unwrap_abort_signal(info.This());
       if (!d)
@@ -426,7 +411,7 @@ namespace fxe::js {
       abort_signal_data* sig = nullptr;
       auto obj = make_abort_signal(iso, ctx, sig);
       sig->aborted = true;
-      sig->reason = info.Length() >= 1 ? to_str(iso, info[0]) : std::string("aborted");
+      sig->reason = info.Length() >= 1 ? to_std_string(iso, info[0]) : std::string("aborted");
       info.GetReturnValue().Set(obj);
     }
 
@@ -439,7 +424,7 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "AbortController must be called with new");
+        (void)throw_type_error(iso, "AbortController must be called with new");
         return;
       }
       auto* d = new abort_controller_data();
@@ -448,7 +433,7 @@ namespace fxe::js {
       auto self = info.This();
       set_native(iso, self, d, TAG_ABORT + 1);
       // Expose `signal` directly on the instance.
-      self->Set(ctx, "signal"_v8(iso), sig_obj).Check();
+      set_prop(ctx, self, "signal", sig_obj);
       d->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
@@ -458,16 +443,14 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       auto self = info.This();
-      Local<Value> sig_v;
-      if (!self->Get(ctx, "signal"_v8(iso)).ToLocal(&sig_v))
+      auto sig_v = get_prop<Local<Value>>(ctx, self, "signal");
+      if (!sig_v.has_value() || !(*sig_v)->IsObject())
         return;
-      if (!sig_v->IsObject())
-        return;
-      auto* sig = unwrap_abort_signal(sig_v.As<Object>());
+      auto* sig = unwrap_abort_signal((*sig_v).As<Object>());
       if (!sig || sig->aborted)
         return;
       sig->aborted = true;
-      sig->reason = info.Length() >= 1 ? to_str(iso, info[0]) : std::string("aborted");
+      sig->reason = info.Length() >= 1 ? to_std_string(iso, info[0]) : std::string("aborted");
       // Fire listeners once. Swap first so callbacks may remove themselves
       // during promise settlement without invalidating this dispatch loop.
       std::vector<Global<Function>> listeners;
@@ -555,7 +538,7 @@ namespace fxe::js {
       auto* d = unwrap_response(info.HolderV2());
       if (!d)
         return;
-      info.GetReturnValue().Set(s8(iso, d->status_text));
+      info.GetReturnValue().Set(to_v8_string(iso, d->status_text));
     }
     void resp_get_ok(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* d = unwrap_response(info.HolderV2());
@@ -568,7 +551,7 @@ namespace fxe::js {
       auto* d = unwrap_response(info.HolderV2());
       if (!d)
         return;
-      info.GetReturnValue().Set(s8(iso, d->url));
+      info.GetReturnValue().Set(to_v8_string(iso, d->url));
     }
     void resp_get_headers(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -590,7 +573,7 @@ namespace fxe::js {
         return true;
       }
       if (v->IsString()) {
-        out = to_str(iso, v);
+        out = to_std_string(iso, v);
         return true;
       }
       if (v->IsArrayBuffer()) {
@@ -616,14 +599,12 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_response(info.This());
       if (!d) {
-        throw_type(iso, "Response.text: invalid this");
+        (void)throw_type_error(iso, "Response.text: invalid this");
         return;
       }
       d->body_used = true;
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
-      auto str = String::NewFromUtf8(iso, d->body.c_str(), NewStringType::kNormal,
-                                     static_cast<int>(d->body.size()))
-                     .ToLocalChecked();
+      auto str = to_v8_string(iso, std::string_view(d->body.data(), d->body.size()));
       resolver->Resolve(ctx, str).Check();
       info.GetReturnValue().Set(resolver->GetPromise());
     }
@@ -634,7 +615,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_response(info.This());
       if (!d) {
-        throw_type(iso, "Response.arrayBuffer: invalid this");
+        (void)throw_type_error(iso, "Response.arrayBuffer: invalid this");
         return;
       }
       d->body_used = true;
@@ -653,14 +634,12 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* d = unwrap_response(info.This());
       if (!d) {
-        throw_type(iso, "Response.json: invalid this");
+        (void)throw_type_error(iso, "Response.json: invalid this");
         return;
       }
       d->body_used = true;
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
-      auto src = String::NewFromUtf8(iso, d->body.c_str(), NewStringType::kNormal,
-                                     static_cast<int>(d->body.size()))
-                     .ToLocalChecked();
+      auto src = to_v8_string(iso, std::string_view(d->body.data(), d->body.size()));
       Local<Value> parsed;
       if (!JSON::Parse(ctx, src).ToLocal(&parsed)) {
         resolver->Reject(ctx, Exception::SyntaxError("JSON parse failed"_v8(iso))).Check();
@@ -675,32 +654,34 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "Response must be called with new");
+        (void)throw_type_error(iso, "Response must be called with new");
         return;
       }
 
       auto d = std::make_unique<response_data>();
       if (info.Length() >= 1 && !response_body_from_value(iso, info[0], d->body)) {
-        throw_type(iso, "Response: unsupported body type");
+        (void)throw_type_error(iso, "Response: unsupported body type");
         return;
       }
 
       auto h_data = std::make_unique<headers_data>();
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto init = info[1].As<Object>();
-        Local<Value> v;
-        if (init->Get(ctx, "status"_v8(iso)).ToLocal(&v) && !v->IsUndefined()) {
-          auto status = v->Int32Value(ctx).FromMaybe(200);
-          if (status < 200 || status > 599) {
+        if (auto status = get_prop<Local<Value>>(ctx, init, "status");
+            status.has_value() && !(*status)->IsUndefined()) {
+          auto code = (*status)->Int32Value(ctx).FromMaybe(200);
+          if (code < 200 || code > 599) {
             (void)throw_range_error(iso, "Response: status must be in the range 200 to 599");
             return;
           }
-          d->status = status;
+          d->status = code;
         }
-        if (init->Get(ctx, "statusText"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-          d->status_text = to_str(iso, v);
-        if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-          headers_populate_from_value(iso, ctx, v, *h_data);
+        if (auto status_text = get_prop<Local<Value>>(ctx, init, "statusText");
+            status_text.has_value() && !(*status_text)->IsUndefined())
+          d->status_text = to_std_string(iso, *status_text);
+        if (auto headers = get_prop<Local<Value>>(ctx, init, "headers");
+            headers.has_value() && !(*headers)->IsUndefined())
+          headers_populate_from_value(iso, ctx, *headers, *h_data);
       }
       d->headers_obj.Reset(iso, wrap_headers(iso, ctx, std::move(h_data)));
 
@@ -739,55 +720,61 @@ namespace fxe::js {
       if (!init_v->IsObject())
         return true;
       auto init = init_v.As<Object>();
-      Local<Value> v;
-      if (init->Get(ctx, "method"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-        req.method = to_str(iso, v);
-      if (init->Get(ctx, "headers"_v8(iso)).ToLocal(&v) && !v->IsUndefined()) {
+      if (auto method = get_prop<Local<Value>>(ctx, init, "method");
+          method.has_value() && !(*method)->IsUndefined())
+        req.method = to_std_string(iso, *method);
+      if (auto headers = get_prop<Local<Value>>(ctx, init, "headers");
+          headers.has_value() && !(*headers)->IsUndefined()) {
         auto h_data = std::make_unique<headers_data>();
-        headers_populate_from_value(iso, ctx, v, *h_data);
+        headers_populate_from_value(iso, ctx, *headers, *h_data);
         req.headers_obj.Reset(iso, wrap_headers(iso, ctx, std::move(h_data)));
       }
-      if (init->Get(ctx, "body"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull()) {
-        if (v->IsString()) {
-          req.body = to_str(iso, v);
-        } else if (v->IsArrayBuffer()) {
-          auto ab = v.As<ArrayBuffer>();
+      if (auto body = get_prop<Local<Value>>(ctx, init, "body");
+          body.has_value() && !(*body)->IsUndefined() && !(*body)->IsNull()) {
+        auto body_value = *body;
+        if (body_value->IsString()) {
+          req.body = to_std_string(iso, body_value);
+        } else if (body_value->IsArrayBuffer()) {
+          auto ab = body_value.As<ArrayBuffer>();
           auto bs = ab->GetBackingStore();
           req.body.assign(reinterpret_cast<const char*>(bs->Data()), bs->ByteLength());
-        } else if (v->IsArrayBufferView()) {
-          auto view = v.As<ArrayBufferView>();
+        } else if (body_value->IsArrayBufferView()) {
+          auto view = body_value.As<ArrayBufferView>();
           auto ab = view->Buffer();
           auto bs = ab->GetBackingStore();
           auto* p = reinterpret_cast<const char*>(bs->Data()) + view->ByteOffset();
           req.body.assign(p, view->ByteLength());
-        } else if (v->IsObject()) {
-          if (is_readable_stream_like(iso, ctx, v.As<Object>())) {
+        } else if (body_value->IsObject()) {
+          if (is_readable_stream_like(ctx, body_value.As<Object>())) {
             if (!allow_stream) {
               if (throw_stream)
                 *throw_stream = true;
               return false;
             }
             if (stream_body_or_null)
-              *stream_body_or_null = v.As<Object>();
+              *stream_body_or_null = body_value.As<Object>();
             req.body.clear();
           } else {
-            // Best-effort: stringify objects that look like form data.
-            req.body = to_str(iso, v);
+            req.body = to_std_string(iso, body_value);
           }
         } else {
-          req.body = to_str(iso, v);
+          req.body = to_std_string(iso, body_value);
         }
         if (body_text_or_null)
           *body_text_or_null = req.body;
       }
-      if (init->Get(ctx, "signal"_v8(iso)).ToLocal(&v) && v->IsObject())
-        req.signal_obj.Reset(iso, v.As<Object>());
-      if (init->Get(ctx, "proxy"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull())
-        req.proxy = to_str(iso, v);
-      if (init->Get(ctx, "range"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull())
-        req.range = to_str(iso, v);
-      if (init->Get(ctx, "timeout_ms"_v8(iso)).ToLocal(&v) && !v->IsUndefined() && !v->IsNull())
-        req.timeout_ms = v->Int32Value(ctx).FromMaybe(0);
+      if (auto signal = get_prop<Local<Value>>(ctx, init, "signal");
+          signal.has_value() && (*signal)->IsObject())
+        req.signal_obj.Reset(iso, (*signal).As<Object>());
+      if (auto proxy = get_prop<Local<Value>>(ctx, init, "proxy");
+          proxy.has_value() && !(*proxy)->IsUndefined() && !(*proxy)->IsNull())
+        req.proxy = to_std_string(iso, *proxy);
+      if (auto range = get_prop<Local<Value>>(ctx, init, "range");
+          range.has_value() && !(*range)->IsUndefined() && !(*range)->IsNull())
+        req.range = to_std_string(iso, *range);
+      if (auto timeout_ms = get_prop<Local<Value>>(ctx, init, "timeout_ms");
+          timeout_ms.has_value() && !(*timeout_ms)->IsUndefined() && !(*timeout_ms)->IsNull())
+        req.timeout_ms = (*timeout_ms)->Int32Value(ctx).FromMaybe(0);
       return true;
     }
 
@@ -795,15 +782,15 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "Request must be called with new");
+        (void)throw_type_error(iso, "Request must be called with new");
         return;
       }
       if (info.Length() < 1) {
-        throw_type(iso, "Request: missing url");
+        (void)throw_type_error(iso, "Request: missing url");
         return;
       }
       auto* d = new request_data();
-      d->url = to_str(iso, info[0]);
+      d->url = to_std_string(iso, info[0]);
       bool throw_stream = false;
       if (info.Length() >= 2) {
         std::string ignored;
@@ -818,8 +805,8 @@ namespace fxe::js {
       set_native(iso, self, d, TAG_REQUEST);
       d->bind(iso, self);
       // Expose simple props as own properties so JS readers see them.
-      self->Set(ctx, "url"_v8(iso), s8(iso, d->url)).Check();
-      self->Set(ctx, "method"_v8(iso), s8(iso, d->method)).Check();
+      set_prop(ctx, self, "url", d->url);
+      set_prop(ctx, self, "method", d->method);
       info.GetReturnValue().Set(self);
     }
 
@@ -904,8 +891,8 @@ namespace fxe::js {
       Context::Scope cs(ctx);
       TryCatch try_catch(iso);
       auto reader = st.upload_reader.Get(iso);
-      Local<Value> read_v;
-      if (!reader->Get(ctx, "read"_v8(iso)).ToLocal(&read_v) || !read_v->IsFunction()) {
+      auto read_v = get_prop<Local<Value>>(ctx, reader, "read");
+      if (!read_v.has_value() || !(*read_v)->IsFunction()) {
         Local<Value> reason =
             try_catch.HasCaught()
                 ? try_catch.Exception()
@@ -915,7 +902,7 @@ namespace fxe::js {
         return false;
       }
       Local<Value> pending_v;
-      if (!read_v.As<Function>()->Call(ctx, reader, 0, nullptr).ToLocal(&pending_v)) {
+      if (!(*read_v).As<Function>()->Call(ctx, reader, 0, nullptr).ToLocal(&pending_v)) {
         Local<Value> reason = try_catch.HasCaught()
                                   ? try_catch.Exception()
                                   : Exception::Error("fetch: ReadableStream read() threw"_v8(iso));
@@ -1003,8 +990,8 @@ namespace fxe::js {
         return;
       }
       auto result = info[0].As<Object>();
-      Local<Value> done_v;
-      if (!result->Get(ctx, "done"_v8(iso)).ToLocal(&done_v)) {
+      auto done_v = get_prop<Local<Value>>(ctx, result, "done");
+      if (!done_v.has_value()) {
         Local<Value> reason =
             try_catch.HasCaught()
                 ? try_catch.Exception()
@@ -1020,7 +1007,7 @@ namespace fxe::js {
         net::http_client::instance().abort(st.req_id);
         return;
       }
-      if (done_v->BooleanValue(iso)) {
+      if ((*done_v)->BooleanValue(iso)) {
         {
           std::lock_guard<std::mutex> lock(st.upload_stream->m);
           st.upload_stream->reader_done = true;
@@ -1033,8 +1020,8 @@ namespace fxe::js {
         delete data;
         return;
       }
-      Local<Value> value_v;
-      if (!result->Get(ctx, "value"_v8(iso)).ToLocal(&value_v)) {
+      auto value_v = get_prop<Local<Value>>(ctx, result, "value");
+      if (!value_v.has_value()) {
         Local<Value> reason =
             try_catch.HasCaught()
                 ? try_catch.Exception()
@@ -1056,7 +1043,7 @@ namespace fxe::js {
           delete data;
           return;
         }
-        if (!append_buffer_source(value_v, st.upload_stream->buf)) {
+        if (!append_buffer_source(*value_v, st.upload_stream->buf)) {
           st.upload_stream->aborted = true;
           st.upload_stream->reader_done = true;
           reject_in_flight(
@@ -1101,7 +1088,7 @@ namespace fxe::js {
         std::string msg = "fetch failed: " + resp.error;
         fxe::debug::network::emit_loading_failed(st.debug_request_id, "Fetch", msg, false);
         cleanup_in_flight_state(iso, st);
-        resolver->Reject(ctx, Exception::Error(s8(iso, msg))).Check();
+        resolver->Reject(ctx, Exception::Error(to_v8_string(iso, msg))).Check();
         st.resolver.Reset();
         st.ctx.Reset();
         return;
@@ -1133,12 +1120,12 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 3) {
-        throw_type(iso, "cookieJar.set: expected domain, name, value");
+        (void)throw_type_error(iso, "cookieJar.set: expected domain, name, value");
         return;
       }
       std::string path = "/";
       if (info.Length() >= 4 && !info[3]->IsUndefined() && !info[3]->IsNull())
-        path = to_str(iso, info[3]);
+        path = to_std_string(iso, info[3]);
       i64 expires = 0;
       if (info.Length() >= 5 && !info[4]->IsUndefined() && !info[4]->IsNull())
         expires = info[4]->IntegerValue(ctx).FromMaybe(0);
@@ -1148,17 +1135,17 @@ namespace fxe::js {
       bool http_only = false;
       if (info.Length() >= 7)
         http_only = info[6]->BooleanValue(iso);
-      net::http_client::instance().cookies().set(to_str(iso, info[0]), to_str(iso, info[1]),
-                                                 to_str(iso, info[2]), std::move(path), expires,
-                                                 secure, http_only);
+      net::http_client::instance().cookies().set(
+          to_std_string(iso, info[0]), to_std_string(iso, info[1]), to_std_string(iso, info[2]),
+          std::move(path), expires, secure, http_only);
     }
 
     void cookie_jar_get(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1)
         return;
-      auto out = net::http_client::instance().cookies().get(to_str(iso, info[0]));
-      info.GetReturnValue().Set(s8(iso, out));
+      auto out = net::http_client::instance().cookies().get(to_std_string(iso, info[0]));
+      info.GetReturnValue().Set(to_v8_string(iso, out));
     }
 
     void cookie_jar_clear(const FunctionCallbackInfo<Value>& info) {
@@ -1170,11 +1157,11 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() >= 1 && !info[0]->IsUndefined() && !info[0]->IsNull())
-        net::http_client::instance().set_cookie_file_path(to_str(iso, info[0]));
+        net::http_client::instance().set_cookie_file_path(to_std_string(iso, info[0]));
       auto obj = Object::New(iso);
-      obj->Set(ctx, "set"_v8(iso), Function::New(ctx, cookie_jar_set).ToLocalChecked()).Check();
-      obj->Set(ctx, "get"_v8(iso), Function::New(ctx, cookie_jar_get).ToLocalChecked()).Check();
-      obj->Set(ctx, "clear"_v8(iso), Function::New(ctx, cookie_jar_clear).ToLocalChecked()).Check();
+      add_function(ctx, obj, "set", cookie_jar_set);
+      add_function(ctx, obj, "get", cookie_jar_get);
+      add_function(ctx, obj, "clear", cookie_jar_clear);
       info.GetReturnValue().Set(obj);
     }
 
@@ -1214,7 +1201,7 @@ namespace fxe::js {
           have_signal = true;
         }
       } else {
-        hreq.url = to_str(iso, info[0]);
+        hreq.url = to_std_string(iso, info[0]);
         hreq.method = "GET";
       }
 
@@ -1299,9 +1286,8 @@ namespace fxe::js {
         };
 
         TryCatch try_catch(iso);
-        Local<Value> get_reader_v;
-        if (!stream_body_local->Get(ctx, "getReader"_v8(iso)).ToLocal(&get_reader_v) ||
-            !get_reader_v->IsFunction()) {
+        auto get_reader_v = get_prop<Local<Value>>(ctx, stream_body_local, "getReader");
+        if (!get_reader_v.has_value() || !(*get_reader_v)->IsFunction()) {
           Local<Value> reason =
               try_catch.HasCaught()
                   ? try_catch.Exception()
@@ -1312,7 +1298,8 @@ namespace fxe::js {
           return;
         }
         Local<Value> reader_v;
-        if (!get_reader_v.As<Function>()
+        if (!(*get_reader_v)
+                 .As<Function>()
                  ->Call(ctx, stream_body_local, 0, nullptr)
                  .ToLocal(&reader_v) ||
             !reader_v->IsObject()) {
@@ -1392,12 +1379,11 @@ namespace fxe::js {
                   Context::Scope cs(ctx);
                   TryCatch try_catch(iso);
                   auto reader = a->st->upload_reader.Get(iso);
-                  Local<Value> cancel_v;
-                  if (reader->Get(ctx, "cancel"_v8(iso)).ToLocal(&cancel_v) &&
-                      cancel_v->IsFunction()) {
-                    Local<Value> argv[1] = {s8(iso, a->st->abort_reason)};
+                  auto cancel_v = get_prop<Local<Value>>(ctx, reader, "cancel");
+                  if (cancel_v.has_value() && (*cancel_v)->IsFunction()) {
+                    Local<Value> argv[1] = {to_v8_string(iso, a->st->abort_reason)};
                     Local<Value> ignored;
-                    (void)cancel_v.As<Function>()->Call(ctx, reader, 1, argv).ToLocal(&ignored);
+                    (void)(*cancel_v).As<Function>()->Call(ctx, reader, 1, argv).ToLocal(&ignored);
                   }
                   try_catch.Reset();
                 }
@@ -1469,7 +1455,7 @@ namespace fxe::js {
     // AbortSignal
     auto sigtpl = FunctionTemplate::New(iso, [](const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      throw_type(iso, "AbortSignal cannot be constructed directly");
+      (void)throw_type_error(iso, "AbortSignal cannot be constructed directly");
     });
     sigtpl->SetClassName("AbortSignal"_v8(iso));
     sigtpl->InstanceTemplate()->SetInternalFieldCount(2);

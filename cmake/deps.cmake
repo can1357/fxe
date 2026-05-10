@@ -178,6 +178,21 @@ if(NOT EXISTS "${FXE_MINIAUDIO_INCLUDE_DIR}/miniaudio.h")
     )
 endif()
 
+
+# xstd — header-only C++20 utility library. Pulled in for `xstd::const_tag` /
+# `xstd::type_tag` (compile-time value/type names used by `<fxe/v8_helpers.hpp>`
+# to derive JS function names from the C++ callback identifier). Header-only
+# INTERFACE target; no transitive deps.
+if(NOT TARGET xstd)
+    FetchContent_Declare(
+        xstd
+        GIT_REPOSITORY https://github.com/can1357/xstd.git
+        GIT_TAG 983110fa89a9cacbdc5b9f4ad8d13651e0422ee6
+        GIT_SHALLOW FALSE
+    )
+    FetchContent_MakeAvailable(xstd)
+endif()
+target_link_libraries(fxe_deps INTERFACE xstd)
 # md4c — fast Markdown parser (CommonMark + GFM extensions). Used by the
 # fxe_markdown library to power the Markdown JS API and the markdown UI
 # component. Always fetched when FXE_FETCH_DEPS is on; otherwise expects a
@@ -436,6 +451,7 @@ foreach(_dep
     spdlog::spdlog spdlog
     md4c::md4c md4c md4c::md4c_html
     yoga::yogacore yogacore
+    xstd
 )
     _fxe_mark_system_include(${_dep})
 endforeach()

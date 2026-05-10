@@ -2,6 +2,7 @@
 #include "../os/os.hpp"
 
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <memory>
 #include <string>
@@ -9,14 +10,6 @@
 
 namespace fxe::js {
   using namespace v8;
-  namespace {
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      if (v.IsEmpty() || !v->IsString())
-        return {};
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-  } // namespace
 
   void parse_menu_items(Isolate* iso, Local<Context> ctx, Local<Value> arr_v,
                         std::vector<fxe::os::menu_item>& out) {
@@ -24,43 +17,41 @@ namespace fxe::js {
       return;
     auto arr = arr_v.As<Array>();
     for (u32 i = 0; i < arr->Length(); ++i) {
-      Local<Value> el;
-      if (!arr->Get(ctx, i).ToLocal(&el) || !el->IsObject())
+      auto el = get_index<Local<Object>>(ctx, arr, i);
+      if (!el)
         continue;
-      auto obj = el.As<Object>();
+      auto obj = *el;
       fxe::os::menu_item it;
-      Local<Value> v;
-      if (obj->Get(ctx, "id"_v8(iso)).ToLocal(&v))
-        it.id = to_str(iso, v);
-      if (obj->Get(ctx, "label"_v8(iso)).ToLocal(&v))
-        it.label = to_str(iso, v);
-      if (obj->Get(ctx, "accelerator"_v8(iso)).ToLocal(&v))
-        it.accelerator = to_str(iso, v);
-      if (obj->Get(ctx, "type"_v8(iso)).ToLocal(&v) && v->IsString())
-        it.type = to_str(iso, v);
-      if (obj->Get(ctx, "enabled"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-        it.enabled = v->BooleanValue(iso);
-      if (obj->Get(ctx, "checked"_v8(iso)).ToLocal(&v))
-        it.checked = v->BooleanValue(iso);
-      if (obj->Get(ctx, "submenu"_v8(iso)).ToLocal(&v))
-        parse_menu_items(iso, ctx, v, it.submenu);
+      if (auto v = get_prop<Local<Value>>(ctx, obj, "id"_v8(iso)))
+        it.id = to_std_string(iso, *v);
+      if (auto v = get_prop<Local<Value>>(ctx, obj, "label"_v8(iso)))
+        it.label = to_std_string(iso, *v);
+      if (auto v = get_prop<Local<Value>>(ctx, obj, "accelerator"_v8(iso)))
+        it.accelerator = to_std_string(iso, *v);
+      if (auto v = get_prop<std::string>(ctx, obj, "type"_v8(iso)))
+        it.type = std::move(*v);
+      if (auto v = get_prop<Local<Value>>(ctx, obj, "enabled"_v8(iso)); v && !(*v)->IsUndefined())
+        it.enabled = (*v)->BooleanValue(iso);
+      if (auto v = get_prop<Local<Value>>(ctx, obj, "checked"_v8(iso)))
+        it.checked = (*v)->BooleanValue(iso);
+      if (auto v = get_prop<Local<Value>>(ctx, obj, "submenu"_v8(iso)))
+        parse_menu_items(iso, ctx, *v, it.submenu);
       out.push_back(std::move(it));
     }
   }
 
   bool parse_menu_item_patch(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                              fxe::os::menu_item_patch& out) {
-    Local<Value> v;
-    if (obj->Get(ctx, "label"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-      out.label = to_str(iso, v);
-    if (obj->Get(ctx, "enabled"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-      out.enabled = v->BooleanValue(iso);
-    if (obj->Get(ctx, "checked"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-      out.checked = v->BooleanValue(iso);
-    if (obj->Get(ctx, "visible"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-      out.visible = v->BooleanValue(iso);
-    if (obj->Get(ctx, "accelerator"_v8(iso)).ToLocal(&v) && !v->IsUndefined())
-      out.accelerator = to_str(iso, v);
+    if (auto v = get_prop<Local<Value>>(ctx, obj, "label"_v8(iso)); v && !(*v)->IsUndefined())
+      out.label = to_std_string(iso, *v);
+    if (auto v = get_prop<Local<Value>>(ctx, obj, "enabled"_v8(iso)); v && !(*v)->IsUndefined())
+      out.enabled = (*v)->BooleanValue(iso);
+    if (auto v = get_prop<Local<Value>>(ctx, obj, "checked"_v8(iso)); v && !(*v)->IsUndefined())
+      out.checked = (*v)->BooleanValue(iso);
+    if (auto v = get_prop<Local<Value>>(ctx, obj, "visible"_v8(iso)); v && !(*v)->IsUndefined())
+      out.visible = (*v)->BooleanValue(iso);
+    if (auto v = get_prop<Local<Value>>(ctx, obj, "accelerator"_v8(iso)); v && !(*v)->IsUndefined())
+      out.accelerator = to_std_string(iso, *v);
     return true;
   }
 
@@ -98,9 +89,7 @@ namespace fxe::js {
         if (id.empty()) {
           (void)r->Resolve(ctx2, Null(captured));
         } else {
-          (void)r->Resolve(ctx2, String::NewFromUtf8(captured, id.data(), NewStringType::kNormal,
-                                                     static_cast<int>(id.size()))
-                                     .ToLocalChecked());
+          (void)r->Resolve(ctx2, to_v8(captured, id));
         }
       });
     }
@@ -112,7 +101,7 @@ namespace fxe::js {
         info.GetReturnValue().Set(false);
         return;
       }
-      std::string id = to_str(iso, info[0]);
+      std::string id = to_std_string(iso, info[0]);
       fxe::os::menu_item_patch patch;
       parse_menu_item_patch(iso, ctx, info[1].As<Object>(), patch);
       info.GetReturnValue().Set(fxe::os::update_menu_item(id, patch));
@@ -121,15 +110,14 @@ namespace fxe::js {
     std::string menu_handle_id(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      Local<Value> id_v;
-      if (!info.This()->Get(ctx, "id"_v8(iso)).ToLocal(&id_v))
-        return {};
-      return to_str(iso, id_v);
+      if (auto id_v = get_prop<Local<Value>>(ctx, info.This(), "id"_v8(iso)))
+        return to_std_string(iso, *id_v);
+      return {};
     }
 
     void menu_item_set_label(const FunctionCallbackInfo<Value>& info) {
       fxe::os::menu_item_patch patch;
-      patch.label = info.Length() > 0 ? to_str(info.GetIsolate(), info[0]) : std::string{};
+      patch.label = info.Length() > 0 ? to_std_string(info.GetIsolate(), info[0]) : std::string{};
       (void)fxe::os::update_menu_item(menu_handle_id(info), patch);
     }
 
@@ -153,33 +141,26 @@ namespace fxe::js {
 
     void menu_item_set_accelerator(const FunctionCallbackInfo<Value>& info) {
       fxe::os::menu_item_patch patch;
-      patch.accelerator = info.Length() > 0 ? to_str(info.GetIsolate(), info[0]) : std::string{};
+      patch.accelerator =
+          info.Length() > 0 ? to_std_string(info.GetIsolate(), info[0]) : std::string{};
       (void)fxe::os::update_menu_item(menu_handle_id(info), patch);
     }
 
     void menu_find_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      std::string id = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
+      std::string id = info.Length() > 0 ? to_std_string(iso, info[0]) : std::string{};
       if (!fxe::os::menu_item_exists(id)) {
         info.GetReturnValue().Set(Null(iso));
         return;
       }
       auto obj = Object::New(iso);
-      (void)obj->Set(
-          ctx, "id"_v8(iso),
-          String::NewFromUtf8(iso, id.data(), NewStringType::kNormal, static_cast<int>(id.size()))
-              .ToLocalChecked());
-      (void)obj->Set(ctx, "setLabel"_v8(iso),
-                     Function::New(ctx, menu_item_set_label).ToLocalChecked());
-      (void)obj->Set(ctx, "setEnabled"_v8(iso),
-                     Function::New(ctx, menu_item_set_enabled).ToLocalChecked());
-      (void)obj->Set(ctx, "setChecked"_v8(iso),
-                     Function::New(ctx, menu_item_set_checked).ToLocalChecked());
-      (void)obj->Set(ctx, "setVisible"_v8(iso),
-                     Function::New(ctx, menu_item_set_visible).ToLocalChecked());
-      (void)obj->Set(ctx, "setAccelerator"_v8(iso),
-                     Function::New(ctx, menu_item_set_accelerator).ToLocalChecked());
+      set_prop(ctx, obj, "id"_v8, id);
+      add_function(ctx, obj, "setLabel"_v8, menu_item_set_label);
+      add_function(ctx, obj, "setEnabled"_v8, menu_item_set_enabled);
+      add_function(ctx, obj, "setChecked"_v8, menu_item_set_checked);
+      add_function(ctx, obj, "setVisible"_v8, menu_item_set_visible);
+      add_function(ctx, obj, "setAccelerator"_v8, menu_item_set_accelerator);
       info.GetReturnValue().Set(obj);
     }
 
@@ -202,11 +183,7 @@ namespace fxe::js {
       auto fn = g_menu_command_callback->Get(iso);
       if (fn.IsEmpty())
         return;
-      Local<String> arg_str;
-      if (!String::NewFromUtf8(iso, id.data(), NewStringType::kNormal, static_cast<int>(id.size()))
-               .ToLocal(&arg_str)) {
-        return;
-      }
+      auto arg_str = to_v8(iso, id);
       Local<Value> argv[1] = {arg_str};
       TryCatch tc(iso);
       (void)fn->Call(ctx, ctx->Global(), 1, argv);

@@ -14,20 +14,18 @@ namespace fxe::js {
 
     MaybeLocal<Object> require_native_namespace(Isolate* iso, Local<Context> ctx, Local<String> key,
                                                 const char* module_name, const char* export_name) {
-      Local<Value> native_value;
-      if (!ctx->Global()->Get(ctx, "__fxe_native"_v8(iso)).ToLocal(&native_value) ||
-          !native_value->IsObject()) {
+      if (auto native_value = get_prop<Local<Value>>(ctx, ctx->Global(), "__fxe_native"_v8(iso));
+          !native_value || !(*native_value)->IsObject()) {
         (void)throw_error(iso, std::string(module_name) + " requires __fxe_native");
         return MaybeLocal<Object>();
-      }
-
-      Local<Value> namespace_value;
-      if (!native_value.As<Object>()->Get(ctx, key).ToLocal(&namespace_value) ||
-          !namespace_value->IsObject()) {
+      } else if (auto namespace_value =
+                     get_prop<Local<Value>>(ctx, (*native_value).As<Object>(), key);
+                 !namespace_value || !(*namespace_value)->IsObject()) {
         (void)throw_error(iso, std::string(module_name) + " requires __fxe_native." + export_name);
         return MaybeLocal<Object>();
+      } else {
+        return (*namespace_value).As<Object>();
       }
-      return namespace_value.As<Object>();
     }
 
     MaybeLocal<Value> net_module_evaluate(Local<Context> ctx, Local<Module> mod) {

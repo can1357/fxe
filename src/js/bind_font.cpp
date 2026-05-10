@@ -28,15 +28,6 @@ namespace fxe::js {
 
     constexpr double kEngineMinFontSizePx = 1.0;
 
-    void throw_type(Isolate* iso, const char* msg) {
-      (void)throw_type_error(iso, msg);
-    }
-
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-
     bool read_file_bytes(const std::string& path, std::vector<u8>& out) {
       std::ifstream f(path, std::ios::binary);
       if (!f)
@@ -54,20 +45,26 @@ namespace fxe::js {
     void s_load(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsNumber())
-        return throw_type(iso, "Font.load(path: string, sizePx: number)");
+      if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsNumber()) {
+        (void)throw_type_error(iso, "Font.load(path: string, sizePx: number)");
+        return;
+      }
       auto ctx = iso->GetCurrentContext();
       const double size_px = info[1]->NumberValue(ctx).FromMaybe(0.0);
-      if (!std::isfinite(size_px) || size_px < kEngineMinFontSizePx)
-        return throw_type(iso, "Font.load: sizePx must be a finite number >= 1");
+      if (!std::isfinite(size_px) || size_px < kEngineMinFontSizePx) {
+        (void)throw_type_error(iso, "Font.load: sizePx must be a finite number >= 1");
+        return;
+      }
       std::vector<u8> bytes;
-      if (!read_file_bytes(utf8(iso, info[0]), bytes))
-        return throw_type(iso, "Font.load: failed to read TTF file");
+      if (!read_file_bytes(to_std_string(iso, info[0]), bytes)) {
+        (void)throw_type_error(iso, "Font.load: failed to read TTF file");
+        return;
+      }
       try {
         init_default_fonts(get_default_spritesheet(), std::span<const u8>(bytes),
                            static_cast<float>(size_px));
       } catch (const std::exception& e) {
-        throw_type(iso, e.what());
+        (void)throw_type_error(iso, e.what());
         return;
       }
       info.GetReturnValue().Set(0_v8(iso));
@@ -75,8 +72,10 @@ namespace fxe::js {
 
     void s_builtin(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      if (info.Length() < 1 || !info[0]->IsString() || utf8(iso, info[0]) != "default")
-        return throw_type(iso, "Font.builtin(name): expected 'default'");
+      if (info.Length() < 1 || !info[0]->IsString() || to_std_string(iso, info[0]) != "default") {
+        (void)throw_type_error(iso, "Font.builtin(name): expected 'default'");
+        return;
+      }
       info.GetReturnValue().Set(0_v8(iso));
     }
 
@@ -88,20 +87,21 @@ namespace fxe::js {
     void s_system(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      if (info.Length() < 1 || !info[0]->IsString())
-        return throw_type(iso, "Font.system(family: string, opts?)");
+      if (info.Length() < 1 || !info[0]->IsString()) {
+        (void)throw_type_error(iso, "Font.system(family: string, opts?)");
+        return;
+      }
       auto ctx = iso->GetCurrentContext();
-      const std::string family = utf8(iso, info[0]);
+      const std::string family = to_std_string(iso, info[0]);
       double size_px = 16.0;
       fxe::font::Style want_style = fxe::font::Style::regular;
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
-        Local<Value> field;
-        if (o->Get(ctx, "sizePx"_v8(iso)).ToLocal(&field) && field->IsNumber()) {
-          size_px = field->NumberValue(ctx).FromMaybe(16.0);
+        if (auto field = get_prop<Local<Value>>(ctx, o, "sizePx"); field && (*field)->IsNumber()) {
+          size_px = (*field)->NumberValue(ctx).FromMaybe(16.0);
         }
-        if (o->Get(ctx, "style"_v8(iso)).ToLocal(&field) && field->IsString()) {
-          auto s = field.As<String>();
+        if (auto field = get_prop<Local<Value>>(ctx, o, "style"); field && (*field)->IsString()) {
+          auto s = field->As<String>();
           if (s == "bold"_v8)
             want_style = fxe::font::Style::bold;
           else if (s == "italic"_v8)
@@ -110,26 +110,34 @@ namespace fxe::js {
             want_style = fxe::font::Style::bold_italic;
         }
       }
-      if (!std::isfinite(size_px) || size_px < kEngineMinFontSizePx)
-        return throw_type(iso, "Font.system: sizePx must be >= 1");
+      if (!std::isfinite(size_px) || size_px < kEngineMinFontSizePx) {
+        (void)throw_type_error(iso, "Font.system: sizePx must be >= 1");
+        return;
+      }
       auto disc = fxe::font::default_discover();
-      if (!disc)
-        return throw_type(iso, "Font.system: no font discovery backend available");
+      if (!disc) {
+        (void)throw_type_error(iso, "Font.system: no font discovery backend available");
+        return;
+      }
       fxe::font::Descriptor q;
       q.family = family;
       q.style = want_style;
       q.size_pt = static_cast<float>(size_px);
       auto results = disc->find(q);
-      if (results.empty() || !results.front().path)
-        return throw_type(iso, "Font.system: no matching font found");
+      if (results.empty() || !results.front().path) {
+        (void)throw_type_error(iso, "Font.system: no matching font found");
+        return;
+      }
       std::vector<u8> bytes;
-      if (!read_file_bytes(*results.front().path, bytes))
-        return throw_type(iso, "Font.system: failed to read discovered font");
+      if (!read_file_bytes(*results.front().path, bytes)) {
+        (void)throw_type_error(iso, "Font.system: failed to read discovered font");
+        return;
+      }
       try {
         init_default_fonts(get_default_spritesheet(), std::span<const u8>(bytes),
                            static_cast<float>(size_px));
       } catch (const std::exception& e) {
-        throw_type(iso, e.what());
+        (void)throw_type_error(iso, e.what());
         return;
       }
       info.GetReturnValue().Set(0_v8(iso));

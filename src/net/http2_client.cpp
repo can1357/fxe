@@ -9,8 +9,8 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
-#include <fxe/types.hpp>
 #include <fxe/string_utils.hpp>
+#include <fxe/types.hpp>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include "monotonic.hpp"
+
 namespace fxe::net {
   namespace {
     constexpr int kReadPollTimeoutMs = 50;
@@ -30,12 +32,6 @@ namespace fxe::net {
       out.append(": ");
       out.append(nghttp2_strerror(rv));
       return out;
-    }
-
-    i64 monotonic_ms() {
-      using clock = std::chrono::steady_clock;
-      return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch())
-          .count();
     }
 
     bool is_forbidden_user_header(std::string_view name) {

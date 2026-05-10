@@ -13,6 +13,7 @@ namespace fxe::runtime {
   namespace {
     using namespace v8;
 
+    using namespace fxe::js;
     constexpr uint32_t kContextTag = 0x564d4358; // VMCX
     constexpr uint32_t kScriptTag = 0x564d5343;  // VMSC
 
@@ -33,25 +34,6 @@ namespace fxe::runtime {
     struct context_state {
       Global<Context> context;
     };
-
-    Local<String> str(Isolate* iso, std::string_view value) {
-      return String::NewFromUtf8(iso, value.data(), NewStringType::kNormal,
-                                 static_cast<int>(value.size()))
-          .ToLocalChecked();
-    }
-
-    std::string utf8(Isolate* iso, Local<Value> value) {
-      String::Utf8Value text(iso, value);
-      return *text ? std::string(*text, text.length()) : std::string{};
-    }
-
-    void throw_error(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::Error(str(iso, message)));
-    }
-
-    void throw_type(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::TypeError(str(iso, message)));
-    }
 
     void context_state_finalize(const WeakCallbackInfo<context_state>& info) {
       auto* state = info.GetParameter();
@@ -93,18 +75,17 @@ namespace fxe::runtime {
       if (opts_value.IsEmpty() || opts_value->IsUndefined() || opts_value->IsNull())
         return Just(true);
       if (!opts_value->IsObject()) {
-        throw_type(iso, "vm options must be an object");
+        throw_type_error(iso, "vm options must be an object");
         return Nothing<bool>();
       }
       auto opts = opts_value.As<Object>();
-      Local<Value> microtask_mode;
-      if (!opts->Get(ctx, "microtaskMode"_v8(iso)).ToLocal(&microtask_mode))
-        return Nothing<bool>();
-      if (!microtask_mode->IsUndefined() && !microtask_mode->IsNull()) {
-        const std::string mode = utf8(iso, microtask_mode);
-        if (mode == "afterEvaluate") {
-          throw_error(iso, "node:vm microtaskMode 'afterEvaluate' is not supported in FXE");
-          return Nothing<bool>();
+      if (auto microtask_mode = get_prop<Local<Value>>(ctx, opts, "microtaskMode")) {
+        if (!(*microtask_mode)->IsUndefined() && !(*microtask_mode)->IsNull()) {
+          const std::string mode = to_std_string(iso, *microtask_mode);
+          if (mode == "afterEvaluate") {
+            throw_error(iso, "node:vm microtaskMode 'afterEvaluate' is not supported in FXE");
+            return Nothing<bool>();
+          }
         }
       }
       return Just(true);
@@ -118,29 +99,26 @@ namespace fxe::runtime {
         return Just(true);
       auto opts = opts_value.As<Object>();
 
-      Local<Value> filename_value;
-      if (!opts->Get(ctx, "filename"_v8(iso)).ToLocal(&filename_value))
-        return Nothing<bool>();
-      if (!filename_value->IsUndefined() && !filename_value->IsNull())
-        out.filename = utf8(iso, filename_value);
+      if (auto filename_value = get_prop<Local<Value>>(ctx, opts, "filename")) {
+        if (!(*filename_value)->IsUndefined() && !(*filename_value)->IsNull())
+          out.filename = to_std_string(iso, *filename_value);
+      }
 
-      Local<Value> line_value;
-      if (!opts->Get(ctx, "lineOffset"_v8(iso)).ToLocal(&line_value))
-        return Nothing<bool>();
-      if (!line_value->IsUndefined() && !line_value->IsNull())
-        out.line_offset = line_value->Int32Value(ctx).FromMaybe(0);
+      if (auto line_value = get_prop<Local<Value>>(ctx, opts, "lineOffset")) {
+        if (!(*line_value)->IsUndefined() && !(*line_value)->IsNull())
+          out.line_offset = (*line_value)->Int32Value(ctx).FromMaybe(0);
+      }
 
-      Local<Value> column_value;
-      if (!opts->Get(ctx, "columnOffset"_v8(iso)).ToLocal(&column_value))
-        return Nothing<bool>();
-      if (!column_value->IsUndefined() && !column_value->IsNull())
-        out.column_offset = column_value->Int32Value(ctx).FromMaybe(0);
+      if (auto column_value = get_prop<Local<Value>>(ctx, opts, "columnOffset")) {
+        if (!(*column_value)->IsUndefined() && !(*column_value)->IsNull())
+          out.column_offset = (*column_value)->Int32Value(ctx).FromMaybe(0);
+      }
 
       return Just(true);
     }
 
     ScriptOrigin make_origin(Isolate* iso, const script_options& opts) {
-      return ScriptOrigin(str(iso, opts.filename), opts.line_offset, opts.column_offset,
+      return ScriptOrigin(to_v8_string(iso, opts.filename), opts.line_offset, opts.column_offset,
                           /*is_shared_cross_origin*/ false, /*script_id*/ -1, Local<Value>());
     }
 
@@ -154,10 +132,11 @@ namespace fxe::runtime {
         return Nothing<bool>();
       if (desc_value.IsEmpty() || !desc_value->IsObject())
         return Just(false);
-      Local<Value> enumerable;
-      if (!desc_value.As<Object>()->Get(ctx, "enumerable"_v8(iso)).ToLocal(&enumerable))
+      auto desc = desc_value.As<Object>();
+      auto enumerable = get_prop<Local<Value>>(ctx, desc, "enumerable");
+      if (!enumerable.has_value())
         return Nothing<bool>();
-      return Just(enumerable->BooleanValue(iso));
+      return Just((*enumerable)->BooleanValue(iso));
     }
 
     struct prop_entry {
@@ -192,7 +171,8 @@ namespace fxe::runtime {
                             const std::vector<prop_entry>& props, bool skip_native_binding) {
       Context::Scope scope(target_ctx);
       for (const auto& prop : props) {
-        if (skip_native_binding && prop.key->IsString() && utf8(iso, prop.key) == "__fxe_native")
+        if (skip_native_binding && prop.key->IsString() &&
+            to_std_string(iso, prop.key) == "__fxe_native")
           continue;
         if (!to->Set(target_ctx, prop.key, prop.value).FromMaybe(false))
           return Nothing<bool>();
@@ -211,7 +191,7 @@ namespace fxe::runtime {
 
     MaybeLocal<Context> context_from_value(Isolate* iso, Local<Value> value) {
       if (!is_tagged_object(value, kContextTag)) {
-        throw_type(iso, "vm context must be created by vm.createContext()");
+        throw_type_error(iso, "vm context must be created by vm.createContext()");
         return {};
       }
       auto state = context_state_from(value.As<Object>());
@@ -296,7 +276,8 @@ namespace fxe::runtime {
         return;
       }
       if (info.Length() < 1 || !info[0]->IsObject()) {
-        throw_type(iso, "Script.runInContext(contextifiedObject[, options]) requires a context");
+        throw_type_error(iso,
+                         "Script.runInContext(contextifiedObject[, options]) requires a context");
         return;
       }
       if (!validate_runtime_opts(iso, current_ctx, info.Length() > 1 ? info[1] : Local<Value>())
@@ -322,7 +303,8 @@ namespace fxe::runtime {
       Local<Object> sandbox = Object::New(iso);
       if (info.Length() > 0 && !info[0]->IsUndefined() && !info[0]->IsNull()) {
         if (!info[0]->IsObject()) {
-          throw_type(iso, "Script.runInNewContext([sandbox[, options]]) sandbox must be an object");
+          throw_type_error(
+              iso, "Script.runInNewContext([sandbox[, options]]) sandbox must be an object");
           return;
         }
         sandbox = info[0].As<Object>();
@@ -353,15 +335,11 @@ namespace fxe::runtime {
       auto holder = tpl->NewInstance(ctx).ToLocalChecked();
       auto* state = new script_state();
       state->script.Reset(iso, script);
-      holder->SetInternalField(0, fxe::js::make_external(iso, state));
-      holder->SetInternalField(1, Uint32::New(iso, kScriptTag));
+      set_native(iso, holder, state, kScriptTag);
       state->bind(iso, holder);
-      (void)holder->Set(ctx, "runInThisContext"_v8(iso),
-                        Function::New(ctx, script_run_in_this_context).ToLocalChecked());
-      (void)holder->Set(ctx, "runInContext"_v8(iso),
-                        Function::New(ctx, script_run_in_context).ToLocalChecked());
-      (void)holder->Set(ctx, "runInNewContext"_v8(iso),
-                        Function::New(ctx, script_run_in_new_context).ToLocalChecked());
+      add_function(ctx, holder, "runInThisContext", script_run_in_this_context);
+      add_function(ctx, holder, "runInContext", script_run_in_context);
+      add_function(ctx, holder, "runInNewContext", script_run_in_new_context);
       return holder;
     }
 
@@ -377,8 +355,7 @@ namespace fxe::runtime {
       auto* state = new context_state();
       state->context.Reset(iso, sandbox_ctx);
       state->context.SetWeak(state, context_state_finalize, WeakCallbackType::kParameter);
-      global->SetInternalField(0, fxe::js::make_external(iso, state));
-      global->SetInternalField(1, Uint32::New(iso, kContextTag));
+      set_native(iso, global, state, kContextTag);
       return global;
     }
 
@@ -386,7 +363,7 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_type(iso, "__fxe_native.vm.runInThisContext(code[, options]) requires code");
+        throw_type_error(iso, "__fxe_native.vm.runInThisContext(code[, options]) requires code");
         return;
       }
       script_options opts;
@@ -403,7 +380,7 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsObject() || !info[1]->IsString()) {
-        throw_type(
+        throw_type_error(
             iso,
             "__fxe_native.vm.runInContext(context, code[, options]) requires context and code");
         return;
@@ -425,14 +402,14 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_type(iso,
-                   "__fxe_native.vm.runInNewContext(code[, sandbox[, options]]) requires code");
+        throw_type_error(
+            iso, "__fxe_native.vm.runInNewContext(code[, sandbox[, options]]) requires code");
         return;
       }
       Local<Object> sandbox = Object::New(iso);
       if (info.Length() > 1 && !info[1]->IsUndefined() && !info[1]->IsNull()) {
         if (!info[1]->IsObject()) {
-          throw_type(iso, "vm sandbox must be an object");
+          throw_type_error(iso, "vm sandbox must be an object");
           return;
         }
         sandbox = info[1].As<Object>();
@@ -451,7 +428,7 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        throw_type(iso, "__fxe_native.vm.compile(code[, options]) requires code");
+        throw_type_error(iso, "__fxe_native.vm.compile(code[, options]) requires code");
         return;
       }
       script_options opts;
@@ -477,7 +454,8 @@ namespace fxe::runtime {
       Local<Object> seed = Object::New(iso);
       if (info.Length() > 0 && !info[0]->IsUndefined() && !info[0]->IsNull()) {
         if (!info[0]->IsObject()) {
-          throw_type(iso, "__fxe_native.vm.createContext([sandbox]) sandbox must be an object");
+          throw_type_error(iso,
+                           "__fxe_native.vm.createContext([sandbox]) sandbox must be an object");
           return;
         }
         seed = info[0].As<Object>();
@@ -497,7 +475,7 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 2 || !info[0]->IsString() || !info[1]->IsArray()) {
-        throw_type(
+        throw_type_error(
             iso,
             "__fxe_native.vm.compileFunction(code, params[, options]) requires code and params");
         return;
@@ -514,32 +492,26 @@ namespace fxe::runtime {
         Local<Value> param;
         if (!params->Get(ctx, i).ToLocal(&param))
           return;
-        wrapped += utf8(iso, param);
+        wrapped += to_std_string(iso, param);
       }
       wrapped += "){ ";
-      wrapped += utf8(iso, info[0]);
+      wrapped += to_std_string(iso, info[0]);
       wrapped += " })";
       Local<Value> result;
-      if (!run_string_in_context(ctx, str(iso, wrapped), opts).ToLocal(&result))
+      if (!run_string_in_context(ctx, to_v8_string(iso, wrapped), opts).ToLocal(&result))
         return;
       info.GetReturnValue().Set(result);
     }
 
     Local<Object> make_vm_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      (void)ns->Set(ctx, "runInThisContext"_v8(iso),
-                    Function::New(ctx, native_run_in_this_context).ToLocalChecked());
-      (void)ns->Set(ctx, "runInContext"_v8(iso),
-                    Function::New(ctx, native_run_in_context).ToLocalChecked());
-      (void)ns->Set(ctx, "runInNewContext"_v8(iso),
-                    Function::New(ctx, native_run_in_new_context).ToLocalChecked());
-      (void)ns->Set(ctx, "compile"_v8(iso), Function::New(ctx, native_compile).ToLocalChecked());
-      (void)ns->Set(ctx, "createContext"_v8(iso),
-                    Function::New(ctx, native_create_context).ToLocalChecked());
-      (void)ns->Set(ctx, "isContext"_v8(iso),
-                    Function::New(ctx, native_is_context).ToLocalChecked());
-      (void)ns->Set(ctx, "compileFunction"_v8(iso),
-                    Function::New(ctx, native_compile_function).ToLocalChecked());
+      add_function(ctx, ns, "runInThisContext", native_run_in_this_context);
+      add_function(ctx, ns, "runInContext", native_run_in_context);
+      add_function(ctx, ns, "runInNewContext", native_run_in_new_context);
+      add_function(ctx, ns, "compile", native_compile);
+      add_function(ctx, ns, "createContext", native_create_context);
+      add_function(ctx, ns, "isContext", native_is_context);
+      add_function(ctx, ns, "compileFunction", native_compile_function);
       return ns;
     }
   } // namespace
@@ -552,9 +524,9 @@ namespace fxe::runtime {
       native = native_value.As<Object>();
     } else {
       native = Object::New(iso);
-      (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
-                                             static_cast<PropertyAttribute>(DontEnum));
+      define_prop(ctx, ctx->Global(), "__fxe_native"_v8, native,
+                  static_cast<PropertyAttribute>(DontEnum));
     }
-    (void)native->Set(ctx, "vm"_v8(iso), make_vm_namespace(iso, ctx));
+    set_prop(ctx, native, "vm", make_vm_namespace(iso, ctx));
   }
 } // namespace fxe::runtime

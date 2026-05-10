@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <limits>
 #include <memory>
 #include <string>
@@ -29,33 +30,7 @@
 namespace fxe::runtime {
   namespace {
     using namespace v8;
-
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    void set(Local<Context> ctx, Local<Object> obj, const char* key, Local<Value> value) {
-      (void)obj->Set(ctx, str(Isolate::GetCurrent(), key), value);
-    }
-
-    void set_string(Local<Context> ctx, Local<Object> obj, const char* key,
-                    std::string_view value) {
-      set(ctx, obj, key, str(Isolate::GetCurrent(), value));
-    }
-
-    void set_number(Local<Context> ctx, Local<Object> obj, const char* key, double value) {
-      set(ctx, obj, key, Number::New(Isolate::GetCurrent(), value));
-    }
-
-    void set_bool(Local<Context> ctx, Local<Object> obj, const char* key, bool value) {
-      set(ctx, obj, key, Boolean::New(Isolate::GetCurrent(), value));
-    }
-
-    std::string string_arg(Isolate* iso, Local<Value> value) {
-      String::Utf8Value utf8(iso, value);
-      return std::string(*utf8 ? *utf8 : "");
-    }
+    using namespace fxe::js;
 
 #if defined(_WIN32)
     std::wstring widen_utf8(const std::string& value) {
@@ -103,9 +78,9 @@ namespace fxe::runtime {
       std::string msg = "Permission denied: fs access denied for '";
       msg.append(path);
       msg.push_back('\'');
-      auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, "name"_v8(iso), "PermissionDenied"_v8(iso));
-      (void)err->Set(ctx, "code"_v8(iso), "EACCES"_v8(iso));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(ctx, err, "name", "PermissionDenied");
+      set_prop(ctx, err, "code", "EACCES");
       return err;
     }
 
@@ -128,12 +103,12 @@ namespace fxe::runtime {
         message.append(path);
         message.push_back('\'');
       }
-      auto out = Exception::Error(str(iso, message)).As<Object>();
-      set_number(ctx, out, "errno", err);
-      set_string(ctx, out, "code", code);
-      set_string(ctx, out, "syscall", syscall);
+      auto out = Exception::Error(to_v8_string(iso, message)).As<Object>();
+      set_prop(ctx, out, "errno", err);
+      set_prop(ctx, out, "code", code);
+      set_prop(ctx, out, "syscall", syscall);
       if (!path.empty())
-        set_string(ctx, out, "path", path);
+        set_prop(ctx, out, "path", path);
       return out;
     }
 
@@ -150,12 +125,12 @@ namespace fxe::runtime {
         message.append(path);
         message.push_back('\'');
       }
-      auto out = Exception::Error(str(iso, message)).As<Object>();
-      set_number(ctx, out, "errno", status);
-      set_string(ctx, out, "code", uv_err_name(status));
-      set_string(ctx, out, "syscall", syscall);
+      auto out = Exception::Error(to_v8_string(iso, message)).As<Object>();
+      set_prop(ctx, out, "errno", status);
+      set_prop(ctx, out, "code", uv_err_name(status));
+      set_prop(ctx, out, "syscall", syscall);
       if (!path.empty())
-        set_string(ctx, out, "path", path);
+        set_prop(ctx, out, "path", path);
       return out;
     }
 #endif
@@ -215,15 +190,11 @@ namespace fxe::runtime {
         return true;
       }
       if (!value->IsString()) {
-        iso->ThrowException(
-            Exception::TypeError("fs open flags must be a string or number"_v8(iso)));
-        return false;
+        return throw_type_error(iso, "fs open flags must be a string or number");
       }
-      out = open_flag_value(string_arg(iso, value));
-      if (out < 0) {
-        iso->ThrowException(Exception::TypeError("unsupported fs open flags"_v8(iso)));
-        return false;
-      }
+      out = open_flag_value(to_std_string(iso, value));
+      if (out < 0)
+        return throw_type_error(iso, "unsupported fs open flags");
 #if defined(_WIN32)
       out |= _O_BINARY;
 #endif
@@ -385,30 +356,30 @@ namespace fxe::runtime {
 
     Local<Object> fd_object(Isolate* iso, Local<Context> ctx, int fd) {
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", fd);
+      set_prop(ctx, out, "fd", fd);
       return out;
     }
 
     Local<Object> bytes_read_object(Isolate* iso, Local<Context> ctx, i64 n) {
       auto out = Object::New(iso);
-      set_number(ctx, out, "bytesRead", static_cast<double>(n));
+      set_prop(ctx, out, "bytesRead", static_cast<double>(n));
       return out;
     }
 
     Local<Object> bytes_written_object(Isolate* iso, Local<Context> ctx, i64 n) {
       auto out = Object::New(iso);
-      set_number(ctx, out, "bytesWritten", static_cast<double>(n));
+      set_prop(ctx, out, "bytesWritten", static_cast<double>(n));
       return out;
     }
 
     Local<Object> stat_object(Isolate* iso, Local<Context> ctx, const stat_result& st) {
       auto out = Object::New(iso);
-      set_number(ctx, out, "size", static_cast<double>(st.size));
-      set_bool(ctx, out, "isFile", st.is_file);
-      set_bool(ctx, out, "isDirectory", st.is_directory);
-      set_number(ctx, out, "mtimeMs", st.mtime_ms);
-      set_number(ctx, out, "atimeMs", st.atime_ms);
-      set_number(ctx, out, "ctimeMs", st.ctime_ms);
+      set_prop(ctx, out, "size", static_cast<double>(st.size));
+      set_prop(ctx, out, "isFile", st.is_file);
+      set_prop(ctx, out, "isDirectory", st.is_directory);
+      set_prop(ctx, out, "mtimeMs", st.mtime_ms);
+      set_prop(ctx, out, "atimeMs", st.atime_ms);
+      set_prop(ctx, out, "ctimeMs", st.ctime_ms);
       return out;
     }
 
@@ -416,10 +387,8 @@ namespace fxe::runtime {
                            const FunctionCallbackInfo<Value>& info, bool write, u8*& data,
                            usize& length, i64& position, usize* view_offset = nullptr) {
       if (info.Length() < 2 || !info[0]->IsNumber() || !info[1]->IsArrayBufferView()) {
-        iso->ThrowException(Exception::TypeError(
-            str(iso, write ? "fs_fd.write(fd, buffer, offset, length, position)"
-                           : "fs_fd.read(fd, buffer, offset, length, position)")));
-        return false;
+        return throw_type_error(iso, write ? "fs_fd.write(fd, buffer, offset, length, position)"
+                                           : "fs_fd.read(fd, buffer, offset, length, position)");
       }
       auto view = info[1].As<ArrayBufferView>();
       const auto view_length = static_cast<i64>(view->ByteLength());
@@ -431,8 +400,7 @@ namespace fxe::runtime {
                                     : view_length - offset_value;
       if (offset_value < 0 || length_value < 0 || offset_value > view_length ||
           length_value > view_length - offset_value) {
-        iso->ThrowException(Exception::RangeError("buffer offset/length out of range"_v8(iso)));
-        return false;
+        return throw_range_error(iso, "buffer offset/length out of range");
       }
       const usize offset = static_cast<usize>(offset_value);
       length = static_cast<usize>(length_value);
@@ -451,11 +419,10 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(
-            Exception::TypeError("__fxe_native.fs_fd.openSync(path, flags, mode)"_v8(iso)));
+        throw_type_error(iso, "__fxe_native.fs_fd.openSync(path, flags, mode)");
         return;
       }
-      const std::string path = string_arg(iso, info[0]);
+      const std::string path = to_std_string(iso, info[0]);
       if (!fs_path_allowed(path)) {
         iso->ThrowException(make_permission_denied(iso, ctx, path));
         return;
@@ -746,7 +713,7 @@ namespace fxe::runtime {
             iso, ctx, Exception::TypeError("__fxe_native.fs_fd.open(path, flags, mode)"_v8(iso))));
         return;
       }
-      const std::string path = string_arg(iso, info[0]);
+      const std::string path = to_std_string(iso, info[0]);
       if (!fs_path_allowed(path)) {
         info.GetReturnValue().Set(rejected(iso, ctx, make_permission_denied(iso, ctx, path)));
         return;
@@ -822,29 +789,24 @@ namespace fxe::runtime {
       queue_job(info, std::move(job));
     }
 
-    void add_function(Isolate* iso, Local<Context> ctx, Local<Object> ns, const char* name,
-                      FunctionCallback callback) {
-      auto fn = Function::New(ctx, callback).ToLocalChecked();
-      (void)ns->Set(ctx, str(iso, name), fn);
-    }
   } // namespace
 
   void install_fs_fd_native(Isolate* iso, Local<Context> ctx, Local<Object> native) {
     auto ns = Object::New(iso);
-    add_function(iso, ctx, ns, "openSync", open_sync);
-    add_function(iso, ctx, ns, "readSync", read_sync);
-    add_function(iso, ctx, ns, "writeSync", write_sync);
-    add_function(iso, ctx, ns, "closeSync", close_sync);
-    add_function(iso, ctx, ns, "fstatSync", fstat_sync);
-    add_function(iso, ctx, ns, "ftruncateSync", ftruncate_sync);
-    add_function(iso, ctx, ns, "fdatasyncSync", fdatasync_sync);
-    add_function(iso, ctx, ns, "open", open_async);
-    add_function(iso, ctx, ns, "read", read_async);
-    add_function(iso, ctx, ns, "write", write_async);
-    add_function(iso, ctx, ns, "close", close_async);
-    add_function(iso, ctx, ns, "fstat", fstat_async);
-    add_function(iso, ctx, ns, "ftruncate", ftruncate_async);
-    add_function(iso, ctx, ns, "fdatasync", fdatasync_async);
-    (void)native->Set(ctx, "fs_fd"_v8(iso), ns);
+    add_function(ctx, ns, "openSync", open_sync);
+    add_function(ctx, ns, "readSync", read_sync);
+    add_function(ctx, ns, "writeSync", write_sync);
+    add_function(ctx, ns, "closeSync", close_sync);
+    add_function(ctx, ns, "fstatSync", fstat_sync);
+    add_function(ctx, ns, "ftruncateSync", ftruncate_sync);
+    add_function(ctx, ns, "fdatasyncSync", fdatasync_sync);
+    add_function(ctx, ns, "open", open_async);
+    add_function(ctx, ns, "read", read_async);
+    add_function(ctx, ns, "write", write_async);
+    add_function(ctx, ns, "close", close_async);
+    add_function(ctx, ns, "fstat", fstat_async);
+    add_function(ctx, ns, "ftruncate", ftruncate_async);
+    add_function(ctx, ns, "fdatasync", fdatasync_async);
+    set_prop(ctx, native, "fs_fd", ns);
   }
 } // namespace fxe::runtime

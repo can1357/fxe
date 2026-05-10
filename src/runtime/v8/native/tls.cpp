@@ -9,6 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <memory>
 #include <mutex>
@@ -22,6 +23,7 @@ namespace fxe::runtime {
   namespace {
     using namespace v8;
 
+    using namespace fxe::js;
     struct secure_context_state {
       std::string ca_pem;
       std::string cert_pem;
@@ -48,20 +50,10 @@ namespace fxe::runtime {
     std::unordered_map<int, std::shared_ptr<tls_socket_state>> g_tls_sockets;
     std::unordered_map<int, secure_context_state> g_secure_contexts;
 
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
     void add_function(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
                       FunctionCallback cb) {
       auto fn = Function::New(ctx, cb).ToLocalChecked();
-      (void)obj->Set(ctx, str(iso, name), fn);
-    }
-
-    bool get_property(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                      Local<Value>& out) {
-      return obj->Get(ctx, str(iso, name)).ToLocal(&out) && !out->IsUndefined() && !out->IsNull();
+      (void)obj->Set(ctx, to_v8_string(iso, name), fn);
     }
 
     std::string value_to_string(Isolate* iso, Local<Context> ctx, Local<Value> value) {
@@ -100,25 +92,25 @@ namespace fxe::runtime {
 
     std::string string_option(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                               const char* name) {
-      Local<Value> value;
-      if (!get_property(iso, ctx, obj, name, value))
+      auto value = get_prop<Local<Value>>(ctx, obj, name);
+      if (!value || (*value)->IsNullOrUndefined())
         return {};
-      return value_to_string(iso, ctx, value);
+      return value_to_string(iso, ctx, *value);
     }
 
     bool bool_option(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
                      bool fallback) {
-      Local<Value> value;
-      if (!get_property(iso, ctx, obj, name, value))
+      auto value = get_prop<Local<Value>>(ctx, obj, name);
+      if (!value || (*value)->IsNullOrUndefined())
         return fallback;
-      return value->BooleanValue(iso);
+      return (*value)->BooleanValue(iso);
     }
 
-    u16 port_option(Isolate* iso, Local<Context> ctx, Local<Object> obj) {
-      Local<Value> value;
-      if (!get_property(iso, ctx, obj, "port", value))
+    u16 port_option(Local<Context> ctx, Local<Object> obj) {
+      auto value = get_prop<Local<Value>>(ctx, obj, "port");
+      if (!value || (*value)->IsNullOrUndefined())
         return 443;
-      const int port = value->Int32Value(ctx).FromMaybe(443);
+      const int port = (*value)->Int32Value(ctx).FromMaybe(443);
       if (port <= 0 || port > 65535)
         return 443;
       return static_cast<u16>(port);
@@ -126,16 +118,16 @@ namespace fxe::runtime {
 
     std::vector<std::string> string_list_option(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                                                 const char* name) {
-      Local<Value> value;
-      if (!get_property(iso, ctx, obj, name, value))
+      auto value = get_prop<Local<Value>>(ctx, obj, name);
+      if (!value || (*value)->IsNullOrUndefined())
         return {};
-      if (!value->IsArray()) {
-        auto single = value_to_string(iso, ctx, value);
+      if (!(*value)->IsArray()) {
+        auto single = value_to_string(iso, ctx, *value);
         if (single.empty())
           return {};
         return {single};
       }
-      auto arr = value.As<Array>();
+      auto arr = (*value).As<Array>();
       std::vector<std::string> out;
       out.reserve(arr->Length());
       for (u32 i = 0; i < arr->Length(); ++i) {
@@ -166,7 +158,7 @@ namespace fxe::runtime {
         out.host = string_option(iso, ctx, options, "hostname");
       if (out.host.empty())
         out.host = "localhost";
-      out.port = port_option(iso, ctx, options);
+      out.port = port_option(ctx, options);
       out.ca_pem = string_option(iso, ctx, options, "ca");
       out.reject_unauthorized = bool_option(iso, ctx, options, "rejectUnauthorized", true);
       out.alpn = string_list_option(iso, ctx, options, "ALPNProtocols");
@@ -214,7 +206,7 @@ namespace fxe::runtime {
           auto fn = state->on_error.Get(iso);
           if (fn.IsEmpty())
             return;
-          Local<Value> argv[] = {str(iso, message)};
+          Local<Value> argv[] = {to_v8_string(iso, message)};
           Local<Value> ignored;
           (void)fn->Call(ctx, Undefined(iso), 1, argv).ToLocal(&ignored);
         });
@@ -250,10 +242,10 @@ namespace fxe::runtime {
           if (fn.IsEmpty())
             return;
           auto info = Object::New(iso);
-          (void)info->Set(ctx, "alpnProtocol"_v8(iso), str(iso, alpn));
-          (void)info->Set(ctx, "peerCertificateSubject"_v8(iso), str(iso, subject));
+          (void)info->Set(ctx, "alpnProtocol"_v8(iso), to_v8_string(iso, alpn));
+          (void)info->Set(ctx, "peerCertificateSubject"_v8(iso), to_v8_string(iso, subject));
           if (!subject_error.empty())
-            (void)info->Set(ctx, "peerCertificateError"_v8(iso), str(iso, subject_error));
+            (void)info->Set(ctx, "peerCertificateError"_v8(iso), to_v8_string(iso, subject_error));
           Local<Value> argv[] = {info};
           Local<Value> ignored;
           (void)fn->Call(ctx, Undefined(iso), 1, argv).ToLocal(&ignored);
@@ -481,8 +473,8 @@ namespace fxe::runtime {
       native = native_value.As<Object>();
     } else {
       native = Object::New(iso);
-      (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
-                                             static_cast<PropertyAttribute>(DontEnum));
+      define_prop(ctx, ctx->Global(), "__fxe_native"_v8, native,
+                  static_cast<PropertyAttribute>(DontEnum));
     }
     (void)native->Set(ctx, "tls"_v8(iso), make_tls_namespace(iso, ctx));
   }

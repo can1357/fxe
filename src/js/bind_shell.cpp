@@ -2,6 +2,7 @@
 #include "../os/os.hpp"
 #include "runtime/capabilities.hpp"
 
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <string>
 #include <string_view>
@@ -10,24 +11,13 @@
 namespace fxe::js {
   using namespace v8;
   namespace {
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      if (v.IsEmpty() || !v->IsString())
-        return {};
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
-
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
 
     Local<Value> make_permission_denied(Isolate* iso, std::string_view what) {
       std::string msg = "Permission denied: shell access denied for '";
       msg.append(what);
       msg += "'";
-      auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(iso->GetCurrentContext(), "name"_v8(iso), "PermissionDenied"_v8(iso));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(iso->GetCurrentContext(), err, "name"_v8, "PermissionDenied"_v8);
       return err;
     }
 
@@ -40,17 +30,17 @@ namespace fxe::js {
 
     void shell_open_external(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      auto url = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
+      auto url = info.Length() > 0 ? to_std_string_strict(iso, info[0]) : std::string{};
       if (!guard_shell(iso, url))
         return;
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::open_external(url)));
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::open_external(url)));
     }
     void shell_show_item_in_folder(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      auto p = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
+      auto p = info.Length() > 0 ? to_std_string_strict(iso, info[0]) : std::string{};
       if (!guard_shell(iso, p))
         return;
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::show_item_in_folder(p)));
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::show_item_in_folder(p)));
     }
     void shell_beep(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -60,10 +50,10 @@ namespace fxe::js {
     }
     void shell_trash_item(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
-      auto p = info.Length() > 0 ? to_str(iso, info[0]) : std::string{};
+      auto p = info.Length() > 0 ? to_std_string_strict(iso, info[0]) : std::string{};
       if (!guard_shell(iso, p))
         return;
-      info.GetReturnValue().Set(Boolean::New(iso, fxe::os::trash_item(p)));
+      info.GetReturnValue().Set(to_v8(iso, fxe::os::trash_item(p)));
     }
   } // namespace
 

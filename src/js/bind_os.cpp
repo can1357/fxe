@@ -12,20 +12,18 @@ namespace fxe::js {
     using namespace v8;
 
     MaybeLocal<Object> require_os_namespace(Isolate* iso, Local<Context> ctx) {
-      Local<Value> native_value;
-      if (!ctx->Global()->Get(ctx, "__fxe_native"_v8(iso)).ToLocal(&native_value) ||
-          !native_value->IsObject()) {
+      if (auto native_value = get_prop<Local<Value>>(ctx, ctx->Global(), "__fxe_native"_v8(iso));
+          !native_value || !(*native_value)->IsObject()) {
         (void)throw_error(iso, "fxe:os requires __fxe_native");
         return MaybeLocal<Object>();
-      }
-
-      Local<Value> os_value;
-      if (!native_value.As<Object>()->Get(ctx, "os"_v8(iso)).ToLocal(&os_value) ||
-          !os_value->IsObject()) {
+      } else if (auto os_value =
+                     get_prop<Local<Value>>(ctx, (*native_value).As<Object>(), "os"_v8(iso));
+                 !os_value || !(*os_value)->IsObject()) {
         (void)throw_error(iso, "fxe:os requires __fxe_native.os");
         return MaybeLocal<Object>();
+      } else {
+        return (*os_value).As<Object>();
       }
-      return os_value.As<Object>();
     }
 
     MaybeLocal<Value> os_module_evaluate(Local<Context> ctx, Local<Module> mod) {
@@ -37,12 +35,12 @@ namespace fxe::js {
         return MaybeLocal<Value>();
 
       auto export_fn = [&](Local<String> name) -> bool {
-        Local<Value> value;
-        if (!os->Get(ctx, name).ToLocal(&value) || !value->IsFunction()) {
+        auto value = get_prop<Local<Value>>(ctx, os, name);
+        if (!value || !(*value)->IsFunction()) {
           (void)throw_error(iso, "fxe:os export is unavailable");
           return false;
         }
-        auto ok = mod->SetSyntheticModuleExport(iso, name, value);
+        auto ok = mod->SetSyntheticModuleExport(iso, name, *value);
         return ok.IsJust() && ok.FromJust();
       };
 

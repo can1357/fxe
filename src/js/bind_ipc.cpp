@@ -25,43 +25,22 @@ namespace fxe::js {
     using ResolverGlobal = Global<Promise::Resolver>;
     using TplGlobal = Global<FunctionTemplate>;
 
-    Local<String> s(Isolate* iso, std::string_view sv) {
-      return String::NewFromUtf8(iso, sv.data(), NewStringType::kNormal,
-                                 static_cast<int>(sv.size()))
-          .ToLocalChecked();
-    }
-
-    Local<String> s(Isolate* iso, const char* z) {
-      return String::NewFromUtf8(iso, z ? z : "", NewStringType::kNormal).ToLocalChecked();
-    }
-
-    std::string to_string(Isolate* iso, Local<Value> value) {
-      String::Utf8Value utf8(iso, value);
-      if (*utf8)
-        return std::string(*utf8, utf8.length());
-      return {};
-    }
-
     bool require_channel(Isolate* iso, const FunctionCallbackInfo<Value>& info, int index,
                          const char* signature, std::string& out) {
       if (info.Length() <= index || !info[index]->IsString()) {
         (void)throw_type_error(iso, signature);
         return false;
       }
-      out = to_string(iso, info[index]);
+      out = to_std_string(iso, info[index]);
       return true;
-    }
-
-    Local<Value> type_error(Isolate* iso, const char* message) {
-      return Exception::TypeError(s(iso, message));
     }
 
     Local<Value> no_handler_error(Isolate* iso, Local<Context> ctx, std::string_view channel) {
       std::string msg = "No handler registered for IPC channel '";
       msg += channel;
       msg += "'";
-      auto err = Exception::Error(s(iso, msg)).As<Object>();
-      (void)err->Set(ctx, "name"_v8(iso), "NoHandler"_v8(iso));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(ctx, err, "name", "NoHandler");
       return err;
     }
 
@@ -169,18 +148,15 @@ namespace fxe::js {
 
     void log_listener_error(Isolate* iso, Local<Context> ctx, Local<Value> err) {
       TryCatch tc(iso);
-      Local<Value> console_value;
-      if (!ctx->Global()->Get(ctx, "console"_v8(iso)).ToLocal(&console_value) ||
-          !console_value->IsObject())
+      auto console_obj = get_prop<Local<Object>>(ctx, ctx->Global(), "console");
+      if (!console_obj)
         return;
-      auto console_obj = console_value.As<Object>();
-      Local<Value> error_value;
-      if (!console_obj->Get(ctx, "error"_v8(iso)).ToLocal(&error_value) ||
-          !error_value->IsFunction())
+      auto error_fn = get_prop<Local<Function>>(ctx, *console_obj, "error");
+      if (!error_fn)
         return;
       Local<Value> argv[2] = {"fxe:ipc listener error"_v8(iso), err};
       Local<Value> ignored;
-      (void)error_value.As<Function>()->Call(ctx, console_obj, 2, argv).ToLocal(&ignored);
+      (void)(*error_fn)->Call(ctx, *console_obj, 2, argv).ToLocal(&ignored);
     }
 
     void ipc_handle(const FunctionCallbackInfo<Value>& info) {
@@ -239,8 +215,9 @@ namespace fxe::js {
       Local<Value> result;
       Local<Value> argv[1] = {payload};
       if (!handler->Call(ctx, Undefined(iso), 1, argv).ToLocal(&result)) {
-        Local<Value> err =
-            tc.HasCaught() ? tc.Exception() : Exception::Error("ipc handler failed"_v8(iso));
+        Local<Value> err = tc.HasCaught()
+                               ? tc.Exception()
+                               : Exception::Error(to_v8_string(iso, "ipc handler failed"));
         tc.Reset();
         (void)resolver->Reject(ctx, err);
       } else {
@@ -261,11 +238,11 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       std::string channel;
       if (info.Length() < 1 || !info[0]->IsString()) {
-        info.GetReturnValue().Set(
-            rejected(iso, ctx, type_error(iso, "ipc.invoke(channel, payload)")));
+        info.GetReturnValue().Set(rejected(
+            iso, ctx, Exception::TypeError(to_v8_string(iso, "ipc.invoke(channel, payload)"))));
         return;
       }
-      channel = to_string(iso, info[0]);
+      channel = to_std_string(iso, info[0]);
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       info.GetReturnValue().Set(resolver->GetPromise());
 
@@ -288,7 +265,8 @@ namespace fxe::js {
       if (!Function::New(ctx, invoke_task_cb, data).ToLocal(&microtask)) {
         raw->reset();
         st.invoke_tasks.pop_back();
-        (void)resolver->Reject(ctx, Exception::Error("ipc invoke scheduling failed"_v8(iso)));
+        (void)resolver->Reject(ctx,
+                               Exception::Error(to_v8_string(iso, "ipc invoke scheduling failed")));
         return;
       }
       iso->EnqueueMicrotask(microtask);
@@ -371,7 +349,7 @@ namespace fxe::js {
         (void)throw_type_error(iso, "ipc.removeAllListeners(channel?)");
         return;
       }
-      std::string channel = to_string(iso, info[0]);
+      std::string channel = to_std_string(iso, info[0]);
       auto it = listeners.find(channel);
       if (it == listeners.end())
         return;
@@ -402,8 +380,9 @@ namespace fxe::js {
         TryCatch tc(iso);
         Local<Value> ignored;
         if (!fn->Call(ctx, Undefined(iso), 1, argv).ToLocal(&ignored) || tc.HasCaught()) {
-          Local<Value> err =
-              tc.HasCaught() ? tc.Exception() : Exception::Error("ipc listener failed"_v8(iso));
+          Local<Value> err = tc.HasCaught()
+                                 ? tc.Exception()
+                                 : Exception::Error(to_v8_string(iso, "ipc listener failed"));
           tc.Reset();
           log_listener_error(iso, ctx, err);
         }
@@ -418,21 +397,20 @@ namespace fxe::js {
       auto& st = state_for(iso);
       for (auto& [channel, handler] : st.handlers) {
         auto entry = Object::New(iso);
-        (void)entry->Set(ctx, "handler"_v8(iso), Boolean::New(iso, !handler.IsEmpty()));
+        set_prop(ctx, entry, "handler", !handler.IsEmpty());
         auto listeners_it = st.listeners.find(channel);
         int count =
             listeners_it == st.listeners.end() ? 0 : static_cast<int>(listeners_it->second.size());
-        (void)entry->Set(ctx, "listeners"_v8(iso), Integer::New(iso, count));
-        (void)out->Set(ctx, s(iso, channel), entry);
+        set_prop(ctx, entry, "listeners", count);
+        set_prop(ctx, out, channel, entry);
       }
       for (auto& [channel, list] : st.listeners) {
         if (st.handlers.find(channel) != st.handlers.end())
           continue;
         auto entry = Object::New(iso);
-        (void)entry->Set(ctx, "handler"_v8(iso), False(iso));
-        (void)entry->Set(ctx, "listeners"_v8(iso),
-                         Integer::New(iso, static_cast<int>(list.size())));
-        (void)out->Set(ctx, s(iso, channel), entry);
+        set_prop(ctx, entry, "handler", false);
+        set_prop(ctx, entry, "listeners", static_cast<int>(list.size()));
+        set_prop(ctx, out, channel, entry);
       }
       info.GetReturnValue().Set(out);
     }
@@ -490,7 +468,7 @@ namespace fxe::js {
         Local<Function> fn;
         if (!tpl.Get(iso)->GetFunction(ctx).ToLocal(&fn))
           return false;
-        auto ok = mod->SetSyntheticModuleExport(iso, s(iso, name), fn);
+        auto ok = mod->SetSyntheticModuleExport(iso, to_v8_string(iso, name), fn);
         return ok.IsJust() && ok.FromJust();
       };
 

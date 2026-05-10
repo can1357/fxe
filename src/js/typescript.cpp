@@ -2,6 +2,7 @@
 #include <fxe/generated/typescript_compiler.hpp>
 #include <fxe/types.hpp>
 #include <fxe/typescript.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 
 #include "transpile_cache.hpp"
@@ -25,19 +26,6 @@ namespace fxe::js {
       v8::Global<v8::Context> context;
       v8::Global<v8::Function> bridge;
     };
-
-    std::string to_std_string(v8::Isolate* iso, v8::Local<v8::Value> value) {
-      if (value.IsEmpty())
-        return {};
-      v8::String::Utf8Value utf8(iso, value);
-      return *utf8 ? std::string(*utf8, utf8.length()) : std::string{};
-    }
-
-    v8::Local<v8::String> str(v8::Isolate* iso, std::string_view value) {
-      return v8::String::NewFromUtf8(iso, value.data(), v8::NewStringType::kNormal,
-                                     static_cast<int>(value.size()))
-          .ToLocalChecked();
-    }
 
     std::string exception_message(v8::Isolate* iso, v8::Local<v8::Context> ctx,
                                   v8::TryCatch& try_catch, std::string_view prefix) {
@@ -85,24 +73,18 @@ namespace fxe::js {
                                   "failed to initialize embedded TypeScript compiler: ")};
       }
 
-      v8::Local<v8::Value> ts_value;
-      if (!ctx->Global()->Get(ctx, "ts"_v8(iso)).ToLocal(&ts_value) || !ts_value->IsObject()) {
-        return {false, {}, "embedded TypeScript compiler did not create global `ts`"};
-      }
-      auto ts = ts_value.As<v8::Object>();
-      v8::Local<v8::Value> create_program;
-      v8::Local<v8::Value> script_target;
-      if (!ts->Get(ctx, "createProgram"_v8(iso)).ToLocal(&create_program) ||
-          !create_program->IsFunction() ||
-          !ts->Get(ctx, "ScriptTarget"_v8(iso)).ToLocal(&script_target) ||
-          !script_target->IsObject()) {
+      if (auto ts_value = get_prop<v8::Local<v8::Object>>(ctx, ctx->Global(), "ts")) {
+        auto ts = *ts_value;
+        if (auto create_program = get_prop<v8::Local<v8::Function>>(ctx, ts, "createProgram");
+            create_program && get_prop<v8::Local<v8::Object>>(ctx, ts, "ScriptTarget")) {
+          auto* cached = new typescript_isolate_cache(iso, ctx);
+          iso->SetData(k_typescript_context_slot, cached);
+          out = handle_scope.Escape(ctx);
+          return {true, {}, {}};
+        }
         return {false, {}, "embedded TypeScript compiler is missing required compiler APIs"};
       }
-
-      auto* cached = new typescript_isolate_cache(iso, ctx);
-      iso->SetData(k_typescript_context_slot, cached);
-      out = handle_scope.Escape(ctx);
-      return {true, {}, {}};
+      return {false, {}, "embedded TypeScript compiler did not create global `ts`"};
     }
 
     const char k_transpile_function_source[] = R"JS(
@@ -273,8 +255,8 @@ globalThis.__fxe_hmr ??= (() => {
       return bridge_result;
 
     v8::TryCatch try_catch(iso);
-    v8::Local<v8::Value> argv[] = {str(iso, source), str(iso, origin),
-                                   str(iso, k_fxe_types_source)};
+    v8::Local<v8::Value> argv[] = {to_v8_string(iso, source), to_v8_string(iso, origin),
+                                   to_v8_string(iso, k_fxe_types_source)};
     v8::Local<v8::Value> result_value;
     if (!bridge->Call(compiler_context, compiler_context->Global(), 3, argv)
              .ToLocal(&result_value)) {

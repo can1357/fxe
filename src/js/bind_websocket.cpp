@@ -102,18 +102,6 @@ namespace fxe::js {
       for (auto* h : stale)
         destroy_ws_holder(h);
     }
-    Local<String> s8(Isolate* iso, const std::string& s) {
-      return String::NewFromUtf8(iso, s.c_str(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      auto ctx = iso->GetCurrentContext();
-      Local<String> str;
-      if (!v->ToString(ctx).ToLocal(&str))
-        return {};
-      String::Utf8Value u(iso, str);
-      return std::string(*u ? *u : "", *u ? u.length() : 0);
-    }
 
     std::string b64_encode_bytes(const u8* data, usize size) {
       if (size == 0)
@@ -175,10 +163,6 @@ namespace fxe::js {
       return headers;
     }
 
-    void throw_type(Isolate* iso, const char* m) {
-      (void)throw_type_error(iso, m);
-    }
-
     void ws_finalizer(const WeakCallbackInfo<ws_holder>& info) {
       destroy_ws_holder(info.GetParameter());
     }
@@ -191,35 +175,30 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "WebSocket must be called with new");
+        (void)throw_type_error(iso, "WebSocket must be called with new");
         return;
       }
       if (info.Length() < 1) {
-        throw_type(iso, "WebSocket: missing url");
+        (void)throw_type_error(iso, "WebSocket: missing url");
         return;
       }
-      std::string url = to_str(iso, info[0]);
+      std::string url = to_std_string(iso, info[0]);
       net::ws_client_options client_options{};
       // FXE extension: browsers standardize only (url, protocols).
       if (info.Length() >= 3 && info[2]->IsObject()) {
         auto opts = info[2].As<Object>();
         auto read_positive_int = [&](const char* key, i64& out) -> bool {
-          Local<Value> v;
-          if (!opts->Get(ctx, s8(iso, key)).ToLocal(&v) || v->IsUndefined() || v->IsNull() ||
-              !v->IsNumber()) {
+          auto v = get_prop<Local<Value>>(ctx, opts, key);
+          if (!v || (*v)->IsUndefined() || (*v)->IsNull() || !(*v)->IsNumber())
             return false;
-          }
-          const i64 n = static_cast<i64>(v->IntegerValue(ctx).FromMaybe(0));
+          const i64 n = static_cast<i64>((*v)->IntegerValue(ctx).FromMaybe(0));
           if (n <= 0)
             return false;
           out = n;
           return true;
         };
-        Local<Value> compress_v;
-        if (opts->Get(ctx, "perMessageDeflate"_v8(iso)).ToLocal(&compress_v) &&
-            !compress_v->IsUndefined() && !compress_v->IsNull() && compress_v->IsBoolean()) {
-          client_options.compress = compress_v->BooleanValue(iso);
-        }
+        if (auto compress_v = get_prop<bool>(ctx, opts, "perMessageDeflate"_v8(iso)))
+          client_options.compress = *compress_v;
         i64 n = 0;
         if (read_positive_int("maxMessageBytes", n))
           client_options.max_message_bytes = static_cast<usize>(n);
@@ -235,12 +214,11 @@ namespace fxe::js {
         if (info[1]->IsArray()) {
           auto a = info[1].As<Array>();
           for (u32 i = 0; i < a->Length(); ++i) {
-            Local<Value> v;
-            if (a->Get(ctx, i).ToLocal(&v))
-              protocols.push_back(to_str(iso, v));
+            if (auto v = get_index<Local<Value>>(ctx, a, i))
+              protocols.push_back(to_std_string(iso, *v));
           }
         } else {
-          protocols.push_back(to_str(iso, info[1]));
+          protocols.push_back(to_std_string(iso, info[1]));
         }
       }
       auto* h = new ws_holder();
@@ -254,7 +232,7 @@ namespace fxe::js {
       }
       auto self = info.This();
       set_native(iso, self, h, TAG_WEBSOCKET);
-      self->Set(ctx, "url"_v8(iso), s8(iso, url)).Check();
+      set_prop(ctx, self, "url"_v8, url);
       h->isolate = iso;
       h->self.Reset(iso, self);
       h->self.SetWeak(h, ws_finalizer, WeakCallbackType::kParameter);
@@ -281,14 +259,14 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.HolderV2());
       if (!h)
         return;
-      info.GetReturnValue().Set(s8(iso, h->client->selected_protocol()));
+      info.GetReturnValue().Set(to_v8_string(iso, h->client->selected_protocol()));
     }
     void ws_get_extensions(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = unwrap_ws(info.HolderV2());
       if (!h)
         return;
-      info.GetReturnValue().Set(s8(iso, h->client->negotiated_extensions()));
+      info.GetReturnValue().Set(to_v8_string(iso, h->client->negotiated_extensions()));
     }
 
     void ws_get_binary_type(Local<Name>, const PropertyCallbackInfo<Value>& info) {
@@ -296,7 +274,7 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.HolderV2());
       if (!h)
         return;
-      info.GetReturnValue().Set(s8(iso, h->binary_type));
+      info.GetReturnValue().Set(to_v8_string(iso, h->binary_type));
     }
 
     void ws_set_binary_type(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
@@ -304,7 +282,7 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.HolderV2());
       if (!h)
         return;
-      const std::string value = to_str(iso, v);
+      const std::string value = to_std_string(iso, v);
       if (value == "arraybuffer" || value == "blob")
         h->binary_type = value;
     }
@@ -329,9 +307,7 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.HolderV2());
       if (!h)
         return;
-      String::Utf8Value u(iso, name);
-      std::string key(*u ? *u : "");
-      auto& slot = field_for(h, key);
+      auto& slot = field_for(h, to_std_string_strict(iso, name));
       if (v->IsFunction())
         slot.Reset(iso, v.As<Function>());
       else
@@ -342,8 +318,7 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.HolderV2());
       if (!h)
         return;
-      String::Utf8Value u(iso, name);
-      auto& slot = field_for(h, std::string(*u ? *u : ""));
+      auto& slot = field_for(h, to_std_string_strict(iso, name));
       if (slot.IsEmpty())
         info.GetReturnValue().SetNull();
       else
@@ -360,7 +335,7 @@ namespace fxe::js {
         return;
       auto v = info[0];
       if (v->IsString()) {
-        const std::string text = to_str(iso, v);
+        const std::string text = to_std_string(iso, v);
         fxe::debug::network::emit_ws_frame_sent(h->request_id, 1, b64_encode_text(text));
         h->client->send_text(text);
       } else if (v->IsArrayBuffer()) {
@@ -381,7 +356,7 @@ namespace fxe::js {
                                                 b64_encode_bytes(bytes.data(), bytes.size()));
         h->client->send_binary(std::move(bytes));
       } else {
-        const std::string text = to_str(iso, v);
+        const std::string text = to_std_string(iso, v);
         fxe::debug::network::emit_ws_frame_sent(h->request_id, 1, b64_encode_text(text));
         h->client->send_text(text);
       }
@@ -399,7 +374,7 @@ namespace fxe::js {
       if (info.Length() >= 1 && info[0]->IsNumber())
         code = static_cast<u16>(info[0]->Uint32Value(ctx).FromMaybe(1000u));
       if (info.Length() >= 2)
-        reason = to_str(iso, info[1]);
+        reason = to_std_string(iso, info[1]);
       h->client->close(code, std::move(reason));
     }
 
@@ -409,7 +384,7 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.This());
       if (!h || info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction())
         return;
-      std::string evt = to_str(iso, info[0]);
+      std::string evt = to_std_string(iso, info[0]);
       auto fn = info[1].As<Function>();
       if (evt == "open")
         h->h.open_l.emplace_back(iso, fn);
@@ -429,7 +404,7 @@ namespace fxe::js {
       auto* h = unwrap_ws(info.This());
       if (!h || info.Length() < 2 || !info[0]->IsString() || !info[1]->IsFunction())
         return;
-      std::string evt = to_str(iso, info[0]);
+      std::string evt = to_std_string(iso, info[0]);
       auto target = info[1].As<Function>();
       auto sweep = [&](std::vector<Global<Function>>& v) {
         auto it = v.begin();
@@ -452,7 +427,7 @@ namespace fxe::js {
 
     Local<Object> make_event_obj(Isolate* iso, Local<Context> ctx, const std::string& type) {
       auto o = Object::New(iso);
-      o->Set(ctx, "type"_v8(iso), s8(iso, type)).Check();
+      set_prop(ctx, o, "type"_v8, type);
       return o;
     }
 
@@ -530,8 +505,7 @@ namespace fxe::js {
 
     // Class-level constants for readyState.
     auto attach_const = [&](Local<String> name, int v) {
-      tpl->Set(name, Integer::New(iso, v),
-               static_cast<PropertyAttribute>(v8::ReadOnly | v8::DontDelete));
+      tpl->Set(name, to_v8(iso, v), static_cast<PropertyAttribute>(v8::ReadOnly | v8::DontDelete));
     };
     attach_const("CONNECTING"_v8(iso), 0);
     attach_const("OPEN"_v8(iso), 1);
@@ -573,7 +547,7 @@ namespace fxe::js::bind_websocket {
         case fxe::net::ws_event_kind::message_text: {
           fxe::debug::network::emit_ws_frame_received(h->request_id, 1, b64_encode_text(ev.text));
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("message"));
-          eo->Set(ctx, "data"_v8(iso), fxe::js::s8(iso, ev.text)).Check();
+          set_prop(ctx, eo, "data"_v8, ev.text);
           fxe::js::dispatch(iso, ctx, h, "message", eo);
         } break;
         case fxe::net::ws_event_kind::message_binary: {
@@ -582,28 +556,27 @@ namespace fxe::js::bind_websocket {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("message"));
           if (h->binary_type == "blob") {
             auto bytes = std::make_shared<std::vector<u8>>(std::move(ev.binary));
-            eo->Set(ctx, "data"_v8(iso), fxe::js::make_blob_object(iso, ctx, std::move(bytes)))
-                .Check();
+            set_prop(ctx, eo, "data"_v8, fxe::js::make_blob_object(iso, ctx, std::move(bytes)));
           } else {
             auto store = ArrayBuffer::NewBackingStore(iso, ev.binary.size());
             if (!ev.binary.empty())
               std::memcpy(store->Data(), ev.binary.data(), ev.binary.size());
             auto ab = ArrayBuffer::New(iso, std::move(store));
-            eo->Set(ctx, "data"_v8(iso), ab).Check();
+            set_prop(ctx, eo, "data"_v8, ab);
           }
           fxe::js::dispatch(iso, ctx, h, "message", eo);
         } break;
         case fxe::net::ws_event_kind::error_: {
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("error"));
-          eo->Set(ctx, "message"_v8(iso), fxe::js::s8(iso, ev.text)).Check();
+          set_prop(ctx, eo, "message"_v8, ev.text);
           fxe::js::dispatch(iso, ctx, h, "error", eo);
         } break;
         case fxe::net::ws_event_kind::close: {
           fxe::debug::network::emit_ws_closed(h->request_id);
           auto eo = fxe::js::make_event_obj(iso, ctx, std::string("close"));
-          eo->Set(ctx, "code"_v8(iso), Integer::New(iso, ev.code)).Check();
-          eo->Set(ctx, "reason"_v8(iso), fxe::js::s8(iso, ev.reason)).Check();
-          eo->Set(ctx, "wasClean"_v8(iso), v8::Boolean::New(iso, ev.was_clean)).Check();
+          set_prop(ctx, eo, "code"_v8, ev.code);
+          set_prop(ctx, eo, "reason"_v8, ev.reason);
+          set_prop(ctx, eo, "wasClean"_v8, ev.was_clean);
           fxe::js::dispatch(iso, ctx, h, "close", eo);
         } break;
         }

@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <fxe/log.hpp>
 #include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <limits>
 #include <mutex>
@@ -40,11 +41,6 @@ namespace fxe::js {
     mark_store& store() {
       static mark_store s;
       return s;
-    }
-
-    std::string to_std_string(v8::Isolate* iso, v8::Local<v8::Value> value) {
-      v8::String::Utf8Value u(iso, value);
-      return *u ? std::string(*u, u.length()) : std::string{};
     }
 
     void record_locked(mark_entry& e, double ms) {

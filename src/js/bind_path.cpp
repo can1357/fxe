@@ -1,5 +1,6 @@
 #include "bind_path.hpp"
 #include <fxe/js_bindings.hpp>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 
 #include <filesystem>
@@ -11,24 +12,12 @@ namespace fxe::js {
     using namespace v8;
     namespace fs = std::filesystem;
 
-    std::string utf8(Isolate* iso, Local<Value> v) {
-      String::Utf8Value u(iso, v);
-      if (*u)
-        return std::string(*u, u.length());
-      return {};
-    }
-
-    Local<String> str(Isolate* iso, const std::string& s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
     void path_join(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       fs::path p;
       for (int i = 0; i < info.Length(); ++i) {
-        auto seg = utf8(iso, info[i]);
+        auto seg = to_std_string(iso, info[i]);
         if (seg.empty())
           continue;
         if (p.empty())
@@ -40,7 +29,7 @@ namespace fxe::js {
       // Strip trailing slash unless it's just "/" or root.
       if (out.size() > 1 && out.back() == '/')
         out.pop_back();
-      info.GetReturnValue().Set(str(iso, out));
+      info.GetReturnValue().Set(to_v8_string(iso, out));
     }
 
     void path_resolve(const FunctionCallbackInfo<Value>& info) {
@@ -48,7 +37,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       fs::path p = fs::current_path();
       for (int i = 0; i < info.Length(); ++i) {
-        auto seg = utf8(iso, info[i]);
+        auto seg = to_std_string(iso, info[i]);
         if (seg.empty())
           continue;
         fs::path s(seg);
@@ -57,66 +46,66 @@ namespace fxe::js {
         else
           p /= s;
       }
-      info.GetReturnValue().Set(str(iso, p.lexically_normal().generic_string()));
+      info.GetReturnValue().Set(to_v8_string(iso, p.lexically_normal().generic_string()));
     }
 
     void path_dirname(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       auto out = fs::path(p).parent_path().generic_string();
       if (out.empty())
         out = ".";
-      info.GetReturnValue().Set(str(iso, out));
+      info.GetReturnValue().Set(to_v8_string(iso, out));
     }
 
     void path_basename(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       auto base = fs::path(p).filename().generic_string();
       if (info.Length() >= 2) {
-        auto ext = utf8(iso, info[1]);
+        auto ext = to_std_string(iso, info[1]);
         if (!ext.empty() && base.size() >= ext.size() &&
             base.compare(base.size() - ext.size(), ext.size(), ext) == 0) {
           base.resize(base.size() - ext.size());
         }
       }
-      info.GetReturnValue().Set(str(iso, base));
+      info.GetReturnValue().Set(to_v8_string(iso, base));
     }
 
     void path_extname(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       auto out = fs::path(p).extension().generic_string();
-      info.GetReturnValue().Set(str(iso, out));
+      info.GetReturnValue().Set(to_v8_string(iso, out));
     }
 
     void path_relative(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto from = utf8(iso, info[0]);
-      auto to = utf8(iso, info[1]);
+      auto from = to_std_string(iso, info[0]);
+      auto to = to_std_string(iso, info[1]);
       std::error_code ec;
       auto rel = fs::relative(fs::path(to), fs::path(from), ec);
-      info.GetReturnValue().Set(str(iso, ec ? to : rel.generic_string()));
+      info.GetReturnValue().Set(to_v8_string(iso, ec ? to : rel.generic_string()));
     }
 
     void path_normalize(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       auto out = fs::path(p).lexically_normal().generic_string();
       if (out.empty())
         out = ".";
-      info.GetReturnValue().Set(str(iso, out));
+      info.GetReturnValue().Set(to_v8_string(iso, out));
     }
 
     void path_is_absolute(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto p = utf8(iso, info[0]);
+      auto p = to_std_string(iso, info[0]);
       info.GetReturnValue().Set(fs::path(p).is_absolute());
     }
   } // namespace

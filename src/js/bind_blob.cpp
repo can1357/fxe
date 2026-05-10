@@ -59,24 +59,6 @@ namespace fxe::js {
     };
     static blob_resetter_register s_blob_resetter_register;
 
-    Local<String> s8(Isolate* iso, const std::string& s) {
-      return String::NewFromUtf8(iso, s.c_str(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      auto ctx = iso->GetCurrentContext();
-      Local<String> str;
-      if (!v->ToString(ctx).ToLocal(&str))
-        return {};
-      String::Utf8Value u(iso, str);
-      return std::string(*u ? *u : "", *u ? u.length() : 0);
-    }
-
-    void throw_type(Isolate* iso, const char* m) {
-      (void)throw_type_error(iso, m);
-    }
-
     std::string normalize_type(std::string type) {
       for (char ch : type) {
         const auto c = static_cast<unsigned char>(ch);
@@ -203,7 +185,7 @@ namespace fxe::js {
         out = part_from_owned(std::move(bytes));
         return true;
       }
-      out = part_from_string(to_str(iso, v));
+      out = part_from_string(to_std_string(iso, v));
       return true;
     }
 
@@ -256,11 +238,10 @@ namespace fxe::js {
     std::string read_type_option(Isolate* iso, Local<Context> ctx, Local<Value> options) {
       if (options.IsEmpty() || !options->IsObject())
         return {};
-      Local<Value> type_value;
-      if (!options.As<Object>()->Get(ctx, "type"_v8(iso)).ToLocal(&type_value) ||
-          type_value->IsUndefined())
-        return {};
-      return normalize_type(to_str(iso, type_value));
+      if (auto type_value = get_prop<Local<Value>>(ctx, options.As<Object>(), "type")) {
+        return normalize_type(to_std_string(iso, *type_value));
+      }
+      return {};
     }
 
     void blob_ctor(const FunctionCallbackInfo<Value>& info) {
@@ -268,7 +249,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "Blob must be called with new");
+        (void)throw_type_error(iso, "Blob must be called with new");
         return;
       }
 
@@ -280,11 +261,11 @@ namespace fxe::js {
           const u32 n = arr->Length();
           parts.reserve(n);
           for (u32 i = 0; i < n; ++i) {
-            Local<Value> value;
-            if (!arr->Get(ctx, i).ToLocal(&value))
+            auto value = get_index<Local<Value>>(ctx, arr, i);
+            if (!value)
               continue;
             blob_part part;
-            if (extract_part(iso, value, part)) {
+            if (extract_part(iso, *value, part)) {
               total += part.length;
               parts.push_back(std::move(part));
             }
@@ -323,7 +304,7 @@ namespace fxe::js {
       auto* h = unwrap_blob_object(info.HolderV2());
       if (!h)
         return;
-      info.GetReturnValue().Set(s8(iso, h->type));
+      info.GetReturnValue().Set(to_v8_string(iso, h->type));
     }
 
     void blob_slice(const FunctionCallbackInfo<Value>& info) {
@@ -332,7 +313,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_blob_object(info.This());
       if (!h) {
-        throw_type(iso, "Blob.slice: invalid this");
+        (void)throw_type_error(iso, "Blob.slice: invalid this");
         return;
       }
       const auto start =
@@ -342,12 +323,12 @@ namespace fxe::js {
                              : static_cast<double>(h->length),
           h->length);
       const auto slice_length = start < end ? end - start : 0;
-      auto* sliced =
-          new blob_holder{h->bytes,
-                          h->offset + start,
-                          slice_length,
-                          info.Length() >= 3 ? normalize_type(to_str(iso, info[2])) : std::string{},
-                          {}};
+      auto* sliced = new blob_holder{
+          h->bytes,
+          h->offset + start,
+          slice_length,
+          info.Length() >= 3 ? normalize_type(to_std_string(iso, info[2])) : std::string{},
+          {}};
       auto obj =
           blob_tpl_table()[iso].Get(iso)->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
       init_blob_object(iso, obj, sliced);
@@ -360,7 +341,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_blob_object(info.This());
       if (!h) {
-        throw_type(iso, "Blob.arrayBuffer: invalid this");
+        (void)throw_type_error(iso, "Blob.arrayBuffer: invalid this");
         return;
       }
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
@@ -375,16 +356,14 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_blob_object(info.This());
       if (!h) {
-        throw_type(iso, "Blob.text: invalid this");
+        (void)throw_type_error(iso, "Blob.text: invalid this");
         return;
       }
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       const char* data =
           h->length == 0 ? "" : reinterpret_cast<const char*>(h->bytes->data() + h->offset);
       resolver
-          ->Resolve(ctx, String::NewFromUtf8(iso, data, NewStringType::kNormal,
-                                             static_cast<int>(h->length))
-                             .ToLocalChecked())
+          ->Resolve(ctx, to_v8_string(iso, std::string_view(data, static_cast<usize>(h->length))))
           .Check();
       info.GetReturnValue().Set(resolver->GetPromise());
     }
@@ -415,7 +394,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_blob_object(info.This());
       if (!h) {
-        throw_type(iso, "Blob.stream: invalid this");
+        (void)throw_type_error(iso, "Blob.stream: invalid this");
         return;
       }
       info.GetReturnValue().Set(make_stream_object(iso, ctx, h->bytes, h->offset, h->length));
@@ -424,7 +403,7 @@ namespace fxe::js {
     void stream_ctor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "ReadableStream must be called with new");
+        (void)throw_type_error(iso, "ReadableStream must be called with new");
         return;
       }
       auto empty = std::make_shared<std::vector<u8>>();
@@ -439,7 +418,7 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_stream_object(info.This());
       if (!h) {
-        throw_type(iso, "ReadableStream.getReader: invalid this");
+        (void)throw_type_error(iso, "ReadableStream.getReader: invalid this");
         return;
       }
       info.GetReturnValue().Set(make_reader_object(iso, ctx, h->bytes, h->offset, h->length));
@@ -451,19 +430,19 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* h = unwrap_reader_object(info.This());
       if (!h) {
-        throw_type(iso, "ReadableStreamDefaultReader.read: invalid this");
+        (void)throw_type_error(iso, "ReadableStreamDefaultReader.read: invalid this");
         return;
       }
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       auto result = Object::New(iso);
       if (h->consumed) {
-        result->Set(ctx, "done"_v8(iso), Boolean::New(iso, true)).Check();
+        set_prop(ctx, result, "done", true);
       } else {
         h->consumed = true;
         const auto* data = h->length == 0 ? nullptr : h->bytes->data() + h->offset;
         auto ab = copy_array_buffer(iso, data, h->length);
-        result->Set(ctx, "done"_v8(iso), Boolean::New(iso, false)).Check();
-        result->Set(ctx, "value"_v8(iso), Uint8Array::New(ab, 0, h->length)).Check();
+        set_prop(ctx, result, "done", false);
+        set_prop(ctx, result, "value", Uint8Array::New(ab, 0, h->length));
       }
       resolver->Resolve(ctx, result).Check();
       info.GetReturnValue().Set(resolver->GetPromise());

@@ -3,6 +3,7 @@
 #include "runtime/capabilities.hpp"
 #include "runtime/uv_loop.hpp"
 #include "runtime/v8/fs_fd.hpp"
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_host.hpp>
 #include <fxe/v8_literals.hpp>
 
@@ -116,28 +117,7 @@ namespace fxe::runtime {
   }
   namespace {
     using namespace v8;
-
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    void set(Local<Context> ctx, Local<Object> obj, const char* key, Local<Value> value) {
-      (void)obj->Set(ctx, str(Isolate::GetCurrent(), key), value);
-    }
-
-    void set_string(Local<Context> ctx, Local<Object> obj, const char* key,
-                    std::string_view value) {
-      set(ctx, obj, key, str(Isolate::GetCurrent(), value));
-    }
-
-    void set_number(Local<Context> ctx, Local<Object> obj, const char* key, double value) {
-      set(ctx, obj, key, Number::New(Isolate::GetCurrent(), value));
-    }
-
-    void set_bool(Local<Context> ctx, Local<Object> obj, const char* key, bool value) {
-      set(ctx, obj, key, Boolean::New(Isolate::GetCurrent(), value));
-    }
+    using namespace fxe::js;
 
     const char* getenv_or_empty(const char* name) {
       const char* value = std::getenv(name);
@@ -426,28 +406,30 @@ namespace fxe::runtime {
 
     void child_read_stdout(const FunctionCallbackInfo<Value>& info) {
       auto* h = child_handle_from(info.This());
-      info.GetReturnValue().Set(str(info.GetIsolate(), h ? read_available(h->stdout_fd) : ""));
+      info.GetReturnValue().Set(
+          to_v8_string(info.GetIsolate(), h ? read_available(h->stdout_fd) : ""));
     }
 
     void child_read_stderr(const FunctionCallbackInfo<Value>& info) {
       auto* h = child_handle_from(info.This());
-      info.GetReturnValue().Set(str(info.GetIsolate(), h ? read_available(h->stderr_fd) : ""));
+      info.GetReturnValue().Set(
+          to_v8_string(info.GetIsolate(), h ? read_available(h->stderr_fd) : ""));
     }
 
     void child_write_stdin(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = child_handle_from(info.This());
       if (!h || h->stdin_fd < 0) {
-        info.GetReturnValue().Set(Boolean::New(iso, false));
+        info.GetReturnValue().Set(to_v8(iso, false));
         return;
       }
       if (info.Length() < 1) {
-        info.GetReturnValue().Set(Boolean::New(iso, true));
+        info.GetReturnValue().Set(to_v8(iso, true));
         return;
       }
-      String::Utf8Value data(iso, info[0]);
-      const char* p = *data ? *data : "";
-      usize left = static_cast<usize>(data.length());
+      std::string data = to_std_string(iso, info[0]);
+      const char* p = data.data();
+      usize left = data.size();
       while (left > 0) {
         ssize_t n = ::write(h->stdin_fd, p, left);
         if (n > 0) {
@@ -457,10 +439,10 @@ namespace fxe::runtime {
         }
         if (n < 0 && errno == EINTR)
           continue;
-        iso->ThrowException(Exception::Error("child_process stdin write failed"_v8(iso)));
+        throw_error(iso, "child_process stdin write failed");
         return;
       }
-      info.GetReturnValue().Set(Boolean::New(iso, true));
+      info.GetReturnValue().Set(to_v8(iso, true));
     }
 
     void child_end_stdin(const FunctionCallbackInfo<Value>& info) {
@@ -475,7 +457,7 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       auto* h = child_handle_from(info.This());
       if (!h || h->pid <= 0 || h->exited) {
-        info.GetReturnValue().Set(Boolean::New(iso, false));
+        info.GetReturnValue().Set(to_v8(iso, false));
         return;
       }
       int sig = SIGTERM;
@@ -483,8 +465,7 @@ namespace fxe::runtime {
         if (info[0]->IsNumber()) {
           sig = info[0]->Int32Value(ctx).FromMaybe(SIGTERM);
         } else if (info[0]->IsString()) {
-          String::Utf8Value name(iso, info[0]);
-          std::string s(*name ? *name : "");
+          std::string s = to_std_string(iso, info[0]);
           if (s == "SIGKILL")
             sig = SIGKILL;
           else if (s == "SIGINT")
@@ -493,7 +474,7 @@ namespace fxe::runtime {
             sig = SIGTERM;
         }
       }
-      info.GetReturnValue().Set(Boolean::New(iso, ::kill(h->pid, sig) == 0));
+      info.GetReturnValue().Set(to_v8(iso, ::kill(h->pid, sig) == 0));
     }
 
     Local<Value> make_wait_result(Isolate* iso, Local<Context> ctx, child_process_handle* h) {
@@ -518,14 +499,14 @@ namespace fxe::runtime {
       }
       auto out = Object::New(iso);
       if (WIFEXITED(h->status)) {
-        set(ctx, out, "exitCode", Integer::New(iso, WEXITSTATUS(h->status)));
-        set(ctx, out, "signal", Null(iso));
+        set_prop(ctx, out, "exitCode", WEXITSTATUS(h->status));
+        set_prop(ctx, out, "signal", to_v8_null(iso));
       } else if (WIFSIGNALED(h->status)) {
-        set(ctx, out, "exitCode", Null(iso));
-        set(ctx, out, "signal", Integer::New(iso, WTERMSIG(h->status)));
+        set_prop(ctx, out, "exitCode", to_v8_null(iso));
+        set_prop(ctx, out, "signal", WTERMSIG(h->status));
       } else {
-        set(ctx, out, "exitCode", Null(iso));
-        set(ctx, out, "signal", Null(iso));
+        set_prop(ctx, out, "exitCode", to_v8_null(iso));
+        set_prop(ctx, out, "signal", to_v8_null(iso));
       }
       return out;
     }
@@ -542,7 +523,7 @@ namespace fxe::runtime {
       const int ms = info.Length() > 0 ? info[0]->Int32Value(ctx).FromMaybe(0) : 0;
       if (ms > 0)
         ::usleep(static_cast<useconds_t>(ms) * 1000);
-      info.GetReturnValue().Set(Boolean::New(iso, true));
+      info.GetReturnValue().Set(to_v8(iso, true));
     }
 
     std::vector<std::string> string_array_arg(Isolate* iso, Local<Context> ctx,
@@ -557,8 +538,7 @@ namespace fxe::runtime {
         Local<Value> item;
         if (!array->Get(ctx, i).ToLocal(&item))
           continue;
-        String::Utf8Value s(iso, item);
-        out.emplace_back(*s ? *s : "");
+        out.emplace_back(to_std_string(iso, item));
       }
       return out;
     }
@@ -567,13 +547,11 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(
-            "__fxe_native.spawn.spawn(file, args, opts) requires file"_v8(iso)));
+        throw_type_error(iso, "__fxe_native.spawn.spawn(file, args, opts) requires file");
         return;
       }
 
-      String::Utf8Value file_value(iso, info[0]);
-      std::string file(*file_value ? *file_value : "");
+      std::string file = to_std_string(iso, info[0]);
       auto args =
           info.Length() > 1 ? string_array_arg(iso, ctx, info[1]) : std::vector<std::string>{};
 
@@ -588,8 +566,7 @@ namespace fxe::runtime {
         close_fd(stdout_pipe[1]);
         close_fd(stderr_pipe[0]);
         close_fd(stderr_pipe[1]);
-        iso->ThrowException(
-            Exception::Error(str(iso, std::string("pipe failed: ") + std::strerror(err))));
+        throw_error(iso, "pipe failed: {}", std::strerror(err));
         return;
       }
 
@@ -614,8 +591,7 @@ namespace fxe::runtime {
         close_fd(stdout_pipe[1]);
         close_fd(stderr_pipe[0]);
         close_fd(stderr_pipe[1]);
-        iso->ThrowException(Exception::Error(
-            str(iso, std::string("posix_spawn file actions failed: ") + std::strerror(rc))));
+        throw_error(iso, "posix_spawn file actions failed: {}", std::strerror(rc));
         return;
       }
 
@@ -637,8 +613,7 @@ namespace fxe::runtime {
         close_fd(stdin_pipe[1]);
         close_fd(stdout_pipe[0]);
         close_fd(stderr_pipe[0]);
-        iso->ThrowException(
-            Exception::Error(str(iso, std::string("spawn failed: ") + std::strerror(rc))));
+        throw_error(iso, "spawn failed: {}", std::strerror(rc));
         return;
       }
 
@@ -657,8 +632,8 @@ namespace fxe::runtime {
       tpl->Set(iso, "wait", FunctionTemplate::New(iso, child_wait));
       tpl->Set(iso, "sleep", FunctionTemplate::New(iso, child_sleep_ms));
       auto obj = tpl->NewInstance(ctx).ToLocalChecked();
-      obj->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      set(ctx, obj, "pid", Integer::New(iso, pid));
+      obj->SetInternalField(0, make_external(iso, h));
+      set_prop(ctx, obj, "pid", pid);
       h->self_persistent.Reset(iso, obj);
       h->self_persistent.SetWeak(h, child_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(obj);
@@ -737,8 +712,7 @@ namespace fxe::runtime {
         Local<Value> item;
         if (!array->Get(ctx, i).ToLocal(&item))
           continue;
-        String::Utf8Value s(iso, item);
-        out.emplace_back(*s ? *s : "");
+        out.emplace_back(to_std_string(iso, item));
       }
       return out;
     }
@@ -795,31 +769,31 @@ namespace fxe::runtime {
     void child_read_stdout(const FunctionCallbackInfo<Value>& info) {
       auto* h = child_handle_from(info.This());
       info.GetReturnValue().Set(
-          str(info.GetIsolate(), h ? read_pipe_available(h->stdout_read) : ""));
+          to_v8_string(info.GetIsolate(), h ? read_pipe_available(h->stdout_read) : ""));
     }
 
     void child_read_stderr(const FunctionCallbackInfo<Value>& info) {
       auto* h = child_handle_from(info.This());
       info.GetReturnValue().Set(
-          str(info.GetIsolate(), h ? read_pipe_available(h->stderr_read) : ""));
+          to_v8_string(info.GetIsolate(), h ? read_pipe_available(h->stderr_read) : ""));
     }
 
     void child_write_stdin(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* h = child_handle_from(info.This());
       if (!h || !h->stdin_write) {
-        info.GetReturnValue().Set(Boolean::New(iso, false));
+        info.GetReturnValue().Set(to_v8(iso, false));
         return;
       }
-      String::Utf8Value data(iso, info.Length() > 0 ? info[0] : Undefined(iso));
+      std::string data = to_std_string(iso, info.Length() > 0 ? info[0] : Undefined(iso));
       DWORD written = 0;
-      const BOOL ok = WriteFile(h->stdin_write, *data ? *data : "",
-                                static_cast<DWORD>(data.length()), &written, nullptr);
+      const BOOL ok = WriteFile(h->stdin_write, data.data(), static_cast<DWORD>(data.size()),
+                                &written, nullptr);
       if (!ok) {
-        iso->ThrowException(Exception::Error("child_process stdin write failed"_v8(iso)));
+        throw_error(iso, "child_process stdin write failed");
         return;
       }
-      info.GetReturnValue().Set(Boolean::New(iso, true));
+      info.GetReturnValue().Set(to_v8(iso, true));
     }
 
     void child_end_stdin(const FunctionCallbackInfo<Value>& info) {
@@ -833,7 +807,7 @@ namespace fxe::runtime {
       auto* h = child_handle_from(info.This());
       const bool ok =
           h && h->process.hProcess && !h->exited && TerminateProcess(h->process.hProcess, 1);
-      info.GetReturnValue().Set(Boolean::New(info.GetIsolate(), ok));
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), ok));
     }
 
     Local<Value> make_wait_result(Isolate* iso, Local<Context> ctx, child_process_handle* h) {
@@ -850,8 +824,8 @@ namespace fxe::runtime {
         h->exited = true;
       }
       auto out = Object::New(iso);
-      set(ctx, out, "exitCode", Integer::New(iso, static_cast<i32>(h->exit_code)));
-      set(ctx, out, "signal", Null(iso));
+      set_prop(ctx, out, "exitCode", static_cast<i32>(h->exit_code));
+      set_prop(ctx, out, "signal", to_v8_null(iso));
       return out;
     }
 
@@ -884,12 +858,10 @@ namespace fxe::runtime {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsString()) {
-        iso->ThrowException(Exception::TypeError(
-            "__fxe_native.spawn.spawn(file, args, opts) requires file"_v8(iso)));
+        throw_type_error(iso, "__fxe_native.spawn.spawn(file, args, opts) requires file");
         return;
       }
-      String::Utf8Value file_value(iso, info[0]);
-      std::string file(*file_value ? *file_value : "");
+      std::string file = to_std_string(iso, info[0]);
       auto args =
           info.Length() > 1 ? string_array_arg(iso, ctx, info[1]) : std::vector<std::string>{};
 
@@ -908,7 +880,7 @@ namespace fxe::runtime {
         close_handle(stdout_write);
         close_handle(stderr_read);
         close_handle(stderr_write);
-        iso->ThrowException(Exception::Error("CreatePipe failed"_v8(iso)));
+        throw_error(iso, "CreatePipe failed");
         return;
       }
 
@@ -939,7 +911,7 @@ namespace fxe::runtime {
         close_handle(stdin_write);
         close_handle(stdout_read);
         close_handle(stderr_read);
-        iso->ThrowException(Exception::Error("CreateProcessW failed"_v8(iso)));
+        throw_error(iso, "CreateProcessW failed");
         return;
       }
 
@@ -954,8 +926,8 @@ namespace fxe::runtime {
       tpl->Set(iso, "wait", FunctionTemplate::New(iso, child_wait));
       tpl->Set(iso, "sleep", FunctionTemplate::New(iso, child_sleep_ms));
       auto obj = tpl->NewInstance(ctx).ToLocalChecked();
-      obj->SetInternalField(0, External::New(iso, h, v8::kExternalPointerTypeTagDefault));
-      set(ctx, obj, "pid", Integer::New(iso, static_cast<i32>(pi.dwProcessId)));
+      obj->SetInternalField(0, make_external(iso, h));
+      set_prop(ctx, obj, "pid", static_cast<i32>(pi.dwProcessId));
       h->self_persistent.Reset(iso, obj);
       h->self_persistent.SetWeak(h, child_finalizer, WeakCallbackType::kParameter);
       info.GetReturnValue().Set(obj);
@@ -968,34 +940,20 @@ namespace fxe::runtime {
       std::vector<u8> owned;
     };
 
-    void throw_error(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::Error(str(iso, message)));
-    }
-
-    void throw_error(Isolate* iso, const char* message) {
-      throw_error(iso, std::string_view(message));
-    }
-
-    void throw_error(Isolate* iso, const std::string& message) {
-      throw_error(iso, std::string_view(message));
-    }
-
     Local<Value> make_permission_denied(Isolate* iso, std::string_view what) {
       auto ctx = iso->GetCurrentContext();
       std::string msg = "Permission denied: ";
       msg.append(what);
-      auto err = Exception::Error(str(iso, msg)).As<Object>();
-      (void)err->Set(ctx, "name"_v8(iso), "PermissionDenied"_v8(iso));
+      auto err = Exception::Error(to_v8_string(iso, msg)).As<Object>();
+      set_prop(ctx, err, "name", "PermissionDenied");
       return err;
     }
 
     bool value_to_bytes(Isolate* iso, Local<Context> ctx, Local<Value> value, byte_view& out) {
       if (value->IsString()) {
-        String::Utf8Value utf8(iso, value);
-        if (*utf8 == nullptr)
-          return false;
-        out.owned.assign(reinterpret_cast<const u8*>(*utf8),
-                         reinterpret_cast<const u8*>(*utf8) + utf8.length());
+        const std::string utf8 = to_std_string(iso, value);
+        out.owned.assign(reinterpret_cast<const u8*>(utf8.data()),
+                         reinterpret_cast<const u8*>(utf8.data()) + utf8.size());
         out.data = out.owned.data();
         out.size = out.owned.size();
         return true;
@@ -1019,8 +977,8 @@ namespace fxe::runtime {
     }
     bool read_bytes_property(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* key,
                              byte_view& out, bool required) {
-      auto v = obj->Get(ctx, str(iso, key));
-      if (v.IsEmpty()) {
+      auto v = get_prop<Local<Value>>(ctx, obj, key);
+      if (!v.has_value()) {
         if (required) {
           throw_error(iso, std::string("missing pk component '") + key + "'");
           return false;
@@ -1028,7 +986,7 @@ namespace fxe::runtime {
         out = byte_view{};
         return true;
       }
-      auto val = v.ToLocalChecked();
+      auto val = *v;
       if (val->IsUndefined() || val->IsNull()) {
         if (required) {
           throw_error(iso, std::string("missing pk component '") + key + "'");
@@ -1038,23 +996,13 @@ namespace fxe::runtime {
         return true;
       }
       if (!value_to_bytes(iso, ctx, val, out)) {
-        iso->ThrowException(Exception::TypeError(
-            str(iso, std::string("pk component '") + key + "' must be a Uint8Array")));
-        return false;
+        return throw_type_error(iso, "pk component '{}' must be a Uint8Array", key);
       }
       return true;
     }
 
-    std::string read_string_property(Isolate* iso, Local<Context> ctx, Local<Object> obj,
-                                     const char* key) {
-      auto v = obj->Get(ctx, str(iso, key));
-      if (v.IsEmpty())
-        return {};
-      auto val = v.ToLocalChecked();
-      if (!val->IsString())
-        return {};
-      String::Utf8Value utf8(iso, val);
-      return *utf8 ? std::string(*utf8, utf8.length()) : std::string{};
+    std::string read_string_property(Local<Context> ctx, Local<Object> obj, const char* key) {
+      return get_prop<std::string>(ctx, obj, key).value_or(std::string{});
     }
 
     std::string mbedtls_err_str(int rc) {
@@ -1340,9 +1288,8 @@ namespace fxe::runtime {
         throw_error(iso, "__fxe_native.hash.create requires an algorithm string");
         return;
       }
-      String::Utf8Value algo_utf8(iso, info[0]);
-      const auto type = hash_type_for(*algo_utf8 ? std::string_view(*algo_utf8, algo_utf8.length())
-                                                 : std::string_view{});
+      const std::string algorithm = to_std_string(iso, info[0]);
+      const auto type = hash_type_for(algorithm);
       const mbedtls_md_info_t* md = mbedtls_md_info_from_type(type);
       if (md == nullptr) {
         throw_error(iso, "unsupported hash algorithm");
@@ -1355,11 +1302,9 @@ namespace fxe::runtime {
       }
       state->digest_size = mbedtls_md_get_size(md);
       auto out = Object::New(iso);
-      auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, "update"_v8(iso),
-                     Function::New(ctx, hash_update, external).ToLocalChecked());
-      (void)out->Set(ctx, "digest"_v8(iso),
-                     Function::New(ctx, hash_digest, external).ToLocalChecked());
+      auto external = make_external(iso, state.get());
+      add_function(ctx, out, "update", hash_update, external);
+      add_function(ctx, out, "digest", hash_digest, external);
       state->self.Reset(iso, out);
       state->self.SetWeak(state.get(), hash_finalizer, WeakCallbackType::kParameter);
       (void)state.release();
@@ -1373,9 +1318,8 @@ namespace fxe::runtime {
         throw_error(iso, "__fxe_native.hash.createHmac requires algorithm and key");
         return;
       }
-      String::Utf8Value algo_utf8(iso, info[0]);
-      const auto type = hash_type_for(*algo_utf8 ? std::string_view(*algo_utf8, algo_utf8.length())
-                                                 : std::string_view{});
+      const std::string algorithm = to_std_string(iso, info[0]);
+      const auto type = hash_type_for(algorithm);
       const mbedtls_md_info_t* md = mbedtls_md_info_from_type(type);
       if (md == nullptr) {
         throw_error(iso, "unsupported hmac algorithm");
@@ -1395,11 +1339,9 @@ namespace fxe::runtime {
       state->digest_size = mbedtls_md_get_size(md);
       state->hmac = true;
       auto out = Object::New(iso);
-      auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, "update"_v8(iso),
-                     Function::New(ctx, hash_update, external).ToLocalChecked());
-      (void)out->Set(ctx, "digest"_v8(iso),
-                     Function::New(ctx, hash_digest, external).ToLocalChecked());
+      auto external = make_external(iso, state.get());
+      add_function(ctx, out, "update", hash_update, external);
+      add_function(ctx, out, "digest", hash_digest, external);
       state->self.Reset(iso, out);
       state->self.SetWeak(state.get(), hash_finalizer, WeakCallbackType::kParameter);
       (void)state.release();
@@ -1429,9 +1371,8 @@ namespace fxe::runtime {
         throw_error(iso, "pbkdf2 iterations must be positive and keylen non-negative");
         return;
       }
-      String::Utf8Value digest_utf8(iso, info[4]);
-      const auto type = hash_type_for(
-          *digest_utf8 ? std::string_view(*digest_utf8, digest_utf8.length()) : std::string_view{});
+      const std::string digest = to_std_string(iso, info[4]);
+      const auto type = hash_type_for(digest);
       const mbedtls_md_info_t* md = mbedtls_md_info_from_type(type);
       if (md == nullptr) {
         throw_error(iso, "unsupported pbkdf2 digest");
@@ -1472,8 +1413,7 @@ namespace fxe::runtime {
       Local<Value> n_val = info[2], r_val = info[3], p_val = info[4], keylen_val = info[5];
       if (!n_val->IsNumber() || !r_val->IsNumber() || !p_val->IsNumber() ||
           !keylen_val->IsNumber()) {
-        iso->ThrowException(
-            Exception::TypeError("scrypt N, r, p, and keylen must be numbers"_v8(iso)));
+        throw_type_error(iso, "scrypt N, r, p, and keylen must be numbers");
         return;
       }
       const double n_d = n_val->NumberValue(ctx).FromMaybe(-1.0);
@@ -1487,9 +1427,7 @@ namespace fxe::runtime {
       //   keylen >= 1 (we reject 0 — Node's scryptSync also rejects 0 keylen).
       // Upper bounds: cap N to 2^31 (1 << 31), r/p to 2^24 to keep memory bounded
       // (libsodium itself enforces 128 * N * r <= some platform-dependent limit).
-      auto bad_range = [&](const char* msg) {
-        iso->ThrowException(Exception::RangeError(str(iso, msg)));
-      };
+      auto bad_range = [&](const char* msg) { throw_range_error(iso, msg); };
       if (!(n_d >= 2.0) || std::floor(n_d) != n_d || n_d > static_cast<double>(1ull << 31)) {
         bad_range("scrypt N must be a power of two between 2 and 2^31");
         return;
@@ -1647,23 +1585,20 @@ namespace fxe::runtime {
                                usize coord_len) {
       if (bytes.size == coord_len)
         return true;
-      iso->ThrowException(
-          Exception::RangeError(str(iso, std::string("EC component '") + std::string(name) +
-                                             "' must match the curve coordinate length")));
-      return false;
+      return throw_range_error(iso, "EC component '{}' must match the curve coordinate length",
+                               name);
     }
 
     bool require_ec_scalar_size(Isolate* iso, const byte_view& bytes, usize coord_len) {
       if (bytes.size > 0 && bytes.size <= coord_len)
         return true;
-      iso->ThrowException(Exception::RangeError(
-          "EC private scalar must be non-empty and no longer than the curve length"_v8(iso)));
-      return false;
+      return throw_range_error(
+          iso, "EC private scalar must be non-empty and no longer than the curve length");
     }
 
     bool read_ec_curve(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                        mbedtls_ecp_group_id& group_id, usize& coord_len) {
-      const auto curve = read_string_property(iso, ctx, obj, "curve");
+      const auto curve = read_string_property(ctx, obj, "curve");
       if (curve.empty()) {
         throw_error(iso, "missing EC curve");
         return false;
@@ -1771,12 +1706,12 @@ namespace fxe::runtime {
 
     bool setup_pk_for_components(Isolate* iso, Local<Context> ctx, Local<Object> components,
                                  bool require_private, pk_context_guard& pk) {
-      const auto kind = read_string_property(iso, ctx, components, "kind");
+      const auto kind = read_string_property(ctx, components, "kind");
       if (kind == "rsa")
         return setup_rsa_pk(iso, ctx, components, require_private, pk);
       if (kind == "ec")
         return setup_ec_pk(iso, ctx, components, require_private, pk);
-      if (!read_string_property(iso, ctx, components, "curve").empty())
+      if (!read_string_property(ctx, components, "curve").empty())
         return setup_ec_pk(iso, ctx, components, require_private, pk);
       return setup_rsa_pk(iso, ctx, components, require_private, pk);
     }
@@ -1790,8 +1725,8 @@ namespace fxe::runtime {
         throw_error(iso, "failed to export RSA components: " + mbedtls_err_str(rc));
         return false;
       }
-      (void)out->Set(ctx, "n"_v8(iso), mpi_to_uint8_minimal(iso, &N.ctx));
-      (void)out->Set(ctx, "e"_v8(iso), mpi_to_uint8_minimal(iso, &E.ctx));
+      set_prop(ctx, out, "n", mpi_to_uint8_minimal(iso, &N.ctx));
+      set_prop(ctx, out, "e", mpi_to_uint8_minimal(iso, &E.ctx));
       return true;
     }
 
@@ -1814,7 +1749,7 @@ namespace fxe::runtime {
       auto out = Object::New(iso);
       const auto type = mbedtls_pk_get_type(&pk.ctx);
       if (type == MBEDTLS_PK_RSA) {
-        set_string(ctx, out, "kind", "rsa");
+        set_prop(ctx, out, "kind", "rsa");
         if (!set_rsa_public_components(iso, ctx, out, mbedtls_pk_rsa(pk.ctx)))
           return;
       } else if (type == MBEDTLS_PK_ECKEY || type == MBEDTLS_PK_ECKEY_DH) {
@@ -1825,8 +1760,8 @@ namespace fxe::runtime {
           throw_error(iso, "unsupported EC curve");
           return;
         }
-        set_string(ctx, out, "kind", "ec");
-        set_string(ctx, out, "curve", canonical_curve_name(group_id));
+        set_prop(ctx, out, "kind", "ec");
+        set_prop(ctx, out, "curve", canonical_curve_name(group_id));
         (void)out->Set(
             ctx, "x"_v8(iso),
             mpi_to_uint8_fixed(iso, &ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X), coord_len));
@@ -1861,7 +1796,7 @@ namespace fxe::runtime {
       auto out = Object::New(iso);
       const auto type = mbedtls_pk_get_type(&pk.ctx);
       if (type == MBEDTLS_PK_RSA) {
-        set_string(ctx, out, "kind", "rsa");
+        set_prop(ctx, out, "kind", "rsa");
         auto* rsa = mbedtls_pk_rsa(pk.ctx);
         mpi_guard N;
         mpi_guard P;
@@ -1879,14 +1814,14 @@ namespace fxe::runtime {
                       "failed to export RSA private components: " + mbedtls_err_str(export_rc));
           return;
         }
-        (void)out->Set(ctx, "n"_v8(iso), mpi_to_uint8_minimal(iso, &N.ctx));
-        (void)out->Set(ctx, "e"_v8(iso), mpi_to_uint8_minimal(iso, &E.ctx));
-        (void)out->Set(ctx, "d"_v8(iso), mpi_to_uint8_minimal(iso, &D.ctx));
-        (void)out->Set(ctx, "p"_v8(iso), mpi_to_uint8_minimal(iso, &P.ctx));
-        (void)out->Set(ctx, "q"_v8(iso), mpi_to_uint8_minimal(iso, &Q.ctx));
-        (void)out->Set(ctx, "dp"_v8(iso), mpi_to_uint8_minimal(iso, &DP.ctx));
-        (void)out->Set(ctx, "dq"_v8(iso), mpi_to_uint8_minimal(iso, &DQ.ctx));
-        (void)out->Set(ctx, "qi"_v8(iso), mpi_to_uint8_minimal(iso, &QP.ctx));
+        set_prop(ctx, out, "n", mpi_to_uint8_minimal(iso, &N.ctx));
+        set_prop(ctx, out, "e", mpi_to_uint8_minimal(iso, &E.ctx));
+        set_prop(ctx, out, "d", mpi_to_uint8_minimal(iso, &D.ctx));
+        set_prop(ctx, out, "p", mpi_to_uint8_minimal(iso, &P.ctx));
+        set_prop(ctx, out, "q", mpi_to_uint8_minimal(iso, &Q.ctx));
+        set_prop(ctx, out, "dp", mpi_to_uint8_minimal(iso, &DP.ctx));
+        set_prop(ctx, out, "dq", mpi_to_uint8_minimal(iso, &DQ.ctx));
+        set_prop(ctx, out, "qi", mpi_to_uint8_minimal(iso, &QP.ctx));
       } else if (type == MBEDTLS_PK_ECKEY || type == MBEDTLS_PK_ECKEY_DH) {
         auto* ec = mbedtls_pk_ec(pk.ctx);
         const auto group_id = ec->MBEDTLS_PRIVATE(grp).id;
@@ -1895,8 +1830,8 @@ namespace fxe::runtime {
           throw_error(iso, "unsupported EC curve");
           return;
         }
-        set_string(ctx, out, "kind", "ec");
-        set_string(ctx, out, "curve", canonical_curve_name(group_id));
+        set_prop(ctx, out, "kind", "ec");
+        set_prop(ctx, out, "curve", canonical_curve_name(group_id));
         (void)out->Set(
             ctx, "x"_v8(iso),
             mpi_to_uint8_fixed(iso, &ec->MBEDTLS_PRIVATE(Q).MBEDTLS_PRIVATE(X), coord_len));
@@ -1969,9 +1904,8 @@ namespace fxe::runtime {
         return;
       }
 
-      String::Utf8Value hash_utf8(iso, info[1]);
-      const auto md_type = hash_type_for(
-          *hash_utf8 ? std::string_view(*hash_utf8, hash_utf8.length()) : std::string_view{});
+      const std::string hash_name = to_std_string(iso, info[1]);
+      const auto md_type = hash_type_for(hash_name);
       if (md_type == MBEDTLS_MD_NONE) {
         throw_error(iso, "unsupported RSA-OAEP hash");
         return;
@@ -2022,9 +1956,8 @@ namespace fxe::runtime {
         return;
       }
 
-      String::Utf8Value hash_utf8(iso, info[1]);
-      const auto md_type = hash_type_for(
-          *hash_utf8 ? std::string_view(*hash_utf8, hash_utf8.length()) : std::string_view{});
+      const std::string hash_name = to_std_string(iso, info[1]);
+      const auto md_type = hash_type_for(hash_name);
       if (md_type == MBEDTLS_MD_NONE) {
         throw_error(iso, "unsupported RSA-OAEP hash");
         return;
@@ -2103,9 +2036,8 @@ namespace fxe::runtime {
         throw_error(iso, "__fxe_native.pk.ecdsaSign requires (components, hashName, data)");
         return;
       }
-      String::Utf8Value hash_utf8(iso, info[1]);
-      const auto md_type = hash_type_for(
-          *hash_utf8 ? std::string_view(*hash_utf8, hash_utf8.length()) : std::string_view{});
+      const std::string hash_name = to_std_string(iso, info[1]);
+      const auto md_type = hash_type_for(hash_name);
       if (md_type == MBEDTLS_MD_NONE) {
         throw_error(iso, "unsupported ECDSA hash");
         return;
@@ -2163,9 +2095,8 @@ namespace fxe::runtime {
                          "signature)");
         return;
       }
-      String::Utf8Value hash_utf8(iso, info[1]);
-      const auto md_type = hash_type_for(
-          *hash_utf8 ? std::string_view(*hash_utf8, hash_utf8.length()) : std::string_view{});
+      const std::string hash_name = to_std_string(iso, info[1]);
+      const auto md_type = hash_type_for(hash_name);
       if (md_type == MBEDTLS_MD_NONE) {
         throw_error(iso, "unsupported ECDSA hash");
         return;
@@ -2191,7 +2122,7 @@ namespace fxe::runtime {
         return;
       }
       if (signature.size != coord_len * 2) {
-        info.GetReturnValue().Set(Boolean::New(iso, false));
+        info.GetReturnValue().Set(to_v8(iso, false));
         return;
       }
 
@@ -2224,7 +2155,7 @@ namespace fxe::runtime {
       if (!hash_data_for_pk(iso, md_type, data, hash))
         return;
       rc = mbedtls_ecdsa_verify(&grp.ctx, hash.data(), hash.size(), &Q.ctx, &r.ctx, &s.ctx);
-      info.GetReturnValue().Set(Boolean::New(iso, rc == 0));
+      info.GetReturnValue().Set(to_v8(iso, rc == 0));
     }
 
     void pk_ecdsa_generate(const FunctionCallbackInfo<Value>& info) {
@@ -2234,11 +2165,9 @@ namespace fxe::runtime {
         throw_error(iso, "__fxe_native.pk.ecdsaGenerate requires a curve string");
         return;
       }
-      String::Utf8Value curve_utf8(iso, info[0]);
+      const std::string curve = to_std_string(iso, info[0]);
       mbedtls_ecp_group_id group_id = MBEDTLS_ECP_DP_NONE;
-      if (!ecp_group_id_for(*curve_utf8 ? std::string_view(*curve_utf8, curve_utf8.length())
-                                        : std::string_view{},
-                            group_id)) {
+      if (!ecp_group_id_for(curve, group_id)) {
         throw_error(iso, "unsupported EC curve");
         return;
       }
@@ -2264,13 +2193,11 @@ namespace fxe::runtime {
         return;
       }
       auto out = Object::New(iso);
-      set_string(ctx, out, "kind", "ec");
-      set_string(ctx, out, "curve", canonical_curve_name(group_id));
-      (void)out->Set(ctx, "x"_v8(iso),
-                     mpi_to_uint8_fixed(iso, &Q.ctx.MBEDTLS_PRIVATE(X), coord_len));
-      (void)out->Set(ctx, "y"_v8(iso),
-                     mpi_to_uint8_fixed(iso, &Q.ctx.MBEDTLS_PRIVATE(Y), coord_len));
-      (void)out->Set(ctx, "d"_v8(iso), mpi_to_uint8_fixed(iso, &d.ctx, coord_len));
+      set_prop(ctx, out, "kind", "ec");
+      set_prop(ctx, out, "curve", canonical_curve_name(group_id));
+      set_prop(ctx, out, "x", mpi_to_uint8_fixed(iso, &Q.ctx.MBEDTLS_PRIVATE(X), coord_len));
+      set_prop(ctx, out, "y", mpi_to_uint8_fixed(iso, &Q.ctx.MBEDTLS_PRIVATE(Y), coord_len));
+      set_prop(ctx, out, "d", mpi_to_uint8_fixed(iso, &d.ctx, coord_len));
       info.GetReturnValue().Set(out);
     }
 
@@ -2280,21 +2207,19 @@ namespace fxe::runtime {
       byte_view a, b;
       if (info.Length() < 2 || !value_to_bytes(iso, ctx, info[0], a) ||
           !value_to_bytes(iso, ctx, info[1], b)) {
-        iso->ThrowException(Exception::TypeError(
-            "__fxe_native.pk.timingSafeEqual requires two Uint8Arrays"_v8(iso)));
+        throw_type_error(iso, "__fxe_native.pk.timingSafeEqual requires two Uint8Arrays");
         return;
       }
       if (a.size != b.size) {
-        iso->ThrowException(
-            Exception::RangeError("timingSafeEqual inputs must have the same length"_v8(iso)));
+        throw_range_error(iso, "timingSafeEqual inputs must have the same length");
         return;
       }
       if (a.size == 0) {
-        info.GetReturnValue().Set(Boolean::New(iso, true));
+        info.GetReturnValue().Set(to_v8(iso, true));
         return;
       }
       const int rc = mbedtls_ct_memcmp(a.data, b.data, a.size);
-      info.GetReturnValue().Set(Boolean::New(iso, rc == 0));
+      info.GetReturnValue().Set(to_v8(iso, rc == 0));
     }
 
     void cipher_update(const FunctionCallbackInfo<Value>& info) {
@@ -2423,9 +2348,8 @@ namespace fxe::runtime {
         throw_error(iso, "__fxe_native.cipher.createCipheriv requires algorithm, key, and iv");
         return;
       }
-      String::Utf8Value algo_utf8(iso, info[0]);
-      const std::string cipher_name = cipher_name_for(
-          *algo_utf8 ? std::string_view(*algo_utf8, algo_utf8.length()) : std::string_view{});
+      const std::string algorithm = to_std_string(iso, info[0]);
+      const std::string cipher_name = cipher_name_for(algorithm);
       const mbedtls_cipher_info_t* cipher_info =
           mbedtls_cipher_info_from_string(cipher_name.c_str());
       if (cipher_info == nullptr) {
@@ -2452,19 +2376,13 @@ namespace fxe::runtime {
         (void)mbedtls_cipher_set_padding_mode(&state->ctx, MBEDTLS_PADDING_PKCS7);
       }
       auto out = Object::New(iso);
-      auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, "update"_v8(iso),
-                     Function::New(ctx, cipher_update, external).ToLocalChecked());
-      (void)out->Set(ctx, "final"_v8(iso),
-                     Function::New(ctx, cipher_final, external).ToLocalChecked());
-      (void)out->Set(ctx, "setAutoPadding"_v8(iso),
-                     Function::New(ctx, cipher_set_auto_padding, external).ToLocalChecked());
-      (void)out->Set(ctx, "setAAD"_v8(iso),
-                     Function::New(ctx, cipher_set_aad, external).ToLocalChecked());
-      (void)out->Set(ctx, "getAuthTag"_v8(iso),
-                     Function::New(ctx, cipher_get_auth_tag, external).ToLocalChecked());
-      (void)out->Set(ctx, "setAuthTag"_v8(iso),
-                     Function::New(ctx, cipher_set_auth_tag, external).ToLocalChecked());
+      auto external = make_external(iso, state.get());
+      add_function(ctx, out, "update", cipher_update, external);
+      add_function(ctx, out, "final", cipher_final, external);
+      add_function(ctx, out, "setAutoPadding", cipher_set_auto_padding, external);
+      add_function(ctx, out, "setAAD", cipher_set_aad, external);
+      add_function(ctx, out, "getAuthTag", cipher_get_auth_tag, external);
+      add_function(ctx, out, "setAuthTag", cipher_set_auth_tag, external);
       state->self.Reset(iso, out);
       state->self.SetWeak(state.get(), cipher_finalizer, WeakCallbackType::kParameter);
       (void)state.release();
@@ -2481,62 +2399,62 @@ namespace fxe::runtime {
 
     void os_platform(const FunctionCallbackInfo<Value>& info) {
 #if defined(__APPLE__)
-      info.GetReturnValue().Set(str(info.GetIsolate(), "darwin"));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "darwin"));
 #elif defined(__linux__)
-      info.GetReturnValue().Set(str(info.GetIsolate(), "linux"));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "linux"));
 #elif defined(_WIN32)
-    info.GetReturnValue().Set(str(info.GetIsolate(), "win32"));
+    info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "win32"));
 #else
-    info.GetReturnValue().Set(str(info.GetIsolate(), "unknown"));
+    info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "unknown"));
 #endif
     }
 
     void os_arch(const FunctionCallbackInfo<Value>& info) {
 #if defined(__aarch64__) || defined(_M_ARM64)
-      info.GetReturnValue().Set(str(info.GetIsolate(), "arm64"));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "arm64"));
 #elif defined(__x86_64__) || defined(_M_X64)
-      info.GetReturnValue().Set(str(info.GetIsolate(), "x64"));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "x64"));
 #elif defined(__arm__) || defined(_M_ARM)
-    info.GetReturnValue().Set(str(info.GetIsolate(), "arm"));
+    info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "arm"));
 #elif defined(__i386__) || defined(_M_IX86)
-    info.GetReturnValue().Set(str(info.GetIsolate(), "ia32"));
+    info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "ia32"));
 #else
-    info.GetReturnValue().Set(str(info.GetIsolate(), "unknown"));
+    info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "unknown"));
 #endif
     }
 
     void os_type(const FunctionCallbackInfo<Value>& info) {
 #if defined(__APPLE__)
-      info.GetReturnValue().Set(str(info.GetIsolate(), "Darwin"));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "Darwin"));
 #elif defined(__linux__)
-      info.GetReturnValue().Set(str(info.GetIsolate(), "Linux"));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "Linux"));
 #elif defined(_WIN32)
-    info.GetReturnValue().Set(str(info.GetIsolate(), "Windows_NT"));
+    info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "Windows_NT"));
 #else
-    info.GetReturnValue().Set(str(info.GetIsolate(), "Unknown"));
+    info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), "Unknown"));
 #endif
     }
 
     void os_endianness(const FunctionCallbackInfo<Value>& info) {
       const u16 marker = 0x0102;
       const auto* bytes = reinterpret_cast<const u8*>(&marker);
-      info.GetReturnValue().Set(str(info.GetIsolate(), bytes[0] == 0x02 ? "LE" : "BE"));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), bytes[0] == 0x02 ? "LE" : "BE"));
     }
 
     void os_release_fn(const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(str(info.GetIsolate(), os_release()));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), os_release()));
     }
 
     void os_homedir(const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(str(info.GetIsolate(), home_dir()));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), home_dir()));
     }
 
     void os_tmpdir(const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(str(info.GetIsolate(), tmp_dir()));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), tmp_dir()));
     }
 
     void os_hostname(const FunctionCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(str(info.GetIsolate(), host_name()));
+      info.GetReturnValue().Set(to_v8_string(info.GetIsolate(), host_name()));
     }
 
     void os_uptime_fn(const FunctionCallbackInfo<Value>& info) {
@@ -2591,7 +2509,7 @@ namespace fxe::runtime {
       if (ctx.IsEmpty() || cb.IsEmpty())
         return;
       Context::Scope context_scope(ctx);
-      Local<Value> argv[1] = {str(iso, kind)};
+      Local<Value> argv[1] = {to_v8_string(iso, kind)};
       TryCatch try_catch(iso);
       Local<Value> ignored;
       (void)cb->Call(ctx, ctx->Global(), 1, argv).ToLocal(&ignored);
@@ -2648,7 +2566,7 @@ namespace fxe::runtime {
         return;
       }
       auto disposer =
-          Function::New(ctx, dispose_system_change_observer, Integer::NewFromUnsigned(iso, id))
+          Function::New(ctx, dispose_system_change_observer, to_v8(iso, static_cast<u32>(id)))
               .ToLocalChecked();
       info.GetReturnValue().Set(disposer);
     }
@@ -2663,16 +2581,16 @@ namespace fxe::runtime {
       const int speed = cpu_speed_mhz();
       for (u32 i = 0; i < count_u32; ++i) {
         auto cpu = Object::New(iso);
-        set_string(ctx, cpu, "model", model);
-        set_number(ctx, cpu, "speed", speed);
+        set_prop(ctx, cpu, "model", model);
+        set_prop(ctx, cpu, "speed", speed);
         auto times = Object::New(iso);
-        set_number(ctx, times, "user", 0);
-        set_number(ctx, times, "nice", 0);
-        set_number(ctx, times, "sys", 0);
-        set_number(ctx, times, "idle", 0);
-        set_number(ctx, times, "irq", 0);
-        set(ctx, cpu, "times", times);
-        (void)array->Set(ctx, i, cpu);
+        set_prop(ctx, times, "user", 0);
+        set_prop(ctx, times, "nice", 0);
+        set_prop(ctx, times, "sys", 0);
+        set_prop(ctx, times, "idle", 0);
+        set_prop(ctx, times, "irq", 0);
+        set_prop(ctx, cpu, "times", times);
+        set_index(ctx, array, i, cpu);
       }
       info.GetReturnValue().Set(array);
     }
@@ -2691,23 +2609,22 @@ namespace fxe::runtime {
           const int family = it->ifa_addr->sa_family;
           if (family != AF_INET && family != AF_INET6)
             continue;
-          auto name = str(iso, it->ifa_name);
-          Local<Value> existing;
+          auto name = to_v8_string(iso, it->ifa_name);
           Local<Array> entries;
-          if (out->Get(ctx, name).ToLocal(&existing) && existing->IsArray()) {
-            entries = existing.As<Array>();
+          if (auto existing = get_prop<Local<Array>>(ctx, out, name); existing.has_value()) {
+            entries = *existing;
           } else {
             entries = Array::New(iso);
-            (void)out->Set(ctx, name, entries);
+            set_prop(ctx, out, name, entries);
           }
           auto entry = Object::New(iso);
-          set_string(ctx, entry, "address", sockaddr_to_numeric(it->ifa_addr));
-          set_string(ctx, entry, "netmask", sockaddr_to_numeric(it->ifa_netmask));
-          set_string(ctx, entry, "family", family == AF_INET ? "IPv4" : "IPv6");
-          set_string(ctx, entry, "mac", "");
-          set_bool(ctx, entry, "internal", (it->ifa_flags & IFF_LOOPBACK) != 0);
-          set(ctx, entry, "cidr", Null(iso));
-          (void)entries->Set(ctx, entries->Length(), entry);
+          set_prop(ctx, entry, "address", sockaddr_to_numeric(it->ifa_addr));
+          set_prop(ctx, entry, "netmask", sockaddr_to_numeric(it->ifa_netmask));
+          set_prop(ctx, entry, "family", family == AF_INET ? "IPv4" : "IPv6");
+          set_prop(ctx, entry, "mac", "");
+          set_prop(ctx, entry, "internal", (it->ifa_flags & IFF_LOOPBACK) != 0);
+          set_prop(ctx, entry, "cidr", to_v8_null(iso));
+          set_index(ctx, entries, entries->Length(), entry);
           ++next_index;
         }
         (void)next_index;
@@ -2722,18 +2639,18 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       auto out = Object::New(iso);
 #if defined(_WIN32)
-      set_string(ctx, out, "username", getenv_or_empty("USERNAME"));
-      set_number(ctx, out, "uid", -1);
-      set_number(ctx, out, "gid", -1);
-      set_string(ctx, out, "shell", getenv_or_empty("ComSpec"));
-      set_string(ctx, out, "homedir", home_dir());
+      set_prop(ctx, out, "username", getenv_or_empty("USERNAME"));
+      set_prop(ctx, out, "uid", -1);
+      set_prop(ctx, out, "gid", -1);
+      set_prop(ctx, out, "shell", getenv_or_empty("ComSpec"));
+      set_prop(ctx, out, "homedir", home_dir());
 #else
       passwd* pw = getpwuid(getuid());
-      set_string(ctx, out, "username", pw && pw->pw_name ? pw->pw_name : getenv_or_empty("USER"));
-      set_number(ctx, out, "uid", static_cast<double>(getuid()));
-      set_number(ctx, out, "gid", static_cast<double>(getgid()));
-      set_string(ctx, out, "shell", pw && pw->pw_shell ? pw->pw_shell : getenv_or_empty("SHELL"));
-      set_string(ctx, out, "homedir", pw && pw->pw_dir ? pw->pw_dir : home_dir());
+      set_prop(ctx, out, "username", pw && pw->pw_name ? pw->pw_name : getenv_or_empty("USER"));
+      set_prop(ctx, out, "uid", static_cast<double>(getuid()));
+      set_prop(ctx, out, "gid", static_cast<double>(getgid()));
+      set_prop(ctx, out, "shell", pw && pw->pw_shell ? pw->pw_shell : getenv_or_empty("SHELL"));
+      set_prop(ctx, out, "homedir", pw && pw->pw_dir ? pw->pw_dir : home_dir());
 #endif
       info.GetReturnValue().Set(out);
     }
@@ -2747,7 +2664,7 @@ namespace fxe::runtime {
 #else
       const bool result = ::isatty(fd) == 1;
 #endif
-      info.GetReturnValue().Set(Boolean::New(info.GetIsolate(), result));
+      info.GetReturnValue().Set(to_v8(info.GetIsolate(), result));
     }
 
     void tty_get_window_size(const FunctionCallbackInfo<Value>& info) {
@@ -2775,8 +2692,8 @@ namespace fxe::runtime {
       }
 #endif
       auto array = Array::New(iso, 2);
-      (void)array->Set(ctx, 0, Number::New(iso, columns));
-      (void)array->Set(ctx, 1, Number::New(iso, rows));
+      set_index(ctx, array, 0, columns);
+      set_index(ctx, array, 1, rows);
       info.GetReturnValue().Set(array);
     }
 
@@ -2791,8 +2708,8 @@ namespace fxe::runtime {
 
     Local<Object> make_js_error(Isolate* iso, Local<Context> ctx, std::string_view message,
                                 std::string_view code) {
-      auto error = Exception::Error(str(iso, message)).As<Object>();
-      set_string(ctx, error, "code", code);
+      auto error = Exception::Error(to_v8_string(iso, message)).As<Object>();
+      set_prop(ctx, error, "code", code);
       return error;
     }
 
@@ -3121,7 +3038,7 @@ namespace fxe::runtime {
             error = make_js_error(iso, ctx, "malformed DNS name rdata", "EAI_FAIL");
             return false;
           }
-          (void)array->Set(ctx, index++, str(iso, name));
+          set_index(ctx, array, index++, to_v8_string(iso, name));
         } else if (requested == dns_rr_type::MX) {
           if (pos + 2 > end) {
             error = make_js_error(iso, ctx, "malformed MX rdata", "EAI_FAIL");
@@ -3135,9 +3052,9 @@ namespace fxe::runtime {
             return false;
           }
           auto record = Object::New(iso);
-          set_number(ctx, record, "priority", priority);
-          set_string(ctx, record, "exchange", exchange);
-          (void)array->Set(ctx, index++, record);
+          set_prop(ctx, record, "priority", priority);
+          set_prop(ctx, record, "exchange", exchange);
+          set_index(ctx, array, index++, record);
         } else if (requested == dns_rr_type::SRV) {
           if (pos + 6 > end) {
             error = make_js_error(iso, ctx, "malformed SRV rdata", "EAI_FAIL");
@@ -3153,11 +3070,11 @@ namespace fxe::runtime {
             return false;
           }
           auto record = Object::New(iso);
-          set_number(ctx, record, "priority", priority);
-          set_number(ctx, record, "weight", weight);
-          set_number(ctx, record, "port", port);
-          set_string(ctx, record, "name", name);
-          (void)array->Set(ctx, index++, record);
+          set_prop(ctx, record, "priority", priority);
+          set_prop(ctx, record, "weight", weight);
+          set_prop(ctx, record, "port", port);
+          set_prop(ctx, record, "name", name);
+          set_index(ctx, array, index++, record);
         } else if (requested == dns_rr_type::TXT) {
           auto chunks = Array::New(iso);
           u32 chunk_index = 0;
@@ -3167,9 +3084,9 @@ namespace fxe::runtime {
               error = make_js_error(iso, ctx, "malformed TXT rdata", "EAI_FAIL");
               return false;
             }
-            (void)chunks->Set(ctx, chunk_index++, str(iso, chunk));
+            set_index(ctx, chunks, chunk_index++, to_v8_string(iso, chunk));
           }
-          (void)array->Set(ctx, index++, chunks);
+          set_index(ctx, array, index++, chunks);
         } else if (requested == dns_rr_type::CAA) {
           if (pos + 2 > end) {
             error = make_js_error(iso, ctx, "malformed CAA rdata", "EAI_FAIL");
@@ -3185,9 +3102,9 @@ namespace fxe::runtime {
           pos += tag_len;
           std::string value(reinterpret_cast<const char*>(packet.data() + pos), end - pos);
           auto record = Object::New(iso);
-          set_number(ctx, record, "critical", critical);
-          set_string(ctx, record, tag.c_str(), value);
-          (void)array->Set(ctx, index++, record);
+          set_prop(ctx, record, "critical", critical);
+          set_prop(ctx, record, tag.c_str(), value);
+          set_index(ctx, array, index++, record);
         } else if (requested == dns_rr_type::SOA) {
           std::string nsname;
           std::string hostmaster;
@@ -3197,13 +3114,13 @@ namespace fxe::runtime {
             return false;
           }
           auto record = Object::New(iso);
-          set_string(ctx, record, "nsname", nsname);
-          set_string(ctx, record, "hostmaster", hostmaster);
-          set_number(ctx, record, "serial", dns_read_u32(packet, pos));
-          set_number(ctx, record, "refresh", dns_read_u32(packet, pos + 4));
-          set_number(ctx, record, "retry", dns_read_u32(packet, pos + 8));
-          set_number(ctx, record, "expire", dns_read_u32(packet, pos + 12));
-          set_number(ctx, record, "minttl", dns_read_u32(packet, pos + 16));
+          set_prop(ctx, record, "nsname", nsname);
+          set_prop(ctx, record, "hostmaster", hostmaster);
+          set_prop(ctx, record, "serial", dns_read_u32(packet, pos));
+          set_prop(ctx, record, "refresh", dns_read_u32(packet, pos + 4));
+          set_prop(ctx, record, "retry", dns_read_u32(packet, pos + 8));
+          set_prop(ctx, record, "expire", dns_read_u32(packet, pos + 12));
+          set_prop(ctx, record, "minttl", dns_read_u32(packet, pos + 16));
           singleton = record;
           index = 1;
         } else if (requested == dns_rr_type::NAPTR) {
@@ -3226,13 +3143,13 @@ namespace fxe::runtime {
             return false;
           }
           auto record = Object::New(iso);
-          set_number(ctx, record, "order", order);
-          set_number(ctx, record, "preference", preference);
-          set_string(ctx, record, "flags", flags);
-          set_string(ctx, record, "service", service);
-          set_string(ctx, record, "regexp", regexp);
-          set_string(ctx, record, "replacement", replacement);
-          (void)array->Set(ctx, index++, record);
+          set_prop(ctx, record, "order", order);
+          set_prop(ctx, record, "preference", preference);
+          set_prop(ctx, record, "flags", flags);
+          set_prop(ctx, record, "service", service);
+          set_prop(ctx, record, "regexp", regexp);
+          set_prop(ctx, record, "replacement", replacement);
+          set_index(ctx, array, index++, record);
         }
         offset = end;
       }
@@ -3256,10 +3173,8 @@ namespace fxe::runtime {
         throw_error(iso, "__fxe_native.dns.resolveRecord requires hostname, rrtype, callback");
         return;
       }
-      String::Utf8Value hostname_value(iso, info[0]);
-      String::Utf8Value rrtype_value(iso, info[1]);
-      const std::string hostname(*hostname_value ? *hostname_value : "");
-      const std::string rrtype_string(*rrtype_value ? *rrtype_value : "");
+      const std::string hostname = to_std_string(iso, info[0]);
+      const std::string rrtype_string = to_std_string(iso, info[1]);
       auto rrtype = dns_rr_type_from_string(rrtype_string);
       if (!rrtype) {
         call_dns_lookup_callback(iso, ctx, info[2].As<Function>(),
@@ -3288,13 +3203,11 @@ namespace fxe::runtime {
       (void)callback->Call(ctx, Undefined(iso), 2, argv).ToLocal(&ignored);
     }
 
-    int dns_family_from_options(Isolate* iso, Local<Context> ctx, Local<Value> options) {
+    int dns_family_from_options([[maybe_unused]] Isolate* iso, Local<Context> ctx,
+                                Local<Value> options) {
       if (!options->IsObject())
         return AF_UNSPEC;
-      Local<Value> family_value;
-      if (!options.As<Object>()->Get(ctx, "family"_v8(iso)).ToLocal(&family_value))
-        return AF_UNSPEC;
-      const int family = family_value->Int32Value(ctx).FromMaybe(0);
+      const int family = get_prop_or<i32>(ctx, options.As<Object>(), "family", 0);
       if (family == 4)
         return AF_INET;
       if (family == 6)
@@ -3302,13 +3215,11 @@ namespace fxe::runtime {
       return AF_UNSPEC;
     }
 
-    bool dns_all_from_options(Isolate* iso, Local<Context> ctx, Local<Value> options) {
+    bool dns_all_from_options([[maybe_unused]] Isolate* iso, Local<Context> ctx,
+                              Local<Value> options) {
       if (!options->IsObject())
         return false;
-      Local<Value> all_value;
-      if (!options.As<Object>()->Get(ctx, "all"_v8(iso)).ToLocal(&all_value))
-        return false;
-      return all_value->BooleanValue(iso);
+      return get_prop_or<bool>(ctx, options.As<Object>(), "all", false);
     }
 
     std::string numeric_address_for(const addrinfo* info) {
@@ -3334,8 +3245,8 @@ namespace fxe::runtime {
     Local<Object> make_dns_result(Isolate* iso, Local<Context> ctx, const addrinfo* info,
                                   std::string_view address) {
       auto result = Object::New(iso);
-      set_string(ctx, result, "address", address);
-      set_number(ctx, result, "family", info->ai_family == AF_INET6 ? 6 : 4);
+      set_prop(ctx, result, "address", address);
+      set_prop(ctx, result, "family", info->ai_family == AF_INET6 ? 6 : 4);
       return result;
     }
 
@@ -3360,7 +3271,7 @@ namespace fxe::runtime {
           const std::string address = numeric_address_for(it);
           if (address.empty())
             continue;
-          (void)array->Set(ctx, index++, make_dns_result(iso, ctx, it, address));
+          set_index(ctx, array, index++, make_dns_result(iso, ctx, it, address));
         }
         free_dns_addrinfo(results, from_uv);
         call_dns_lookup_callback(iso, ctx, callback, Null(iso), array);
@@ -3429,8 +3340,7 @@ namespace fxe::runtime {
       }
 #endif
 
-      String::Utf8Value hostname_value(iso, info[0]);
-      const std::string hostname(*hostname_value ? *hostname_value : "");
+      const std::string hostname = to_std_string(iso, info[0]);
       addrinfo hints{};
       hints.ai_family = dns_family_from_options(iso, ctx, options);
       hints.ai_socktype = SOCK_STREAM;
@@ -3469,8 +3379,7 @@ namespace fxe::runtime {
         return;
       }
 #endif
-      String::Utf8Value address_value(iso, info[0]);
-      const std::string address(*address_value ? *address_value : "");
+      const std::string address = to_std_string(iso, info[0]);
       const int port = info[1]->Int32Value(ctx).FromMaybe(0);
       sockaddr_storage storage{};
       socklen_t len = 0;
@@ -3501,8 +3410,8 @@ namespace fxe::runtime {
         return;
       }
       auto result = Object::New(iso);
-      set_string(ctx, result, "hostname", host);
-      set_string(ctx, result, "service", service);
+      set_prop(ctx, result, "hostname", host);
+      set_prop(ctx, result, "service", service);
       call_dns_lookup_callback(iso, ctx, info[2].As<Function>(), Null(iso), result);
     }
 
@@ -3646,8 +3555,8 @@ namespace fxe::runtime {
 
     Local<Object> make_socket_error(Isolate* iso, Local<Context> ctx, int err) {
       auto obj = Object::New(iso);
-      set_string(ctx, obj, "error", socket_error_message(err));
-      set_number(ctx, obj, "errno", err);
+      set_prop(ctx, obj, "error", socket_error_message(err));
+      set_prop(ctx, obj, "errno", err);
       return obj;
     }
 
@@ -3658,19 +3567,14 @@ namespace fxe::runtime {
       const int rc = getnameinfo(addr, addr_len, host, sizeof(host), service, sizeof(service),
                                  NI_NUMERICHOST | NI_NUMERICSERV);
       auto obj = Object::New(iso);
-      set_string(ctx, obj, "address", rc == 0 ? host : "");
-      set_string(ctx, obj, "family", addr && addr->sa_family == AF_INET6 ? "IPv6" : "IPv4");
-      set_number(ctx, obj, "port", rc == 0 ? std::strtol(service, nullptr, 10) : 0);
+      set_prop(ctx, obj, "address", rc == 0 ? host : "");
+      set_prop(ctx, obj, "family", addr && addr->sa_family == AF_INET6 ? "IPv6" : "IPv4");
+      set_prop(ctx, obj, "port", rc == 0 ? std::strtol(service, nullptr, 10) : 0);
       return obj;
     }
 
-    std::string string_arg(Isolate* iso, Local<Value> value) {
-      String::Utf8Value utf8(iso, value);
-      return std::string(*utf8 ? *utf8 : "");
-    }
-
     int socket_family_arg(Isolate* iso, Local<Value> value) {
-      const std::string family = string_arg(iso, value);
+      const std::string family = to_std_string(iso, value);
       if (family == "udp4" || family == "IPv4" || family == "4")
         return AF_INET;
       if (family == "udp6" || family == "IPv6" || family == "6")
@@ -3727,7 +3631,7 @@ namespace fxe::runtime {
     void tcp_listen(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const std::string host = info.Length() > 0 ? string_arg(iso, info[0]) : "127.0.0.1";
+      const std::string host = info.Length() > 0 ? to_std_string(iso, info[0]) : "127.0.0.1";
       const int port = info.Length() > 1 ? int_arg(ctx, info[1]) : 0;
       if (!guard_net_socket(iso, host, port))
         return;
@@ -3758,7 +3662,7 @@ namespace fxe::runtime {
       addr_len = sizeof(addr);
       (void)getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &addr_len);
       auto out = make_sockaddr_object(iso, ctx, reinterpret_cast<sockaddr*>(&addr), addr_len);
-      set_number(ctx, out, "fd", static_cast<double>(fd));
+      set_prop(ctx, out, "fd", static_cast<double>(fd));
       info.GetReturnValue().Set(out);
     }
 
@@ -3780,14 +3684,14 @@ namespace fxe::runtime {
       }
       (void)set_nonblocking_socket(client);
       auto out = make_sockaddr_object(iso, ctx, reinterpret_cast<sockaddr*>(&addr), len);
-      set_number(ctx, out, "fd", static_cast<double>(client));
+      set_prop(ctx, out, "fd", static_cast<double>(client));
       info.GetReturnValue().Set(out);
     }
 
     void tcp_connect(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const std::string host = info.Length() > 0 ? string_arg(iso, info[0]) : "127.0.0.1";
+      const std::string host = info.Length() > 0 ? to_std_string(iso, info[0]) : "127.0.0.1";
       const int port = info.Length() > 1 ? int_arg(ctx, info[1]) : 0;
       if (!guard_net_socket(iso, host, port))
         return;
@@ -3816,8 +3720,8 @@ namespace fxe::runtime {
         return;
       }
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", static_cast<double>(fd));
-      set_bool(ctx, out, "connected", rc == 0);
+      set_prop(ctx, out, "fd", static_cast<double>(fd));
+      set_prop(ctx, out, "connected", rc == 0);
       info.GetReturnValue().Set(out);
     }
 
@@ -3836,10 +3740,10 @@ namespace fxe::runtime {
         return;
       }
       auto out = Object::New(iso);
-      set_bool(ctx, out, "connected", err == 0);
+      set_prop(ctx, out, "connected", err == 0);
       if (err != 0 && !would_block_error(err)) {
-        set_string(ctx, out, "error", socket_error_message(err));
-        set_number(ctx, out, "errno", err);
+        set_prop(ctx, out, "error", socket_error_message(err));
+        set_prop(ctx, out, "errno", err);
       }
       info.GetReturnValue().Set(out);
     }
@@ -3864,15 +3768,15 @@ namespace fxe::runtime {
       }
       auto out = Object::New(iso);
       if (n == 0) {
-        set_bool(iso->GetCurrentContext(), out, "eof", true);
+        set_prop(iso->GetCurrentContext(), out, "eof", true);
         info.GetReturnValue().Set(out);
         return;
       }
       auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<usize>(n));
       std::memcpy(backing->Data(), buf.data(), static_cast<usize>(n));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(iso->GetCurrentContext(), "data"_v8(iso),
-                     Uint8Array::New(buffer, 0, static_cast<usize>(n)));
+      set_prop(iso->GetCurrentContext(), out, "data",
+               Uint8Array::New(buffer, 0, static_cast<usize>(n)));
       info.GetReturnValue().Set(out);
     }
 
@@ -3905,17 +3809,17 @@ namespace fxe::runtime {
         }
         written += static_cast<usize>(n);
       }
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(written)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(written)));
     }
 
     void tcp_shutdown(const FunctionCallbackInfo<Value>& info) {
       const auto fd = socket_arg(info.GetIsolate()->GetCurrentContext(), info);
       if (fd != invalid_socket_handle)
-        (void)shutdown(fd,
+        (void)::shutdown(fd,
 #if defined(_WIN32)
-                       SD_SEND
+                         SD_SEND
 #else
-                       SHUT_WR
+                         SHUT_WR
 #endif
         );
     }
@@ -3983,7 +3887,7 @@ namespace fxe::runtime {
     void ipcsock_listen(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const std::string path = info.Length() > 0 ? string_arg(iso, info[0]) : "";
+      const std::string path = info.Length() > 0 ? to_std_string(iso, info[0]) : "";
       if (!guard_ipc_path(iso, path))
         return;
       const std::wstring wide_path = widen_utf8(path);
@@ -3995,8 +3899,8 @@ namespace fxe::runtime {
       }
       const int id = register_ipcsock_pipe({handle, wide_path, true});
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", id);
-      set_string(ctx, out, "path", path);
+      set_prop(ctx, out, "fd", id);
+      set_prop(ctx, out, "path", path);
       info.GetReturnValue().Set(out);
     }
 
@@ -4030,14 +3934,14 @@ namespace fxe::runtime {
       const int client_id = next_ipcsock_id();
       ipcsock_registry()[client_id] = {client, it->second.path, false};
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", client_id);
+      set_prop(ctx, out, "fd", client_id);
       info.GetReturnValue().Set(out);
     }
 
     void ipcsock_connect(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const std::string path = info.Length() > 0 ? string_arg(iso, info[0]) : "";
+      const std::string path = info.Length() > 0 ? to_std_string(iso, info[0]) : "";
       if (!guard_ipc_path(iso, path))
         return;
       const std::wstring wide_path = widen_utf8(path);
@@ -4051,15 +3955,15 @@ namespace fxe::runtime {
       set_pipe_nowait(handle);
       const int id = register_ipcsock_pipe({handle, wide_path, false});
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", id);
-      set_bool(ctx, out, "connected", true);
+      set_prop(ctx, out, "fd", id);
+      set_prop(ctx, out, "connected", true);
       info.GetReturnValue().Set(out);
     }
 
     void ipcsock_finish_connect(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto out = Object::New(iso);
-      set_bool(iso->GetCurrentContext(), out, "connected", true);
+      set_prop(iso->GetCurrentContext(), out, "connected", true);
       info.GetReturnValue().Set(out);
     }
 
@@ -4081,7 +3985,7 @@ namespace fxe::runtime {
         }
         if (err == ERROR_BROKEN_PIPE || err == ERROR_PIPE_NOT_CONNECTED) {
           auto out = Object::New(iso);
-          set_bool(ctx, out, "eof", true);
+          set_prop(ctx, out, "eof", true);
           info.GetReturnValue().Set(out);
           return;
         }
@@ -4090,14 +3994,14 @@ namespace fxe::runtime {
       }
       auto out = Object::New(iso);
       if (read == 0) {
-        set_bool(ctx, out, "eof", true);
+        set_prop(ctx, out, "eof", true);
         info.GetReturnValue().Set(out);
         return;
       }
       auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<usize>(read));
       std::memcpy(backing->Data(), buf.data(), static_cast<usize>(read));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(buffer, 0, static_cast<usize>(read)));
+      set_prop(ctx, out, "data", Uint8Array::New(buffer, 0, static_cast<usize>(read)));
       info.GetReturnValue().Set(out);
     }
 
@@ -4129,7 +4033,7 @@ namespace fxe::runtime {
         }
         written += static_cast<usize>(n);
       }
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(written)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(written)));
     }
 
     void ipcsock_shutdown(const FunctionCallbackInfo<Value>& info) {
@@ -4192,7 +4096,7 @@ namespace fxe::runtime {
     void ipcsock_listen(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const std::string path = info.Length() > 0 ? string_arg(iso, info[0]) : "";
+      const std::string path = info.Length() > 0 ? to_std_string(iso, info[0]) : "";
       if (!guard_ipc_path(iso, path))
         return;
       sockaddr_un addr{};
@@ -4217,8 +4121,8 @@ namespace fxe::runtime {
         ipcsock_listener_paths()[fd] = path;
       }
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", static_cast<double>(fd));
-      set_string(ctx, out, "path", path);
+      set_prop(ctx, out, "fd", static_cast<double>(fd));
+      set_prop(ctx, out, "path", path);
       info.GetReturnValue().Set(out);
     }
 
@@ -4240,14 +4144,14 @@ namespace fxe::runtime {
       }
       (void)set_nonblocking_socket(client);
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", static_cast<double>(client));
+      set_prop(ctx, out, "fd", static_cast<double>(client));
       info.GetReturnValue().Set(out);
     }
 
     void ipcsock_connect(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const std::string path = info.Length() > 0 ? string_arg(iso, info[0]) : "";
+      const std::string path = info.Length() > 0 ? to_std_string(iso, info[0]) : "";
       if (!guard_ipc_path(iso, path))
         return;
       sockaddr_un addr{};
@@ -4275,8 +4179,8 @@ namespace fxe::runtime {
         return;
       }
       auto out = Object::New(iso);
-      set_number(ctx, out, "fd", static_cast<double>(fd));
-      set_bool(ctx, out, "connected", rc == 0);
+      set_prop(ctx, out, "fd", static_cast<double>(fd));
+      set_prop(ctx, out, "connected", rc == 0);
       info.GetReturnValue().Set(out);
     }
 
@@ -4328,7 +4232,7 @@ namespace fxe::runtime {
     void udp_bind(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      const std::string host = info.Length() > 0 ? string_arg(iso, info[0]) : "127.0.0.1";
+      const std::string host = info.Length() > 0 ? to_std_string(iso, info[0]) : "127.0.0.1";
       const int port = info.Length() > 1 ? int_arg(ctx, info[1]) : 0;
       const int family = info.Length() > 2 ? socket_family_arg(iso, info[2]) : AF_UNSPEC;
       if (!guard_net_socket(iso, host, port))
@@ -4353,7 +4257,7 @@ namespace fxe::runtime {
       addr_len = sizeof(addr);
       (void)getsockname(fd, reinterpret_cast<sockaddr*>(&addr), &addr_len);
       auto out = make_sockaddr_object(iso, ctx, reinterpret_cast<sockaddr*>(&addr), addr_len);
-      set_number(ctx, out, "fd", static_cast<double>(fd));
+      set_prop(ctx, out, "fd", static_cast<double>(fd));
       info.GetReturnValue().Set(out);
     }
 
@@ -4384,7 +4288,7 @@ namespace fxe::runtime {
       auto backing = ArrayBuffer::NewBackingStore(iso, static_cast<usize>(n));
       std::memcpy(backing->Data(), buf.data(), static_cast<usize>(n));
       auto buffer = ArrayBuffer::New(iso, std::move(backing));
-      (void)out->Set(ctx, "data"_v8(iso), Uint8Array::New(buffer, 0, static_cast<usize>(n)));
+      set_prop(ctx, out, "data", Uint8Array::New(buffer, 0, static_cast<usize>(n)));
       info.GetReturnValue().Set(out);
     }
 
@@ -4396,7 +4300,7 @@ namespace fxe::runtime {
         throw_error(iso, "udp.send requires fd, bytes, host, port");
         return;
       }
-      const std::string host = string_arg(iso, info[2]);
+      const std::string host = to_std_string(iso, info[2]);
       const int port = int_arg(ctx, info[3]);
       if (!guard_net_socket(iso, host, port))
         return;
@@ -4420,7 +4324,7 @@ namespace fxe::runtime {
                     std::string("udp send failed: ") + socket_error_message(last_socket_error()));
         return;
       }
-      info.GetReturnValue().Set(Number::New(iso, static_cast<double>(n)));
+      info.GetReturnValue().Set(to_v8(iso, static_cast<double>(n)));
     }
 
     struct array_buffer_transfer {
@@ -4615,9 +4519,9 @@ namespace fxe::runtime {
       }
       auto worker = std::make_shared<worker_handle>();
       worker->id = next_worker_id();
-      worker->path = string_arg(iso, info[0]);
+      worker->path = to_std_string(iso, info[0]);
       if (info.Length() > 1 && info[1]->IsString())
-        worker->worker_data_json = string_arg(iso, info[1]);
+        worker->worker_data_json = to_std_string(iso, info[1]);
       {
         std::lock_guard<std::mutex> lock(worker_registry_mutex());
         worker_registry()[worker->id] = worker;
@@ -4630,7 +4534,7 @@ namespace fxe::runtime {
         throw_error(iso, std::string("worker thread start failed: ") + e.what());
         return;
       }
-      info.GetReturnValue().Set(Integer::New(iso, worker->id));
+      info.GetReturnValue().Set(to_v8(iso, worker->id));
     }
 
     void worker_post_message(const FunctionCallbackInfo<Value>& info) {
@@ -4712,19 +4616,19 @@ namespace fxe::runtime {
     MaybeLocal<Object> worker_event_to_object(Isolate* iso, Local<Context> ctx,
                                               const worker_event& event) {
       auto out = Object::New(iso);
-      set_string(ctx, out, "type", event.type);
+      set_prop(ctx, out, "type", event.type);
       if (event.has_data) {
         Local<Value> data;
         if (!deserialize_worker_value(iso, ctx, event.data).ToLocal(&data))
           return MaybeLocal<Object>();
-        (void)out->Set(ctx, "data"_v8(iso), data);
+        set_prop(ctx, out, "data", data);
       } else if (event.type == "close") {
-        (void)out->Set(ctx, "data"_v8(iso), Null(iso));
+        set_prop(ctx, out, "data", to_v8_null(iso));
       }
       if (!event.message.empty())
-        set_string(ctx, out, "message", event.message);
+        set_prop(ctx, out, "message", event.message);
       if (event.type == "exit")
-        set_number(ctx, out, "exitCode", event.exit_code);
+        set_prop(ctx, out, "exitCode", event.exit_code);
       return out;
     }
 
@@ -4735,7 +4639,7 @@ namespace fxe::runtime {
         Local<Object> object;
         if (!worker_event_to_object(iso, ctx, events[i]).ToLocal(&object))
           return Array::New(iso, 0);
-        (void)arr->Set(ctx, i, object);
+        set_index(ctx, arr, i, object);
       }
       return arr;
     }
@@ -4781,17 +4685,13 @@ namespace fxe::runtime {
       state->channel = std::move(channel);
       state->side = side;
       auto out = Object::New(iso);
-      auto external = External::New(iso, state.get(), v8::kExternalPointerTypeTagDefault);
-      (void)out->Set(ctx, "postMessage"_v8(iso),
-                     Function::New(ctx, message_port_post_message, external).ToLocalChecked());
-      (void)out->Set(ctx, "drainMessages"_v8(iso),
-                     Function::New(ctx, message_port_drain_messages, external).ToLocalChecked());
-      (void)out->Set(ctx, "close"_v8(iso),
-                     Function::New(ctx, message_port_close, external).ToLocalChecked());
-      (void)out->Set(ctx, "start"_v8(iso),
-                     Function::New(ctx, [](const FunctionCallbackInfo<Value>& info) {
-                       info.GetReturnValue().Set(True(info.GetIsolate()));
-                     }).ToLocalChecked());
+      auto external = make_external(iso, state.get());
+      add_function(ctx, out, "postMessage", message_port_post_message, external);
+      add_function(ctx, out, "drainMessages", message_port_drain_messages, external);
+      add_function(ctx, out, "close", message_port_close, external);
+      add_function(ctx, out, "start", [](const FunctionCallbackInfo<Value>& info) {
+        info.GetReturnValue().Set(True(info.GetIsolate()));
+      });
       state->self.Reset(iso, out);
       state->self.SetWeak(state.get(), message_port_finalizer, WeakCallbackType::kParameter);
       (void)state.release();
@@ -4803,9 +4703,8 @@ namespace fxe::runtime {
       auto ctx = iso->GetCurrentContext();
       auto channel = std::make_shared<message_port_channel>();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "port1"_v8(iso), make_native_message_port(iso, ctx, channel, 0));
-      (void)out->Set(ctx, "port2"_v8(iso),
-                     make_native_message_port(iso, ctx, std::move(channel), 1));
+      set_prop(ctx, out, "port1", make_native_message_port(iso, ctx, channel, 0));
+      set_prop(ctx, out, "port2", make_native_message_port(iso, ctx, std::move(channel), 1));
       info.GetReturnValue().Set(out);
     }
 
@@ -4875,25 +4774,16 @@ namespace fxe::runtime {
       msg.reserve(full_name.size() + sizeof(" is not implemented"));
       msg.append(full_name);
       msg.append(" is not implemented");
-      iso->ThrowException(Exception::Error(str(iso, msg)));
-    }
-
-    void add_function(Isolate* iso, Local<Context> ctx, Local<Object> ns, const char* name,
-                      FunctionCallback callback) {
-      auto fn = Function::New(ctx, callback).ToLocalChecked();
-      (void)ns->Set(ctx, str(iso, name), fn);
+      throw_error(iso, msg);
     }
 
     void add_placeholder(Isolate* iso, Local<Context> ctx, Local<Object> ns, const char* name,
                          const char* full_name, const char* reason = nullptr) {
-      auto data =
-          External::New(iso, const_cast<char*>(full_name), v8::kExternalPointerTypeTagDefault);
-      auto fn = Function::New(ctx, not_implemented, data).ToLocalChecked();
-      (void)ns->Set(ctx, str(iso, name), fn);
-      (void)fn->Set(ctx, "notImplemented"_v8(iso), Boolean::New(iso, true));
-      if (reason != nullptr) {
-        (void)fn->Set(ctx, "reason"_v8(iso), str(iso, reason));
-      }
+      auto data = make_external(iso, const_cast<char*>(full_name));
+      auto fn = add_function(ctx, ns, name, not_implemented, data);
+      set_prop(ctx, fn, "notImplemented", true);
+      if (reason != nullptr)
+        set_prop(ctx, fn, "reason", reason);
     }
 
     Local<Object> make_placeholder_namespace(Isolate* iso, Local<Context> ctx,
@@ -4905,76 +4795,76 @@ namespace fxe::runtime {
 
     Local<Object> make_os_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "platform", os_platform);
-      add_function(iso, ctx, ns, "arch", os_arch);
-      add_function(iso, ctx, ns, "release", os_release_fn);
-      add_function(iso, ctx, ns, "type", os_type);
-      add_function(iso, ctx, ns, "endianness", os_endianness);
-      add_function(iso, ctx, ns, "homedir", os_homedir);
-      add_function(iso, ctx, ns, "tmpdir", os_tmpdir);
-      add_function(iso, ctx, ns, "hostname", os_hostname);
-      add_function(iso, ctx, ns, "uptime", os_uptime_fn);
-      add_function(iso, ctx, ns, "totalmem", os_totalmem);
-      add_function(iso, ctx, ns, "freemem", os_freemem);
-      add_function(iso, ctx, ns, "cpus", os_cpus);
-      add_function(iso, ctx, ns, "networkInterfaces", os_network_interfaces);
-      add_function(iso, ctx, ns, "userInfo", os_user_info);
-      add_function(iso, ctx, ns, "installSystemChangeObserver", os_install_system_change_observer);
+      add_function(ctx, ns, "platform", os_platform);
+      add_function(ctx, ns, "arch", os_arch);
+      add_function(ctx, ns, "release", os_release_fn);
+      add_function(ctx, ns, "type", os_type);
+      add_function(ctx, ns, "endianness", os_endianness);
+      add_function(ctx, ns, "homedir", os_homedir);
+      add_function(ctx, ns, "tmpdir", os_tmpdir);
+      add_function(ctx, ns, "hostname", os_hostname);
+      add_function(ctx, ns, "uptime", os_uptime_fn);
+      add_function(ctx, ns, "totalmem", os_totalmem);
+      add_function(ctx, ns, "freemem", os_freemem);
+      add_function(ctx, ns, "cpus", os_cpus);
+      add_function(ctx, ns, "networkInterfaces", os_network_interfaces);
+      add_function(ctx, ns, "userInfo", os_user_info);
+      add_function(ctx, ns, "installSystemChangeObserver", os_install_system_change_observer);
       return ns;
     }
 
     Local<Object> make_tty_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "isatty", tty_isatty);
-      add_function(iso, ctx, ns, "getWindowSize", tty_get_window_size);
+      add_function(ctx, ns, "isatty", tty_isatty);
+      add_function(ctx, ns, "getWindowSize", tty_get_window_size);
       return ns;
     }
 
     Local<Object> make_random_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "fill", random_fill);
+      add_function(ctx, ns, "fill", random_fill);
       return ns;
     }
 
     Local<Object> make_hash_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "create", hash_create);
-      add_function(iso, ctx, ns, "createHmac", hmac_create);
-      add_function(iso, ctx, ns, "pbkdf2Sync", pbkdf2_sync);
+      add_function(ctx, ns, "create", hash_create);
+      add_function(ctx, ns, "createHmac", hmac_create);
+      add_function(ctx, ns, "pbkdf2Sync", pbkdf2_sync);
       return ns;
     }
 
     Local<Object> make_cipher_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "createCipheriv", cipher_create_cipheriv);
-      add_function(iso, ctx, ns, "createDecipheriv", cipher_create_decipheriv);
+      add_function(ctx, ns, "createCipheriv", cipher_create_cipheriv);
+      add_function(ctx, ns, "createDecipheriv", cipher_create_decipheriv);
       return ns;
     }
 
     Local<Object> make_kdf_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "scryptSync", kdf_scrypt_sync);
+      add_function(ctx, ns, "scryptSync", kdf_scrypt_sync);
       return ns;
     }
 
     Local<Object> make_pk_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "parsePublicKeyDer", pk_parse_public_key_der);
-      add_function(iso, ctx, ns, "parsePrivateKeyDer", pk_parse_private_key_der);
-      add_function(iso, ctx, ns, "writePublicKeyDer", pk_write_public_key_der);
-      add_function(iso, ctx, ns, "writePrivateKeyDer", pk_write_private_key_der);
-      add_function(iso, ctx, ns, "rsaOaepEncrypt", pk_rsa_oaep_encrypt);
-      add_function(iso, ctx, ns, "rsaOaepDecrypt", pk_rsa_oaep_decrypt);
-      add_function(iso, ctx, ns, "ecdsaSign", pk_ecdsa_sign);
-      add_function(iso, ctx, ns, "ecdsaVerify", pk_ecdsa_verify);
-      add_function(iso, ctx, ns, "ecdsaGenerate", pk_ecdsa_generate);
-      add_function(iso, ctx, ns, "timingSafeEqual", pk_timing_safe_equal);
+      add_function(ctx, ns, "parsePublicKeyDer", pk_parse_public_key_der);
+      add_function(ctx, ns, "parsePrivateKeyDer", pk_parse_private_key_der);
+      add_function(ctx, ns, "writePublicKeyDer", pk_write_public_key_der);
+      add_function(ctx, ns, "writePrivateKeyDer", pk_write_private_key_der);
+      add_function(ctx, ns, "rsaOaepEncrypt", pk_rsa_oaep_encrypt);
+      add_function(ctx, ns, "rsaOaepDecrypt", pk_rsa_oaep_decrypt);
+      add_function(ctx, ns, "ecdsaSign", pk_ecdsa_sign);
+      add_function(ctx, ns, "ecdsaVerify", pk_ecdsa_verify);
+      add_function(ctx, ns, "ecdsaGenerate", pk_ecdsa_generate);
+      add_function(ctx, ns, "timingSafeEqual", pk_timing_safe_equal);
       return ns;
     }
 
     Local<Object> make_spawn_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "spawn", spawn_spawn);
+      add_function(ctx, ns, "spawn", spawn_spawn);
       return ns;
     }
 
@@ -4982,25 +4872,25 @@ namespace fxe::runtime {
       auto ns = Object::New(iso);
       auto* bootstrap = current_worker_bootstrap();
       const bool is_worker = bootstrap != nullptr;
-      add_function(iso, ctx, ns, "start", worker_start);
-      add_function(iso, ctx, ns, "createWorker", worker_start);
-      add_function(iso, ctx, ns, "spawn", worker_start);
-      add_function(iso, ctx, ns, "postMessage", worker_post_message);
-      add_function(iso, ctx, ns, "drainMessages", worker_drain_messages);
-      add_function(iso, ctx, ns, "createMessageChannel", worker_create_message_channel);
-      add_function(iso, ctx, ns, "terminate", worker_terminate);
-      add_function(iso, ctx, ns, "ref", [](const FunctionCallbackInfo<Value>& info) {
+      add_function(ctx, ns, "start", worker_start);
+      add_function(ctx, ns, "createWorker", worker_start);
+      add_function(ctx, ns, "spawn", worker_start);
+      add_function(ctx, ns, "postMessage", worker_post_message);
+      add_function(ctx, ns, "drainMessages", worker_drain_messages);
+      add_function(ctx, ns, "createMessageChannel", worker_create_message_channel);
+      add_function(ctx, ns, "terminate", worker_terminate);
+      add_function(ctx, ns, "ref", [](const FunctionCallbackInfo<Value>& info) {
         info.GetReturnValue().Set(True(info.GetIsolate()));
       });
-      add_function(iso, ctx, ns, "unref", [](const FunctionCallbackInfo<Value>& info) {
+      add_function(ctx, ns, "unref", [](const FunctionCallbackInfo<Value>& info) {
         info.GetReturnValue().Set(True(info.GetIsolate()));
       });
-      set_bool(ctx, ns, "available", true);
-      set_bool(ctx, ns, "notImplemented", false);
-      set_bool(ctx, ns, "isMainThread", !is_worker);
-      set_number(ctx, ns, "threadId", is_worker ? bootstrap->thread_id : 0);
+      set_prop(ctx, ns, "available", true);
+      set_prop(ctx, ns, "notImplemented", false);
+      set_prop(ctx, ns, "isMainThread", !is_worker);
+      set_prop(ctx, ns, "threadId", is_worker ? bootstrap->thread_id : 0);
       if (is_worker) {
-        set_string(ctx, ns, "workerDataJson", bootstrap->worker_data_json);
+        set_prop(ctx, ns, "workerDataJson", bootstrap->worker_data_json);
         if (auto* worker = static_cast<worker_handle*>(bootstrap->native_handle)) {
           std::lock_guard<std::mutex> lock(worker->mutex);
           worker->isolate = iso;
@@ -5011,67 +4901,67 @@ namespace fxe::runtime {
 
     Local<Object> make_dns_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "lookup", dns_lookup);
-      add_function(iso, ctx, ns, "lookupService", dns_lookup_service);
-      add_function(iso, ctx, ns, "resolveRecord", dns_resolve_record);
+      add_function(ctx, ns, "lookup", dns_lookup);
+      add_function(ctx, ns, "lookupService", dns_lookup_service);
+      add_function(ctx, ns, "resolveRecord", dns_resolve_record);
       return ns;
     }
 
     Local<Object> make_net_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "listen", tcp_listen);
-      add_function(iso, ctx, ns, "accept", tcp_accept);
-      add_function(iso, ctx, ns, "connect", tcp_connect);
-      add_function(iso, ctx, ns, "finishConnect", tcp_finish_connect);
-      add_function(iso, ctx, ns, "read", tcp_read);
-      add_function(iso, ctx, ns, "write", tcp_write);
-      add_function(iso, ctx, ns, "shutdown", tcp_shutdown);
-      add_function(iso, ctx, ns, "close", close_fd);
-      add_function(iso, ctx, ns, "address", socket_address);
+      add_function(ctx, ns, "listen", tcp_listen);
+      add_function(ctx, ns, "accept", tcp_accept);
+      add_function(ctx, ns, "connect", tcp_connect);
+      add_function(ctx, ns, "finishConnect", tcp_finish_connect);
+      add_function(ctx, ns, "read", tcp_read);
+      add_function(ctx, ns, "write", tcp_write);
+      add_function(ctx, ns, "shutdown", tcp_shutdown);
+      add_function(ctx, ns, "close", close_fd);
+      add_function(ctx, ns, "address", socket_address);
       return ns;
     }
 
     Local<Object> make_ipcsock_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "listen", ipcsock_listen);
-      add_function(iso, ctx, ns, "accept", ipcsock_accept);
-      add_function(iso, ctx, ns, "connect", ipcsock_connect);
-      add_function(iso, ctx, ns, "finishConnect", ipcsock_finish_connect);
-      add_function(iso, ctx, ns, "read", ipcsock_read);
-      add_function(iso, ctx, ns, "recv", ipcsock_recv);
-      add_function(iso, ctx, ns, "write", ipcsock_write);
-      add_function(iso, ctx, ns, "send", ipcsock_send);
-      add_function(iso, ctx, ns, "shutdown", ipcsock_shutdown);
-      add_function(iso, ctx, ns, "close", ipcsock_close);
-      add_function(iso, ctx, ns, "address", ipcsock_address);
+      add_function(ctx, ns, "listen", ipcsock_listen);
+      add_function(ctx, ns, "accept", ipcsock_accept);
+      add_function(ctx, ns, "connect", ipcsock_connect);
+      add_function(ctx, ns, "finishConnect", ipcsock_finish_connect);
+      add_function(ctx, ns, "read", ipcsock_read);
+      add_function(ctx, ns, "recv", ipcsock_recv);
+      add_function(ctx, ns, "write", ipcsock_write);
+      add_function(ctx, ns, "send", ipcsock_send);
+      add_function(ctx, ns, "shutdown", ipcsock_shutdown);
+      add_function(ctx, ns, "close", ipcsock_close);
+      add_function(ctx, ns, "address", ipcsock_address);
       return ns;
     }
 
     Local<Object> make_dgram_namespace(Isolate* iso, Local<Context> ctx) {
       auto ns = Object::New(iso);
-      add_function(iso, ctx, ns, "bind", udp_bind);
-      add_function(iso, ctx, ns, "recv", udp_recv);
-      add_function(iso, ctx, ns, "send", udp_send);
-      add_function(iso, ctx, ns, "close", close_fd);
+      add_function(ctx, ns, "bind", udp_bind);
+      add_function(ctx, ns, "recv", udp_recv);
+      add_function(ctx, ns, "send", udp_send);
+      add_function(ctx, ns, "close", close_fd);
       return ns;
     }
   } // namespace
 
   void install_fxe_native(Isolate* iso, Local<Context> ctx) {
     auto native = Object::New(iso);
-    (void)native->Set(ctx, "os"_v8(iso), make_os_namespace(iso, ctx));
-    (void)native->Set(ctx, "tty"_v8(iso), make_tty_namespace(iso, ctx));
-    (void)native->Set(ctx, "spawn"_v8(iso), make_spawn_namespace(iso, ctx));
-    (void)native->Set(ctx, "random"_v8(iso), make_random_namespace(iso, ctx));
-    (void)native->Set(ctx, "hash"_v8(iso), make_hash_namespace(iso, ctx));
-    (void)native->Set(ctx, "cipher"_v8(iso), make_cipher_namespace(iso, ctx));
-    (void)native->Set(ctx, "kdf"_v8(iso), make_kdf_namespace(iso, ctx));
-    (void)native->Set(ctx, "pk"_v8(iso), make_pk_namespace(iso, ctx));
-    (void)native->Set(ctx, "worker"_v8(iso), make_worker_namespace(iso, ctx));
-    (void)native->Set(ctx, "dns"_v8(iso), make_dns_namespace(iso, ctx));
-    (void)native->Set(ctx, "net"_v8(iso), make_net_namespace(iso, ctx));
-    (void)native->Set(ctx, "ipcsock"_v8(iso), make_ipcsock_namespace(iso, ctx));
-    (void)native->Set(ctx, "dgram"_v8(iso), make_dgram_namespace(iso, ctx));
+    set_prop(ctx, native, "os", make_os_namespace(iso, ctx));
+    set_prop(ctx, native, "tty", make_tty_namespace(iso, ctx));
+    set_prop(ctx, native, "spawn", make_spawn_namespace(iso, ctx));
+    set_prop(ctx, native, "random", make_random_namespace(iso, ctx));
+    set_prop(ctx, native, "hash", make_hash_namespace(iso, ctx));
+    set_prop(ctx, native, "cipher", make_cipher_namespace(iso, ctx));
+    set_prop(ctx, native, "kdf", make_kdf_namespace(iso, ctx));
+    set_prop(ctx, native, "pk", make_pk_namespace(iso, ctx));
+    set_prop(ctx, native, "worker", make_worker_namespace(iso, ctx));
+    set_prop(ctx, native, "dns", make_dns_namespace(iso, ctx));
+    set_prop(ctx, native, "net", make_net_namespace(iso, ctx));
+    set_prop(ctx, native, "ipcsock", make_ipcsock_namespace(iso, ctx));
+    set_prop(ctx, native, "dgram", make_dgram_namespace(iso, ctx));
     install_fs_fd_native(iso, ctx, native);
 
     struct namespace_spec {
@@ -5085,13 +4975,12 @@ namespace fxe::runtime {
     };
 
     for (const auto& spec : namespaces) {
-      (void)native->Set(
-          ctx, str(iso, spec.name),
-          make_placeholder_namespace(iso, ctx, spec.placeholder_name, spec.full_name));
+      set_prop(ctx, native, spec.name,
+               make_placeholder_namespace(iso, ctx, spec.placeholder_name, spec.full_name));
     }
 
-    (void)ctx->Global()->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native,
-                                           static_cast<PropertyAttribute>(DontEnum));
+    define_prop(ctx, ctx->Global(), "__fxe_native"_v8, native,
+                static_cast<PropertyAttribute>(DontEnum));
   }
 
 } // namespace fxe::runtime

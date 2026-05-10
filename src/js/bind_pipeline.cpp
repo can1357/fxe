@@ -23,49 +23,21 @@
 #include <vector>
 
 #include <fxe/types.hpp>
+#include <fxe/v8_template_cache.hpp>
 #include <v8.h>
-
 namespace fxe::js {
   namespace {
     using namespace v8;
 
     inline constexpr u32 TAG_PIPELINE = 0x5049504Cu; // 'PIPL'
 
-    using TplGlobal = Global<FunctionTemplate>;
-    std::unordered_map<Isolate*, TplGlobal>& pipeline_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-
-    void pipeline_reset_for_isolate(Isolate* iso) {
-      auto& t = pipeline_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-
-    struct pipeline_resetter_register {
-      pipeline_resetter_register() {
-        register_template_resetter(&pipeline_reset_for_isolate);
-      }
-    };
-    static pipeline_resetter_register s_pipeline_resetter_register;
+    struct pipeline_tag {};
+    using pipeline_tpl_cache = template_isolate_cache<pipeline_tag>;
 
     struct pipeline_holder : weak_holder<pipeline_holder> {
       std::unique_ptr<pipeline> owned;
       u32 vertex_stride = 0;
     };
-
-    [[nodiscard]] std::string utf8(Isolate* iso, Local<Value> value) {
-      String::Utf8Value s(iso, value);
-      return *s ? std::string(*s, s.length()) : std::string{};
-    }
-
-    void throw_type(Isolate* iso, const char* msg) {
-      (void)throw_type_error(iso, msg);
-    }
 
     renderer* unwrap_renderer(Local<Value> value) {
       if (value.IsEmpty() || !value->IsObject())
@@ -96,7 +68,7 @@ namespace fxe::js {
       Local<Value> value;
       if (!get_value(ctx, obj, key, value) || !value->IsString())
         return false;
-      out = utf8(iso, value);
+      out = to_std_string(iso, value);
       return true;
     }
 
@@ -104,7 +76,7 @@ namespace fxe::js {
                              std::string& out) {
       Local<Value> value;
       if (get_value(ctx, obj, key, value) && value->IsString())
-        out = utf8(iso, value);
+        out = to_std_string(iso, value);
     }
 
     bool get_required_u32(Local<Context> ctx, Local<Object> obj, Local<String> key, u32& out) {
@@ -172,7 +144,7 @@ namespace fxe::js {
         if (!get_required_string(iso, ctx, attr_obj, "format"_v8(iso), format))
           return false;
         if (!parse_vertex_format(format, attr.fmt)) {
-          throw_type(iso, "Pipeline: unknown vertex attribute format");
+          (void)throw_type_error(iso, "Pipeline: unknown vertex attribute format");
           return false;
         }
         desc.attrs.push_back(attr);
@@ -185,22 +157,22 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (!info.IsConstructCall()) {
-        throw_type(iso, "Pipeline must be invoked with new");
+        (void)throw_type_error(iso, "Pipeline must be invoked with new");
         return;
       }
       if (info.Length() < 2) {
-        throw_type(iso, "Pipeline(renderer, desc)");
+        (void)throw_type_error(iso, "Pipeline(renderer, desc)");
         return;
       }
       auto* r = unwrap_renderer(info[0]);
       if (!r) {
-        throw_type(iso, "Pipeline: first arg must be Renderer");
+        (void)throw_type_error(iso, "Pipeline: first arg must be Renderer");
         return;
       }
       pipeline_desc desc;
       if (!parse_desc(iso, ctx, info[1], desc)) {
         if (!iso->HasPendingException())
-          throw_type(iso, "Pipeline: desc must include wgsl, vertexStride, and attrs");
+          (void)throw_type_error(iso, "Pipeline: desc must include wgsl, vertexStride, and attrs");
         return;
       }
       try {
@@ -221,7 +193,7 @@ namespace fxe::js {
       if (!h || !h->owned)
         return;
       if (info.Length() < 1 || (!info[0]->IsFloat32Array() && !info[0]->IsUint8Array())) {
-        throw_type(iso, "Pipeline.updateUniforms(Float32Array | Uint8Array)");
+        (void)throw_type_error(iso, "Pipeline.updateUniforms(Float32Array | Uint8Array)");
         return;
       }
       auto view = info[0].As<ArrayBufferView>();
@@ -239,7 +211,7 @@ namespace fxe::js {
       if (!h || !h->owned)
         return;
       if (info.Length() < 2 || !info[0]->IsNumber()) {
-        throw_type(iso, "Pipeline.bindTexture(binding, imageOrTextureId)");
+        (void)throw_type_error(iso, "Pipeline.bindTexture(binding, imageOrTextureId)");
         return;
       }
       const u32 binding = info[0]->Uint32Value(ctx).FromMaybe(0);
@@ -249,7 +221,8 @@ namespace fxe::js {
       } else {
         auto* img = unwrap_image(info[1]);
         if (!img || !img->tex) {
-          throw_type(iso, "Pipeline.bindTexture: arg 2 must be ImageHandle or texture id");
+          (void)throw_type_error(iso,
+                                 "Pipeline.bindTexture: arg 2 must be ImageHandle or texture id");
           return;
         }
         tex = get_default_spritesheet().add_texture(*img->tex);
@@ -264,27 +237,29 @@ namespace fxe::js {
       if (!h || !h->owned)
         return;
       if (info.Length() < 4) {
-        throw_type(iso, "Pipeline.draw(cb, vertices, indices, matrix)");
+        (void)throw_type_error(iso, "Pipeline.draw(cb, vertices, indices, matrix)");
         return;
       }
       auto* cb = unwrap_cb(info[0]);
       if (!cb) {
-        throw_type(iso, "Pipeline.draw: first arg must be CommandBuffer or Renderer");
+        (void)throw_type_error(iso, "Pipeline.draw: first arg must be CommandBuffer or Renderer");
         return;
       }
       if (!info[1]->IsFloat32Array() || !info[2]->IsUint32Array() || !info[3]->IsFloat32Array()) {
-        throw_type(iso, "Pipeline.draw: expected Float32Array, Uint32Array, Float32Array(16)");
+        (void)throw_type_error(
+            iso, "Pipeline.draw: expected Float32Array, Uint32Array, Float32Array(16)");
         return;
       }
       auto vertices = info[1].As<Float32Array>();
       auto indices = info[2].As<Uint32Array>();
       auto matrix = info[3].As<Float32Array>();
       if (matrix->Length() < 16) {
-        throw_type(iso, "Pipeline.draw: matrix must be Float32Array(16)");
+        (void)throw_type_error(iso, "Pipeline.draw: matrix must be Float32Array(16)");
         return;
       }
       if (h->vertex_stride == 0 || vertices->ByteLength() % h->vertex_stride != 0) {
-        throw_type(iso, "Pipeline.draw: vertices byteLength must be a multiple of vertexStride");
+        (void)throw_type_error(
+            iso, "Pipeline.draw: vertices byteLength must be a multiple of vertexStride");
         return;
       }
 
@@ -314,6 +289,6 @@ namespace fxe::js {
     proto->Set(iso, "draw", FunctionTemplate::New(iso, pipeline_draw));
 
     global->Set(iso, "Pipeline", tpl);
-    pipeline_tpl_table()[iso].Reset(iso, tpl);
+    pipeline_tpl_cache::install(iso, tpl);
   }
 } // namespace fxe::js

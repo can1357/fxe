@@ -18,35 +18,15 @@
 #include <unordered_map>
 #include <vector>
 
+#include <fxe/v8_template_cache.hpp>
 #include <v8.h>
 
 namespace fxe::js {
   namespace {
     using namespace v8;
 
-    using TplGlobal = Global<FunctionTemplate>;
-    std::unordered_map<Isolate*, TplGlobal>& sheet_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-    void sheet_reset_for_isolate(Isolate* iso) {
-      auto& t = sheet_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-    struct sheet_resetter_register {
-      sheet_resetter_register() {
-        register_template_resetter(&sheet_reset_for_isolate);
-      }
-    };
-    static sheet_resetter_register s_sheet_resetter_register;
-
-    void throw_type(Isolate* iso, const char* msg) {
-      (void)throw_type_error(iso, msg);
-    }
+    struct sheet_tag {};
+    using sheet_tpl_cache = template_isolate_cache<sheet_tag>;
 
     spritesheet_holder* self_of(Local<Object> obj) {
       return static_cast<spritesheet_holder*>(unwrap(obj, TAG_SPRITESHEET));
@@ -55,7 +35,7 @@ namespace fxe::js {
     void s_constructor(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (!info.IsConstructCall())
-        return throw_type(iso, "Spritesheet must be constructed with `new`");
+        return (void)throw_type_error(iso, "Spritesheet must be constructed with `new`");
       auto self = info.This();
       auto* h = new spritesheet_holder{};
       set_native(iso, self, h, TAG_SPRITESHEET);
@@ -110,10 +90,10 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* sh = self_of(info.This());
       if (!sh)
-        return throw_type(iso, "Spritesheet.add: invalid receiver");
+        return (void)throw_type_error(iso, "Spritesheet.add: invalid receiver");
       auto* img = unwrap_image(info.Length() >= 1 ? info[0] : Local<Value>());
       if (!img || !img->tex)
-        return throw_type(iso, "Spritesheet.add: arg 1 must be a live ImageHandle");
+        return (void)throw_type_error(iso, "Spritesheet.add: arg 1 must be a live ImageHandle");
 
       // Copy the image's pixels into a fresh atlas slot owned by the sheet.
       // The shared_ptr ref is retained so the original image stays alive for
@@ -125,7 +105,7 @@ namespace fxe::js {
       const u32 ih = copy.size.y;
       math::uvec2 at{}, size{};
       if (!decode_rect(iso, ctx, info.Length() >= 2 ? info[1] : Local<Value>(), iw, ih, at, size))
-        return throw_type(iso, "Spritesheet.add: rect must be [x,y,w,h]");
+        return (void)throw_type_error(iso, "Spritesheet.add: rect must be [x,y,w,h]");
       texture_id tex_id = sh->sheet.add_texture(std::move(copy));
       remember_external_texture(*sh, tex_id, external_texture);
       sprite spr{};
@@ -142,14 +122,14 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* sh = self_of(info.This());
       if (!sh)
-        return throw_type(iso, "Spritesheet.addAnimated: invalid receiver");
+        return (void)throw_type_error(iso, "Spritesheet.addAnimated: invalid receiver");
       if (info.Length() < 2 || !info[0]->IsArray() || !info[1]->IsArray())
-        return throw_type(iso,
-                          "Spritesheet.addAnimated(images: ImageHandle[], delaysMs: number[])");
+        return (void)throw_type_error(
+            iso, "Spritesheet.addAnimated(images: ImageHandle[], delaysMs: number[])");
       auto images = info[0].As<Array>();
       auto delays = info[1].As<Array>();
       if (images->Length() == 0)
-        return throw_type(iso, "Spritesheet.addAnimated: empty image list");
+        return (void)throw_type_error(iso, "Spritesheet.addAnimated: empty image list");
 
       // Each frame becomes its own atlas texture; consecutive texture_ids form
       // the asprite range expected by spritesheet::resolve_if.
@@ -157,10 +137,10 @@ namespace fxe::js {
       for (u32 i = 0; i < images->Length(); ++i) {
         Local<Value> e;
         if (!images->Get(ctx, i).ToLocal(&e))
-          return throw_type(iso, "Spritesheet.addAnimated: bad image entry");
+          return (void)throw_type_error(iso, "Spritesheet.addAnimated: bad image entry");
         auto* img = unwrap_image(e);
         if (!img || !img->tex)
-          return throw_type(iso, "Spritesheet.addAnimated: live ImageHandle required");
+          return (void)throw_type_error(iso, "Spritesheet.addAnimated: live ImageHandle required");
         sh->retained.push_back(img->tex);
         const texture_id external_texture = ensure_image_texture_id(img);
         texture_id id = sh->sheet.add_texture(*img->tex);
@@ -191,9 +171,9 @@ namespace fxe::js {
       auto ctx = iso->GetCurrentContext();
       auto* sh = self_of(info.This());
       if (!sh)
-        return throw_type(iso, "Spritesheet.resolve: invalid receiver");
+        return (void)throw_type_error(iso, "Spritesheet.resolve: invalid receiver");
       if (info.Length() < 1)
-        return throw_type(iso, "Spritesheet.resolve(spriteId, timeMs?)");
+        return (void)throw_type_error(iso, "Spritesheet.resolve(spriteId, timeMs?)");
       texture_id requested = info[0]->Uint32Value(ctx).FromMaybe(0);
       float time_s = info.Length() >= 2
                          ? static_cast<float>(info[1]->NumberValue(ctx).FromMaybe(0.0)) / 1000.0f
@@ -287,6 +267,6 @@ namespace fxe::js {
 
     global->Set(iso, "Spritesheet", tpl);
 
-    sheet_tpl_table()[iso].Reset(iso, tpl);
+    sheet_tpl_cache::install(iso, tpl);
   }
 } // namespace fxe::js

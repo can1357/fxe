@@ -2,8 +2,8 @@
 // optional low-level libdbus-1 desktop integrations.
 
 #include "../os.hpp"
-#include <fxe/string_utils.hpp>
 #include <fxe/log.hpp>
+#include <fxe/string_utils.hpp>
 
 #if !defined(__APPLE__) && !defined(_WIN32)
 #include <fcntl.h>

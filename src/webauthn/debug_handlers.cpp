@@ -1,4 +1,5 @@
 #include "debug_handlers.hpp"
+#include "webauthn/mbedtls_util.hpp"
 
 #include <fxe/debug.hpp>
 #include <fxe/webauthn.hpp>
@@ -83,12 +84,6 @@ namespace fxe::webauthn::debug {
 
     [[noreturn]] void invalid_params(std::string message) {
       throw dispatch_error{err_code::invalid_params, std::move(message), ""};
-    }
-
-    std::string mbedtls_err_str(int rc) {
-      std::array<char, 256> buf{};
-      mbedtls_strerror(rc, buf.data(), buf.size());
-      return buf.data();
     }
 
     virtual_authenticator_impl_mirror& mirrored_impl(virtual_authenticator& authenticator) {

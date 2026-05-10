@@ -2,6 +2,7 @@
 #include <fxe/webauthn.hpp>
 
 #include "webauthn/credential_jar.hpp"
+#include "webauthn/mbedtls_util.hpp"
 
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecdsa.h>
@@ -45,12 +46,6 @@ namespace fxe::webauthn {
         mbedtls_pk_free(&ctx);
       }
     };
-
-    std::string mbedtls_err_str(int rc) {
-      std::array<char, 256> buf{};
-      mbedtls_strerror(rc, buf.data(), buf.size());
-      return buf.data();
-    }
 
     std::optional<std::string> origin_host(std::string_view origin) {
       const size_t scheme = origin.find("://");

@@ -6,6 +6,8 @@
 #include "bind_pipeline.hpp"
 #include "js_command_buffer.hpp"
 #include "weak_holder.hpp"
+#include <algorithm>
+#include <cmath>
 #include <fxe/js_bindings.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/renderer.hpp>
@@ -13,10 +15,8 @@
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
+#include <fxe/v8_template_cache.hpp>
 #include <fxe/window.hpp>
-
-#include <algorithm>
-#include <cmath>
 #include <memory>
 #include <unordered_map>
 #include <v8.h>
@@ -25,25 +25,8 @@ namespace fxe::js {
 
   namespace {
     using namespace v8;
-    using TplGlobal = Global<FunctionTemplate>;
-    std::unordered_map<Isolate*, TplGlobal>& rend_tpl_table() {
-      static std::unordered_map<Isolate*, TplGlobal> t;
-      return t;
-    }
-    void rend_reset_for_isolate(Isolate* iso) {
-      auto& t = rend_tpl_table();
-      auto it = t.find(iso);
-      if (it != t.end()) {
-        it->second.Reset();
-        t.erase(it);
-      }
-    }
-    struct rend_resetter_register {
-      rend_resetter_register() {
-        register_template_resetter(&rend_reset_for_isolate);
-      }
-    };
-    static rend_resetter_register s_rend_resetter_register;
+    struct rend_tag {};
+    using rend_tpl_cache = template_isolate_cache<rend_tag>;
 
     // Owned-renderer holder. Borrowed wraps (install_renderer_global) skip
     // ownership so the engine retains lifetime control.
@@ -79,13 +62,10 @@ namespace fxe::js {
       renderer_options opts;
       if (info.Length() >= 2 && info[1]->IsObject()) {
         auto o = info[1].As<Object>();
-        Local<Value> v;
-        if (o->Get(ctx, "multisampleCount"_v8(iso)).ToLocal(&v))
-          opts.multisample_count = v->Uint32Value(ctx).FromMaybe(opts.multisample_count);
-        if (o->Get(ctx, "enableBloom"_v8(iso)).ToLocal(&v))
-          opts.enable_bloom = v->BooleanValue(iso);
-        if (o->Get(ctx, "vsync"_v8(iso)).ToLocal(&v))
-          opts.vsync = v->BooleanValue(iso);
+        opts.multisample_count =
+            get_prop_or<u32>(ctx, o, "multisampleCount"_v8(iso), opts.multisample_count);
+        opts.enable_bloom = get_prop_or<bool>(ctx, o, "enableBloom"_v8(iso), opts.enable_bloom);
+        opts.vsync = get_prop_or<bool>(ctx, o, "vsync"_v8(iso), opts.vsync);
       }
       const auto& runner_overrides = get_runner_render_overrides();
       if (runner_overrides.override_multisample_count)
@@ -227,8 +207,8 @@ namespace fxe::js {
         return;
       auto s = r->get_screen();
       auto arr = Array::New(iso, 2);
-      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(s.x)));
-      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(s.y)));
+      set_index(ctx, arr, 0, static_cast<double>(s.x));
+      set_index(ctx, arr, 1, static_cast<double>(s.y));
       info.GetReturnValue().Set(arr);
     }
     void rend_world_to_screen(const FunctionCallbackInfo<Value>& info) {
@@ -243,10 +223,10 @@ namespace fxe::js {
       a->CopyContents(v, sizeof(v));
       auto p = r->world_to_screen({v[0], v[1], v[2]});
       auto arr = Array::New(iso, 4);
-      (void)arr->Set(ctx, 0, Number::New(iso, static_cast<double>(p.x)));
-      (void)arr->Set(ctx, 1, Number::New(iso, static_cast<double>(p.y)));
-      (void)arr->Set(ctx, 2, Number::New(iso, static_cast<double>(p.z)));
-      (void)arr->Set(ctx, 3, Number::New(iso, static_cast<double>(p.w)));
+      set_index(ctx, arr, 0, static_cast<double>(p.x));
+      set_index(ctx, arr, 1, static_cast<double>(p.y));
+      set_index(ctx, arr, 2, static_cast<double>(p.z));
+      set_index(ctx, arr, 3, static_cast<double>(p.w));
       info.GetReturnValue().Set(arr);
     }
     void rend_viewport(const FunctionCallbackInfo<Value>& info) {
@@ -259,13 +239,13 @@ namespace fxe::js {
       const auto& vp = r->viewport();
       auto out = Object::New(iso);
       auto at = Array::New(iso, 2);
-      (void)at->Set(ctx, 0, Number::New(iso, static_cast<double>(vp.at.x)));
-      (void)at->Set(ctx, 1, Number::New(iso, static_cast<double>(vp.at.y)));
+      set_index(ctx, at, 0, static_cast<double>(vp.at.x));
+      set_index(ctx, at, 1, static_cast<double>(vp.at.y));
       auto sz = Array::New(iso, 2);
-      (void)sz->Set(ctx, 0, Number::New(iso, static_cast<double>(vp.size.x)));
-      (void)sz->Set(ctx, 1, Number::New(iso, static_cast<double>(vp.size.y)));
-      (void)out->Set(ctx, "at"_v8(iso), at);
-      (void)out->Set(ctx, "size"_v8(iso), sz);
+      set_index(ctx, sz, 0, static_cast<double>(vp.size.x));
+      set_index(ctx, sz, 1, static_cast<double>(vp.size.y));
+      set_prop(ctx, out, "at"_v8, at);
+      set_prop(ctx, out, "size"_v8, sz);
       info.GetReturnValue().Set(out);
     }
     void rend_begin_frame(const FunctionCallbackInfo<Value>& info) {
@@ -392,7 +372,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto* r = unwrap_rend(info.This());
       if (r)
-        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, r->epoch()));
+        info.GetReturnValue().Set(to_v8(iso, r->epoch()));
     }
 
     void rend_vertex_count(const FunctionCallbackInfo<Value>& info) {
@@ -400,7 +380,7 @@ namespace fxe::js {
       HandleScope hs(iso);
       auto* r = unwrap_rend(info.This());
       if (r)
-        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, r->vertex_count()));
+        info.GetReturnValue().Set(to_v8(iso, r->vertex_count()));
     }
 
     void rend_index_count(const FunctionCallbackInfo<Value>& info) {
@@ -412,8 +392,7 @@ namespace fxe::js {
       u32 top = 0;
       if (!read_topology_arg(info, 0, top))
         return;
-      info.GetReturnValue().Set(
-          Integer::NewFromUnsigned(iso, r->index_count(static_cast<vertex_topology>(top))));
+      info.GetReturnValue().Set(to_v8(iso, r->index_count(static_cast<vertex_topology>(top))));
     }
 
     void rend_is_empty(const FunctionCallbackInfo<Value>& info) {
@@ -437,10 +416,10 @@ namespace fxe::js {
       }
       auto [mn, mx] = r->get_boundaries();
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "x"_v8(iso), Number::New(iso, static_cast<double>(mn.x)));
-      (void)out->Set(ctx, "y"_v8(iso), Number::New(iso, static_cast<double>(mn.y)));
-      (void)out->Set(ctx, "width"_v8(iso), Number::New(iso, static_cast<double>(mx.x - mn.x)));
-      (void)out->Set(ctx, "height"_v8(iso), Number::New(iso, static_cast<double>(mx.y - mn.y)));
+      set_prop(ctx, out, "x"_v8, static_cast<double>(mn.x));
+      set_prop(ctx, out, "y"_v8, static_cast<double>(mn.y));
+      set_prop(ctx, out, "width"_v8, static_cast<double>(mx.x - mn.x));
+      set_prop(ctx, out, "height"_v8, static_cast<double>(mx.y - mn.y));
       info.GetReturnValue().Set(out);
     }
 
@@ -505,10 +484,9 @@ namespace fxe::js {
       auto out = Object::New(iso);
       auto vab = array_buffer_view(iso, const_cast<vertex*>(verts.data()), verts.size_bytes());
       auto iab = array_buffer_view(iso, const_cast<u32*>(idxs.data()), idxs.size_bytes());
-      (void)out->Set(ctx, "verts"_v8(iso),
-                     Float32Array::New(vab, 0, verts.size_bytes() / sizeof(float)));
-      (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, idxs.size()));
-      (void)out->Set(ctx, "epoch"_v8(iso), Integer::NewFromUnsigned(iso, r->epoch()));
+      set_prop(ctx, out, "verts"_v8, Float32Array::New(vab, 0, verts.size_bytes() / sizeof(float)));
+      set_prop(ctx, out, "idxs"_v8, Uint32Array::New(iab, 0, idxs.size()));
+      set_prop(ctx, out, "epoch"_v8, r->epoch());
       info.GetReturnValue().Set(out);
     }
 
@@ -560,13 +538,12 @@ namespace fxe::js {
       auto out = Object::New(iso);
       auto vab = array_buffer_view(iso, verts, static_cast<usize>(vtx) * sizeof(vertex));
       auto iab = array_buffer_view(iso, indices, static_cast<usize>(idx) * sizeof(u32));
-      (void)out->Set(
-          ctx, "verts"_v8(iso),
-          Float32Array::New(vab, 0, static_cast<usize>(vtx) * sizeof(vertex) / sizeof(float)));
-      (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, idx));
-      (void)out->Set(ctx, "base"_v8(iso), Integer::NewFromUnsigned(iso, base));
-      (void)out->Set(ctx, "indexBase"_v8(iso), Integer::NewFromUnsigned(iso, index_base));
-      (void)out->Set(ctx, "epoch"_v8(iso), Integer::NewFromUnsigned(iso, r->epoch()));
+      set_prop(ctx, out, "verts"_v8,
+               Float32Array::New(vab, 0, static_cast<usize>(vtx) * sizeof(vertex) / sizeof(float)));
+      set_prop(ctx, out, "idxs"_v8, Uint32Array::New(iab, 0, idx));
+      set_prop(ctx, out, "base"_v8, base);
+      set_prop(ctx, out, "indexBase"_v8, index_base);
+      set_prop(ctx, out, "epoch"_v8, r->epoch());
       info.GetReturnValue().Set(out);
     }
 
@@ -636,14 +613,14 @@ namespace fxe::js {
 
     global->Set(iso, "Renderer", tpl);
     install_pipeline_template(iso, global);
-    rend_tpl_table()[iso].Reset(iso, tpl);
+    rend_tpl_cache::install(iso, tpl);
   }
 
   Local<FunctionTemplate> get_renderer_template(Isolate* iso) {
-    return rend_tpl_table()[iso].Get(iso);
+    return rend_tpl_cache::resolve(iso);
   }
 
   Local<Object> make_renderer_object(Isolate* iso, Local<Context> ctx, renderer* r) {
-    return wrap(iso, ctx, rend_tpl_table()[iso].Get(iso), r, TAG_RENDERER);
+    return wrap(iso, ctx, rend_tpl_cache::resolve(iso), r, TAG_RENDERER);
   }
 } // namespace fxe::js

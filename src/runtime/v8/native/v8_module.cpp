@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 #include <string>
 #include <string_view>
@@ -12,41 +13,12 @@
 namespace fxe::runtime {
   namespace {
     using namespace v8;
+    using namespace fxe::js;
 
     struct byte_span {
       const uint8_t* data = nullptr;
       size_t size = 0;
     };
-
-    Local<String> str(Isolate* iso, std::string_view s) {
-      return String::NewFromUtf8(iso, s.data(), NewStringType::kNormal, static_cast<int>(s.size()))
-          .ToLocalChecked();
-    }
-
-    void set(Local<Context> ctx, Local<Object> obj, const char* key, Local<Value> value) {
-      (void)obj->Set(ctx, str(Isolate::GetCurrent(), key), value);
-    }
-
-    void set_number(Local<Context> ctx, Local<Object> obj, const char* key, double value) {
-      set(ctx, obj, key, Number::New(Isolate::GetCurrent(), value));
-    }
-
-    void set_string(Local<Context> ctx, Local<Object> obj, const char* key,
-                    std::string_view value) {
-      set(ctx, obj, key, str(Isolate::GetCurrent(), value));
-    }
-
-    void throw_error(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::Error(str(iso, message)));
-    }
-
-    void throw_type_error(Isolate* iso, std::string_view message) {
-      iso->ThrowException(Exception::TypeError(str(iso, message)));
-    }
-
-    void throw_data_clone_error(Isolate* iso) {
-      throw_error(iso, "DataCloneError");
-    }
 
     std::string string_arg(Isolate* iso, Local<Value> value) {
       String::Utf8Value utf8(iso, value);
@@ -85,7 +57,7 @@ namespace fxe::runtime {
                       FunctionCallback fn) {
       auto maybe = Function::New(ctx, fn);
       if (!maybe.IsEmpty())
-        (void)obj->Set(ctx, str(iso, name), maybe.ToLocalChecked());
+        (void)obj->Set(ctx, to_v8_string(iso, name), maybe.ToLocalChecked());
     }
 
     class file_output_stream final : public OutputStream {
@@ -124,25 +96,25 @@ namespace fxe::runtime {
       HeapStatistics hs;
       iso->GetHeapStatistics(&hs);
       auto out = Object::New(iso);
-      set_number(ctx, out, "total_heap_size", static_cast<double>(hs.total_heap_size()));
-      set_number(ctx, out, "total_heap_size_executable",
-                 static_cast<double>(hs.total_heap_size_executable()));
-      set_number(ctx, out, "total_physical_size", static_cast<double>(hs.total_physical_size()));
-      set_number(ctx, out, "total_available_size", static_cast<double>(hs.total_available_size()));
-      set_number(ctx, out, "used_heap_size", static_cast<double>(hs.used_heap_size()));
-      set_number(ctx, out, "heap_size_limit", static_cast<double>(hs.heap_size_limit()));
-      set_number(ctx, out, "malloced_memory", static_cast<double>(hs.malloced_memory()));
-      set_number(ctx, out, "peak_malloced_memory", static_cast<double>(hs.peak_malloced_memory()));
-      set_number(ctx, out, "does_zap_garbage", static_cast<double>(hs.does_zap_garbage()));
-      set_number(ctx, out, "number_of_native_contexts",
-                 static_cast<double>(hs.number_of_native_contexts()));
-      set_number(ctx, out, "number_of_detached_contexts",
-                 static_cast<double>(hs.number_of_detached_contexts()));
-      set_number(ctx, out, "total_global_handles_size",
-                 static_cast<double>(hs.total_global_handles_size()));
-      set_number(ctx, out, "used_global_handles_size",
-                 static_cast<double>(hs.used_global_handles_size()));
-      set_number(ctx, out, "external_memory", static_cast<double>(hs.external_memory()));
+      set_prop(ctx, out, "total_heap_size", static_cast<double>(hs.total_heap_size()));
+      set_prop(ctx, out, "total_heap_size_executable",
+               static_cast<double>(hs.total_heap_size_executable()));
+      set_prop(ctx, out, "total_physical_size", static_cast<double>(hs.total_physical_size()));
+      set_prop(ctx, out, "total_available_size", static_cast<double>(hs.total_available_size()));
+      set_prop(ctx, out, "used_heap_size", static_cast<double>(hs.used_heap_size()));
+      set_prop(ctx, out, "heap_size_limit", static_cast<double>(hs.heap_size_limit()));
+      set_prop(ctx, out, "malloced_memory", static_cast<double>(hs.malloced_memory()));
+      set_prop(ctx, out, "peak_malloced_memory", static_cast<double>(hs.peak_malloced_memory()));
+      set_prop(ctx, out, "does_zap_garbage", static_cast<double>(hs.does_zap_garbage()));
+      set_prop(ctx, out, "number_of_native_contexts",
+               static_cast<double>(hs.number_of_native_contexts()));
+      set_prop(ctx, out, "number_of_detached_contexts",
+               static_cast<double>(hs.number_of_detached_contexts()));
+      set_prop(ctx, out, "total_global_handles_size",
+               static_cast<double>(hs.total_global_handles_size()));
+      set_prop(ctx, out, "used_global_handles_size",
+               static_cast<double>(hs.used_global_handles_size()));
+      set_prop(ctx, out, "external_memory", static_cast<double>(hs.external_memory()));
       info.GetReturnValue().Set(out);
     }
 
@@ -156,13 +128,13 @@ namespace fxe::runtime {
         if (!iso->GetHeapSpaceStatistics(&stats, i))
           continue;
         auto entry = Object::New(iso);
-        set_string(ctx, entry, "space_name", stats.space_name());
-        set_number(ctx, entry, "space_size", static_cast<double>(stats.space_size()));
-        set_number(ctx, entry, "space_used_size", static_cast<double>(stats.space_used_size()));
-        set_number(ctx, entry, "space_available_size",
-                   static_cast<double>(stats.space_available_size()));
-        set_number(ctx, entry, "physical_space_size",
-                   static_cast<double>(stats.physical_space_size()));
+        set_prop(ctx, entry, "space_name", stats.space_name());
+        set_prop(ctx, entry, "space_size", static_cast<double>(stats.space_size()));
+        set_prop(ctx, entry, "space_used_size", static_cast<double>(stats.space_used_size()));
+        set_prop(ctx, entry, "space_available_size",
+                 static_cast<double>(stats.space_available_size()));
+        set_prop(ctx, entry, "physical_space_size",
+                 static_cast<double>(stats.physical_space_size()));
         (void)out->Set(ctx, static_cast<uint32_t>(i), entry);
       }
       info.GetReturnValue().Set(out);
@@ -174,12 +146,12 @@ namespace fxe::runtime {
       HeapCodeStatistics stats;
       iso->GetHeapCodeAndMetadataStatistics(&stats);
       auto out = Object::New(iso);
-      set_number(ctx, out, "code_and_metadata_size",
-                 static_cast<double>(stats.code_and_metadata_size()));
-      set_number(ctx, out, "bytecode_and_metadata_size",
-                 static_cast<double>(stats.bytecode_and_metadata_size()));
-      set_number(ctx, out, "external_script_source_size",
-                 static_cast<double>(stats.external_script_source_size()));
+      set_prop(ctx, out, "code_and_metadata_size",
+               static_cast<double>(stats.code_and_metadata_size()));
+      set_prop(ctx, out, "bytecode_and_metadata_size",
+               static_cast<double>(stats.bytecode_and_metadata_size()));
+      set_prop(ctx, out, "external_script_source_size",
+               static_cast<double>(stats.external_script_source_size()));
       info.GetReturnValue().Set(out);
     }
 
@@ -199,7 +171,7 @@ namespace fxe::runtime {
       serializer.WriteHeader();
       auto ok = serializer.WriteValue(ctx, info[0]);
       if (ok.IsNothing() || !ok.FromJust()) {
-        throw_data_clone_error(iso);
+        throw_error(iso, "DataCloneError");
         return;
       }
       auto released = serializer.Release();
@@ -219,12 +191,12 @@ namespace fxe::runtime {
       ValueDeserializer deserializer(iso, bytes.data, bytes.size);
       auto header_ok = deserializer.ReadHeader(ctx);
       if (header_ok.IsNothing() || !header_ok.FromJust()) {
-        throw_data_clone_error(iso);
+        throw_error(iso, "DataCloneError");
         return;
       }
       Local<Value> value;
       if (!deserializer.ReadValue(ctx).ToLocal(&value)) {
-        throw_data_clone_error(iso);
+        throw_error(iso, "DataCloneError");
         return;
       }
       info.GetReturnValue().Set(value);
@@ -276,8 +248,8 @@ namespace fxe::runtime {
     if (!global->Get(ctx, "__fxe_native"_v8(iso)).ToLocal(&native_value) ||
         !native_value->IsObject()) {
       native_value = Object::New(iso);
-      (void)global->DefineOwnProperty(ctx, "__fxe_native"_v8(iso), native_value,
-                                      static_cast<PropertyAttribute>(DontEnum));
+      define_prop(ctx, global, "__fxe_native"_v8, native_value,
+                  static_cast<PropertyAttribute>(DontEnum));
     }
     auto native = native_value.As<Object>();
     (void)native->Set(ctx, "v8"_v8(iso), make_v8_namespace(iso, ctx));

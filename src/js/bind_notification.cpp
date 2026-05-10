@@ -17,30 +17,16 @@
 namespace fxe::js {
   using namespace v8;
   namespace {
-    Local<String> s(Isolate* iso, const char* str) {
-      return String::NewFromUtf8(iso, str, NewStringType::kNormal).ToLocalChecked();
-    }
-    bool get_prop(Isolate* iso, Local<Context> ctx, Local<Object> obj, const char* name,
-                  Local<Value>* out) {
-      return obj->Get(ctx, s(iso, name)).ToLocal(out);
-    }
-    std::string to_str(Isolate* iso, Local<Value> v) {
-      if (v.IsEmpty() || !v->IsString())
-        return {};
-      String::Utf8Value u(iso, v);
-      return *u ? std::string(*u, u.length()) : std::string{};
-    }
     std::optional<std::string> to_image_src(Isolate* iso, Local<Context> ctx, Local<Value> v) {
       if (v.IsEmpty())
         return std::nullopt;
       if (v->IsString())
-        return to_str(iso, v);
+        return to_std_string(iso, v);
       if (!v->IsObject())
         return std::nullopt;
-      Local<Value> src;
-      if (!get_prop(iso, ctx, v.As<Object>(), "src", &src))
-        return std::nullopt;
-      return to_str(iso, src);
+      if (auto src = get_prop<Local<Value>>(ctx, v.As<Object>(), "src"_v8(iso)))
+        return to_std_string(iso, *src);
+      return std::nullopt;
     }
 
     struct action_callback_state {
@@ -59,14 +45,9 @@ namespace fxe::js {
       Local<Context> cb_ctx = state->context.Get(iso);
       Context::Scope cs(cb_ctx);
       Local<Object> event = Object::New(iso);
-      (void)event->Set(
-          cb_ctx, "id"_v8(iso),
-          String::NewFromUtf8(iso, action_id.c_str(), NewStringType::kNormal).ToLocalChecked());
-      if (input) {
-        (void)event->Set(
-            cb_ctx, "input"_v8(iso),
-            String::NewFromUtf8(iso, input->c_str(), NewStringType::kNormal).ToLocalChecked());
-      }
+      set_prop(cb_ctx, event, "id"_v8, action_id);
+      if (input)
+        set_prop(cb_ctx, event, "input"_v8, *input);
       Local<Value> argv[] = {event};
       TryCatch try_catch(iso);
       (void)state->callback.Get(iso)->Call(cb_ctx, cb_ctx->Global(), 1, argv);
@@ -106,40 +87,45 @@ namespace fxe::js {
       h->context.Reset(iso, ctx);
       if (info.Length() > 0 && info[0]->IsObject()) {
         auto obj = info[0].As<Object>();
-        Local<Value> v;
-        if (get_prop(iso, ctx, obj, "title", &v))
-          h->opts.title = to_str(iso, v);
-        if (get_prop(iso, ctx, obj, "body", &v))
-          h->opts.body = to_str(iso, v);
-        if (get_prop(iso, ctx, obj, "icon", &v))
-          h->opts.icon_path = to_str(iso, v);
-        if (get_prop(iso, ctx, obj, "image", &v) || get_prop(iso, ctx, obj, "imagePath", &v))
-          h->opts.image_path = to_image_src(iso, ctx, v);
-        if (get_prop(iso, ctx, obj, "heroImage", &v))
-          h->opts.hero_image_path = to_image_src(iso, ctx, v);
-        if (get_prop(iso, ctx, obj, "appLogo", &v))
-          h->opts.app_logo_image_path = to_image_src(iso, ctx, v);
-        if (get_prop(iso, ctx, obj, "attachmentPath", &v))
-          h->opts.attachment_path = to_str(iso, v);
-        if (get_prop(iso, ctx, obj, "onAction", &v) && v->IsFunction())
-          h->on_action.Reset(iso, v.As<Function>());
-        if (get_prop(iso, ctx, obj, "actions", &v) && v->IsArray()) {
-          auto arr = v.As<Array>();
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "title"_v8(iso)))
+          h->opts.title = to_std_string(iso, *value);
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "body"_v8(iso)))
+          h->opts.body = to_std_string(iso, *value);
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "icon"_v8(iso)))
+          h->opts.icon_path = to_std_string(iso, *value);
+        if (auto image = get_prop<Local<Value>>(ctx, obj, "image"_v8(iso))) {
+          h->opts.image_path = to_image_src(iso, ctx, *image);
+        } else if (auto image_path = get_prop<Local<Value>>(ctx, obj, "imagePath"_v8(iso))) {
+          h->opts.image_path = to_image_src(iso, ctx, *image_path);
+        }
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "heroImage"_v8(iso)))
+          h->opts.hero_image_path = to_image_src(iso, ctx, *value);
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "appLogo"_v8(iso)))
+          h->opts.app_logo_image_path = to_image_src(iso, ctx, *value);
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "attachmentPath"_v8(iso)))
+          h->opts.attachment_path = to_std_string(iso, *value);
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "onAction"_v8(iso));
+            value && (*value)->IsFunction())
+          h->on_action.Reset(iso, (*value).As<Function>());
+        if (auto value = get_prop<Local<Value>>(ctx, obj, "actions"_v8(iso));
+            value && (*value)->IsArray()) {
+          auto arr = (*value).As<Array>();
           u32 len = arr->Length();
           h->opts.actions.reserve(len);
           for (u32 i = 0; i < len; ++i) {
-            Local<Value> item_value;
-            if (!arr->Get(ctx, i).ToLocal(&item_value) || !item_value->IsObject())
+            auto item_value = get_index<Local<Value>>(ctx, arr, i);
+            if (!item_value || !(*item_value)->IsObject())
               continue;
-            auto action_obj = item_value.As<Object>();
-            Local<Value> field;
+            auto action_obj = (*item_value).As<Object>();
             fxe::os::notification_action action;
-            if (get_prop(iso, ctx, action_obj, "id", &field))
-              action.id = to_str(iso, field);
-            if (get_prop(iso, ctx, action_obj, "title", &field))
-              action.title = to_str(iso, field);
-            if (get_prop(iso, ctx, action_obj, "kind", &field) && to_str(iso, field) == "input")
+            if (auto field = get_prop<Local<Value>>(ctx, action_obj, "id"_v8(iso)))
+              action.id = to_std_string(iso, *field);
+            if (auto field = get_prop<Local<Value>>(ctx, action_obj, "title"_v8(iso)))
+              action.title = to_std_string(iso, *field);
+            if (auto field = get_prop<Local<Value>>(ctx, action_obj, "kind"_v8(iso));
+                field && to_std_string(iso, *field) == "input") {
               action.kind = fxe::os::notification_action_kind::input;
+            }
             if (!action.id.empty() && !action.title.empty())
               h->opts.actions.push_back(std::move(action));
           }

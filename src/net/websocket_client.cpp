@@ -47,6 +47,8 @@ static int sock_close(socket_handle s) {
 }
 #endif
 
+#include "monotonic.hpp"
+
 namespace fxe::net {
 
   // ws:// transport still uses its dedicated socket worker so builds without
@@ -221,12 +223,6 @@ namespace fxe::net {
     bool negotiated = false;
 #endif
   };
-
-  i64 monotonic_ms() {
-    using clock = std::chrono::steady_clock;
-    return std::chrono::duration_cast<std::chrono::milliseconds>(clock::now().time_since_epoch())
-        .count();
-  }
 
   bool parse_u16_port(const std::string& port, u16& out) {
     if (port.empty())
