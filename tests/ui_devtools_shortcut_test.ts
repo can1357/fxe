@@ -1,5 +1,5 @@
 import { CommandBuffer, type Renderer, type Window, type WindowEventName } from 'fxe';
-import { Text, View, defaultDevToolsAccelerator, installDevToolsShortcut, mount } from 'fxe-ui';
+import { defaultDevToolsAccelerator, installDevToolsShortcut, mount, Text, View } from 'fxe-ui';
 
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 
@@ -126,7 +126,7 @@ test('installDevToolsShortcut honours custom accelerators and catches App.openDe
     assertEqual(handle.accelerator, 'Ctrl+Alt+D');
     assertEqual(registeredAccelerator, 'Ctrl+Alt+D');
     assertEqual(callbacks.length, 1);
-    callbacks[0]!();
+    callbacks[0]?.();
     assertEqual(capturedError, expectedError);
     handle.dispose();
     handle.dispose();

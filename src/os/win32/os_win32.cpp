@@ -1328,6 +1328,16 @@ namespace fxe::os {
       xml += L"</text><text>";
       xml += xml_escape(opts.body);
       xml += L"</text>";
+      if (opts.hero_image_path && !opts.hero_image_path->empty()) {
+        xml += L"<image placement=\"hero\" src=\"";
+        xml += xml_escape(*opts.hero_image_path);
+        xml += L"\"/>";
+      }
+      if (opts.app_logo_image_path && !opts.app_logo_image_path->empty()) {
+        xml += L"<image placement=\"appLogoOverride\" src=\"";
+        xml += xml_escape(*opts.app_logo_image_path);
+        xml += L"\"/>";
+      }
       if (opts.image_path && !opts.image_path->empty()) {
         xml += L"<image placement=\"inline\" src=\"";
         xml += xml_escape(*opts.image_path);

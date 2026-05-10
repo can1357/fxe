@@ -2375,6 +2375,8 @@ interface NotificationOptions {
   icon?: string;
   image?: string;
   imagePath?: string;
+  heroImage?: string;
+  appLogo?: string;
   attachmentPath?: string;
   actions?: NotificationAction[];
   onAction?: (event: NotificationActionEvent) => void;
@@ -2486,6 +2488,15 @@ declare class Blob {
   arrayBuffer(): Promise<ArrayBuffer>;
   text(): Promise<string>;
   stream(): ReadableStream<Uint8Array>;
+}
+declare class File extends Blob {
+  constructor(
+    blobParts?: BlobPart[],
+    fileName?: string,
+    options?: BlobPropertyBag & { lastModified?: number },
+  );
+  readonly name: string;
+  readonly lastModified: number;
 }
 declare class Headers {
   constructor(init?: HeadersInit);
@@ -3690,6 +3701,11 @@ declare module 'node:buffer' {
     set(array: ArrayLike<number>, offset?: number): void;
   }
   export const Buffer: {
+    new (
+      value?: number | string | ArrayBuffer | ArrayBufferView | ArrayLike<number>,
+      encoding?: BufferEncoding,
+    ): Buffer;
+    prototype: Buffer;
     from(
       value: string | ArrayBuffer | ArrayBufferView | ArrayLike<number>,
       encoding?: BufferEncoding,
@@ -3697,12 +3713,40 @@ declare module 'node:buffer' {
     alloc(size: number, fill?: string | number, encoding?: BufferEncoding): Buffer;
     allocUnsafe(size: number): Buffer;
     concat(list: readonly (Buffer | Uint8Array)[], totalLength?: number): Buffer;
+    compare(
+      a: Buffer | Uint8Array | ArrayBuffer | ArrayBufferView | ArrayLike<number>,
+      b: Buffer | Uint8Array | ArrayBuffer | ArrayBufferView | ArrayLike<number>,
+    ): number;
     isBuffer(value: unknown): value is Buffer;
     byteLength(value: string | ArrayBuffer | ArrayBufferView, encoding?: BufferEncoding): number;
   };
   export function SlowBuffer(size: number): Buffer;
   export const INSPECT_MAX_BYTES: number;
-  const buffer: { Buffer: typeof Buffer; SlowBuffer: typeof SlowBuffer; INSPECT_MAX_BYTES: number };
+  export const kMaxLength: number;
+  export const kStringMaxLength: number;
+  export const constants: {
+    MAX_LENGTH: typeof kMaxLength;
+    MAX_STRING_LENGTH: typeof kStringMaxLength;
+  };
+  export const atob: ((data: string) => string) | undefined;
+  export const btoa: ((data: string) => string) | undefined;
+  const BlobCtor: typeof Blob;
+  const FileCtor: typeof File;
+
+  export { BlobCtor as Blob, FileCtor as File };
+
+  const buffer: {
+    Buffer: typeof Buffer;
+    SlowBuffer: typeof SlowBuffer;
+    INSPECT_MAX_BYTES: typeof INSPECT_MAX_BYTES;
+    kMaxLength: typeof kMaxLength;
+    kStringMaxLength: typeof kStringMaxLength;
+    constants: typeof constants;
+    atob: typeof atob;
+    btoa: typeof btoa;
+    Blob: typeof Blob;
+    File: typeof File;
+  };
   export default buffer;
 }
 declare const Buffer: typeof import('node:buffer').Buffer;
@@ -3716,14 +3760,29 @@ declare module 'node:events' {
       eventName: string | symbol,
       listener?: (...args: any[]) => void,
     ): number;
+    static on(
+      emitter: EventEmitter,
+      eventName: string | symbol,
+      options?: { signal?: AbortSignal },
+    ): AsyncIterableIterator<any[]>;
     static once(
       emitter: EventEmitter,
       eventName: string | symbol,
       options?: { signal?: AbortSignal },
     ): Promise<any[]>;
+    static getEventListeners(
+      emitter: EventEmitter,
+      eventName: string | symbol,
+    ): ((...args: any[]) => any)[];
+    static setMaxListeners(
+      n: number,
+      ...targets: Array<EventEmitter | { setMaxListeners(n: number): unknown }>
+    ): void;
     on(eventName: string | symbol, listener: (...args: any[]) => void): this;
     addListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
+    prependListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
     once(eventName: string | symbol, listener: (...args: any[]) => void): this;
+    prependOnceListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
     off(eventName: string | symbol, listener: (...args: any[]) => void): this;
     removeListener(eventName: string | symbol, listener: (...args: any[]) => void): this;
     removeAllListeners(eventName?: string | symbol): this;
@@ -3735,6 +3794,15 @@ declare module 'node:events' {
     setMaxListeners(n: number): this;
     getMaxListeners(): number;
   }
+  export function addAbortListener(
+    signal: AbortSignal,
+    listener: () => void,
+  ): { [Symbol.dispose](): void };
+  export function on(
+    emitter: EventEmitter,
+    eventName: string | symbol,
+    options?: { signal?: AbortSignal },
+  ): AsyncIterableIterator<any[]>;
   export function once(
     emitter: EventEmitter,
     eventName: string | symbol,
@@ -3745,6 +3813,15 @@ declare module 'node:events' {
     eventName: string | symbol,
     listener?: (...args: any[]) => void,
   ): number;
+  export function getEventListeners(
+    emitter: EventEmitter,
+    eventName: string | symbol,
+  ): ((...args: any[]) => any)[];
+  export function setMaxListeners(
+    n: number,
+    ...targets: Array<EventEmitter | { setMaxListeners(n: number): unknown }>
+  ): void;
+  export const defaultMaxListeners: number;
   export default EventEmitter;
 }
 declare module 'events' {
@@ -3794,11 +3871,39 @@ declare module 'node:path' {
 }
 declare module 'node:path/posix' {
   import { posix } from 'node:path';
-  export = posix;
+  export const sep: typeof posix.sep;
+  export const delimiter: typeof posix.delimiter;
+  export const resolve: typeof posix.resolve;
+  export const normalize: typeof posix.normalize;
+  export const isAbsolute: typeof posix.isAbsolute;
+  export const join: typeof posix.join;
+  export const relative: typeof posix.relative;
+  export const dirname: typeof posix.dirname;
+  export const basename: typeof posix.basename;
+  export const extname: typeof posix.extname;
+  export const parse: typeof posix.parse;
+  export const format: typeof posix.format;
+  export const toNamespacedPath: typeof posix.toNamespacedPath;
+  const pathPosix: typeof posix;
+  export default pathPosix;
 }
 declare module 'node:path/win32' {
   import { win32 } from 'node:path';
-  export = win32;
+  export const sep: typeof win32.sep;
+  export const delimiter: typeof win32.delimiter;
+  export const resolve: typeof win32.resolve;
+  export const normalize: typeof win32.normalize;
+  export const isAbsolute: typeof win32.isAbsolute;
+  export const join: typeof win32.join;
+  export const relative: typeof win32.relative;
+  export const dirname: typeof win32.dirname;
+  export const basename: typeof win32.basename;
+  export const extname: typeof win32.extname;
+  export const parse: typeof win32.parse;
+  export const format: typeof win32.format;
+  export const toNamespacedPath: typeof win32.toNamespacedPath;
+  const pathWin32: typeof win32;
+  export default pathWin32;
 }
 
 declare module 'node:querystring' {
@@ -3841,16 +3946,33 @@ declare module 'node:url' {
   ): Record<string, any>;
   export function format(value: string | URL | Record<string, any>): string;
   export function resolve(from: string, to: string): string;
+  export function resolveObject(from: string, to: string): Record<string, any>;
   export function fileURLToPath(url: string | URL): string;
   export function pathToFileURL(path: string): URL;
   export function domainToASCII(domain: string): string;
   export function domainToUnicode(domain: string): string;
+  const url: {
+    URL: typeof URL;
+    URLSearchParams: typeof URLSearchParams;
+    parse: typeof parse;
+    format: typeof format;
+    resolve: typeof resolve;
+    resolveObject: typeof resolveObject;
+    fileURLToPath: typeof fileURLToPath;
+    pathToFileURL: typeof pathToFileURL;
+    domainToASCII: typeof domainToASCII;
+    domainToUnicode: typeof domainToUnicode;
+  };
+  export default url;
 }
 
 declare module 'node:util' {
   export function format(format?: any, ...args: any[]): string;
   export function formatWithOptions(options: unknown, format?: any, ...args: any[]): string;
   export function inspect(value: unknown, options?: unknown): string;
+  export namespace inspect {
+    const custom: symbol;
+  }
   export function inherits(ctor: (...args: any[]) => any, superCtor: (...args: any[]) => any): void;
   export function promisify(fn: (...args: any[]) => any): (...args: any[]) => any;
   export namespace promisify {
@@ -3870,8 +3992,24 @@ declare module 'node:util' {
     isPromise(value: unknown): value is Promise<unknown>;
     isNativeError(value: unknown): value is Error;
   };
+  export function debuglog(section?: string): (...args: any[]) => void;
+  export function deprecate<T extends (...args: any[]) => any>(fn: T, message?: string): T;
   export const TextEncoder: FxeTextEncoderConstructor;
   export const TextDecoder: FxeTextDecoderConstructor;
+  const util: {
+    format: typeof format;
+    formatWithOptions: typeof formatWithOptions;
+    inspect: typeof inspect;
+    inherits: typeof inherits;
+    promisify: typeof promisify;
+    callbackify: typeof callbackify;
+    types: typeof types;
+    debuglog: typeof debuglog;
+    deprecate: typeof deprecate;
+    TextEncoder: typeof TextEncoder;
+    TextDecoder: typeof TextDecoder;
+  };
+  export default util;
 }
 declare module 'node:util/types' {
   import { types } from 'node:util';
@@ -3897,12 +4035,48 @@ declare module 'node:console' {
     debug(...args: any[]): void;
     warn(...args: any[]): void;
     error(...args: any[]): void;
+    dir(value: unknown, options?: unknown): void;
+    time(label?: string): void;
+    timeEnd(label?: string): void;
+    trace(...args: any[]): void;
+    assert(condition: unknown, ...args: any[]): void;
   }
   export const log: (...args: any[]) => void;
   export const info: (...args: any[]) => void;
   export const debug: (...args: any[]) => void;
   export const warn: (...args: any[]) => void;
   export const error: (...args: any[]) => void;
+  export const dir: (value: unknown, options?: unknown) => void;
+  export const trace: (...args: any[]) => void;
+  export const assert: (condition: unknown, ...args: any[]) => void;
+  export const time: (label?: string) => void;
+  export const timeEnd: (label?: string) => void;
+  export const table: (...args: any[]) => void;
+  export const group: (...args: any[]) => void;
+  export const groupEnd: () => void;
+  export const clear: () => void;
+  export const count: (label?: string) => void;
+  export const countReset: (label?: string) => void;
+  const consoleModule: {
+    Console: typeof Console;
+    log: typeof log;
+    info: typeof info;
+    debug: typeof debug;
+    warn: typeof warn;
+    error: typeof error;
+    dir: typeof dir;
+    trace: typeof trace;
+    assert: typeof assert;
+    time: typeof time;
+    timeEnd: typeof timeEnd;
+    table: typeof table;
+    group: typeof group;
+    groupEnd: typeof groupEnd;
+    clear: typeof clear;
+    count: typeof count;
+    countReset: typeof countReset;
+  };
+  export default consoleModule;
 }
 declare module 'console' {
   export * from 'node:console';
@@ -3914,7 +4088,18 @@ declare module 'node:timers' {
   export const setInterval: typeof globalThis.setInterval;
   export const clearInterval: typeof globalThis.clearInterval;
   export const setImmediate: typeof globalThis.setImmediate;
+  export const clearImmediate: (id: ReturnType<typeof setImmediate>) => void;
   export const queueMicrotask: typeof globalThis.queueMicrotask;
+  const timers: {
+    setTimeout: typeof setTimeout;
+    clearTimeout: typeof clearTimeout;
+    setInterval: typeof setInterval;
+    clearInterval: typeof clearInterval;
+    setImmediate: typeof setImmediate;
+    clearImmediate: typeof clearImmediate;
+    queueMicrotask: typeof queueMicrotask;
+  };
+  export default timers;
 }
 declare module 'node:timers/promises' {
   export function setTimeout<T = void>(
@@ -3929,6 +4114,13 @@ declare module 'node:timers/promises' {
     options?: { signal?: AbortSignal },
   ): AsyncIterable<T>;
   export const scheduler: { wait: typeof setTimeout; yield(): Promise<void> };
+  const timersPromises: {
+    setTimeout: typeof setTimeout;
+    setImmediate: typeof setImmediate;
+    setInterval: typeof setInterval;
+    scheduler: typeof scheduler;
+  };
+  export default timersPromises;
 }
 
 declare module 'node:process' {
@@ -3951,6 +4143,11 @@ declare module 'node:process' {
   export const nextTick: typeof process.nextTick;
   export const on: typeof process.on;
   export const off: typeof process.off;
+  export const addListener: typeof process.on;
+  export const removeListener: typeof process.off;
+  export const browser: false;
+  export const title: string;
+  export const version: string;
   export default process;
 }
 
@@ -3959,12 +4156,19 @@ declare module 'node:stream' {
   export class Readable extends EventEmitter {
     constructor(options?: any);
     static from(iterable: Iterable<any> | AsyncIterable<any>): Readable;
+    readonly readableEnded: boolean;
     setEncoding(encoding: string): this;
+    push(chunk: any): boolean;
     read(): any;
+    resume(): this;
+    pause(): this;
     pipe(dest: Writable): Writable;
+    destroy(error?: unknown): this;
+    [Symbol.asyncIterator](): AsyncIterableIterator<any>;
   }
   export class Writable extends EventEmitter {
     constructor(options?: any);
+    readonly writableEnded: boolean;
     write(
       chunk: any,
       encoding?: string | ((error?: unknown) => void),
@@ -3974,6 +4178,7 @@ declare module 'node:stream' {
   }
   export class Transform extends Readable {
     constructor(options?: any);
+    readonly writableEnded: boolean;
     write(
       chunk: any,
       encoding?: string | ((error?: unknown) => void),
@@ -3983,13 +4188,39 @@ declare module 'node:stream' {
   }
   export class Duplex extends Transform {}
   export class PassThrough extends Transform {}
+  export function finished(
+    stream: EventEmitter,
+    options: unknown,
+    callback: (error?: unknown) => void,
+  ): EventEmitter;
   export function finished(stream: EventEmitter, callback: (error?: unknown) => void): EventEmitter;
-  export function finished(stream: EventEmitter): Promise<void>;
+  export function finished(stream: EventEmitter, options?: unknown): Promise<void>;
+  export function pipeline(...streams: [...any[], (error: unknown, value?: any) => void]): any;
   export function pipeline(...streams: any[]): Promise<any>;
+  export const promises: {
+    finished: typeof finished;
+    pipeline: typeof pipeline;
+  };
+  const stream: {
+    Readable: typeof Readable;
+    Writable: typeof Writable;
+    Transform: typeof Transform;
+    Duplex: typeof Duplex;
+    PassThrough: typeof PassThrough;
+    finished: typeof finished;
+    pipeline: typeof pipeline;
+    promises: typeof promises;
+  };
+  export default stream;
 }
 declare module 'node:stream/promises' {
   export function finished(stream: import('node:events').EventEmitter): Promise<void>;
   export function pipeline(...streams: any[]): Promise<any>;
+  const streamPromises: {
+    finished: typeof finished;
+    pipeline: typeof pipeline;
+  };
+  export default streamPromises;
 }
 // === node builtin compatibility end ===
 

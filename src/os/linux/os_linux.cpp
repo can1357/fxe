@@ -1271,6 +1271,9 @@ namespace fxe::os {
           conn, "type='signal',interface='org.freedesktop.Notifications',member='ActionInvoked'");
       add_signal_match(
           conn,
+          "type='signal',interface='org.freedesktop.Notifications',member='NotificationReplied'");
+      add_signal_match(
+          conn,
           "type='signal',interface='org.freedesktop.Notifications',member='NotificationClosed'");
       add_signal_match(
           conn,
@@ -1766,6 +1769,39 @@ namespace fxe::os {
               [cb = std::move(action_cb), action_id = std::move(action_id)]() mutable {
                 cb(action_id, std::nullopt);
               });
+        }
+        return DBUS_HANDLER_RESULT_HANDLED;
+      }
+
+      if (dbus_message_is_signal(msg, kNotificationsIface, "NotificationReplied")) {
+        u32 id = 0;
+        const char* text = nullptr;
+        DBusError error;
+        dbus_error_init(&error);
+        dbus_message_get_args(msg, &error, DBUS_TYPE_UINT32, &id, DBUS_TYPE_STRING, &text,
+                              DBUS_TYPE_INVALID);
+        free_error(error);
+        std::function<void()> click_cb;
+        std::function<void(const std::string&, std::optional<std::string>)> action_cb;
+        std::optional<std::string> reply =
+            text ? std::optional<std::string>(text) : std::optional<std::string>(std::string());
+        {
+          std::lock_guard<std::mutex> lock(g_notif_mu);
+          auto found = g_notifications.find(id);
+          if (found != g_notifications.end()) {
+            action_cb = std::move(found->second.action_callback);
+            if (!action_cb)
+              click_cb = std::move(found->second.click_callback);
+            g_notifications.erase(found);
+          }
+        }
+        if (action_cb) {
+          post_main_thread_dispatch(
+              [cb = std::move(action_cb), reply = std::move(reply)]() mutable {
+                cb("inline-reply", std::move(reply));
+              });
+        } else if (click_cb) {
+          post_main_thread_dispatch(std::move(click_cb));
         }
         return DBUS_HANDLER_RESULT_HANDLED;
       }

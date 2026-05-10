@@ -1,10 +1,12 @@
 import { extractA11yProps } from '../a11y/extract.ts';
-import type { AccessibilityProps } from '../a11y/types.ts';
+import type { AccessibilityNodeSnapshot, AccessibilityProps } from '../a11y/types.ts';
+import { registerVirtualSource } from '../a11y/virtual.ts';
 import {
   type BoundaryChild,
   Component,
   type Node,
   useEffect,
+  useId,
   useInternalLayout,
   useMemo,
   useRef,
@@ -29,6 +31,7 @@ export interface VirtualListProps<T> extends AccessibilityProps {
   renderItem: (item: T, index: number) => Node;
   keyExtractor?: (item: T, index: number) => string;
   onScroll?: (offset: { x: number; y: number }) => void;
+  getItemAccessibilityLabel?: (index: number) => string;
 }
 
 interface VirtualListRowProps {
@@ -165,6 +168,14 @@ function validHeight(value: number, label: string): number {
   return value;
 }
 
+function virtualSourceCount(data: unknown): number | null {
+  if (Array.isArray(data)) return data.length;
+  if (typeof data !== 'object' || data === null || !('length' in data)) return null;
+  const length = data.length;
+  if (typeof length !== 'number' || !Number.isFinite(length)) return null;
+  return Math.max(0, Math.floor(length));
+}
+
 function rangeFor(
   index: HeightIndex,
   count: number,
@@ -182,6 +193,7 @@ function rangeFor(
 }
 
 export const VirtualList = Component(<T>(props: VirtualListProps<T>): Node => {
+  const accessibilityId = props.accessibilityId ?? useId();
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [heightVersion, setHeightVersion] = useState(0);
   const measuredRef = useRef<{
@@ -227,7 +239,38 @@ export const VirtualList = Component(<T>(props: VirtualListProps<T>): Node => {
   }, [count, fixedHeight, variableHeight, estimatedFallback, props.data, heightVersion]);
 
   const visibleRange = rangeFor(heightIndex, count, offset.y, rect.height, overscan);
+  const lastVisibleIndex =
+    visibleRange.end > visibleRange.start ? visibleRange.end - 1 : visibleRange.start - 1;
   const totalHeight = heightIndex.totalHeight;
+
+  useEffect(() => {
+    const totalCount = virtualSourceCount(props.data);
+    if (totalCount === null) return;
+    return registerVirtualSource({
+      parentId: accessibilityId,
+      totalCount,
+      renderedRange: [visibleRange.start, lastVisibleIndex],
+      buildVirtualNode(index: number): AccessibilityNodeSnapshot {
+        return {
+          id: `${accessibilityId}-row-${index}`,
+          parentId: accessibilityId,
+          role: 'listitem',
+          label: props.getItemAccessibilityLabel?.(index) ?? '',
+          state: { offscreen: true },
+          rect: { x: 0, y: 0, width: 0, height: 0 },
+          focusable: false,
+          liveRegion: 'off',
+          children: [],
+        };
+      },
+    });
+  }, [
+    accessibilityId,
+    lastVisibleIndex,
+    props.data,
+    props.getItemAccessibilityLabel,
+    visibleRange.start,
+  ]);
 
   const children = useMemo(() => {
     const nodes: Node[] = [];
@@ -273,6 +316,7 @@ export const VirtualList = Component(<T>(props: VirtualListProps<T>): Node => {
   return ScrollView({
     key: props.key,
     ...extractA11yProps(props),
+    accessibilityId,
     accessibilityRole: props.accessibilityRole ?? 'list',
     style: props.style,
     contentStyle: [

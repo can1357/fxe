@@ -10,6 +10,7 @@ import {
   useFrame,
 } from '../reconciler/fiber.ts';
 import { type Theme, ThemeProvider } from '../theme/index.ts';
+import { installDevToolsShortcut } from './devtools_shortcut.ts';
 import {
   dispatchCompose,
   dispatchKeyDown,
@@ -22,7 +23,6 @@ import {
 } from './event_pipeline.ts';
 import { clearFocus } from './focus.ts';
 import { clearHitTargets } from './hit_test.ts';
-import { installDevToolsShortcut } from './devtools_shortcut.ts';
 
 export interface MountOptions {
   renderer?: Renderer;

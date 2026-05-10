@@ -199,5 +199,5 @@ function readThemeStyle(theme: HighlightTheme, captureName: string): HighlightSt
   if (theme instanceof Map) {
     return theme.get(captureName);
   }
-  return Object.prototype.hasOwnProperty.call(theme, captureName) ? theme[captureName] : undefined;
+  return Object.hasOwn(theme, captureName) ? theme[captureName] : undefined;
 }

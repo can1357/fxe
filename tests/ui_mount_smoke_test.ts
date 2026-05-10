@@ -1,5 +1,5 @@
 import { CommandBuffer, type Renderer, type Window, type WindowEventName } from 'fxe';
-import { memo, mount, Text, View, type Node as UiNode } from 'fxe-ui';
+import { memo, mount, Text, type Node as UiNode, View } from 'fxe-ui';
 import {
   drainLayoutTrace,
   setLayoutTraceEnabled,

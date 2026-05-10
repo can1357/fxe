@@ -1,3 +1,5 @@
+export type { DevToolsShortcutHandle, DevToolsShortcutOptions } from './devtools_shortcut.ts';
+export { defaultDevToolsAccelerator, installDevToolsShortcut } from './devtools_shortcut.ts';
 export {
   dispatchKeyDown,
   dispatchKeyPress,
@@ -16,7 +18,5 @@ export {
   makeSyntheticEvent,
   registerHitTarget,
 } from './hit_test.ts';
-export type { DevToolsShortcutHandle, DevToolsShortcutOptions } from './devtools_shortcut.ts';
-export { defaultDevToolsAccelerator, installDevToolsShortcut } from './devtools_shortcut.ts';
 export type { MountOptions } from './mount.ts';
 export { mount } from './mount.ts';

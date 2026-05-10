@@ -1,14 +1,14 @@
 import { CommandBuffer } from 'fxe';
 import {
-  Markdown as MarkdownComponent,
   clearHitTargets,
+  type FiberNode,
+  type HitTarget,
   hitTest,
+  Markdown as MarkdownComponent,
+  type MarkdownTheme,
   render,
   resetEventPipeline,
   snapshotFiberTree,
-  type FiberNode,
-  type HitTarget,
-  type MarkdownTheme,
 } from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';

@@ -100,6 +100,8 @@ namespace fxe::os {
     std::string icon_path;
     std::vector<notification_action> actions;
     std::optional<std::string> image_path;
+    std::optional<std::string> hero_image_path;
+    std::optional<std::string> app_logo_image_path;
     std::optional<std::string> attachment_path;
   };
   // Returns a positive id, or 0 on failure. The click handler (if any) is set

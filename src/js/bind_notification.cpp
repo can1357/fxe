@@ -30,6 +30,18 @@ namespace fxe::js {
       String::Utf8Value u(iso, v);
       return *u ? std::string(*u, u.length()) : std::string{};
     }
+    std::optional<std::string> to_image_src(Isolate* iso, Local<Context> ctx, Local<Value> v) {
+      if (v.IsEmpty())
+        return std::nullopt;
+      if (v->IsString())
+        return to_str(iso, v);
+      if (!v->IsObject())
+        return std::nullopt;
+      Local<Value> src;
+      if (!get_prop(iso, ctx, v.As<Object>(), "src", &src))
+        return std::nullopt;
+      return to_str(iso, src);
+    }
 
     struct action_callback_state {
       Isolate* isolate = nullptr;
@@ -102,7 +114,11 @@ namespace fxe::js {
         if (get_prop(iso, ctx, obj, "icon", &v))
           h->opts.icon_path = to_str(iso, v);
         if (get_prop(iso, ctx, obj, "image", &v) || get_prop(iso, ctx, obj, "imagePath", &v))
-          h->opts.image_path = to_str(iso, v);
+          h->opts.image_path = to_image_src(iso, ctx, v);
+        if (get_prop(iso, ctx, obj, "heroImage", &v))
+          h->opts.hero_image_path = to_image_src(iso, ctx, v);
+        if (get_prop(iso, ctx, obj, "appLogo", &v))
+          h->opts.app_logo_image_path = to_image_src(iso, ctx, v);
         if (get_prop(iso, ctx, obj, "attachmentPath", &v))
           h->opts.attachment_path = to_str(iso, v);
         if (get_prop(iso, ctx, obj, "onAction", &v) && v->IsFunction())

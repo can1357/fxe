@@ -15,8 +15,8 @@ import {
   useContext,
   useMemo,
 } from '../reconciler/fiber.ts';
-import type { StyleValue, Color } from '../style/types.ts';
-import { ThemeProvider, type Theme, useTheme } from '../theme/index.ts';
+import type { Color, StyleValue } from '../style/types.ts';
+import { type Theme, ThemeProvider, useTheme } from '../theme/index.ts';
 import { Pressable } from './Pressable.ts';
 import { Text } from './Text.ts';
 import { View } from './View.ts';

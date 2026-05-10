@@ -37,6 +37,8 @@ export interface AccessibilityState {
   invalid?: boolean | 'grammar' | 'spelling';
   readOnly?: boolean;
   pressed?: boolean;
+  // Virtual-list specific flag for synthesised offscreen descendants.
+  offscreen?: boolean;
 }
 
 export interface AccessibilityValue {

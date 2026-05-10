@@ -56,6 +56,8 @@ declare module 'fxe-ui' {
     invalid?: boolean | 'grammar' | 'spelling';
     readOnly?: boolean;
     pressed?: boolean;
+    // Virtual-list specific flag for synthesised offscreen descendants.
+    offscreen?: boolean;
   }
   export interface AccessibilityValue {
     text?: string;
@@ -123,6 +125,39 @@ declare module 'fxe-ui' {
     root: AccessibilityFiberLike,
     options: BuildTreeOptions,
   ): AccessibilityTreeSnapshot;
+
+  export interface A11yBridge {
+    publish(snapshot: AccessibilityTreeSnapshot): void;
+    latest(): AccessibilityTreeSnapshot | null;
+    clear(): void;
+    subscribe(cb: (s: AccessibilityTreeSnapshot) => void): () => void;
+  }
+  export function getA11yBridge(): A11yBridge;
+  export function publishAccessibilityTree(snapshot: AccessibilityTreeSnapshot): void;
+
+  export interface VirtualDescendantSource {
+    parentId: string;
+    totalCount: number;
+    renderedRange: [number, number];
+    buildVirtualNode(index: number): AccessibilityNodeSnapshot | null;
+  }
+  export function registerVirtualSource(source: VirtualDescendantSource): () => void;
+  export function getVirtualSources(): ReadonlyMap<string, VirtualDescendantSource>;
+  export function expandVirtualDescendants(
+    node: AccessibilityNodeSnapshot,
+    source: VirtualDescendantSource,
+  ): AccessibilityNodeSnapshot;
+
+  export interface LayoutTraceEntry {
+    component: string;
+    rect: LayoutResult;
+    hasParentLayout: boolean;
+    styleWidth: Style['width'];
+    styleHeight: Style['height'];
+    tag?: string;
+  }
+  export function setLayoutTraceEnabled(on: boolean, opts?: { limit?: number }): void;
+  export function drainLayoutTrace(clear?: boolean): LayoutTraceEntry[];
 
   export interface Constraint {
     width?: number;
@@ -607,6 +642,7 @@ declare module 'fxe-ui' {
     key?: string;
     style?: StyleValue;
     children?: BoundaryChild;
+    __traceTag?: string;
   }
   export interface TextProps extends AccessibilityProps {
     key?: string;

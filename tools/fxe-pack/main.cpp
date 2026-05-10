@@ -6,10 +6,11 @@
 //            [--platform macos|win|linux] [--include <glob>...]
 //            [--identity <codesign-id>] [--notarize-profile <profile>]
 //            [--webauthn-rp-id <rp_id>...] [--webauthn-mode production|developer]
-//            [--cert <path-or-subject>] [--appimage] [--dmg] [--msi] [--msix]
+//            [--cert <path-or-subject>] [--installer dmg|msi|msix|appimage|none]
+//            [--dmg|--msi|--msix|--appimage DEPRECATED aliases for --installer]
 //            [--update-url <url>] [--public-key <key>] [--channel stable|beta|alpha]
-//            [--version <semver> REQUIRED for --appimage/--dmg/--msi/--msix]
-//            [--manufacturer <name>|--publisher <name> REQUIRED for --appimage/--dmg/--msi/--msix]
+//            [--version <semver> REQUIRED for installer output]
+//            [--manufacturer <name>|--publisher <name> REQUIRED for installer output]
 //            [--compress zstd|none]
 
 #include <algorithm>
@@ -40,6 +41,16 @@ namespace {
 
   enum class Compression { None, Zstd };
 
+  enum class InstallerFormat { None, Dmg, Msi, Msix, AppImage };
+
+  struct PackageMetadata {
+    std::string version;
+    std::string manufacturer;
+    std::string channel = "stable";
+    std::string update_url;
+    std::string public_key;
+  };
+
   struct Args {
     std::string entry;
     std::string out;
@@ -51,20 +62,15 @@ namespace {
     std::vector<std::string> webauthn_rp_ids;
     std::string webauthn_mode;
     std::string cert;
-    bool appimage = false;
-    bool dmg = false;
-    bool msi = false;
-    bool msix = false;
-    std::string update_url;
-    std::string public_key;
-    std::string channel = "stable";
-    std::string version;
-    std::string manufacturer;
+    InstallerFormat installer = InstallerFormat::None;
+    bool installer_explicit = false;
+    PackageMetadata package;
     Compression compress = Compression::None;
     std::vector<std::string> includes;
   };
+
   bool produces_installer(const Args& a) {
-    return a.appimage || a.dmg || a.msi || a.msix;
+    return a.installer != InstallerFormat::None;
   }
   [[noreturn]] void die(const std::string& msg) {
     std::cerr << "fxe-pack: " << msg << "\n";
@@ -228,6 +234,40 @@ namespace {
   bool is_windows_msix_output(const Args& a) {
     return a.platform == "win" && fs::path(a.out).extension() == ".msix";
   }
+  bool is_linux_appimage_output(const Args& a) {
+    return a.platform == "linux" && fs::path(a.out).extension() == ".AppImage";
+  }
+
+  std::string installer_value(InstallerFormat installer) {
+    switch (installer) {
+    case InstallerFormat::None:
+      return "none";
+    case InstallerFormat::Dmg:
+      return "dmg";
+    case InstallerFormat::Msi:
+      return "msi";
+    case InstallerFormat::Msix:
+      return "msix";
+    case InstallerFormat::AppImage:
+      return "appimage";
+    }
+    die("unknown installer format");
+  }
+
+  InstallerFormat parse_installer_value(std::string_view value) {
+    if (value == "none")
+      return InstallerFormat::None;
+    if (value == "dmg")
+      return InstallerFormat::Dmg;
+    if (value == "msi")
+      return InstallerFormat::Msi;
+    if (value == "msix")
+      return InstallerFormat::Msix;
+    if (value == "appimage")
+      return InstallerFormat::AppImage;
+    die("unknown --installer value: " + std::string(value) +
+        " (expected dmg, msi, msix, appimage, or none)");
+  }
 
   [[maybe_unused]] bool has_wix_tooling() {
 #if defined(_WIN32)
@@ -339,13 +379,16 @@ namespace {
       if (s == "--out")
         a.out = need("--out");
       else if (s == "--update-url")
-        a.update_url = need("--update-url");
+        a.package.update_url = need("--update-url");
       else if (s == "--public-key")
-        a.public_key = need("--public-key");
+        a.package.public_key = need("--public-key");
       else if (s == "--channel") {
-        a.channel = need("--channel");
-        if (a.channel != "stable" && a.channel != "beta" && a.channel != "alpha")
-          die("unknown --channel value: " + a.channel + " (expected stable, beta, or alpha)");
+        a.package.channel = need("--channel");
+        if (a.package.channel != "stable" && a.package.channel != "beta" &&
+            a.package.channel != "alpha") {
+          die("unknown --channel value: " + a.package.channel +
+              " (expected stable, beta, or alpha)");
+        }
       } else if (s == "--name")
         a.name = need("--name");
       else if (s == "--icon")
@@ -372,18 +415,32 @@ namespace {
       } else if (s == "--cert")
         a.cert = need("--cert");
       else if (s == "--version")
-        a.version = need("--version");
+        a.package.version = need("--version");
       else if (s == "--manufacturer" || s == "--publisher")
-        a.manufacturer = need("--manufacturer/--publisher");
-      else if (s == "--appimage")
-        a.appimage = true;
-      else if (s == "--dmg")
-        a.dmg = true;
-      else if (s == "--msi")
-        a.msi = true;
-      else if (s == "--msix")
-        a.msix = true;
-      else if (s == "--compress") {
+        a.package.manufacturer = need("--manufacturer/--publisher");
+      else if (s == "--installer") {
+        const std::string value = need("--installer");
+        const InstallerFormat installer = parse_installer_value(value);
+        if (a.installer != InstallerFormat::None && a.installer != installer) {
+          die("conflicting installer selection: --installer " + value +
+              " conflicts with --installer " + installer_value(a.installer));
+        }
+        a.installer = installer;
+        a.installer_explicit = true;
+      } else if (s == "--appimage" || s == "--dmg" || s == "--msi" || s == "--msix") {
+        const InstallerFormat installer = s == "--appimage" ? InstallerFormat::AppImage
+                                          : s == "--dmg"    ? InstallerFormat::Dmg
+                                          : s == "--msi"    ? InstallerFormat::Msi
+                                                            : InstallerFormat::Msix;
+        if (a.installer != InstallerFormat::None && a.installer != installer) {
+          die("conflicting installer selection: " + std::string(s) +
+              " conflicts with --installer " + installer_value(a.installer));
+        }
+        std::cerr << "fxe-pack: " << s << " is deprecated; use --installer "
+                  << installer_value(installer) << "\n";
+        a.installer = installer;
+        a.installer_explicit = true;
+      } else if (s == "--compress") {
         std::string value = need("--compress");
         if (value == "none")
           a.compress = Compression::None;
@@ -398,12 +455,13 @@ namespace {
             << "                [--identity CODESIGN_ID] [--notarize-profile PROFILE]\n"
             << "                [--webauthn-rp-id RP_ID ...] [--webauthn-mode "
                "production|developer]\n"
-            << "                [--cert PATH_OR_SUBJECT] [--appimage] [--dmg] [--msi] [--msix]\n"
+            << "                [--cert PATH_OR_SUBJECT] [--installer dmg|msi|msix|appimage|none]\n"
+            << "                [--dmg|--msi|--msix|--appimage DEPRECATED]\n"
             << "                [--update-url URL] [--public-key KEY] [--channel "
                "stable|beta|alpha]\n"
-            << "                [--version SEMVER REQUIRED for --appimage/--dmg/--msi/--msix]\n"
-            << "                [--manufacturer NAME|--publisher NAME REQUIRED for "
-               "--appimage/--dmg/--msi/--msix]\n"
+            << "                [--version SEMVER REQUIRED for installer output]\n"
+            << "                [--manufacturer NAME|--publisher NAME REQUIRED for installer "
+               "output]\n"
             << "                [--compress zstd|none]\n"
             << "\nExamples:\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.app --platform macos\n"
@@ -413,7 +471,7 @@ namespace {
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.msix --platform win --cert "
                "CN=Publisher\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.AppImage --platform linux "
-               "--appimage\n"
+               "--installer appimage\n"
             << "  fxe-pack examples/js/react_demo.ts --out my-app.tar.gz --platform linux\n"
             << "\nSigning is performed only when requested: --identity signs macOS .app/.dmg "
                "payloads,\n"
@@ -443,12 +501,14 @@ namespace {
       // signed builds default to production entitlements.
       a.webauthn_mode = a.identity.empty() ? "developer" : "production";
     }
-    if (a.dmg && a.platform != "macos")
-      die("--dmg requires --platform macos");
-    if (a.msi && a.platform != "win")
-      die("--msi requires --platform win");
-    if (a.msix && a.platform != "win")
-      die("--msix requires --platform win");
+    if (a.installer == InstallerFormat::Dmg && a.platform != "macos")
+      die("--installer dmg requires --platform macos");
+    if (a.installer == InstallerFormat::Msi && a.platform != "win")
+      die("--installer msi requires --platform win");
+    if (a.installer == InstallerFormat::Msix && a.platform != "win")
+      die("--installer msix requires --platform win");
+    if (a.installer == InstallerFormat::AppImage && a.platform != "linux")
+      die("--installer appimage requires --platform linux");
     if (a.name.empty())
       a.name = fs::path(a.entry).stem().string();
     if (a.out.empty())
@@ -465,6 +525,16 @@ namespace {
       die(".msix output requires --platform win");
     if (has_suffix(a.out, ".tar.gz") && a.platform != "linux")
       die(".tar.gz output requires --platform linux");
+    if (!a.installer_explicit && a.installer == InstallerFormat::None) {
+      if (is_macos_dmg_output(a))
+        a.installer = InstallerFormat::Dmg;
+      else if (is_windows_msi_output(a))
+        a.installer = InstallerFormat::Msi;
+      else if (is_windows_msix_output(a))
+        a.installer = InstallerFormat::Msix;
+      else if (is_linux_appimage_output(a))
+        a.installer = InstallerFormat::AppImage;
+    }
     return a;
   }
 
@@ -472,9 +542,11 @@ namespace {
     if (!a.identity.empty()) {
       if (a.platform != "macos")
         die("--identity is only supported with --platform macos");
-      if (!is_macos_app_output(a) && !is_macos_dmg_output(a) && !a.dmg)
+      if (!is_macos_app_output(a) && !is_macos_dmg_output(a) &&
+          a.installer != InstallerFormat::Dmg) {
         die("--identity requires macOS .app or .dmg output (use --out <name>.app, <name>.dmg, or "
-            "--dmg)");
+            "--installer dmg)");
+      }
 #if !defined(__APPLE__)
       die("--identity requires Apple's codesign tool and can only run on macOS hosts");
 #else
@@ -485,9 +557,11 @@ namespace {
     if (!a.notarize_profile.empty()) {
       if (a.platform != "macos")
         die("--notarize-profile is only supported with --platform macos");
-      if (!is_macos_app_output(a) && !is_macos_dmg_output(a) && !a.dmg)
+      if (!is_macos_app_output(a) && !is_macos_dmg_output(a) &&
+          a.installer != InstallerFormat::Dmg) {
         die("--notarize-profile requires macOS .app or .dmg output (use --out <name>.app, "
-            "<name>.dmg, or --dmg)");
+            "<name>.dmg, or --installer dmg)");
+      }
 #if !defined(__APPLE__)
       die("--notarize-profile requires xcrun notarytool and can only run on macOS hosts");
 #else
@@ -509,7 +583,7 @@ namespace {
         die("--cert requires signtool, which was not found in PATH");
 #endif
     }
-    if (a.dmg || is_macos_dmg_output(a)) {
+    if (a.installer == InstallerFormat::Dmg || is_macos_dmg_output(a)) {
 #if !defined(__APPLE__)
       die(".dmg output requires hdiutil and can only be built on macOS hosts");
 #else
@@ -517,30 +591,31 @@ namespace {
         die(".dmg output requires hdiutil, which was not found in PATH");
 #endif
     }
-    if (a.msi || is_windows_msi_output(a)) {
+    if (a.installer == InstallerFormat::Msi || is_windows_msi_output(a)) {
       if (!tool_exists("candle") || !tool_exists("light"))
         die("WiX not found on PATH (requires candle.exe and light.exe)");
 #if !defined(_WIN32)
-      if (!a.msi)
+      if (a.installer != InstallerFormat::Msi)
         die(".msi output requires WiX tooling and can only be built on Windows hosts");
 #endif
     }
-    if (a.msix || is_windows_msix_output(a)) {
+    if (a.installer == InstallerFormat::Msix || is_windows_msix_output(a)) {
       if (!tool_exists("makeappx.exe") && !tool_exists("makeappx"))
         die("makeappx.exe not found on PATH (Windows SDK MakeAppx is required)");
 #if defined(_WIN32)
       if (!a.cert.empty() && !tool_exists("signtool"))
         die(".msix signing requires Windows SDK signtool, which was not found in PATH");
 #else
-      if (!a.msix)
+      if (a.installer != InstallerFormat::Msix)
         die(".msix output requires Windows SDK MakeAppx and can only be built on Windows hosts");
 #endif
     }
-    if (a.appimage && a.platform != "linux")
-      die("--appimage requires --platform linux");
+    if (a.installer == InstallerFormat::AppImage && a.platform != "linux")
+      die("--installer appimage requires --platform linux");
     if (fs::path(a.out).extension() == ".AppImage" && a.platform != "linux")
       die("AppImage output requires --platform linux");
-    if (a.platform == "linux" && (a.appimage || fs::path(a.out).extension() == ".AppImage") &&
+    if (a.platform == "linux" &&
+        (a.installer == InstallerFormat::AppImage || fs::path(a.out).extension() == ".AppImage") &&
         !tool_exists("appimagetool")) {
       die("AppImage output was requested but appimagetool was not found in PATH; use --out "
           "<name>.tar.gz for fallback packaging or install appimagetool");
@@ -742,7 +817,7 @@ namespace {
     std::string plist =
         subst(load_template_or(tmpl_dir, "Info.plist.in", ""), "FXE_APP_NAME", a.name);
     plist = subst(plist, "FXE_APP_BUNDLE_ID", "com.fxe." + a.name);
-    plist = subst(plist, "FXE_APP_VERSION", a.version);
+    plist = subst(plist, "FXE_APP_VERSION", a.package.version);
     spit(app / "Contents" / "Info.plist", plist);
 
     if (!a.webauthn_rp_ids.empty()) {
@@ -1073,8 +1148,8 @@ namespace {
     }
     std::string wxs_body = load_template_or(tmpl_dir, "wix_product.wxs.in", "");
     wxs_body = subst(wxs_body, "APP_NAME", xml_escape(a.name));
-    wxs_body = subst(wxs_body, "VERSION", a.version);
-    wxs_body = subst(wxs_body, "MANUFACTURER", a.manufacturer);
+    wxs_body = subst(wxs_body, "VERSION", a.package.version);
+    wxs_body = subst(wxs_body, "MANUFACTURER", a.package.manufacturer);
     wxs_body = subst(wxs_body, "PRODUCT_CODE", generate_uuid());
     wxs_body = subst(wxs_body, "UPGRADE_CODE", "8F128C0A-5D3F-4F71-8CC0-34796C1FCB5D");
     wxs_body = subst(wxs_body, "EXE_RELATIVE_PATH", xml_escape(exe.filename().string()));
@@ -1122,8 +1197,8 @@ namespace {
 
     std::string manifest = load_template_or(tmpl_dir, "AppxManifest.xml.in", "");
     manifest = subst(manifest, "APP_NAME", xml_escape(a.name));
-    manifest = subst(manifest, "VERSION", four_part_version(a.version));
-    manifest = subst(manifest, "MANUFACTURER", a.manufacturer);
+    manifest = subst(manifest, "VERSION", four_part_version(a.package.version));
+    manifest = subst(manifest, "MANUFACTURER", a.package.manufacturer);
     manifest = subst(manifest, "IDENTITY_NAME", "com.fxe." + xml_escape(safe_identifier(a.name)));
     manifest = subst(manifest, "PUBLISHER", xml_escape(msix_publisher(a)));
     manifest = subst(manifest, "EXE_RELATIVE_PATH", xml_escape(exe.filename().string()));
@@ -1205,9 +1280,9 @@ namespace {
         << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         << "<Wix xmlns=\"http://schemas.microsoft.com/wix/2006/wi\">\n"
         << "<Product Id=\"*\" Name=\"" << xml_escape(a.name) << "\" Language=\"1033\" Version=\""
-        << xml_escape(a.version) << "\" Manufacturer=\"" << xml_escape(a.manufacturer)
-        << "\" "
-           "UpgradeCode=\"8F128C0A-5D3F-4F71-8CC0-34796C1FCB5D\">\n"
+        << xml_escape(a.package.version) << "\" Manufacturer=\""
+        << xml_escape(a.package.manufacturer)
+        << "\" UpgradeCode=\"8F128C0A-5D3F-4F71-8CC0-34796C1FCB5D\">\n"
         << "<Package InstallerVersion=\"500\" Compressed=\"yes\" InstallScope=\"perMachine\"/>\n"
         << "<MediaTemplate EmbedCab=\"yes\"/>\n"
         << "<Directory Id=\"TARGETDIR\" Name=\"SourceDir\"><Directory Id=\"ProgramFilesFolder\">"
@@ -1263,11 +1338,11 @@ namespace {
            "xmlns:uap=\"http://schemas.microsoft.com/appx/manifest/uap/windows10\" "
            "IgnorableNamespaces=\"uap\">\n"
         << "<Identity Name=\"com.fxe." << xml_escape(identity) << "\" Publisher=\""
-        << xml_escape(publisher) << "\" Version=\"" << xml_escape(four_part_version(a.version))
-        << "\"/>\n"
+        << xml_escape(publisher) << "\" Version=\""
+        << xml_escape(four_part_version(a.package.version)) << "\"/>\n"
         << "<Properties><DisplayName>" << xml_escape(a.name)
-        << "</DisplayName><PublisherDisplayName>"
-        << xml_escape(a.manufacturer) "<Logo>Assets\\StoreLogo.png</Logo></Properties>\n"
+        << "</DisplayName><PublisherDisplayName>" << xml_escape(a.package.manufacturer)
+        << "</PublisherDisplayName><Logo>Assets\\StoreLogo.png</Logo></Properties>\n"
         << "<Resources><Resource Language=\"en-us\"/></Resources>\n"
         << "<Dependencies><TargetDeviceFamily Name=\"Windows.Desktop\" MinVersion=\"10.0.17763.0\" "
            "MaxVersionTested=\"10.0.22621.0\"/></Dependencies>\n"
@@ -1313,14 +1388,14 @@ namespace {
 
 int main(int argc, char** argv) {
   Args a = parse(argc, argv);
-  if (produces_installer(a) && a.version.empty())
+  if (produces_installer(a) && a.package.version.empty())
     die("--version is required when producing an installer (.dmg/.msi/.msix/.appimage)");
-  if (produces_installer(a) && a.manufacturer.empty())
+  if (produces_installer(a) && a.package.manufacturer.empty())
     die("--manufacturer/--publisher is required when producing an installer");
-  if (!produces_installer(a) && a.version.empty())
-    a.version = "0.0.0"; // non-installer fallback
-  if (!produces_installer(a) && a.manufacturer.empty())
-    a.manufacturer = "unknown"; // non-installer fallback
+  if (!produces_installer(a) && a.package.version.empty())
+    a.package.version = "0.0.0"; // non-installer fallback
+  if (!produces_installer(a) && a.package.manufacturer.empty())
+    a.package.manufacturer = "unknown"; // non-installer fallback
   validate_requested_tools(a);
 
   fs::path self = fs::weakly_canonical(fs::path(argv[0]));
@@ -1339,13 +1414,13 @@ int main(int argc, char** argv) {
   std::string err;
   fxe::bundle::ManifestMetadata manifest;
   manifest.app_name = a.name;
-  manifest.version = a.version;
+  manifest.version = a.package.version;
   manifest.entry = files.entry_archive;
   manifest.created_at = utc_timestamp();
   manifest.compression = compression_name(a.compress);
-  manifest.update_url = a.update_url;
-  manifest.public_key = a.public_key;
-  manifest.channel = a.channel;
+  manifest.update_url = a.package.update_url;
+  manifest.public_key = a.package.public_key;
+  manifest.channel = a.package.channel;
 
   if (!fxe::bundle::pack_files(staged_bin.string(),
                                std::vector<std::pair<std::string, std::string>>(files.v), &manifest,
@@ -1360,7 +1435,7 @@ int main(int argc, char** argv) {
   std::string artifact_kind = "bundled binary";
   std::vector<std::pair<std::string, fs::path>> extra_artifacts;
 
-  if (a.platform == "macos" && a.dmg) {
+  if (a.platform == "macos" && a.installer == InstallerFormat::Dmg) {
     fs::path app_out = requested_out;
     if (app_out.extension() == ".dmg")
       app_out.replace_extension(".app");
@@ -1382,21 +1457,22 @@ int main(int argc, char** argv) {
   } else if (a.platform == "macos" && requested_out.extension() == ".dmg") {
     final_out = wrap_macos_dmg(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
     artifact_kind = "macOS DMG disk image";
-  } else if (a.platform == "win" && (a.msi || a.msix)) {
+  } else if (a.platform == "win" &&
+             (a.installer == InstallerFormat::Msi || a.installer == InstallerFormat::Msix)) {
     fs::path exe_out = requested_out;
     if (exe_out.extension() == ".msi" || exe_out.extension() == ".msix")
       exe_out.replace_extension(".exe");
     final_out = wrap_win_exe(a, staged_bin, exe_out, fxe_run.parent_path());
     artifact_kind = "Windows .exe";
     sign_windows_exe_or_die(a, final_out);
-    if (a.msi) {
+    if (a.installer == InstallerFormat::Msi) {
       fs::path msi_out = requested_out.extension() == ".msi"
                              ? requested_out
                              : path_with_extension(final_out, ".msi");
       extra_artifacts.emplace_back("Windows MSI installer",
                                    create_msi_from_exe(a, final_out, msi_out, tmpl_dir));
     }
-    if (a.msix) {
+    if (a.installer == InstallerFormat::Msix) {
       fs::path msix_out = requested_out.extension() == ".msix"
                               ? requested_out
                               : path_with_extension(final_out, ".msix");
@@ -1413,7 +1489,8 @@ int main(int argc, char** argv) {
     final_out = wrap_win_exe(a, staged_bin, requested_out, fxe_run.parent_path());
     artifact_kind = "Windows .exe";
     sign_windows_exe_or_die(a, final_out);
-  } else if (a.platform == "linux" && (a.appimage || requested_out.extension() == ".AppImage")) {
+  } else if (a.platform == "linux" && (a.installer == InstallerFormat::AppImage ||
+                                       requested_out.extension() == ".AppImage")) {
     final_out = wrap_linux_appimage(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
     artifact_kind = "Linux AppImage";
   } else if (a.platform == "linux" && has_suffix(requested_out.string(), ".tar.gz")) {

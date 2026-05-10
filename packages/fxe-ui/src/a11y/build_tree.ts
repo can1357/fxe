@@ -6,6 +6,7 @@ import type {
   AccessibilityTreeSnapshot,
   AccessibilityValue,
 } from './types.ts';
+import { expandVirtualDescendants, getVirtualSources } from './virtual.ts';
 
 /**
  * Public input shape. Apps emit this from the reconciler post-commit. The
@@ -99,6 +100,12 @@ export function buildAccessibilityTree(
   const nodesById: Record<string, AccessibilityNodeSnapshot> = {};
   const childrenById: Record<string, string[]> = {};
 
+  function syncSnapshot(snapshot: AccessibilityNodeSnapshot): void {
+    nodesById[snapshot.id] = snapshot;
+    childrenById[snapshot.id] = snapshot.children.map((child) => child.id);
+    for (const child of snapshot.children) syncSnapshot(child);
+  }
+
   function visit(
     node: AccessibilityFiberLike,
     parentId: string | null,
@@ -138,7 +145,6 @@ export function buildAccessibilityTree(
       headingLevel: node.a11y.accessibilityHeadingLevel,
       children: [],
     };
-    nodesById[node.id] = snapshot;
     if (parentId !== null) {
       let existing = childrenById[parentId];
       if (existing === undefined) {
@@ -154,7 +160,10 @@ export function buildAccessibilityTree(
       const r = visit(c, node.id);
       if (r) snapshot.children.push(r);
     }
-    return snapshot;
+    const virtualSource = getVirtualSources().get(node.id);
+    const expanded = virtualSource ? expandVirtualDescendants(snapshot, virtualSource) : snapshot;
+    syncSnapshot(expanded);
+    return expanded;
   }
 
   visit(root, null);
