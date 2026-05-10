@@ -34,7 +34,6 @@
 #include <atomic>
 #include <bit>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -340,15 +339,6 @@ namespace fxe {
         wgpu::SurfaceTexture surf_tex{};
         surface_.GetCurrentTexture(&surf_tex);
         win_.set_vsync(want_vsync_);
-        static int frame_dbg = 0;
-        if (frame_dbg < 3) {
-          std::fprintf(stderr, "fxe.frame[%d]: surf_status=%u verts=%llu tris=%u\n", frame_dbg,
-                       static_cast<unsigned>(surf_tex.status),
-                       static_cast<unsigned long long>(upload_buf_.vertex_buffer.size()),
-                       static_cast<unsigned>(
-                           upload_buf_.index_buffers[usize(vertex_topology::triangle)].size()));
-          ++frame_dbg;
-        }
         const bool tex_ok =
             surf_tex.status == wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal ||
             surf_tex.status == wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal;

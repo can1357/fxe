@@ -1,5 +1,6 @@
 import { blockSelectionFromAnchorFocus } from '../packages/fxe-ui/src/components/editable_area_block_select.ts';
 import { assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
+
 type DocumentLike = InstanceType<typeof TextDocument>;
 
 test('forward block selection preserves direction across rows', () => {

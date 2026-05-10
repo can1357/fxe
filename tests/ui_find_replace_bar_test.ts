@@ -3,13 +3,13 @@ import {
   buildReplaceAllEdits,
   buildReplaceCurrentEdit,
   dedupeRegexFlags,
+  type FindReplaceActiveMatch,
+  type FindReplaceSearchState,
   findNextIndexAfterReplacement,
   getActiveMatch,
   nextActiveIndex,
   prevActiveIndex,
   resolveFindReplaceState,
-  type FindReplaceActiveMatch,
-  type FindReplaceSearchState,
 } from '../packages/fxe-ui/src/components/find_replace_logic.ts';
 import { assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 

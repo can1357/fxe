@@ -8,13 +8,13 @@ import {
   applyFindReplaceEdits,
   buildReplaceAllEdits,
   buildReplaceCurrentEdit,
+  type FindReplaceDispatch,
+  type FindReplaceSearchState,
   findNextIndexAfterReplacement,
   getActiveMatch,
   nextActiveIndex,
   prevActiveIndex,
   resolveFindReplaceState,
-  type FindReplaceDispatch,
-  type FindReplaceSearchState,
 } from './find_replace_logic.ts';
 import { Text } from './Text.ts';
 import { TextInput } from './TextInput.ts';

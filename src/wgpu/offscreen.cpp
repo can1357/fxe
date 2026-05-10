@@ -1,4 +1,5 @@
 #include <fxe/font.hpp>
+#include <fxe/log.hpp>
 #include <fxe/offscreen.hpp>
 #include <fxe/spritesheet.hpp>
 
@@ -9,7 +10,6 @@
 #include <atomic>
 #include <bit>
 #include <chrono>
-#include <cstdio>
 #include <cstring>
 #include <fxe/types.hpp>
 #include <memory>
@@ -72,9 +72,8 @@ namespace fxe {
       explicit null_offscreen_renderer(offscreen_options options)
           : options_(sanitize(options)), window_({options_.width, options_.height}) {
         if (!check_multisample_count(options_.multisample)) {
-          std::fprintf(stderr,
-                       "fxe.offscreen: unsupported multisample count %u; falling back to 1\n",
-                       options_.multisample);
+          FXE_WARN("wgpu.offscreen", "unsupported multisample count {}; falling back to 1",
+                   options_.multisample);
           options_.multisample = 1;
         }
         multisample_count_ = options_.multisample;
@@ -203,7 +202,7 @@ namespace fxe {
               adapter = std::move(a);
             } else {
               std::string m(msg.data, msg.length);
-              std::fprintf(stderr, "fxe.offscreen: RequestAdapter failed: %s\n", m.c_str());
+              FXE_ERROR("wgpu.offscreen", "RequestAdapter failed: {}", m);
             }
           });
       wait_future(instance, fut);
@@ -216,12 +215,11 @@ namespace fxe {
       wgpu::Device device;
       wgpu::DeviceDescriptor desc{};
       desc.label = "fxe-offscreen-device";
-      desc.SetUncapturedErrorCallback(
-          [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView message) {
-            std::string m(message.data, message.length);
-            std::fprintf(stderr, "fxe.offscreen: device error (type=%u): %s\n",
-                         static_cast<unsigned>(type), m.c_str());
-          });
+      desc.SetUncapturedErrorCallback([](const wgpu::Device&, wgpu::ErrorType type,
+                                         wgpu::StringView message) {
+        std::string m(message.data, message.length);
+        FXE_ERROR("wgpu.offscreen", "device error (type={}): {}", static_cast<unsigned>(type), m);
+      });
       auto fut = adapter.RequestDevice(
           &desc, wgpu::CallbackMode::WaitAnyOnly,
           [&device](wgpu::RequestDeviceStatus status, wgpu::Device d, wgpu::StringView msg) {
@@ -229,7 +227,7 @@ namespace fxe {
               device = std::move(d);
             } else {
               std::string m(msg.data, msg.length);
-              std::fprintf(stderr, "fxe.offscreen: RequestDevice failed: %s\n", m.c_str());
+              FXE_ERROR("wgpu.offscreen", "RequestDevice failed: {}", m);
             }
           });
       wait_future(instance, fut);
@@ -283,9 +281,8 @@ namespace fxe {
           queue_ = device_.GetQueue();
         }
         if (!check_multisample_count(options_.multisample)) {
-          std::fprintf(stderr,
-                       "fxe.offscreen: unsupported multisample count %u; falling back to 1\n",
-                       options_.multisample);
+          FXE_WARN("wgpu.offscreen", "unsupported multisample count {}; falling back to 1",
+                   options_.multisample);
           options_.multisample = 1;
         }
         multisample_count_ = options_.multisample;
@@ -385,8 +382,8 @@ namespace fxe {
         const bool blur_ready = blur_capture_texture_ && blur_capture_view_ && blur_ping_texture_ &&
                                 blur_ping_view_ && blur_pong_texture_ && blur_pong_view_;
         if (has_blur && !blur_ready && !blur_texture_failure_logged_) {
-          std::fprintf(stderr, "fxe.offscreen: blur intermediate texture allocation failed; "
-                               "falling back to unblurred base\n");
+          FXE_WARN("wgpu.offscreen",
+                   "blur intermediate texture allocation failed; falling back to unblurred base");
           blur_texture_failure_logged_ = true;
         }
 
@@ -722,8 +719,8 @@ namespace fxe {
         const u32 max_levels = max_mip_levels(w, h);
         const u32 mip_levels = std::min(options_.mip_levels, max_levels);
         if (mip_levels != options_.mip_levels) {
-          std::fprintf(stderr, "fxe.offscreen: mipLevels %u exceeds atlas maximum %u; clamping\n",
-                       options_.mip_levels, max_levels);
+          FXE_WARN("wgpu.offscreen", "mipLevels {} exceeds atlas maximum {}; clamping",
+                   options_.mip_levels, max_levels);
         }
         wgpu::TextureDescriptor td{};
         td.label = "fxe-offscreen-atlas";

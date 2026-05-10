@@ -20,6 +20,7 @@ import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { isPrimaryModifier, MOD_ALT, MOD_SHIFT } from '../text/edit_model.ts';
 import { rectFromStyle } from './common.ts';
+import { blockSelectionFromAnchorFocus } from './editable_area_block_select.ts';
 import {
   addNextOccurrence,
   applyEditsAtRanges,
@@ -31,7 +32,6 @@ import {
   inferIndent,
   outdentSelection,
 } from './editable_area_logic.ts';
-import { blockSelectionFromAnchorFocus } from './editable_area_block_select.ts';
 import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
 
 export type { BracketContextProvider } from './editable_area_logic.ts';

@@ -1,10 +1,10 @@
 import { CommandBuffer } from 'fxe';
 import {
-  Minimap,
   clearHitTargets,
   dispatchMouseDown,
   dispatchMouseMove,
   hitTest,
+  Minimap,
   render,
   resetEventPipeline,
 } from 'fxe-ui';

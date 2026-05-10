@@ -739,7 +739,7 @@ namespace fxe {
   static void warn_once(bool& warned, const char* message) {
     if (!warned) {
       warned = true;
-      std::fprintf(stderr, "%s\n", message);
+      FXE_WARN("window", "{}", message);
     }
   }
 
@@ -970,19 +970,6 @@ namespace fxe {
       // GLFW/X11 and GLFW/Wayland expose file paths only at Xdnd drop time; they do not
       // surface native drag enter/position/leave events for us to forward.
 #endif
-
-      int wx = 0, wy = 0, ww = 0, wh = 0;
-      glfwGetWindowPos(handle_, &wx, &wy);
-      glfwGetWindowSize(handle_, &ww, &wh);
-      std::fprintf(stderr, "fxe.window: created \"%.*s\" at (%d,%d) %dx%d (visible=%d)\n",
-                   int(title_.size()), title_.c_str(), wx, wy, ww, wh,
-                   glfwGetWindowAttrib(handle_, GLFW_VISIBLE));
-      for (int i = 0; i < 8; ++i)
-        glfwPollEvents();
-      std::fprintf(stderr, "fxe.window: post-pump visible=%d focused=%d hovered=%d\n",
-                   glfwGetWindowAttrib(handle_, GLFW_VISIBLE),
-                   glfwGetWindowAttrib(handle_, GLFW_FOCUSED),
-                   glfwGetWindowAttrib(handle_, GLFW_HOVERED));
     }
 
     ~glfw_window() override {

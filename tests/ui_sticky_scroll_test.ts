@@ -1,4 +1,4 @@
-import { StickyScroll, createIndentOutlineProvider, createTreeSitterOutlineProvider } from 'fxe-ui';
+import { createIndentOutlineProvider, createTreeSitterOutlineProvider, StickyScroll } from 'fxe-ui';
 import { resolveStickyScrollEntries } from '../packages/fxe-ui/src/components/StickyScroll.ts';
 import { getIndentStickyEntries } from '../packages/fxe-ui/src/components/sticky_scroll_outline.ts';
 import { assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';

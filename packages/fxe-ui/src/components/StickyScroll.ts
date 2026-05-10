@@ -1,5 +1,4 @@
 import { type Color, Primitives, type TextDocument } from 'fxe';
-import type { LineSpan } from './LineViewport.ts';
 import {
   Component,
   Draw,
@@ -11,12 +10,13 @@ import {
 import type { Style } from '../style/types.ts';
 import { useTextStyle } from '../theme/index.ts';
 import { useTheme } from '../theme/provider.ts';
-import { View } from './View.ts';
+import type { LineSpan } from './LineViewport.ts';
 import {
   createIndentOutlineProvider,
   type OutlineEntry,
   type OutlineProvider,
 } from './sticky_scroll_outline.ts';
+import { View } from './View.ts';
 
 export interface StickyScrollProps {
   key?: string;
