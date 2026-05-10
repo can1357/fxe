@@ -44,7 +44,7 @@ namespace fxe {
     virtual ~pipeline() = default;
     virtual void update_uniforms(const void* data, usize bytes) = 0;
     virtual void bind_texture(u32 binding, texture_id tex) = 0;
-    virtual void draw(command_buffer& cb, const float* vertices, usize vertex_count,
+    virtual void draw(command_sink& cb, const float* vertices, usize vertex_count,
                       const u32* indices, usize index_count, const float matrix[16]) = 0;
   };
 
@@ -111,7 +111,7 @@ namespace fxe {
         bound_textures_[binding] = tex;
       }
 
-      void draw(command_buffer& cb, const float* vertices, usize vertex_count, const u32* indices,
+      void draw(command_sink& cb, const float* vertices, usize vertex_count, const u32* indices,
                 usize index_count, const float matrix[16]) override {
         (void)matrix;
         auto [out_vertices, out_indices] =

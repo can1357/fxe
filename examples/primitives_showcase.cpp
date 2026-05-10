@@ -21,5 +21,5 @@ int main() {
                              {.color = fxe::white, .pt = 32.0f});
   renderer->end_frame();
 
-  return renderer->vertex_buffer.empty() ? 1 : 0;
+  return renderer->is_empty() ? 1 : 0;
 }

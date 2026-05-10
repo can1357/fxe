@@ -103,9 +103,12 @@ namespace fxe::layout {
   };
 
   // Solve the tree. Throws std::runtime_error on internal Yoga config errors.
-  // The returned Result tree mirrors `root`'s structure exactly (one Result
-  // entry per Node child, in the same order — display:none children still
-  // produce a Result entry with width=height=0).
+  // The returned Result tree mirrors `root`'s structure with two filters:
+  //   * children whose style sets `display: none` are dropped from the
+  //     parent's `children` list (no zero-sized placeholder is emitted),
+  //   * `flexDirection: row-reverse` / `column-reverse` reverses the visual
+  //     order while keeping main-start at the leading edge — the returned
+  //     children stay in the input order so callers can index them naturally.
   Result solve(const Node& root, const Constraint& constraint = {});
 
 } // namespace fxe::layout

@@ -1,9 +1,10 @@
-// JS bindings for fxe::renderer. Inherits from the CommandBuffer JS class so
-// allocate/clear/transform/queue all show up on Renderer instances unchanged.
+// JS bindings for fxe::renderer. Renderer composes its own command-buffer
+// storage and exposes the CommandBuffer-compatible mutation methods explicitly.
 //
 // Type tag 'REND'.
 
 #include "bind_pipeline.hpp"
+#include "js_command_buffer.hpp"
 #include "weak_holder.hpp"
 #include <fxe/js_bindings.hpp>
 #include <fxe/offscreen.hpp>
@@ -20,8 +21,6 @@
 #include <v8.h>
 
 namespace fxe::js {
-  // Defined in bind_command_buffer.cpp.
-  v8::Local<v8::FunctionTemplate> get_command_buffer_template(v8::Isolate*);
 
   namespace {
     using namespace v8;
@@ -296,6 +295,267 @@ namespace fxe::js {
         return;
       r->end_frame();
     }
+    command_view* unwrap_command_view(Local<Value> value) {
+      if (value.IsEmpty() || !value->IsObject())
+        return nullptr;
+      auto obj = value.As<Object>();
+      if (void* raw = unwrap(obj, TAG_COMMAND_BUFFER))
+        return static_cast<js_command_buffer*>(raw);
+      if (void* raw = unwrap(obj, TAG_RENDERER))
+        return static_cast<renderer*>(raw);
+      return nullptr;
+    }
+
+    Local<ArrayBuffer> array_buffer_view(Isolate* iso, void* data, usize bytes) {
+      auto bs = ArrayBuffer::NewBackingStore(data, bytes, [](void*, usize, void*) {}, nullptr);
+      return ArrayBuffer::New(iso, std::move(bs));
+    }
+
+    bool read_topology_arg(const FunctionCallbackInfo<Value>& info, u32 index, u32& top) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      top = info.Length() > static_cast<int>(index)
+                ? info[static_cast<int>(index)]->Uint32Value(ctx).FromMaybe(0)
+                : 0;
+      if (top >= static_cast<u32>(vertex_topology::max)) {
+        (void)throw_range_error(iso, "topology out of range");
+        return false;
+      }
+      return true;
+    }
+
+    bool decode_mat4(Local<Value> value, math::mat4x4& out) {
+      if (!value->IsFloat32Array())
+        return false;
+      auto arr = value.As<Float32Array>();
+      if (arr->Length() < 16)
+        return false;
+      float tmp[16];
+      arr->CopyContents(tmp, sizeof(tmp));
+      out = math::mat4x4(tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7], tmp[8],
+                         tmp[9], tmp[10], tmp[11], tmp[12], tmp[13], tmp[14], tmp[15]);
+      return true;
+    }
+
+    bool decode_vec4(Isolate* iso, Local<Value> value, math::vec4& out) {
+      if (value->IsFloat32Array()) {
+        auto arr = value.As<Float32Array>();
+        if (arr->Length() < 4)
+          return false;
+        float tmp[4];
+        arr->CopyContents(tmp, sizeof(tmp));
+        out = {tmp[0], tmp[1], tmp[2], tmp[3]};
+        return true;
+      }
+      if (value->IsArray()) {
+        auto arr = value.As<Array>();
+        if (arr->Length() < 4)
+          return false;
+        auto ctx = iso->GetCurrentContext();
+        float tmp[4];
+        for (u32 i = 0; i != 4; ++i) {
+          Local<Value> elt;
+          if (!arr->Get(ctx, i).ToLocal(&elt))
+            return false;
+          tmp[i] = static_cast<float>(elt->NumberValue(ctx).FromMaybe(0.0));
+        }
+        out = {tmp[0], tmp[1], tmp[2], tmp[3]};
+        return true;
+      }
+      return false;
+    }
+
+    void rend_clear(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (r)
+        r->clear();
+    }
+
+    void rend_epoch(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (r)
+        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, r->epoch()));
+    }
+
+    void rend_vertex_count(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (r)
+        info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, r->vertex_count()));
+    }
+
+    void rend_index_count(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      u32 top = 0;
+      if (!read_topology_arg(info, 0, top))
+        return;
+      info.GetReturnValue().Set(
+          Integer::NewFromUnsigned(iso, r->index_count(static_cast<vertex_topology>(top))));
+    }
+
+    void rend_is_empty(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (r)
+        info.GetReturnValue().Set(r->is_empty());
+    }
+
+    void rend_bounds(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      if (r->vertices().empty()) {
+        info.GetReturnValue().SetNull();
+        return;
+      }
+      auto [mn, mx] = r->get_boundaries();
+      auto out = Object::New(iso);
+      (void)out->Set(ctx, "x"_v8(iso), Number::New(iso, static_cast<double>(mn.x)));
+      (void)out->Set(ctx, "y"_v8(iso), Number::New(iso, static_cast<double>(mn.y)));
+      (void)out->Set(ctx, "width"_v8(iso), Number::New(iso, static_cast<double>(mx.x - mn.x)));
+      (void)out->Set(ctx, "height"_v8(iso), Number::New(iso, static_cast<double>(mx.y - mn.y)));
+      info.GetReturnValue().Set(out);
+    }
+
+    void rend_transform(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      math::mat4x4 m{1.0f};
+      if (info.Length() < 1 || !decode_mat4(info[0], m)) {
+        (void)throw_type_error(iso, "transform: expected Float32Array(16)");
+        return;
+      }
+      r->transform(m);
+    }
+
+    void rend_queue(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      if (info.Length() < 1) {
+        (void)throw_type_error(iso, "queue: expected CommandBuffer");
+        return;
+      }
+      auto* other = unwrap_command_view(info[0]);
+      if (!other) {
+        (void)throw_type_error(iso, "queue: argument is not a CommandBuffer");
+        return;
+      }
+      math::mat4x4 m = math::identity();
+      if (info.Length() >= 2 && !info[1]->IsUndefined() && !decode_mat4(info[1], m)) {
+        (void)throw_type_error(iso, "queue: mat must be Float32Array(16)");
+        return;
+      }
+      std::optional<math::vec4> tint;
+      if (info.Length() >= 3 && !info[2]->IsUndefined()) {
+        math::vec4 t{1, 1, 1, 1};
+        if (!decode_vec4(iso, info[2], t)) {
+          (void)throw_type_error(iso, "queue: tint must be Float32Array(4)");
+          return;
+        }
+        tint = t;
+      }
+      r->queue(*other, m, tint);
+    }
+
+    void rend_buffers(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      u32 top = 0;
+      if (!read_topology_arg(info, 0, top))
+        return;
+      const auto verts = r->vertices();
+      const auto idxs = r->indices(static_cast<vertex_topology>(top));
+      auto out = Object::New(iso);
+      auto vab = array_buffer_view(iso, const_cast<vertex*>(verts.data()), verts.size_bytes());
+      auto iab = array_buffer_view(iso, const_cast<u32*>(idxs.data()), idxs.size_bytes());
+      (void)out->Set(ctx, "verts"_v8(iso),
+                     Float32Array::New(vab, 0, verts.size_bytes() / sizeof(float)));
+      (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, idxs.size()));
+      (void)out->Set(ctx, "epoch"_v8(iso), Integer::NewFromUnsigned(iso, r->epoch()));
+      info.GetReturnValue().Set(out);
+    }
+
+    void rend_vertex_buffer(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      const auto verts = r->vertices();
+      auto ab = array_buffer_view(iso, const_cast<vertex*>(verts.data()), verts.size_bytes());
+      info.GetReturnValue().Set(Float32Array::New(ab, 0, verts.size_bytes() / sizeof(float)));
+    }
+
+    void rend_index_buffer(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      u32 top = 0;
+      if (!read_topology_arg(info, 0, top))
+        return;
+      const auto idxs = r->indices(static_cast<vertex_topology>(top));
+      auto ab = array_buffer_view(iso, const_cast<u32*>(idxs.data()), idxs.size_bytes());
+      info.GetReturnValue().Set(Uint32Array::New(ab, 0, idxs.size()));
+    }
+
+    void rend_allocate(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      if (info.Length() < 3) {
+        (void)throw_type_error(iso, "allocate(vtx, idx, top)");
+        return;
+      }
+      const u32 vtx = info[0]->Uint32Value(ctx).FromMaybe(0);
+      const u32 idx = info[1]->Uint32Value(ctx).FromMaybe(0);
+      u32 top = 0;
+      if (!read_topology_arg(info, 2, top))
+        return;
+      const auto topology = static_cast<vertex_topology>(top);
+      const u32 base = r->vertex_count();
+      const u32 index_base = r->index_count(topology);
+      auto [verts, indices] = r->allocate(vtx, idx, topology);
+      auto out = Object::New(iso);
+      auto vab = array_buffer_view(iso, verts, static_cast<usize>(vtx) * sizeof(vertex));
+      auto iab = array_buffer_view(iso, indices, static_cast<usize>(idx) * sizeof(u32));
+      (void)out->Set(
+          ctx, "verts"_v8(iso),
+          Float32Array::New(vab, 0, static_cast<usize>(vtx) * sizeof(vertex) / sizeof(float)));
+      (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, idx));
+      (void)out->Set(ctx, "base"_v8(iso), Integer::NewFromUnsigned(iso, base));
+      (void)out->Set(ctx, "indexBase"_v8(iso), Integer::NewFromUnsigned(iso, index_base));
+      (void)out->Set(ctx, "epoch"_v8(iso), Integer::NewFromUnsigned(iso, r->epoch()));
+      info.GetReturnValue().Set(out);
+    }
+
     void rend_set_clear_color(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -335,10 +595,8 @@ namespace fxe::js {
     auto tpl = FunctionTemplate::New(iso, rend_constructor);
     tpl->SetClassName("Renderer"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
-    // Inherit allocate/clear/queue/transform/epoch/etc. from CommandBuffer.
-    tpl->Inherit(get_command_buffer_template(iso));
-
     auto proto = tpl->PrototypeTemplate();
+
     proto->Set(iso, "beginFrame", FunctionTemplate::New(iso, rend_begin_frame));
     proto->Set(iso, "endFrame", FunctionTemplate::New(iso, rend_end_frame));
     proto->Set(iso, "setMultisample", FunctionTemplate::New(iso, rend_set_multisample));
@@ -348,10 +606,26 @@ namespace fxe::js {
     proto->Set(iso, "bindUserTexture", FunctionTemplate::New(iso, rend_bind_user_texture));
     proto->Set(iso, "worldToScreen", FunctionTemplate::New(iso, rend_world_to_screen));
     proto->Set(iso, "viewport", FunctionTemplate::New(iso, rend_viewport));
+    proto->Set(iso, "clear", FunctionTemplate::New(iso, rend_clear));
+    proto->Set(iso, "epoch", FunctionTemplate::New(iso, rend_epoch));
+    proto->Set(iso, "vertexCount", FunctionTemplate::New(iso, rend_vertex_count));
+    proto->Set(iso, "indexCount", FunctionTemplate::New(iso, rend_index_count));
+    proto->Set(iso, "bounds", FunctionTemplate::New(iso, rend_bounds));
+    proto->Set(iso, "transform", FunctionTemplate::New(iso, rend_transform));
+    proto->Set(iso, "queue", FunctionTemplate::New(iso, rend_queue));
+    proto->Set(iso, "buffers", FunctionTemplate::New(iso, rend_buffers));
+    proto->Set(iso, "vertexBuffer", FunctionTemplate::New(iso, rend_vertex_buffer));
+    proto->Set(iso, "indexBuffer", FunctionTemplate::New(iso, rend_index_buffer));
+    proto->Set(iso, "allocate", FunctionTemplate::New(iso, rend_allocate));
+    proto->Set(iso, "isEmpty", FunctionTemplate::New(iso, rend_is_empty));
 
     global->Set(iso, "Renderer", tpl);
     install_pipeline_template(iso, global);
     rend_tpl_table()[iso].Reset(iso, tpl);
+  }
+
+  Local<FunctionTemplate> get_renderer_template(Isolate* iso) {
+    return rend_tpl_table()[iso].Get(iso);
   }
 
   Local<Object> make_renderer_object(Isolate* iso, Local<Context> ctx, renderer* r) {

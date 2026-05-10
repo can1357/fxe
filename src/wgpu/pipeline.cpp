@@ -265,7 +265,7 @@ namespace fxe {
         rebuild_user_bind_group();
       }
 
-      void draw(command_buffer& cb, const float* vertices, usize vertex_count, const u32* indices,
+      void draw(command_sink& cb, const float* vertices, usize vertex_count, const u32* indices,
                 usize index_count, const float matrix[16]) override {
         (void)matrix;
         if (dynamic_cast<renderer*>(&cb) != owner_) {

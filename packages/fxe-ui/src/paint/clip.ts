@@ -56,7 +56,7 @@ export function coarseClip(
 ): CommandBuffer {
   const clip = normalizeRect(rect);
   const out = new CommandBuffer();
-  if (clip === null || children.isEmpty()) return out;
+  if (clip === null || children.__fxe_v_len === 0) return out;
 
   const verts = children.vertexBuffer();
   const words = new Uint32Array(verts.buffer, verts.byteOffset, verts.length);

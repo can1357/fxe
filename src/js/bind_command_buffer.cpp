@@ -1,12 +1,14 @@
-// JS bindings for fxe::command_buffer.
+// JS bindings for fxe::command_buffer / fxe::js::js_command_buffer.
 //
 // Type tag 'CMDB'. Internal field layout:
-//   0 = v8::External pointing at the C++ command_buffer
+//   0 = v8::External pointing at the native storage object
 //   1 = v8::Uint32 type tag (TAG_COMMAND_BUFFER, or TAG_RENDERER for Renderer)
 //
-// Construction allocates a heap command_buffer that the GC finalises via
-// SetWeak callback. Wrapping engine-owned buffers (renderer, etc.) skips the
-// finaliser by setting field 0 with EXT_FLAG_BORROWED encoded into the tag.
+// Script-created CommandBuffer instances own a js_command_buffer backed by
+// V8 BackingStores. Renderer still inherits these methods until the renderer
+// cutover; renderer storage is the legacy C++ command_buffer base.
+
+#include "js_command_buffer.hpp"
 
 #include <fxe/command_buffer.hpp>
 #include <fxe/js_bindings.hpp>
@@ -17,6 +19,7 @@
 #include <fxe/vertex.hpp>
 
 #include <cstdint>
+#include <exception>
 #include <unordered_map>
 #include <v8-fast-api-calls.h>
 #include <v8.h>
@@ -46,9 +49,16 @@ namespace fxe::js {
     static cb_resetter_register s_cb_resetter_register;
 
     struct cb_holder {
-      command_buffer* ptr = nullptr;
+      js_command_buffer* ptr = nullptr;
       bool owned = false;
       Global<Object>* self = nullptr;
+    };
+
+    struct cb_target {
+      command_sink* sink = nullptr;
+      command_view* view = nullptr;
+      js_command_buffer* js = nullptr;
+      command_buffer* native = nullptr;
     };
 
     void cb_finalizer(const WeakCallbackInfo<cb_holder>& info) {
@@ -64,51 +74,85 @@ namespace fxe::js {
       delete h;
     }
 
-    // CommandBuffer prototype methods are inherited by Renderer. Renderer has a
-    // distinct type tag, but its native object derives from command_buffer, so
-    // accept either tag without admitting unrelated wrappers.
-    command_buffer* unwrap_cb(Local<Object> self) {
-      if (void* raw = unwrap(self, TAG_COMMAND_BUFFER))
-        return static_cast<command_buffer*>(raw);
-      if (void* raw = unwrap(self, TAG_RENDERER))
-        return static_cast<command_buffer*>(static_cast<renderer*>(raw));
-      return nullptr;
+    cb_target unwrap_cb(Local<Object> self) {
+      if (void* raw = unwrap(self, TAG_COMMAND_BUFFER)) {
+        auto* cb = static_cast<js_command_buffer*>(raw);
+        return {cb, cb, cb, nullptr};
+      }
+      if (void* raw = unwrap(self, TAG_RENDERER)) {
+        auto* r = static_cast<renderer*>(raw);
+        return {r, r, nullptr, nullptr};
+      }
+      return {};
+    }
+
+    void define_counter_property(Isolate* iso, Local<Context> ctx, Local<Object> obj,
+                                 Local<String> key, u32 value) {
+      (void)obj->DefineOwnProperty(ctx, key, Integer::NewFromUnsigned(iso, value), None);
+    }
+
+    void sync_js_fields(Isolate* iso, Local<Context> ctx, Local<Object> obj,
+                        const js_command_buffer& cb) {
+      (void)obj->Set(ctx, "__fxe_v_len"_v8(iso), Integer::NewFromUnsigned(iso, cb.vertex_count()));
+      (void)obj->Set(ctx, "__fxe_tri_len"_v8(iso),
+                     Integer::NewFromUnsigned(iso, cb.index_count(vertex_topology::triangle)));
+      (void)obj->Set(ctx, "__fxe_line_len"_v8(iso),
+                     Integer::NewFromUnsigned(iso, cb.index_count(vertex_topology::line)));
+      (void)obj->Set(ctx, "__fxe_epoch"_v8(iso), Integer::NewFromUnsigned(iso, cb.epoch_value()));
+    }
+
+    void define_js_fields(Isolate* iso, Local<Context> ctx, Local<Object> obj,
+                          const js_command_buffer& cb) {
+      define_counter_property(iso, ctx, obj, "__fxe_v_len"_v8(iso), cb.vertex_count());
+      define_counter_property(iso, ctx, obj, "__fxe_tri_len"_v8(iso),
+                              cb.index_count(vertex_topology::triangle));
+      define_counter_property(iso, ctx, obj, "__fxe_line_len"_v8(iso),
+                              cb.index_count(vertex_topology::line));
+      define_counter_property(iso, ctx, obj, "__fxe_epoch"_v8(iso), cb.epoch_value());
+    }
+
+    void sync_if_js(const FunctionCallbackInfo<Value>& info, const cb_target& target) {
+      if (!target.js)
+        return;
+      auto* iso = info.GetIsolate();
+      sync_js_fields(iso, iso->GetCurrentContext(), info.This(), *target.js);
     }
 
     void cb_clear(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.sink)
         return;
-      cb->clear();
+      target.sink->clear();
+      sync_if_js(info, target);
     }
 
     void cb_epoch(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
-      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, cb->epoch));
+      info.GetReturnValue().Set(Integer::NewFromUnsigned(iso, target.view->epoch_value()));
     }
 
     void cb_vertex_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
       info.GetReturnValue().Set(
-          Integer::NewFromUnsigned(iso, static_cast<u32>(cb->vertex_buffer.size())));
+          Integer::NewFromUnsigned(iso, static_cast<u32>(target.view->vertices().size())));
     }
 
     void cb_index_count(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
       u32 top = 0;
       if (info.Length() >= 1)
@@ -117,8 +161,8 @@ namespace fxe::js {
         (void)throw_range_error(iso, "topology out of range");
         return;
       }
-      info.GetReturnValue().Set(
-          Integer::NewFromUnsigned(iso, static_cast<u32>(cb->index_buffers[top].size())));
+      info.GetReturnValue().Set(Integer::NewFromUnsigned(
+          iso, static_cast<u32>(target.view->indices(static_cast<vertex_topology>(top)).size())));
     }
 
     bool decode_mat4([[maybe_unused]] Isolate* iso, Local<Context> ctx, Local<Value> v,
@@ -169,30 +213,31 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.sink)
         return;
       math::mat4x4 m{1.0f};
       if (info.Length() < 1 || !decode_mat4(iso, ctx, info[0], m)) {
         (void)throw_type_error(iso, "transform: expected Float32Array(16)");
         return;
       }
-      cb->transform(m);
+      target.sink->transform(m);
+      sync_if_js(info, target);
     }
 
     void cb_queue(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.sink)
         return;
       if (info.Length() < 1 || !info[0]->IsObject()) {
         (void)throw_type_error(iso, "queue: expected CommandBuffer");
         return;
       }
-      auto* other = unwrap_cb(info[0].As<Object>());
-      if (!other) {
+      auto other = unwrap_cb(info[0].As<Object>());
+      if (!other.view) {
         (void)throw_type_error(iso, "queue: argument is not a CommandBuffer");
         return;
       }
@@ -212,12 +257,22 @@ namespace fxe::js {
         }
         tint = t;
       }
-      cb->queue(*other, m, tint);
+      try {
+        target.sink->queue(*other.view, m, tint);
+      } catch (const std::exception& e) {
+        (void)throw_error(iso, "queue failed: {}", e.what());
+        return;
+      }
+      sync_if_js(info, target);
     }
 
     Local<ArrayBuffer> array_buffer_view(Isolate* iso, void* data, usize bytes) {
       auto bs = ArrayBuffer::NewBackingStore(data, bytes, [](void*, usize, void*) {}, nullptr);
       return ArrayBuffer::New(iso, std::move(bs));
+    }
+
+    Local<ArrayBuffer> backing_array_buffer(Isolate* iso, std::shared_ptr<BackingStore> store) {
+      return ArrayBuffer::New(iso, std::move(store));
     }
 
     void set_buffer_epoch(Isolate* iso, Local<Context> ctx, Local<Object> out, u32 epoch) {
@@ -241,35 +296,53 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
       u32 top = 0;
       if (!read_topology_arg(info, 0, top))
         return;
 
-      auto& vbuf = cb->vertex_buffer;
-      auto& ibuf = cb->index_buffers[top];
       auto out = Object::New(iso);
-      auto vab = array_buffer_view(iso, vbuf.data(), vbuf.size() * sizeof(vertex));
-      auto iab = array_buffer_view(iso, ibuf.data(), ibuf.size() * sizeof(u32));
-      (void)out->Set(ctx, "verts"_v8(iso),
-                     Float32Array::New(vab, 0, vbuf.size() * sizeof(vertex) / sizeof(float)));
-      (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, ibuf.size()));
-      set_buffer_epoch(iso, ctx, out, cb->epoch);
+      if (target.js) {
+        const auto topology = static_cast<vertex_topology>(top);
+        auto vab = backing_array_buffer(iso, target.js->vertex_store());
+        auto iab = backing_array_buffer(iso, target.js->index_store(topology));
+        (void)out->Set(
+            ctx, "verts"_v8(iso),
+            Float32Array::New(vab, 0, target.js->vertex_count() * sizeof(vertex) / sizeof(float)));
+        (void)out->Set(ctx, "idxs"_v8(iso),
+                       Uint32Array::New(iab, 0, target.js->index_count(topology)));
+        set_buffer_epoch(iso, ctx, out, target.js->epoch_value());
+      } else if (target.native) {
+        auto& vbuf = target.native->vertex_buffer;
+        auto& ibuf = target.native->index_buffers[top];
+        auto vab = array_buffer_view(iso, vbuf.data(), vbuf.size() * sizeof(vertex));
+        auto iab = array_buffer_view(iso, ibuf.data(), ibuf.size() * sizeof(u32));
+        (void)out->Set(ctx, "verts"_v8(iso),
+                       Float32Array::New(vab, 0, vbuf.size() * sizeof(vertex) / sizeof(float)));
+        (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, ibuf.size()));
+        set_buffer_epoch(iso, ctx, out, target.native->epoch);
+      }
       info.GetReturnValue().Set(out);
     }
 
     void cb_vertex_buffer(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
-      auto& vbuf = cb->vertex_buffer;
-      auto ab = array_buffer_view(iso, vbuf.data(), vbuf.size() * sizeof(vertex));
-      info.GetReturnValue().Set(
-          Float32Array::New(ab, 0, vbuf.size() * sizeof(vertex) / sizeof(float)));
+      if (target.js) {
+        auto ab = backing_array_buffer(iso, target.js->vertex_store());
+        info.GetReturnValue().Set(
+            Float32Array::New(ab, 0, target.js->vertex_count() * sizeof(vertex) / sizeof(float)));
+      } else if (target.native) {
+        auto& vbuf = target.native->vertex_buffer;
+        auto ab = array_buffer_view(iso, vbuf.data(), vbuf.size() * sizeof(vertex));
+        info.GetReturnValue().Set(
+            Float32Array::New(ab, 0, vbuf.size() * sizeof(vertex) / sizeof(float)));
+      }
     }
 
     // bounds(): { x, y, width, height } | null
@@ -281,14 +354,14 @@ namespace fxe::js {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
-      if (cb->vertex_buffer.empty()) {
+      if (target.view->vertices().empty()) {
         info.GetReturnValue().SetNull();
         return;
       }
-      auto [mn, mx] = cb->get_boundaries();
+      auto [mn, mx] = target.view->get_boundaries();
       auto out = Object::New(iso);
       (void)out->Set(ctx, "x"_v8(iso), Number::New(iso, static_cast<double>(mn.x)));
       (void)out->Set(ctx, "y"_v8(iso), Number::New(iso, static_cast<double>(mn.y)));
@@ -300,55 +373,78 @@ namespace fxe::js {
     void cb_index_buffer(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
       u32 top = 0;
       if (!read_topology_arg(info, 0, top))
         return;
-      auto& ibuf = cb->index_buffers[top];
-      auto ab = array_buffer_view(iso, ibuf.data(), ibuf.size() * sizeof(u32));
-      info.GetReturnValue().Set(Uint32Array::New(ab, 0, ibuf.size()));
+      if (target.js) {
+        const auto topology = static_cast<vertex_topology>(top);
+        auto ab = backing_array_buffer(iso, target.js->index_store(topology));
+        info.GetReturnValue().Set(Uint32Array::New(ab, 0, target.js->index_count(topology)));
+      } else if (target.native) {
+        auto& ibuf = target.native->index_buffers[top];
+        auto ab = array_buffer_view(iso, ibuf.data(), ibuf.size() * sizeof(u32));
+        info.GetReturnValue().Set(Uint32Array::New(ab, 0, ibuf.size()));
+      }
     }
 
     void cb_is_empty(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
-      info.GetReturnValue().Set(cb->is_empty());
+      info.GetReturnValue().Set(target.view->is_empty());
+    }
+
+    void install_owned_js_buffer(Isolate* iso, Local<Context> ctx, Local<Object> inst,
+                                 js_command_buffer* fresh) {
+      auto* h = new cb_holder{fresh, true, nullptr};
+      set_native(iso, inst, fresh, TAG_COMMAND_BUFFER);
+      define_js_fields(iso, ctx, inst, *fresh);
+      auto* persistent = new Global<Object>(iso, inst);
+      fresh->set_js_object(persistent);
+      h->self = persistent;
+      persistent->SetWeak(h, cb_finalizer, WeakCallbackType::kParameter);
     }
 
     void cb_clone(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.view)
         return;
-      auto* fresh = new command_buffer(cb->clone());
       auto tpl = cb_tpl_table()[iso].Get(iso);
       auto inst = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
-      auto* h = new cb_holder{fresh, true, nullptr};
-      set_native(iso, inst, fresh, TAG_COMMAND_BUFFER);
-      auto* persistent = new Global<Object>(iso, inst);
-      h->self = persistent;
-      persistent->SetWeak(h, cb_finalizer, WeakCallbackType::kParameter);
+      js_command_buffer* fresh = nullptr;
+      try {
+        fresh = target.js ? new js_command_buffer(target.js->clone()) : new js_command_buffer(iso);
+        if (!target.js)
+          fresh->queue(*target.view);
+      } catch (const std::exception& e) {
+        delete fresh;
+        (void)throw_error(iso, "clone failed: {}", e.what());
+        return;
+      }
+      install_owned_js_buffer(iso, ctx, inst, fresh);
       info.GetReturnValue().Set(inst);
     }
+
     void cb_allocate(const FunctionCallbackInfo<Value>& info) {
       // This callback returns an object containing TypedArray subviews. V8 Fast
       // API callbacks cannot return newly allocated JS objects, so allocate()
       // intentionally remains on the normal V8 path. Returned views alias the
-      // command buffer's vector storage for the reported epoch; any mutating
-      // command-buffer operation advances the epoch and callers must reacquire
-      // views before reading or writing through them.
+      // command buffer's storage for the reported epoch; mutating operations
+      // advance the epoch and callers must reacquire views before reading or
+      // writing through them.
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
-      auto* cb = unwrap_cb(info.This());
-      if (!cb)
+      auto target = unwrap_cb(info.This());
+      if (!target.sink)
         return;
       if (info.Length() < 3) {
         (void)throw_type_error(iso, "allocate(vtx, idx, top)");
@@ -359,25 +455,43 @@ namespace fxe::js {
       u32 top = 0;
       if (!read_topology_arg(info, 2, top))
         return;
-      auto base = static_cast<u32>(cb->vertex_buffer.size());
-      auto index_base = static_cast<u32>(cb->index_buffers[top].size());
-      cb->allocate(vtx, idx, static_cast<vertex_topology>(top));
-
-      auto& vbuf = cb->vertex_buffer;
-      auto& ibuf = cb->index_buffers[top];
-      auto* vdata = vtx ? static_cast<void*>(vbuf.data() + base) : nullptr;
-      auto* idata = idx ? static_cast<void*>(ibuf.data() + index_base) : nullptr;
-      auto vab = array_buffer_view(iso, vdata, vtx * sizeof(vertex));
-      auto iab = array_buffer_view(iso, idata, idx * sizeof(u32));
-      auto verts = Float32Array::New(vab, 0, vtx * sizeof(vertex) / sizeof(float));
-      auto idxs = Uint32Array::New(iab, 0, idx);
+      const auto topology = static_cast<vertex_topology>(top);
+      const u32 base = target.js ? target.js->vertex_count()
+                                 : static_cast<u32>(target.native->vertex_buffer.size());
+      const u32 index_base = target.js ? target.js->index_count(topology)
+                                       : static_cast<u32>(target.native->index_buffers[top].size());
+      try {
+        (void)target.sink->allocate(vtx, idx, topology);
+      } catch (const std::exception& e) {
+        (void)throw_error(iso, "allocate failed: {}", e.what());
+        return;
+      }
 
       auto out = Object::New(iso);
-      (void)out->Set(ctx, "verts"_v8(iso), verts);
-      (void)out->Set(ctx, "idxs"_v8(iso), idxs);
+      if (target.js) {
+        auto vab = backing_array_buffer(iso, target.js->vertex_store());
+        auto iab = backing_array_buffer(iso, target.js->index_store(topology));
+        const usize vertex_offset = vtx == 0 ? 0 : static_cast<usize>(base) * sizeof(vertex);
+        const usize index_offset = idx == 0 ? 0 : static_cast<usize>(index_base) * sizeof(u32);
+        (void)out->Set(ctx, "verts"_v8(iso),
+                       Float32Array::New(vab, vertex_offset, vtx * sizeof(vertex) / sizeof(float)));
+        (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, index_offset, idx));
+        set_buffer_epoch(iso, ctx, out, target.js->epoch_value());
+      } else if (target.native) {
+        auto& vbuf = target.native->vertex_buffer;
+        auto& ibuf = target.native->index_buffers[top];
+        auto* vdata = vtx ? static_cast<void*>(vbuf.data() + base) : nullptr;
+        auto* idata = idx ? static_cast<void*>(ibuf.data() + index_base) : nullptr;
+        auto vab = array_buffer_view(iso, vdata, vtx * sizeof(vertex));
+        auto iab = array_buffer_view(iso, idata, idx * sizeof(u32));
+        (void)out->Set(ctx, "verts"_v8(iso),
+                       Float32Array::New(vab, 0, vtx * sizeof(vertex) / sizeof(float)));
+        (void)out->Set(ctx, "idxs"_v8(iso), Uint32Array::New(iab, 0, idx));
+        set_buffer_epoch(iso, ctx, out, target.native->epoch);
+      }
       (void)out->Set(ctx, "base"_v8(iso), Integer::NewFromUnsigned(iso, base));
       (void)out->Set(ctx, "indexBase"_v8(iso), Integer::NewFromUnsigned(iso, index_base));
-      set_buffer_epoch(iso, ctx, out, cb->epoch);
+      sync_if_js(info, target);
       info.GetReturnValue().Set(out);
     }
 
@@ -387,13 +501,9 @@ namespace fxe::js {
         (void)throw_type_error(iso, "CommandBuffer must be invoked with new");
         return;
       }
+      auto ctx = iso->GetCurrentContext();
       auto self = info.This();
-      auto* h = new cb_holder{new command_buffer(), true, nullptr};
-      set_native(iso, self, h->ptr, TAG_COMMAND_BUFFER);
-      // Tie the heap allocation to GC.
-      auto* persistent = new Global<Object>(iso, self);
-      h->self = persistent;
-      persistent->SetWeak(h, cb_finalizer, WeakCallbackType::kParameter);
+      install_owned_js_buffer(iso, ctx, self, new js_command_buffer(iso));
     }
   } // namespace
 
@@ -458,6 +568,12 @@ namespace fxe::js {
   }
 
   Local<Object> make_command_buffer_object(Isolate* iso, Local<Context> ctx, command_buffer* cb) {
-    return wrap(iso, ctx, cb_tpl_table()[iso].Get(iso), cb, TAG_COMMAND_BUFFER);
+    auto tpl = cb_tpl_table()[iso].Get(iso);
+    auto inst = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
+    auto* fresh = new js_command_buffer(iso);
+    if (cb)
+      fresh->queue(*cb);
+    install_owned_js_buffer(iso, ctx, inst, fresh);
+    return inst;
   }
 } // namespace fxe::js

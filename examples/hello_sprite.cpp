@@ -21,8 +21,7 @@ int main() {
                              {.texture = entry.texture, .src = {0.0f, 0.0f}, .dst = {1.0f, 1.0f}});
   renderer->end_frame();
 
-  return renderer->vertex_buffer.size() == 4 &&
-                 std::bit_cast<fxe::texture_id>(renderer->vertex_buffer[0].uv.z) == texture
-             ? 0
-             : 1;
+  const auto vertices = renderer->vertices();
+  return vertices.size() == 4 && std::bit_cast<fxe::texture_id>(vertices[0].uv.z) == texture ? 0
+                                                                                             : 1;
 }

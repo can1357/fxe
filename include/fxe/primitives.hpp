@@ -131,127 +131,127 @@ namespace fxe::primitives {
   // ---------------------------------------------------------------------------
   // Lines
   // ---------------------------------------------------------------------------
-  void draw_line(command_buffer& r, math::vec4 src, math::vec4 dst, const color_list<2>& color,
+  void draw_line(command_sink& r, math::vec4 src, math::vec4 dst, const color_list<2>& color,
                  float thickness);
-  void draw_line(command_buffer& r, math::vec4 src, math::vec4 dst, r8g8b8a8 color,
+  void draw_line(command_sink& r, math::vec4 src, math::vec4 dst, r8g8b8a8 color,
                  float thickness = 0.0f);
-  void draw_line(command_buffer& r, std::span<const math::vec4> points,
+  void draw_line(command_sink& r, std::span<const math::vec4> points,
                  std::span<const r8g8b8a8> colors, float thickness);
-  void draw_line(command_buffer& r, std::span<const math::vec4> points, r8g8b8a8 color,
+  void draw_line(command_sink& r, std::span<const math::vec4> points, r8g8b8a8 color,
                  float thickness = 0.0f);
 
   // ---------------------------------------------------------------------------
   // Triangles & quads (corner form + transform form)
   // ---------------------------------------------------------------------------
-  void draw_triangle(command_buffer& r, math::vec4 a, math::vec4 b, math::vec4 c,
+  void draw_triangle(command_sink& r, math::vec4 a, math::vec4 b, math::vec4 c,
                      const color_list<3>& color, float thickness = 0.0f);
-  void draw_triangle(command_buffer& r, math::vec4 a, math::vec4 b, math::vec4 c, r8g8b8a8 color,
+  void draw_triangle(command_sink& r, math::vec4 a, math::vec4 b, math::vec4 c, r8g8b8a8 color,
                      float thickness = 0.0f);
-  void fill_triangle(command_buffer& r, math::vec4 a, math::vec4 b, math::vec4 c,
+  void fill_triangle(command_sink& r, math::vec4 a, math::vec4 b, math::vec4 c,
                      const color_list<3>& color);
-  void fill_triangle(command_buffer& r, math::vec4 a, math::vec4 b, math::vec4 c, r8g8b8a8 color);
+  void fill_triangle(command_sink& r, math::vec4 a, math::vec4 b, math::vec4 c, r8g8b8a8 color);
 
-  void draw_quad(command_buffer& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
+  void draw_quad(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
                  const color_list<4>& color, float thickness);
-  void fill_quad(command_buffer& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
+  void fill_quad(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
                  const color_list<4>& color, const texture_info& tx = {});
-  void draw_quad(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color,
+  void draw_quad(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color,
                  float thickness = 0.0f);
-  void fill_quad(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color,
+  void fill_quad(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color,
                  const texture_info& tx = {});
 
-  void draw_quad_rounded(command_buffer& r, math::vec4 p1, math::vec4 p2, math::vec4 p3,
+  void draw_quad_rounded(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3,
                          math::vec4 p4, const optional_list<float, 4>& rnd,
                          const color_list<4>& color, float thickness);
-  void fill_quad_rounded(command_buffer& r, math::vec4 p1, math::vec4 p2, math::vec4 p3,
+  void fill_quad_rounded(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3,
                          math::vec4 p4, const optional_list<float, 4>& rnd,
                          const color_list<4>& color, const texture_info& tx = {});
 
   // Rect: low-corner = origin in the supplied transform / vec2-at form.
-  void draw_rect(command_buffer& r, const math::mat4x4& transform, float shift,
+  void draw_rect(command_sink& r, const math::mat4x4& transform, float shift,
                  const color_list<4>& color, float thickness);
-  void fill_rect(command_buffer& r, const math::mat4x4& transform, float shift,
+  void fill_rect(command_sink& r, const math::mat4x4& transform, float shift,
                  const color_list<4>& color, const texture_info& tx = {});
-  void draw_rect_rounded(command_buffer& r, const math::mat4x4& transform,
+  void draw_rect_rounded(command_sink& r, const math::mat4x4& transform,
                          const optional_list<float, 4>& rnd, float shift,
                          const color_list<4>& color, float thickness);
-  void fill_rect_rounded(command_buffer& r, const math::mat4x4& transform,
+  void fill_rect_rounded(command_sink& r, const math::mat4x4& transform,
                          const optional_list<float, 4>& rnd, float shift,
                          const color_list<4>& color, const texture_info& tx = {});
-  void draw_rect(command_buffer& r, math::vec2 at, math::vec2 size, float depth, r8g8b8a8 color,
+  void draw_rect(command_sink& r, math::vec2 at, math::vec2 size, float depth, r8g8b8a8 color,
                  float thickness = 0.0f);
-  void fill_rect(command_buffer& r, math::vec2 at, math::vec2 size, float depth, r8g8b8a8 color,
+  void fill_rect(command_sink& r, math::vec2 at, math::vec2 size, float depth, r8g8b8a8 color,
                  const texture_info& tx = {});
-  void fill_rect(command_buffer& r, math::vec2 at, math::vec2 size, float depth,
+  void fill_rect(command_sink& r, math::vec2 at, math::vec2 size, float depth,
                  const paint_value& paint);
-  void fill_rect_rounded(command_buffer& r, const math::mat4x4& transform,
+  void fill_rect_rounded(command_sink& r, const math::mat4x4& transform,
                          const optional_list<float, 4>& rnd, float shift, const paint_value& paint);
 
   // ---------------------------------------------------------------------------
   // Ellipses, cylinders, spheres
   // ---------------------------------------------------------------------------
-  void draw_ellipse(command_buffer& r, const math::mat4x4& transform, const color_list<2>& color,
+  void draw_ellipse(command_sink& r, const math::mat4x4& transform, const color_list<2>& color,
                     float thickness_per_radius, float percentage = 1.0f, usize edges = 64,
                     texture_id tx = null_texture);
-  void fill_ellipse(command_buffer& r, const math::mat4x4& transform, const color_list<2>& color,
+  void fill_ellipse(command_sink& r, const math::mat4x4& transform, const color_list<2>& color,
                     float percentage = 1.0f, usize edges = 64, texture_id tx = null_texture);
-  void draw_ellipse(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color,
+  void draw_ellipse(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color,
                     float thickness_per_radius, float percentage = 1.0f, usize edges = 64,
                     texture_id tx = null_texture);
-  void fill_ellipse(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color,
+  void fill_ellipse(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color,
                     float percentage = 1.0f, usize edges = 64, texture_id tx = null_texture);
 
-  void fill_cylinder(command_buffer& r, const math::mat4x4& transform, const color_list<2>& color,
+  void fill_cylinder(command_sink& r, const math::mat4x4& transform, const color_list<2>& color,
                      float percentage = 1.0f, usize edges = 64);
-  void fill_sphere(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color,
+  void fill_sphere(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color,
                    float perc_x = 1.0f, float perc_y = 1.0f, usize edges = 32);
 
-  void fill_pyramid(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color);
-  void draw_pyramid(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color,
+  void fill_pyramid(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color);
+  void draw_pyramid(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color,
                     float thickness);
-  void fill_box(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color);
-  void draw_box(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color, float thickness);
-  void fill_cbox(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color);
-  void draw_cbox(command_buffer& r, const math::mat4x4& transform, r8g8b8a8 color, float thickness);
+  void fill_box(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color);
+  void draw_box(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color, float thickness);
+  void fill_cbox(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color);
+  void draw_cbox(command_sink& r, const math::mat4x4& transform, r8g8b8a8 color, float thickness);
 
   // ---------------------------------------------------------------------------
   // 3D primitives — eight-corner colour gradient supported on box/cbox.
   // box: low corner at origin. cbox: centred on origin.
   // ---------------------------------------------------------------------------
-  void fill_pyramid(command_buffer& r, const math::mat4x4& transform, const color_list<2>& color);
-  void draw_pyramid(command_buffer& r, const math::mat4x4& transform, const color_list<2>& color,
+  void fill_pyramid(command_sink& r, const math::mat4x4& transform, const color_list<2>& color);
+  void draw_pyramid(command_sink& r, const math::mat4x4& transform, const color_list<2>& color,
                     float thickness);
 
-  void fill_box(command_buffer& r, const math::mat4x4& transform, const color_list<8>& color);
-  void draw_box(command_buffer& r, const math::mat4x4& transform, const color_list<8>& color,
+  void fill_box(command_sink& r, const math::mat4x4& transform, const color_list<8>& color);
+  void draw_box(command_sink& r, const math::mat4x4& transform, const color_list<8>& color,
                 float thickness);
-  void fill_cbox(command_buffer& r, const math::mat4x4& transform, const color_list<8>& color);
-  void draw_cbox(command_buffer& r, const math::mat4x4& transform, const color_list<8>& color,
+  void fill_cbox(command_sink& r, const math::mat4x4& transform, const color_list<8>& color);
+  void draw_cbox(command_sink& r, const math::mat4x4& transform, const color_list<8>& color,
                  float thickness);
 
   // 2D-collapse helpers retained from previous API for backwards compat.
-  void fill_box(command_buffer& r, math::vec3 mn, math::vec3 mx, r8g8b8a8 color);
-  void draw_box(command_buffer& r, math::vec3 mn, math::vec3 mx, r8g8b8a8 color,
+  void fill_box(command_sink& r, math::vec3 mn, math::vec3 mx, r8g8b8a8 color);
+  void draw_box(command_sink& r, math::vec3 mn, math::vec3 mx, r8g8b8a8 color,
                 float thickness = 0.0f);
 
   // ---------------------------------------------------------------------------
   // Paths and higher-level paint.
   // ---------------------------------------------------------------------------
-  void fill_path(command_buffer& r, const path_2d& path, const paint_value& paint,
+  void fill_path(command_sink& r, const path_2d& path, const paint_value& paint,
                  fill_rule rule = fill_rule::nonzero, float depth = 0.0f);
-  void fill_path(command_buffer& r, const path_2d& path, r8g8b8a8 color,
+  void fill_path(command_sink& r, const path_2d& path, r8g8b8a8 color,
                  fill_rule rule = fill_rule::nonzero, float depth = 0.0f);
-  void stroke_path(command_buffer& r, const path_2d& path, const paint_value& paint,
-                   float line_width, line_join join = line_join::miter,
-                   line_cap cap = line_cap::butt, float depth = 0.0f);
-  void stroke_path(command_buffer& r, const path_2d& path, r8g8b8a8 color, float line_width,
+  void stroke_path(command_sink& r, const path_2d& path, const paint_value& paint, float line_width,
+                   line_join join = line_join::miter, line_cap cap = line_cap::butt,
+                   float depth = 0.0f);
+  void stroke_path(command_sink& r, const path_2d& path, r8g8b8a8 color, float line_width,
                    line_join join = line_join::miter, line_cap cap = line_cap::butt,
                    float depth = 0.0f);
 
-  void draw_shadow_rect(command_buffer& r, float x, float y, float w, float h, float depth,
+  void draw_shadow_rect(command_sink& r, float x, float y, float w, float h, float depth,
                         r8g8b8a8 color, float blur, float spread, float offset_x, float offset_y,
                         float screen_w, float screen_h);
-  void draw_shadow_rect_rounded(command_buffer& r, float x, float y, float w, float h,
+  void draw_shadow_rect_rounded(command_sink& r, float x, float y, float w, float h,
                                 const optional_list<float, 4>& rnd, float depth, r8g8b8a8 color,
                                 float blur, float spread, float offset_x, float offset_y,
                                 float screen_w, float screen_h);
@@ -264,9 +264,9 @@ namespace fxe::primitives {
                                      const font_info& font);
   // Returns (size_x, size_y, advance_x, glyph_count) of the drawn run for callers
   // that need to lay out follow-on geometry.
-  math::vec4 draw_text(command_buffer& r, math::vec2 at, float depth, std::string_view text,
+  math::vec4 draw_text(command_sink& r, math::vec2 at, float depth, std::string_view text,
                        const font_info& font, text_style style = {});
-  math::vec4 draw_text(command_buffer& r, const math::mat4x4& transform, std::string_view text,
+  math::vec4 draw_text(command_sink& r, const math::mat4x4& transform, std::string_view text,
                        const font_info& font, text_style style = {});
 
   // --- Phase 0 editor primitives -------------------------------------------
@@ -281,12 +281,12 @@ namespace fxe::primitives {
     bool underline = false;          // baseline-relative straight underline
     bool strikethrough = false;      // mid-x strike line
   };
-  math::vec4 draw_text_spans(command_buffer& r, math::vec2 at, float depth,
+  math::vec4 draw_text_spans(command_sink& r, math::vec2 at, float depth,
                              std::span<const text_span> spans, const font_info& fallback_font);
 
   // Paint many axis-aligned rects in one trampoline. Used by editor
   // selections (one rect per visible line per cursor).
-  void draw_selection_rects(command_buffer& r, std::span<const math::vec4> rects, r8g8b8a8 color,
+  void draw_selection_rects(command_sink& r, std::span<const math::vec4> rects, r8g8b8a8 color,
                             float depth = 0.0f);
 
   // Decoration underline (squiggle / dashed / dotted / solid) for diagnostics
@@ -297,7 +297,7 @@ namespace fxe::primitives {
     dotted = 2,
     wavy = 3,
   };
-  void draw_decoration_underline(command_buffer& r, float x1, float x2, float y,
+  void draw_decoration_underline(command_sink& r, float x1, float x2, float y,
                                  decoration_style style, r8g8b8a8 color, float thickness = 1.0f,
                                  float depth = 0.0f);
 
@@ -305,10 +305,10 @@ namespace fxe::primitives {
   // Blur helpers — emit textured quads that the post-process chain blurs in the
   // final composite. dispersion is in screen pixels.
   // ---------------------------------------------------------------------------
-  void blur_quad(command_buffer& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
+  void blur_quad(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
                  const color_list<4>& color, float dispersion, math::vec2 screen_size);
-  void blur_rect(command_buffer& r, const math::mat4x4& transform, float shift,
+  void blur_rect(command_sink& r, const math::mat4x4& transform, float shift,
                  const color_list<4>& color, float dispersion, math::vec2 screen_size);
-  void blur_rect(command_buffer& r, math::vec2 at, math::vec2 size, float depth, r8g8b8a8 color,
+  void blur_rect(command_sink& r, math::vec2 at, math::vec2 size, float depth, r8g8b8a8 color,
                  float dispersion, math::vec2 screen_size);
 } // namespace fxe::primitives

@@ -30,7 +30,7 @@ namespace fxe {
   // and the per-frame uniform block. The viewport / projection helpers preserve the
   // semantics of the original GFW renderer so primitives written against vec4{x,y,z,0}
   // (screen-space) and vec4{x,y,z,1} (world-space) keep working unchanged.
-  class renderer : public command_buffer {
+  class renderer : public command_sink {
   public:
     static constexpr math::vec2 s2v_offset{-1.0f, +1.0f};
     static constexpr u32 default_multisample_count = 4;
@@ -42,7 +42,7 @@ namespace fxe {
     virtual void begin_frame(const math::vec3& eye_pos = {}, const math::vec3& eye_dir = {},
                              const math::mat4x4& world_view_proj = math::identity()) = 0;
     virtual void end_frame() = 0;
-    virtual bool queue_dev(const command_buffer& src, const vshader_cbuf& cbuf,
+    virtual bool queue_dev(const command_view& src, const vshader_cbuf& cbuf,
                            const render_config& cfg) = 0;
     virtual void stage_captured_frame() {}
 
@@ -154,6 +154,43 @@ namespace fxe {
       return cbuf_;
     }
 
+    [[nodiscard]] std::span<const vertex> vertices() const noexcept override {
+      return upload_buf_.vertices();
+    }
+    [[nodiscard]] std::span<const u32> indices(vertex_topology topology) const noexcept override {
+      return upload_buf_.indices(topology);
+    }
+    [[nodiscard]] u32 epoch_value() const noexcept override {
+      return upload_buf_.epoch;
+    }
+    [[nodiscard]] u32 epoch() const noexcept {
+      return upload_buf_.epoch;
+    }
+    [[nodiscard]] u32 vertex_count() const noexcept {
+      return static_cast<u32>(upload_buf_.vertex_buffer.size());
+    }
+    [[nodiscard]] u32
+    index_count(vertex_topology topology = vertex_topology::triangle) const noexcept {
+      return static_cast<u32>(upload_buf_.index_buffers[static_cast<usize>(topology)].size());
+    }
+    write_args allocate(usize vtx, usize idx, vertex_topology topology) override {
+      return upload_buf_.allocate(vtx, idx, topology);
+    }
+    void queue(const command_view& src, const math::mat4x4& tf = math::identity(),
+               const std::optional<math::vec4>& tint = std::nullopt) override {
+      upload_buf_.queue(src, tf, tint);
+    }
+    void transform(const math::mat4x4& tf,
+                   const std::optional<math::vec4>& tint = std::nullopt) override {
+      upload_buf_.transform(tf, tint);
+    }
+    void clear() override {
+      upload_buf_.clear();
+    }
+    [[nodiscard]] bool is_empty() const noexcept {
+      return upload_buf_.is_empty();
+    }
+
     // Incremented once per `begin_frame` when backends call `update_constants()`.
     [[nodiscard]] u64 frame_index() const noexcept {
       return frame_index_;
@@ -220,6 +257,7 @@ namespace fxe {
       cbuf_.time = std::chrono::duration<float, std::milli>(now - init_time_).count();
     }
 
+    command_buffer upload_buf_{};
     bool recreate_buffers_ = true;
     u32 multisample_count_ = default_multisample_count;
     blend_mode blend_mode_ = blend_mode::alpha;

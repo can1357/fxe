@@ -102,7 +102,7 @@ namespace {
       if (state_ == state::pending)
         state_ = state::ready;
     }
-    bool queue_dev(const fxe::command_buffer&, const fxe::vshader_cbuf&,
+    bool queue_dev(const fxe::command_view&, const fxe::vshader_cbuf&,
                    const fxe::render_config&) override {
       return true;
     }

@@ -88,8 +88,7 @@ namespace fxe {
         pixels_.assign(pixel_count(), 0);
       }
 
-      bool queue_dev(const command_buffer& src, const vshader_cbuf&,
-                     const render_config&) override {
+      bool queue_dev(const command_view& src, const vshader_cbuf&, const render_config&) override {
         queue(src);
         return true;
       }
@@ -256,6 +255,8 @@ namespace fxe {
     class dawn_offscreen_renderer final : public offscreen_renderer,
                                           public dawn_pipeline_device_access {
     public:
+      using renderer::queue;
+
       explicit dawn_offscreen_renderer(offscreen_options options)
           : options_(sanitize(options)), window_({options_.width, options_.height}) {
         if (options_.parent_device) {
@@ -437,9 +438,8 @@ namespace fxe {
           instance_.ProcessEvents();
       }
 
-      bool queue_dev(const command_buffer& src, const vshader_cbuf&,
-                     const render_config&) override {
-        command_buffer::queue(src);
+      bool queue_dev(const command_view& src, const vshader_cbuf&, const render_config&) override {
+        upload_buf_.queue(src);
         return true;
       }
 
@@ -917,11 +917,13 @@ namespace fxe {
       }
 
       void flush_dynamic() {
-        const u64 vbytes = vertex_buffer.size() * sizeof(vertex);
+        const u64 vbytes = upload_buf_.vertex_buffer.size() * sizeof(vertex);
         const u64 tri_idx_bytes =
-            index_buffers[static_cast<usize>(vertex_topology::triangle)].size() * sizeof(u32);
+            upload_buf_.index_buffers[static_cast<usize>(vertex_topology::triangle)].size() *
+            sizeof(u32);
         const u64 line_idx_bytes =
-            index_buffers[static_cast<usize>(vertex_topology::line)].size() * sizeof(u32);
+            upload_buf_.index_buffers[static_cast<usize>(vertex_topology::line)].size() *
+            sizeof(u32);
         ensure_buffer(vbuf_, vbuf_capacity_, wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst,
                       vbytes ? vbytes : kInitialDynamicBytes, "fxe-offscreen-vbuf");
         ensure_buffer(
@@ -931,24 +933,27 @@ namespace fxe {
             line_ibuf_, line_ibuf_capacity_, wgpu::BufferUsage::Index | wgpu::BufferUsage::CopyDst,
             line_idx_bytes ? line_idx_bytes : kInitialDynamicBytes, "fxe-offscreen-line-ibuf");
         if (vbytes)
-          queue_.WriteBuffer(vbuf_, 0, vertex_buffer.data(), vbytes);
+          queue_.WriteBuffer(vbuf_, 0, upload_buf_.vertex_buffer.data(), vbytes);
         if (tri_idx_bytes)
-          queue_.WriteBuffer(tri_ibuf_, 0,
-                             index_buffers[static_cast<usize>(vertex_topology::triangle)].data(),
-                             tri_idx_bytes);
+          queue_.WriteBuffer(
+              tri_ibuf_, 0,
+              upload_buf_.index_buffers[static_cast<usize>(vertex_topology::triangle)].data(),
+              tri_idx_bytes);
         if (line_idx_bytes)
-          queue_.WriteBuffer(line_ibuf_, 0,
-                             index_buffers[static_cast<usize>(vertex_topology::line)].data(),
-                             line_idx_bytes);
+          queue_.WriteBuffer(
+              line_ibuf_, 0,
+              upload_buf_.index_buffers[static_cast<usize>(vertex_topology::line)].data(),
+              line_idx_bytes);
         vbuf_size_used_ = vbytes;
       }
 
       enum class blur_draw_mode { all, base, composite };
 
       [[nodiscard]] bool has_framebuffer_samples() const {
-        const auto& tri = index_buffers[usize(vertex_topology::triangle)];
+        const auto& tri = upload_buf_.index_buffers[usize(vertex_topology::triangle)];
         for (usize i = 0; i + 2 < tri.size(); i += 3) {
-          if (classify_triangle(vertex_buffer, &tri[i]) == primitive_effect::framebuffer_sample)
+          if (classify_triangle(upload_buf_.vertex_buffer, &tri[i]) ==
+              primitive_effect::framebuffer_sample)
             return true;
         }
         return false;
@@ -987,7 +992,7 @@ namespace fxe {
       }
 
       void draw_triangles(wgpu::RenderPassEncoder& pass, blur_draw_mode mode) {
-        const auto& tri = index_buffers[usize(vertex_topology::triangle)];
+        const auto& tri = upload_buf_.index_buffers[usize(vertex_topology::triangle)];
         u32 batch_first = 0;
         u32 batch_count = 0;
         primitive_effect batch_effect = primitive_effect::color;
@@ -996,7 +1001,7 @@ namespace fxe {
           batch_count = 0;
         };
         for (usize i = 0; i + 2 < tri.size(); i += 3) {
-          const primitive_effect effect = classify_triangle(vertex_buffer, &tri[i]);
+          const primitive_effect effect = classify_triangle(upload_buf_.vertex_buffer, &tri[i]);
           const bool composite_effect = effect == primitive_effect::framebuffer_sample ||
                                         effect == primitive_effect::transparent;
           if (mode == blur_draw_mode::base && composite_effect)
@@ -1023,7 +1028,7 @@ namespace fxe {
       void draw_indexed(wgpu::RenderPassEncoder& pass, blur_draw_mode mode = blur_draw_mode::all) {
         draw_triangles(pass, mode);
         const usize top = static_cast<usize>(vertex_topology::line);
-        const u32 count = static_cast<u32>(index_buffers[top].size());
+        const u32 count = static_cast<u32>(upload_buf_.index_buffers[top].size());
         if (count > 0 && mode != blur_draw_mode::composite) {
           pass.SetPipeline(line_pipeline_);
           pass.SetIndexBuffer(line_ibuf_, wgpu::IndexFormat::Uint32, 0, count * sizeof(u32));

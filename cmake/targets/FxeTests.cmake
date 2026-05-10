@@ -165,9 +165,14 @@ if(FXE_BUILD_TESTS)
             tests/uv_microtask_flush_test.cpp
             fxe_js
         )
+        fxe_add_cpp_test(fxe_js_command_buffer_tests tests/js_command_buffer_test.cpp fxe_js)
         if(_v8_icudtl_dat)
             target_compile_definitions(
                 fxe_uv_microtask_flush_tests
+                PRIVATE FXE_V8_ICUDTL_PATH="${_v8_icudtl_dat}"
+            )
+            target_compile_definitions(
+                fxe_js_command_buffer_tests
                 PRIVATE FXE_V8_ICUDTL_PATH="${_v8_icudtl_dat}"
             )
         endif()

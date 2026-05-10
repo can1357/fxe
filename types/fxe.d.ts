@@ -31,6 +31,10 @@ declare namespace FXE {
 
   class CommandBuffer {
     constructor();
+    readonly __fxe_v_len: number;
+    readonly __fxe_tri_len: number;
+    readonly __fxe_line_len: number;
+    readonly __fxe_epoch: number;
     clear(): void;
     epoch(): number;
     vertexCount(): number;
@@ -157,8 +161,20 @@ declare namespace FXE {
     size: [number, number];
   }
 
-  class Renderer extends CommandBuffer {
+  class Renderer {
     constructor(window: Window, options?: RendererOptions);
+    clear(): void;
+    epoch(): number;
+    vertexCount(): number;
+    bounds(): { x: number; y: number; width: number; height: number } | null;
+    indexCount(topology?: VertexTopology): number;
+    transform(matrix: Mat4): void;
+    queue(other: CommandBuffer | Renderer, matrix?: Mat4, tint?: Vec4): void;
+    buffers(topology?: VertexTopology): BufferViews;
+    vertexBuffer(): Float32Array;
+    indexBuffer(topology?: VertexTopology): Uint32Array;
+    allocate(vertexCount: number, indexCount: number, topology: VertexTopology): Allocation;
+    isEmpty(): boolean;
     beginFrame(eyePosition?: Vec3, eyeDirection?: Vec3, worldViewProjection?: Mat4): void;
     endFrame(): void;
     setClearColor(r: number, g: number, b: number, a?: number): void;

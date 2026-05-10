@@ -31,6 +31,18 @@ function vertexComponent(verts: Float32Array, vertex: number, component: number)
   return verts[vertex * FLOATS_PER_VERTEX + component];
 }
 
+function assertInternalCounts(
+  cb: FXE.CommandBuffer,
+  vertices: number,
+  triangles: number,
+  lines: number,
+): void {
+  assertEqual(cb.__fxe_v_len, vertices, 'internal vertex count');
+  assertEqual(cb.__fxe_tri_len, triangles, 'internal triangle index count');
+  assertEqual(cb.__fxe_line_len, lines, 'internal line index count');
+  assertEqual(cb.__fxe_epoch, cb.epoch(), 'internal epoch');
+}
+
 test('CommandBuffer constructor creates an empty buffer', () => {
   const cb = new CommandBuffer();
 
@@ -41,6 +53,7 @@ test('CommandBuffer constructor creates an empty buffer', () => {
   assertEqual(cb.indexCount(TRIANGLE), 0);
   assertEqual(cb.indexCount(LINE), 0);
   assert(cb.isEmpty(), 'new CommandBuffer should be empty');
+  assertInternalCounts(cb, 0, 0, 0);
 
   const views = cb.buffers(TRIANGLE);
   assert(views.verts instanceof Float32Array, 'buffers().verts should be Float32Array');
@@ -66,6 +79,7 @@ test('CommandBuffer allocate returns aliased views, bases, counts, and epochs', 
   assertEqual(cb.indexCount(TRIANGLE), 3);
   assertEqual(cb.indexCount(LINE), 0);
   assert(!cb.isEmpty(), 'allocated CommandBuffer should not be empty');
+  assertInternalCounts(cb, 3, 3, 0);
 
   writeVertex(first.verts, 0, 1, 2, 3);
   writeVertex(first.verts, 1, 4, 5, 6);
@@ -89,6 +103,7 @@ test('CommandBuffer allocate returns aliased views, bases, counts, and epochs', 
   assertEqual(cb.epoch(), 3);
   assertEqual(cb.vertexCount(), 5);
   assertEqual(cb.indexCount(TRIANGLE), 5);
+  assertInternalCounts(cb, 5, 5, 0);
 
   second.idxs.set([3, 4]);
   const indices = cb.indexBuffer(TRIANGLE);
@@ -108,6 +123,7 @@ test('CommandBuffer buffers are separated by topology while vertices are shared'
   assertEqual(cb.indexCount(), 1);
   assertEqual(cb.indexCount(TRIANGLE), 1);
   assertEqual(cb.indexCount(LINE), 2);
+  assertInternalCounts(cb, 3, 1, 2);
   assertEqual(cb.buffers(TRIANGLE).verts.length, 3 * FLOATS_PER_VERTEX);
   assertEqual(cb.buffers(TRIANGLE).idxs.length, 1);
   assertEqual(cb.buffers(LINE).verts.length, 3 * FLOATS_PER_VERTEX);
@@ -131,6 +147,7 @@ test('CommandBuffer clear empties all topologies and advances epoch', () => {
   assertEqual(cb.vertexBuffer().length, 0);
   assertEqual(cb.indexBuffer(LINE).length, 0);
   assert(cb.isEmpty(), 'clear should restore empty state');
+  assertInternalCounts(cb, 0, 0, 0);
 });
 
 test('CommandBuffer transform mutates vertices and advances epoch', () => {
@@ -144,6 +161,7 @@ test('CommandBuffer transform mutates vertices and advances epoch', () => {
 
   const verts = cb.vertexBuffer();
   assertEqual(cb.epoch(), before + 1);
+  assertEqual(cb.__fxe_epoch, cb.epoch(), 'transform syncs internal epoch');
   assertEqual(vertexComponent(verts, 0, 0), 11);
   assertEqual(vertexComponent(verts, 0, 1), 22);
   assertEqual(vertexComponent(verts, 0, 2), 33);
@@ -172,6 +190,7 @@ test('CommandBuffer queue appends transformed vertices and offset indices', () =
   assertEqual(dst.epoch(), before + 1);
   assertEqual(dst.vertexCount(), 3);
   assertEqual(dst.indexCount(TRIANGLE), 3);
+  assertInternalCounts(dst, 3, 3, 0);
   const verts = dst.vertexBuffer();
   const idxs = dst.indexBuffer(TRIANGLE);
   assertEqual(vertexComponent(verts, 0, 0), 100);
@@ -184,6 +203,7 @@ test('CommandBuffer queue appends transformed vertices and offset indices', () =
   dst.queue(src, undefined, new Float32Array([1, 1, 1, 1]));
   assertEqual(dst.vertexCount(), 5);
   assertEqual(dst.indexCount(TRIANGLE), 5);
+  assertInternalCounts(dst, 5, 5, 0);
 });
 
 test('CommandBuffer clone copies data without sharing later mutations', () => {
@@ -197,6 +217,7 @@ test('CommandBuffer clone copies data without sharing later mutations', () => {
   assertEqual(cloned.epoch(), cb.epoch());
   assertEqual(cloned.vertexCount(), 1);
   assertEqual(cloned.indexCount(TRIANGLE), 1);
+  assertInternalCounts(cloned, 1, 1, 0);
   assertEqual(vertexComponent(cloned.vertexBuffer(), 0, 0), 3);
   assertEqual(cloned.indexBuffer(TRIANGLE)[0], 0);
   assert(!cloned.isEmpty(), 'clone of populated buffer should not be empty');

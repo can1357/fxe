@@ -590,8 +590,10 @@ namespace {
              self_dir / "share" / "fxe" / "fxe-pack" / "templates",
              self_dir / ".." / "share" / "fxe" / "fxe-pack" / "templates",
              self_dir / "templates",
-             // CMake source-tree layout when running from build/<preset>/tools/fxe-pack.
-             self_dir / ".." / ".." / ".." / ".." / "tools" / "fxe-pack" / "templates",
+             // CMake source-tree layout: fxe-pack lives at build/<preset>/fxe-pack
+             // (FXE_BUILD_PACKAGER puts the executable directly in the preset bin
+             // dir), so the template tree is two parents above.
+             self_dir / ".." / ".." / "tools" / "fxe-pack" / "templates",
          }) {
       if (fs::exists(cand))
         return fs::weakly_canonical(cand);

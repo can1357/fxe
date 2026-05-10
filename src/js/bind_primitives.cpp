@@ -6,6 +6,7 @@
 // RGBA8 number (0xRRGGBBAA) or a 4-tuple of floats in [0,1].
 
 #include "bind_font.hpp"
+#include "js_command_buffer.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -15,6 +16,7 @@
 #include <fxe/font/glyph.hpp>
 #include <fxe/js_bindings.hpp>
 #include <fxe/primitives.hpp>
+#include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
@@ -35,14 +37,14 @@ namespace fxe::js {
       Global<Object> self;
     };
 
-    command_buffer* unwrap_any_cb(Local<Value> v) {
+    command_sink* unwrap_any_cb(Local<Value> v) {
       if (!v->IsObject())
         return nullptr;
       auto o = v.As<Object>();
-      if (auto* p = static_cast<command_buffer*>(unwrap(o, TAG_COMMAND_BUFFER)))
+      if (auto* p = static_cast<js_command_buffer*>(unwrap(o, TAG_COMMAND_BUFFER)))
         return p;
-      if (auto* p = static_cast<command_buffer*>(unwrap(o, TAG_RENDERER)))
-        return p;
+      if (void* raw = unwrap(o, TAG_RENDERER))
+        return static_cast<command_sink*>(static_cast<renderer*>(raw));
       return nullptr;
     }
 
@@ -217,7 +219,7 @@ namespace fxe::js {
     }
 
     // Helper: argument prelude. Returns nullptr (and throws) on missing cb.
-    command_buffer* get_cb(const FunctionCallbackInfo<Value>& info) {
+    command_sink* get_cb(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       if (info.Length() < 1) {
         (void)throw_type_error(iso, "missing CommandBuffer");
@@ -347,7 +349,7 @@ namespace fxe::js {
     }
 
     void p_fillEllipse(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
         float perc = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
         usize edges = info.Length() >= 5 ? usize(num(ctx, info[4], 64)) : 64;
@@ -355,7 +357,7 @@ namespace fxe::js {
       });
     }
     void p_drawEllipse(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
         float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
         float perc = info.Length() >= 5 ? float(num(ctx, info[4], 1.0)) : 1.0f;
@@ -364,31 +366,31 @@ namespace fxe::js {
       });
     }
     void p_fillBox(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>&, Local<Context>,
                          Isolate*) { primitives::fill_box(cb, m, c); });
     }
     void p_drawBox(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
         float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
         primitives::draw_box(cb, m, c, thick);
       });
     }
     void p_fillCbox(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>&, Local<Context>,
                          Isolate*) { primitives::fill_cbox(cb, m, c); });
     }
     void p_drawCbox(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
         float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
         primitives::draw_cbox(cb, m, c, thick);
       });
     }
     void p_fillSphere(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
         float px = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
         float py = info.Length() >= 5 ? float(num(ctx, info[4], 1.0)) : 1.0f;
@@ -412,12 +414,12 @@ namespace fxe::js {
       primitives::fill_cylinder(*cb, m, primitives::color_list<2>{c, c}, perc, edges);
     }
     void p_fillPyramid(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>&, Local<Context>,
                          Isolate*) { primitives::fill_pyramid(cb, m, c); });
     }
     void p_drawPyramid(const FunctionCallbackInfo<Value>& info) {
-      mat_color(info, [](command_buffer& cb, const math::mat4x4& m, r8g8b8a8 c,
+      mat_color(info, [](command_sink& cb, const math::mat4x4& m, r8g8b8a8 c,
                          const FunctionCallbackInfo<Value>& info, Local<Context> ctx, Isolate*) {
         float thick = info.Length() >= 4 ? float(num(ctx, info[3])) : 1.0f;
         primitives::draw_pyramid(cb, m, c, thick);
@@ -1235,10 +1237,20 @@ namespace fxe::js {
               continue;
             }
             if (!current.empty()) {
-              push_wrapped_line(out, current, static_cast<u32>(current_start), pt, letter_spacing);
+              while (!current.empty() && is_ascii_space(current.back()))
+                current.pop_back();
+              if (!current.empty())
+                push_wrapped_line(out, current, static_cast<u32>(current_start), pt,
+                                  letter_spacing);
               current.clear();
             }
-            if (!is_space_run && break_words &&
+            if (is_space_run) {
+              // Drop leading whitespace at the start of the next line so
+              // joining the produced lines with a single space reproduces
+              // the input prose without doubled separators.
+              continue;
+            }
+            if (break_words &&
                 measured_text_width(token, pt, letter_spacing) > limit + 0.5f && token.size() > 1) {
               auto pieces = break_long_word_native(token, pt, letter_spacing, limit);
               usize piece_start = token_start;
@@ -1253,6 +1265,10 @@ namespace fxe::js {
               current_start = token_start;
             }
             current = std::move(token);
+          }
+          if (!current.empty()) {
+            while (!current.empty() && is_ascii_space(current.back()))
+              current.pop_back();
           }
           if (!current.empty()) {
             push_wrapped_line(out, current, static_cast<u32>(current_start), pt, letter_spacing);

@@ -31,7 +31,7 @@ namespace fxe {
       }
     }
 
-    bool queue_dev(const command_buffer& src, const vshader_cbuf&, const render_config&) override {
+    bool queue_dev(const command_view& src, const vshader_cbuf&, const render_config&) override {
       queue(src);
       return true;
     }

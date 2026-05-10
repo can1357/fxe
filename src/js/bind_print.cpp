@@ -1,4 +1,5 @@
 #include "bind_print.hpp"
+#include "js_command_buffer.hpp"
 
 #include <cstdio>
 #include <filesystem>
@@ -26,14 +27,14 @@ namespace fxe::js {
       (void)throw_type_error(iso, msg);
     }
 
-    command_buffer* unwrap_cb(Local<Value> value) {
+    command_view* unwrap_cb(Local<Value> value) {
       if (value.IsEmpty() || !value->IsObject())
         return nullptr;
       auto obj = value.As<Object>();
       if (void* raw = unwrap(obj, TAG_COMMAND_BUFFER))
-        return static_cast<command_buffer*>(raw);
+        return static_cast<js_command_buffer*>(raw);
       if (void* raw = unwrap(obj, TAG_RENDERER))
-        return static_cast<command_buffer*>(static_cast<renderer*>(raw));
+        return static_cast<command_view*>(static_cast<renderer*>(raw));
       return nullptr;
     }
 

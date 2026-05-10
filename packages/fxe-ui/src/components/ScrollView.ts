@@ -244,7 +244,7 @@ export const ScrollView = Component((props: ScrollViewProps): Node => {
       x: -clampedOffset.x,
       y: -clampedOffset.y,
     });
-    if (!clipped.isEmpty()) cb.queue(clipped);
+    if (clipped.__fxe_v_len !== 0) cb.queue(clipped);
     paintScrollbars(cb, rect, measured, clampedOffset);
   });
   return Layer({

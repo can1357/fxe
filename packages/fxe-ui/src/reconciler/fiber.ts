@@ -174,14 +174,6 @@ const SURFACE_PAD = 1;
 // path or work around cache bugs without rebuilding).
 const SURFACE_CACHE_DISABLED = process.env.FXE_DISABLE_SURFACE_CACHE === '1';
 
-const kCommandBufferKnownEmpty = Symbol('fxe-ui.commandBufferKnownEmpty');
-
-function markCommandBufferEmptyState(buf: CommandBuffer): boolean {
-  const empty = buf.isEmpty();
-  Reflect.set(buf, kCommandBufferKnownEmpty, empty);
-  return empty;
-}
-
 // Glyph atlas UV-layout epoch. Bumped only when atlas growth/repack can make
 // previously-emitted glyph UVs stale; pure append-only glyph uploads keep the
 // same epoch so memo/layer caches do not thrash while new text arrives.
@@ -313,7 +305,7 @@ function bakeFiberSurface(cache: CommandBuffer, renderer: Renderer): SurfaceCach
     width: w,
     height: h,
     renderer,
-    bakedEpoch: cache.epoch(),
+    bakedEpoch: cache.__fxe_epoch,
     atlasEpoch: atlasEpoch(),
   };
 }
@@ -1665,7 +1657,6 @@ function renderNode(
     if (!produced) {
       fiber.cache = memoInfo ? new CommandBuffer() : fiber.cache;
       if (memoInfo) {
-        markCommandBufferEmptyState(fiber.cache as CommandBuffer);
         fiber.cachedHitTargets = null;
       }
       fiber.lastProps = node.props;
@@ -1680,7 +1671,6 @@ function renderNode(
       RenderStats.recordRebuild();
       if (shouldTraverseMemoProduced(produced)) {
         const empty = new CommandBuffer();
-        markCommandBufferEmptyState(empty);
         fiber.cachedHitTargets = null;
         fiber.cache = empty;
         fiber.cacheAtlasEpoch = epoch;
@@ -1691,7 +1681,6 @@ function renderNode(
         const fresh = new CommandBuffer();
         const hitStart = hitTargetCount();
         renderNodeList(fiber, [produced], fresh, ctx, forceProducedTraversal);
-        markCommandBufferEmptyState(fresh);
         fiber.cachedHitTargets = captureHitTargetsSince(hitStart);
         fiber.cache = fresh;
         fiber.cacheAtlasEpoch = epoch;
@@ -1817,7 +1806,7 @@ function renderNode(
     if (
       !SURFACE_CACHE_DISABLED &&
       fiber.surface !== null &&
-      fiber.surface.bakedEpoch === cached.epoch() &&
+      fiber.surface.bakedEpoch === cached.__fxe_epoch &&
       target instanceof Renderer
     ) {
       const s = fiber.surface;
@@ -1852,7 +1841,7 @@ function renderNode(
       ctx.rootRenderer !== null &&
       props.transform === undefined &&
       props.tint === undefined &&
-      cached.vertexCount() >= SURFACE_MIN_VERTS
+      cached.__fxe_v_len >= SURFACE_MIN_VERTS
     ) {
       fiber.surfaceHits++;
       if (fiber.surfaceHits >= SURFACE_BAKE_HITS) {
@@ -1879,7 +1868,6 @@ function renderNode(
   const hitStart = hitTargetCount();
   const fresh = new CommandBuffer();
   renderNodeList(fiber, props.children, fresh, ctx, forceTraversal);
-  markCommandBufferEmptyState(fresh);
   fiber.cache = fresh;
   fiber.cacheAtlasEpoch = layerEpoch;
   fiber.lastDeps = wantDeps;
@@ -1895,9 +1883,7 @@ function queueInto(
   transform: Mat4 | undefined,
   tint: Vec4 | undefined,
 ): void {
-  const knownEmpty = Reflect.get(src, kCommandBufferKnownEmpty) as boolean | undefined;
-  if (knownEmpty === true) return;
-  if (knownEmpty !== false && src.isEmpty()) return;
+  if (src.__fxe_v_len === 0) return;
   if (transform && tint) target.queue(src, transform, tint);
   else if (transform) target.queue(src, transform);
   else target.queue(src);
@@ -1908,7 +1894,7 @@ function queuePaintFlashOutline(
   src: CommandBuffer,
   transform: Mat4 | undefined,
 ): void {
-  if (!isPaintFlashEnabled() || src.isEmpty()) return;
+  if (!isPaintFlashEnabled() || src.__fxe_v_len === 0) return;
   const vertices = src.vertexBuffer();
   if (vertices.length < 2) return;
   let minX = Number.POSITIVE_INFINITY;

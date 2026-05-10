@@ -16,7 +16,7 @@ int main() {
     fxe::primitives::fill_triangle(*renderer, {-0.6f, -0.5f, 0.0f, 1.0f}, {0.6f, -0.5f, 0.0f, 1.0f},
                                    {0.0f, 0.6f, 0.0f, 1.0f}, fxe::cyan);
     renderer->end_frame();
-    last_vertex_count = renderer->vertex_buffer.size();
+    last_vertex_count = renderer->vertex_count();
   }
 
   return last_vertex_count == 3 ? 0 : 1;

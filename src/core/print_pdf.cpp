@@ -94,8 +94,8 @@ namespace fxe {
         return true;
       }
 
-      const auto& vertices = page.cb->vertex_buffer;
-      const auto& triangles = page.cb->index_buffers[static_cast<usize>(vertex_topology::triangle)];
+      const auto vertices = page.cb->vertices();
+      const auto triangles = page.cb->indices(vertex_topology::triangle);
       for (usize i = 0; i + 2 < triangles.size(); i += 3) {
         const u32 ia = triangles[i + 0];
         const u32 ib = triangles[i + 1];
@@ -124,7 +124,7 @@ namespace fxe {
         out << "h\nf\n";
       }
 
-      const auto& lines = page.cb->index_buffers[static_cast<usize>(vertex_topology::line)];
+      const auto lines = page.cb->indices(vertex_topology::line);
       out << "1 w\n";
       for (usize i = 0; i + 1 < lines.size(); i += 2) {
         const u32 ia = lines[i + 0];

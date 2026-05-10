@@ -66,7 +66,7 @@ test('text input key handling inserts, deletes, and submits', () => {
 test('TextInput mount routes compose and commit callbacks to focused target', () => {
   clearHitTargets();
   clearFocus();
-  const renderer = new CommandBuffer() as Renderer;
+  const renderer = new CommandBuffer() as unknown as Renderer;
   renderer.beginFrame = () => renderer.clear();
   renderer.endFrame = () => undefined;
   const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();
@@ -109,7 +109,7 @@ test('TextInput mount routes compose and commit callbacks to focused target', ()
 test('TextInput selection shortcuts copy and paste through the mounted window clipboard', () => {
   clearHitTargets();
   clearFocus();
-  const renderer = new CommandBuffer() as Renderer;
+  const renderer = new CommandBuffer() as unknown as Renderer;
   renderer.beginFrame = () => renderer.clear();
   renderer.endFrame = () => undefined;
   const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();
@@ -158,7 +158,7 @@ test('TextInput selection shortcuts copy and paste through the mounted window cl
 test('selectable Text copies the dragged read-only selection', () => {
   clearHitTargets();
   clearFocus();
-  const renderer = new CommandBuffer() as Renderer;
+  const renderer = new CommandBuffer() as unknown as Renderer;
   renderer.beginFrame = () => renderer.clear();
   renderer.endFrame = () => undefined;
   const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();
@@ -202,7 +202,7 @@ test('selectable Text copies the dragged read-only selection', () => {
 test('TextInput onEditCommand routes Edit menu actions to the focused input', () => {
   clearHitTargets();
   clearFocus();
-  const renderer = new CommandBuffer() as Renderer;
+  const renderer = new CommandBuffer() as unknown as Renderer;
   renderer.beginFrame = () => renderer.clear();
   renderer.endFrame = () => undefined;
   const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();
@@ -284,7 +284,7 @@ test('TextInput onEditCommand routes Edit menu actions to the focused input', ()
 test('TextInput drag inside selection requests a drag-out via the drag sink', () => {
   clearHitTargets();
   clearFocus();
-  const renderer = new CommandBuffer() as Renderer;
+  const renderer = new CommandBuffer() as unknown as Renderer;
   renderer.beginFrame = () => renderer.clear();
   renderer.endFrame = () => undefined;
   const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();

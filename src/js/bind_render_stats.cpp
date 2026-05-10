@@ -31,9 +31,9 @@ namespace fxe::js {
       put("cacheMisses"_v8(iso), s.cache_misses);
       put("rebuilds"_v8(iso), s.rebuilds);
       put("frames"_v8(iso), s.frames);
-      put("queueFastIdentity"_v8(iso), fxe::command_buffer::g_q_fast.load());
-      put("queueXform"_v8(iso), fxe::command_buffer::g_q_xform.load());
-      put("queueTinted"_v8(iso), fxe::command_buffer::g_q_tinted.load());
+      put("queueFastIdentity"_v8(iso), fxe::command_sink::g_q_fast.load());
+      put("queueXform"_v8(iso), fxe::command_sink::g_q_xform.load());
+      put("queueTinted"_v8(iso), fxe::command_sink::g_q_tinted.load());
       info.GetReturnValue().Set(out);
     }
 

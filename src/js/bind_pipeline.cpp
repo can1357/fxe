@@ -6,6 +6,7 @@
 #include "weak_holder.hpp"
 
 #include "bind_image.hpp"
+#include "js_command_buffer.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -72,13 +73,13 @@ namespace fxe::js {
       return static_cast<renderer*>(unwrap(value.As<Object>(), TAG_RENDERER));
     }
 
-    command_buffer* unwrap_cb(Local<Value> value) {
+    command_sink* unwrap_cb(Local<Value> value) {
       if (value.IsEmpty() || !value->IsObject())
         return nullptr;
       if (void* raw = unwrap(value.As<Object>(), TAG_COMMAND_BUFFER))
-        return static_cast<command_buffer*>(raw);
+        return static_cast<js_command_buffer*>(raw);
       if (void* raw = unwrap(value.As<Object>(), TAG_RENDERER))
-        return static_cast<command_buffer*>(static_cast<renderer*>(raw));
+        return static_cast<command_sink*>(static_cast<renderer*>(raw));
       return nullptr;
     }
 

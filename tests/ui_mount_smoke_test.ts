@@ -4,7 +4,7 @@ import { mount, Text, View } from 'fxe-ui';
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 
 test('mount renders one frame and disposes listeners', () => {
-  const renderer = new CommandBuffer() as Renderer;
+  const renderer = new CommandBuffer() as unknown as Renderer;
   renderer.beginFrame = () => renderer.clear();
   renderer.endFrame = () => undefined;
   const listeners = new Map<string, number>();

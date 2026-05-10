@@ -37,7 +37,7 @@ function invisibleWindow(options: FXE.WindowOptions = {}): FXE.Window {
   });
 }
 
-test('Renderer constructs for an invisible Window and inherits CommandBuffer', () => {
+test('Renderer constructs for an invisible Window and exposes command-buffer methods', () => {
   const win = invisibleWindow();
   try {
     const renderer = new Renderer(win, {
@@ -48,7 +48,10 @@ test('Renderer constructs for an invisible Window and inherits CommandBuffer', (
 
     assertEqual(win.isVisible(), false, 'test window should remain invisible');
     assert(renderer instanceof Renderer, 'renderer instanceof Renderer');
-    assert(renderer instanceof CommandBuffer, 'renderer inherits CommandBuffer prototype');
+    assert(
+      !(renderer instanceof CommandBuffer),
+      'renderer does not inherit CommandBuffer prototype',
+    );
     assertEqual(typeof renderer.beginFrame, 'function', 'beginFrame is installed');
     assertEqual(typeof renderer.endFrame, 'function', 'endFrame is installed');
     assertEqual(typeof renderer.setMultisample, 'function', 'setMultisample is installed');
@@ -58,6 +61,11 @@ test('Renderer constructs for an invisible Window and inherits CommandBuffer', (
     assertEqual(typeof renderer.viewport, 'function', 'viewport is installed');
     assertEqual(typeof renderer.worldToScreen, 'function', 'worldToScreen is installed');
     assertEqual(renderer.isEmpty(), true, 'new renderer command buffer starts empty');
+    assertEqual(typeof renderer.queue, 'function', 'queue is installed');
+    assertEqual(typeof renderer.clear, 'function', 'clear is installed');
+    assertEqual(typeof renderer.epoch, 'function', 'epoch is installed');
+    assertEqual(typeof renderer.vertexCount, 'function', 'vertexCount is installed');
+    assertEqual(typeof renderer.indexCount, 'function', 'indexCount is installed');
   } finally {
     win.close();
   }
@@ -139,22 +147,16 @@ test('Renderer exposes CommandBuffer mutation APIs', () => {
     assertEqual(renderer.indexCount(TRIANGLE), 3, 'renderer triangle index count after allocation');
     assert(renderer.epoch() > startEpoch, 'allocation advances renderer epoch');
 
-    const clone = renderer.clone();
-    assert(clone instanceof CommandBuffer, 'renderer clone is a CommandBuffer');
-    assert(!(clone instanceof Renderer), 'renderer clone is not a Renderer');
-    assertEqual(clone.vertexCount(), renderer.vertexCount(), 'clone vertex count');
-    assertEqual(
-      clone.indexCount(TRIANGLE),
-      renderer.indexCount(TRIANGLE),
-      'clone triangle index count',
-    );
+    const source = new CommandBuffer();
+    const sourceAllocation = source.allocate(2, 2, TRIANGLE);
+    sourceAllocation.idxs.set([0, 1]);
 
     renderer.clear();
     assertEqual(renderer.isEmpty(), true, 'clear empties renderer command buffer');
-    renderer.queue(clone);
+    renderer.queue(source);
     assertEqual(
       renderer.vertexCount(),
-      clone.vertexCount(),
+      source.vertexCount(),
       'queue accepts CommandBuffer on Renderer',
     );
   } finally {

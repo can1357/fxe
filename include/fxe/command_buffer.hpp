@@ -26,27 +26,20 @@ namespace fxe {
     luminance_filter,
   };
 
-  struct command_buffer {
-    std::vector<vertex> vertex_buffer;
-    std::array<std::vector<u32>, static_cast<usize>(vertex_topology::max)> index_buffers{};
-    mutable std::shared_ptr<void> mesh_instance{};
-    mutable void* mesh_owner = nullptr;
-    u32 epoch = 1;
+  struct command_view {
+    [[nodiscard]] virtual std::span<const vertex> vertices() const noexcept = 0;
+    [[nodiscard]] virtual std::span<const u32> indices(vertex_topology topology) const noexcept = 0;
+    [[nodiscard]] virtual u32 epoch_value() const noexcept = 0;
 
-    void inc_epoch() noexcept {
-      ++epoch;
-    }
+    [[nodiscard]] bool is_empty() const noexcept;
+    [[nodiscard]] std::pair<math::vec3, math::vec3> get_boundaries() const;
+    [[nodiscard]] std::pair<math::vec3, math::vec3> get_boundaries(const math::mat4x4& tf) const;
 
-    write_args allocate(usize vtx, usize idx, vertex_topology topology) {
-      inc_epoch();
-      auto& vertices = vertex_buffer;
-      auto& indices = index_buffers[static_cast<usize>(topology)];
-      usize vertex_base = vertices.size();
-      usize index_base = indices.size();
-      vertices.resize(vertex_base + vtx);
-      indices.resize(index_base + idx, static_cast<u32>(vertex_base));
-      return {vertices.data() + vertex_base, indices.data() + index_base};
-    }
+    virtual ~command_view() = default;
+  };
+
+  struct command_sink : virtual command_view {
+    [[nodiscard]] virtual write_args allocate(usize vtx, usize idx, vertex_topology topology) = 0;
 
     vertex* allocate_strip(usize vtx, vertex_topology topology) {
       usize idx = calc_indices_strip(vtx, topology);
@@ -76,19 +69,16 @@ namespace fxe {
       fill_indices_strip(iout, vertices.size(), top);
     }
 
-    virtual bool queue_opt(const command_buffer&, const math::mat4x4&, const math::vec4&) {
+    virtual bool queue_opt(const command_view&, const math::mat4x4&, const math::vec4&) {
       return false;
     }
-    virtual bool queue_opt(const command_buffer&, const math::mat4x4&, const math::mat4x4&,
+    virtual bool queue_opt(const command_view&, const math::mat4x4&, const math::mat4x4&,
                            const math::vec4&, const render_config&) {
       return false;
     }
 
-    void transform(const math::mat4x4& tf, const std::optional<math::vec4>& tint = std::nullopt) {
-      inc_epoch();
-      for (auto& v : vertex_buffer)
-        v = tint ? v.transform(tf, *tint) : v.transform(tf);
-    }
+    virtual void transform(const math::mat4x4& tf,
+                           const std::optional<math::vec4>& tint = std::nullopt) = 0;
 
     // True iff `m` is the 4x4 identity. Cheap (16 fp comparisons), called
     // hot from queue() to choose the memcpy fast-path. We compare against
@@ -107,68 +97,60 @@ namespace fxe {
     inline static std::atomic<u64> g_q_tinted{0};
     inline static std::atomic<u64> g_q_xform{0};
 
-    void queue(const command_buffer& src, const math::mat4x4& tf = math::identity(),
-               const std::optional<math::vec4>& tint = std::nullopt) {
-      if (vertex_buffer.size() > 512 && queue_opt(src, tf, tint.value_or(math::vec4{1, 1, 1, 1})))
-        return;
-      inc_epoch();
-      auto& stats = current_render_stats();
-      ++stats.queue_calls;
-      stats.vertices_submitted += src.vertex_buffer.size();
-      for (const auto& ib : src.index_buffers)
-        stats.indices_submitted += ib.size();
-      const usize vertex_base = vertex_buffer.size();
-      const usize src_n = src.vertex_buffer.size();
-      vertex_buffer.resize(vertex_base + src_n);
+    virtual void queue(const command_view& src, const math::mat4x4& tf = math::identity(),
+                       const std::optional<math::vec4>& tint = std::nullopt);
+    virtual void clear() = 0;
+  };
 
-      // Fast path: identity transform + no tint.
-      // ~42% of the steady-state stress-grid frame was spent in per-vertex
-      // mat4 * vec4 here. queueInto() in the fxe-ui reconciler emits paint
-      // primitives in already-resolved screen coords, so almost every queue
-      // call lands here.
-      if (!tint && is_identity(tf)) {
-        ++g_q_fast;
-        if (src_n != 0)
-          std::memcpy(vertex_buffer.data() + vertex_base, src.vertex_buffer.data(),
-                      src_n * sizeof(vertex));
-      } else if (!tint) {
-        ++g_q_xform;
-        for (usize i = 0; i != src_n; ++i)
-          vertex_buffer[vertex_base + i] = src.vertex_buffer[i].transform(tf);
-      } else {
-        ++g_q_tinted;
-        const math::vec4& t = *tint;
-        for (usize i = 0; i != src_n; ++i)
-          vertex_buffer[vertex_base + i] = src.vertex_buffer[i].transform(tf, t);
-      }
+  struct command_buffer : public command_sink {
+    std::vector<vertex> vertex_buffer;
+    std::array<std::vector<u32>, static_cast<usize>(vertex_topology::max)> index_buffers{};
+    mutable std::shared_ptr<void> mesh_instance{};
+    mutable void* mesh_owner = nullptr;
+    u32 epoch = 1;
 
-      const u32 vbase32 = static_cast<u32>(vertex_base);
-      for (usize n = 0; n != index_buffers.size(); ++n) {
-        auto& dst = index_buffers[n];
-        const auto& si = src.index_buffers[n];
-        const usize dst_base = dst.size();
-        const usize src_idx_n = si.size();
-        dst.resize(dst_base + src_idx_n);
-        if (vbase32 == 0 && src_idx_n != 0) {
-          std::memcpy(dst.data() + dst_base, si.data(), src_idx_n * sizeof(u32));
-        } else {
-          for (usize i = 0; i != src_idx_n; ++i)
-            dst[dst_base + i] = si[i] + vbase32;
-        }
-      }
+    void inc_epoch() noexcept {
+      ++epoch;
     }
 
-    void clear() {
+    [[nodiscard]] std::span<const vertex> vertices() const noexcept override {
+      return vertex_buffer;
+    }
+
+    [[nodiscard]] std::span<const u32> indices(vertex_topology topology) const noexcept override {
+      return index_buffers[static_cast<usize>(topology)];
+    }
+
+    [[nodiscard]] u32 epoch_value() const noexcept override {
+      return epoch;
+    }
+
+    write_args allocate(usize vtx, usize idx, vertex_topology topology) override {
+      inc_epoch();
+      auto& vertices = vertex_buffer;
+      auto& indices = index_buffers[static_cast<usize>(topology)];
+      usize vertex_base = vertices.size();
+      usize index_base = indices.size();
+      vertices.resize(vertex_base + vtx);
+      indices.resize(index_base + idx, static_cast<u32>(vertex_base));
+      return {vtx == 0 ? nullptr : vertices.data() + vertex_base,
+              idx == 0 ? nullptr : indices.data() + index_base};
+    }
+
+    void transform(const math::mat4x4& tf,
+                   const std::optional<math::vec4>& tint = std::nullopt) override {
+      inc_epoch();
+      for (auto& v : vertex_buffer)
+        v = tint ? v.transform(tf, *tint) : v.transform(tf);
+    }
+
+    void clear() override {
       vertex_buffer.clear();
       for (auto& indices : index_buffers)
         indices.clear();
       inc_epoch();
     }
 
-    [[nodiscard]] std::pair<math::vec3, math::vec3> get_boundaries() const;
-    [[nodiscard]] std::pair<math::vec3, math::vec3> get_boundaries(const math::mat4x4& tf) const;
-    virtual ~command_buffer() = default;
     [[nodiscard]] command_buffer clone() const;
-    [[nodiscard]] bool is_empty() const noexcept;
   };
 } // namespace fxe

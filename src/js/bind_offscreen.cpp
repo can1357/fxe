@@ -19,7 +19,7 @@
 #include <v8.h>
 
 namespace fxe::js {
-  v8::Local<v8::FunctionTemplate> get_command_buffer_template(v8::Isolate*);
+  v8::Local<v8::FunctionTemplate> get_renderer_template(v8::Isolate*);
 
   namespace {
     using namespace v8;
@@ -268,7 +268,7 @@ namespace fxe::js {
     auto tpl = FunctionTemplate::New(iso, offscreen_constructor);
     tpl->SetClassName("OffscreenRenderer"_v8(iso));
     tpl->InstanceTemplate()->SetInternalFieldCount(2);
-    tpl->Inherit(get_command_buffer_template(iso));
+    tpl->Inherit(get_renderer_template(iso));
 
     auto proto = tpl->PrototypeTemplate();
     proto->Set(iso, "beginFrame", FunctionTemplate::New(iso, offscreen_begin_frame));

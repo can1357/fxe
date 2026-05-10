@@ -674,7 +674,7 @@ export const View = Component((props: ViewProps): Node => {
         fn: (cb: CommandBuffer) => {
           clipChildHitTargets(hitTargetStart, rect);
           const clipped = coarseClip(childBuffer, rect);
-          if (!clipped.isEmpty()) cb.queue(clipped);
+          if (clipped.__fxe_v_len !== 0) cb.queue(clipped);
         },
         deps: [
           layoutSig,

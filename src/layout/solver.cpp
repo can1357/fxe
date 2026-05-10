@@ -1,4 +1,5 @@
 #include <fxe/layout.hpp>
+#include <algorithm>
 
 #include <yoga/Yoga.h>
 
@@ -325,13 +326,38 @@ namespace fxe::layout {
       return YGSize{measured.width, measured.height};
     }
 
+    bool is_reverse(const Node& node) {
+      return node.style.flex_direction.has_value() &&
+             (*node.style.flex_direction == FlexDirection::row_reverse ||
+              *node.style.flex_direction == FlexDirection::column_reverse);
+    }
+
     void populate_node(YGNodeRef yg_node, const Node& node,
                        std::vector<std::unique_ptr<measure_context>>& contexts) {
-      apply_style(yg_node, node.style);
+      // Translate row-reverse / column-reverse into normal direction + reversed
+      // child insertion. Yoga's reverse implementation packs at the trailing
+      // edge (right / bottom); the fxe-ui contract reverses the visual order
+      // while keeping main-start at the leading edge.
+      Style adjusted = node.style;
+      const bool reversed = is_reverse(node);
+      if (adjusted.flex_direction.has_value()) {
+        if (*adjusted.flex_direction == FlexDirection::row_reverse)
+          adjusted.flex_direction = FlexDirection::row;
+        else if (*adjusted.flex_direction == FlexDirection::column_reverse)
+          adjusted.flex_direction = FlexDirection::column;
+      }
+      apply_style(yg_node, adjusted);
 
       // Yoga only permits measure functions on leaves. Keep the structural tree
       // truthful: nodes with children stay container nodes even if measure_is_leaf is set.
       if (node.measure && node.children.empty()) {
+        // A measure callback's reported size is authoritative for both axes.
+        // Without an explicit cross-axis size, default `align-items: stretch`
+        // would override the measured cross dimension. Opt out so the
+        // returned size sticks unless the caller explicitly chose a different
+        // alignment.
+        if (!adjusted.align_self.has_value())
+          YGNodeStyleSetAlignSelf(yg_node, YGAlignFlexStart);
         auto context = std::make_unique<measure_context>();
         context->fn = node.measure;
         YGNodeSetContext(yg_node, context.get());
@@ -339,12 +365,14 @@ namespace fxe::layout {
         contexts.push_back(std::move(context));
       }
 
-      for (std::size_t index = 0; index < node.children.size(); ++index) {
+      const std::size_t count = node.children.size();
+      for (std::size_t index = 0; index < count; ++index) {
+        const std::size_t source_index = reversed ? (count - 1 - index) : index;
         YGNodeRef child = YGNodeNew();
         if (child == nullptr)
           throw std::runtime_error("layout: failed to allocate Yoga node");
         try {
-          populate_node(child, node.children[index], contexts);
+          populate_node(child, node.children[source_index], contexts);
           YGNodeInsertChild(yg_node, child, index);
         } catch (...) {
           YGNodeFreeRecursive(child);
@@ -353,23 +381,51 @@ namespace fxe::layout {
       }
     }
 
-    Result collect_result(YGNodeConstRef node) {
-      Result result;
-      result.x = round3(YGNodeLayoutGetLeft(node));
-      result.y = round3(YGNodeLayoutGetTop(node));
-      result.width = round3(YGNodeLayoutGetWidth(node));
-      result.height = round3(YGNodeLayoutGetHeight(node));
-      result.padding_left = round3(YGNodeLayoutGetPadding(node, YGEdgeLeft));
-      result.padding_top = round3(YGNodeLayoutGetPadding(node, YGEdgeTop));
-      result.padding_right = round3(YGNodeLayoutGetPadding(node, YGEdgeRight));
-      result.padding_bottom = round3(YGNodeLayoutGetPadding(node, YGEdgeBottom));
+    bool is_display_none(const Node& node) {
+      return node.style.display.has_value() && *node.style.display == Display::none;
+    }
 
-      const std::size_t child_count = YGNodeGetChildCount(node);
-      result.children.reserve(child_count);
-      for (std::size_t index = 0; index < child_count; ++index) {
-        result.children.push_back(
-            collect_result(YGNodeGetChild(const_cast<YGNodeRef>(node), index)));
+    Result collect_result(YGNodeConstRef yg_node, const Node& node, float parent_pad_left,
+                          float parent_pad_top) {
+      Result result;
+      result.x = round3(YGNodeLayoutGetLeft(yg_node));
+      result.y = round3(YGNodeLayoutGetTop(yg_node));
+      result.width = round3(YGNodeLayoutGetWidth(yg_node));
+      result.height = round3(YGNodeLayoutGetHeight(yg_node));
+      result.padding_left = round3(YGNodeLayoutGetPadding(yg_node, YGEdgeLeft));
+      result.padding_top = round3(YGNodeLayoutGetPadding(yg_node, YGEdgeTop));
+      result.padding_right = round3(YGNodeLayoutGetPadding(yg_node, YGEdgeRight));
+      result.padding_bottom = round3(YGNodeLayoutGetPadding(yg_node, YGEdgeBottom));
+
+      // W3C contract: absolute children with explicit insets are positioned
+      // relative to the parent's padding edge, not its border edge. Yoga
+      // reports raw inset offsets; add the parent padding back in so the
+      // public API is content-box-relative.
+      if (node.style.position_type.has_value() &&
+          *node.style.position_type == PositionType::absolute) {
+        if (node.style.position[static_cast<std::size_t>(Edge::left)].kind != LengthKind::undefined)
+          result.x += parent_pad_left;
+        if (node.style.position[static_cast<std::size_t>(Edge::top)].kind != LengthKind::undefined)
+          result.y += parent_pad_top;
       }
+
+      const std::size_t count = node.children.size();
+      const bool reversed = is_reverse(node);
+      result.children.reserve(count);
+      for (std::size_t i = 0; i < count; ++i) {
+        const std::size_t source_index = reversed ? (count - 1 - i) : i;
+        const Node& child_node = node.children[source_index];
+        if (is_display_none(child_node))
+          continue;
+        YGNodeConstRef child_yg = YGNodeGetChild(const_cast<YGNodeRef>(yg_node), i);
+        result.children.push_back(
+            collect_result(child_yg, child_node, result.padding_left, result.padding_top));
+      }
+      // For reversed parents the visit order above walks Yoga child slots in
+      // node-reverse order, so `result.children` lines up backwards relative
+      // to `node.children`. Flip it so the public API matches input order.
+      if (reversed)
+        std::reverse(result.children.begin(), result.children.end());
       return result;
     }
   } // namespace
@@ -385,7 +441,7 @@ namespace fxe::layout {
       const float owner_width = constraint.width.value_or(YGUndefined);
       const float owner_height = constraint.height.value_or(YGUndefined);
       YGNodeCalculateLayout(root_yg, owner_width, owner_height, YGDirectionLTR);
-      Result result = collect_result(root_yg);
+      Result result = collect_result(root_yg, root, 0.0f, 0.0f);
       YGNodeFreeRecursive(root_yg);
       return result;
     } catch (...) {
