@@ -14,6 +14,20 @@ export type EasingName = 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-o
 export type EasingFunction = (t: number) => number;
 export type Easing = EasingName | EasingFunction;
 
+export const Easings = {
+  linear: (t: number): number => t,
+  ease: cubicBezier(0.25, 0.1, 0.25, 1),
+  easeIn: cubicBezier(0.42, 0, 1, 1),
+  easeOut: cubicBezier(0, 0, 0.58, 1),
+  easeInOut: cubicBezier(0.42, 0, 0.58, 1),
+  caEaseIn: cubicBezier(0.42, 0, 1, 1),
+  caEaseOut: cubicBezier(0, 0, 0.58, 1),
+  caEaseInEaseOut: cubicBezier(0.42, 0, 0.58, 1),
+  caDefault: cubicBezier(0.25, 0.1, 0.25, 1),
+  materialStandard: cubicBezier(0.4, 0, 0.2, 1),
+  materialDecelerate: cubicBezier(0, 0, 0.2, 1),
+  materialAccelerate: cubicBezier(0.4, 0, 1, 1),
+} as const satisfies Record<string, EasingFunction>;
 export interface TimingAnimationConfig {
   to: number;
   duration: number;
@@ -39,6 +53,7 @@ const kActiveAnimation = Symbol('fxe-ui.activeTimingAnimation');
 
 export interface ActiveAnimation {
   stopFromOwner(finished: boolean): void;
+  currentVelocity?(): number;
 }
 
 export class AnimatedValue<T extends AnimatedOutput = number> {
@@ -99,6 +114,7 @@ export function timing(
   let settled = false;
   let elapsedMs = 0;
   let from = value.getValue();
+  let sampledVelocity = 0;
   const durationMs = config.duration;
   const delayMs = config.delay ?? 0;
   const easing = resolveEasing(config.easing ?? 'ease');
@@ -112,6 +128,7 @@ export function timing(
       settled = false;
       elapsedMs = 0;
       from = value.getValue();
+      sampledVelocity = 0;
       Reflect.set(value, kActiveAnimation, animation);
 
       if (durationMs === 0 && delayMs === 0) {
@@ -128,6 +145,9 @@ export function timing(
     stopFromOwner(finished: boolean): void {
       finish(finished);
     },
+    currentVelocity(): number {
+      return sampledVelocity;
+    },
   };
 
   const step = (dtMs: number): void => {
@@ -140,7 +160,10 @@ export function timing(
     const eased = easing(t);
     if (!Number.isFinite(eased))
       throw new TypeError('Animated.timing easing returned a non-finite value');
-    value.setValue(from + (config.to - from) * eased);
+    const previous = value.getValue();
+    const next = from + (config.to - from) * eased;
+    sampledVelocity = dtMs > 0 ? (next - previous) / (dtMs / 1000) : sampledVelocity;
+    value.setValue(next);
 
     if (t >= 1) {
       value.setValue(config.to);
@@ -191,6 +214,10 @@ export function clearActiveAnimation(
     Reflect.deleteProperty(value, kActiveAnimation);
 }
 
+export function getActiveAnimationVelocity(value: AnimatedValue<number>): number | undefined {
+  return (Reflect.get(value, kActiveAnimation) as ActiveAnimation | undefined)?.currentVelocity?.();
+}
+
 function stopActiveAnimation(value: AnimatedValue<number>, finished: boolean): void {
   const active = Reflect.get(value, kActiveAnimation) as ActiveAnimation | undefined;
   if (!active) return;
@@ -214,21 +241,27 @@ function resolveEasing(easing: Easing): EasingFunction {
   if (typeof easing === 'function') return easing;
   switch (easing) {
     case 'linear':
-      return (t) => t;
+      return Easings.linear;
     case 'ease':
-      return cubicBezier(0.25, 0.1, 0.25, 1);
+      return Easings.ease;
     case 'ease-in':
-      return cubicBezier(0.42, 0, 1, 1);
+      return Easings.easeIn;
     case 'ease-out':
-      return cubicBezier(0, 0, 0.58, 1);
+      return Easings.easeOut;
     case 'ease-in-out':
-      return cubicBezier(0.42, 0, 0.58, 1);
+      return Easings.easeInOut;
     default:
       throw new RangeError(`unknown easing: ${String(easing)}`);
   }
 }
 
-function cubicBezier(x1: number, y1: number, x2: number, y2: number): EasingFunction {
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): EasingFunction {
+  assertFiniteNumber(x1, 'Animated.cubicBezier x1');
+  assertFiniteNumber(y1, 'Animated.cubicBezier y1');
+  assertFiniteNumber(x2, 'Animated.cubicBezier x2');
+  assertFiniteNumber(y2, 'Animated.cubicBezier y2');
+  assertUnitIntervalNumber(x1, 'Animated.cubicBezier x1');
+  assertUnitIntervalNumber(x2, 'Animated.cubicBezier x2');
   return (t: number): number => {
     const targetX = clamp01(t);
     let lo = 0;
@@ -379,6 +412,10 @@ function asFiniteNumber(value: AnimatedOutput): number {
 
 function assertFiniteNumber(value: number, label: string): void {
   if (!Number.isFinite(value)) throw new TypeError(`${label} must be a finite number`);
+}
+
+function assertUnitIntervalNumber(value: number, label: string): void {
+  if (value < 0 || value > 1) throw new TypeError(`${label} must be between 0 and 1`);
 }
 
 function clamp01(value: number): number {

@@ -587,6 +587,21 @@ declare module 'fxe-ui' {
   export type EasingName = 'linear' | 'ease' | 'ease-in' | 'ease-out' | 'ease-in-out';
   export type EasingFunction = (t: number) => number;
   export type Easing = EasingName | EasingFunction;
+  export const Easings: {
+    readonly linear: EasingFunction;
+    readonly ease: EasingFunction;
+    readonly easeIn: EasingFunction;
+    readonly easeOut: EasingFunction;
+    readonly easeInOut: EasingFunction;
+    readonly caEaseIn: EasingFunction;
+    readonly caEaseOut: EasingFunction;
+    readonly caEaseInEaseOut: EasingFunction;
+    readonly caDefault: EasingFunction;
+    readonly materialStandard: EasingFunction;
+    readonly materialDecelerate: EasingFunction;
+    readonly materialAccelerate: EasingFunction;
+  };
+  export function cubicBezier(x1: number, y1: number, x2: number, y2: number): EasingFunction;
   export interface TimingAnimationConfig {
     to: number;
     duration: number;
@@ -599,7 +614,17 @@ declare module 'fxe-ui' {
     damping?: number;
     mass?: number;
     restThreshold?: number;
+    velocity?: number;
   }
+  export type SpringPresetName = 'snappy' | 'gentle' | 'wobbly' | 'stiff';
+  export const springPresets: Readonly<
+    Record<SpringPresetName, { stiffness: number; damping: number; mass: number }>
+  >;
+  export function springPreset(name: SpringPresetName): {
+    stiffness: number;
+    damping: number;
+    mass: number;
+  };
   export interface AnimationEndResult {
     finished: boolean;
   }
@@ -620,6 +645,7 @@ declare module 'fxe-ui' {
     readonly Value: new (initial: number) => AnimatedValue<number>;
     readonly timing: typeof timing;
     readonly spring: typeof spring;
+    readonly Easings: typeof Easings;
   };
   export function useAnimatedValue(initial: number): AnimatedValue<number>;
 
@@ -918,6 +944,12 @@ declare module 'fxe-ui' {
     ): OutlineEntry[];
     revision?(doc: FXE.TextDocument): number;
   }
+  export interface TreeSitterOutlineOptions {
+    language: string;
+    /** Capture names that mark a 'definition' line. Defaults to ['function','type','class','method','constructor','property']. */
+    definitionCaptures?: ReadonlyArray<string>;
+    tabWidth?: number;
+  }
   export interface StickyScrollProps {
     key?: string;
     doc: FXE.TextDocument;
@@ -934,8 +966,10 @@ declare module 'fxe-ui' {
     testID?: string;
   }
   export function createIndentOutlineProvider(opts?: { tabWidth?: number }): OutlineProvider;
+  export function createTreeSitterOutlineProvider(): OutlineProvider;
+  export function createTreeSitterOutlineProvider(opts: TreeSitterOutlineOptions): OutlineProvider;
   export function createTreeSitterOutlineProvider(
-    cb?: (doc: FXE.TextDocument, topVisibleLine: number, maxDepth: number) => OutlineEntry[],
+    cb: (doc: FXE.TextDocument, topVisibleLine: number, maxDepth: number) => OutlineEntry[],
   ): OutlineProvider;
 
   export interface BracketContextProvider {
@@ -1222,6 +1256,23 @@ declare module 'fxe-ui/jsx-runtime' {
 }
 
 declare global {
+  namespace FXEUI {
+    type EasingFunction = import('fxe-ui').EasingFunction;
+    type SpringPresetName = import('fxe-ui').SpringPresetName;
+    const Easings: typeof import('fxe-ui').Easings;
+    function cubicBezier(
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number,
+    ): import('fxe-ui').EasingFunction;
+    const springPresets: typeof import('fxe-ui').springPresets;
+    function springPreset(name: import('fxe-ui').SpringPresetName): {
+      stiffness: number;
+      damping: number;
+      mass: number;
+    };
+  }
   namespace FXE {
     type RenderStatsSnapshot = {
       verticesSubmitted: number;

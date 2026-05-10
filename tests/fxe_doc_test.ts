@@ -1,7 +1,7 @@
 // fxe-doc helpers — History, MultiRangeSelection, Decorations.
 
 import { Decorations, History, MultiRangeSelection } from 'fxe-doc';
-import { assert, assertDeepEqual, assertEqual, test } from './ts_harness.ts';
+import { assert, assertDeepEqual, assertEqual, assertThrows, run, test } from './ts_harness.ts';
 
 test('History undo/redo round-trips a single edit', () => {
   const doc = new TextDocument('hello');
@@ -49,6 +49,99 @@ test('History.break forces a new undo step', () => {
   assertEqual(doc.text(), 'ab');
   h.undo();
   assertEqual(doc.text(), 'a', 'break: undo only the second edit');
+});
+
+test('History.transact groups multiple dispatches into one undo step', () => {
+  const doc = new TextDocument('ab');
+  const h = new History(doc);
+  h.transact(() => {
+    h.dispatch([{ start: 1, removed: 0, inserted: 'X' }], { origin: 'type' });
+    h.dispatch([{ start: 2, removed: 0, inserted: 'Y' }], { origin: 'type' });
+  });
+  assertEqual(doc.text(), 'aXYb');
+  h.undo();
+  assertEqual(doc.text(), 'ab');
+  assert(!h.canUndo());
+});
+
+test('History.transact handles shifted offsets for multi-caret style edits', () => {
+  const doc = new TextDocument('abcde');
+  const h = new History(doc);
+  h.transact(() => {
+    h.dispatch([{ start: 0, removed: 0, inserted: 'X' }], { origin: 'multi-cursor' });
+    h.dispatch([{ start: 6, removed: 0, inserted: 'Y' }], { origin: 'multi-cursor' });
+  });
+  assertEqual(doc.text(), 'XabcdeY');
+  h.undo();
+  assertEqual(doc.text(), 'abcde');
+});
+
+test('History.transact flattens nested transactions', () => {
+  const doc = new TextDocument('');
+  const h = new History(doc);
+  h.transact(() => {
+    h.dispatch([{ start: 0, removed: 0, inserted: 'a' }], { origin: 'type' });
+    h.transact(() => {
+      h.dispatch([{ start: 1, removed: 0, inserted: 'b' }], { origin: 'type' });
+    });
+    h.dispatch([{ start: 2, removed: 0, inserted: 'c' }], { origin: 'type' });
+  });
+  assertEqual(doc.text(), 'abc');
+  h.undo();
+  assertEqual(doc.text(), '');
+  assert(!h.canUndo());
+});
+
+test('History.transact commits partial edits when the callback throws', () => {
+  const doc = new TextDocument('');
+  const h = new History(doc);
+  assertThrows(() => {
+    h.transact(() => {
+      h.dispatch([{ start: 0, removed: 0, inserted: 'a' }], { origin: 'type' });
+      h.dispatch([{ start: 1, removed: 0, inserted: 'b' }], { origin: 'type' });
+      throw new Error('boom');
+    });
+  }, /boom/);
+  assertEqual(doc.text(), 'ab');
+  assert(h.canUndo());
+  h.undo();
+  assertEqual(doc.text(), '');
+});
+
+test('History.transact origin override does not merge with later dispatches', () => {
+  const doc = new TextDocument('');
+  const h = new History(doc, { mergeWindowMs: 60_000 });
+  h.transact(
+    () => {
+      h.dispatch([{ start: 0, removed: 0, inserted: 'a' }], { origin: 'type' });
+    },
+    { origin: 'multi-cursor' },
+  );
+  const undo = (h as unknown as { undo_: Array<{ origin: string }> }).undo_;
+  assertEqual(undo[undo.length - 1].origin, 'multi-cursor');
+  h.dispatch([{ start: 1, removed: 0, inserted: 'b' }], { origin: 'multi-cursor' });
+  h.undo();
+  assertEqual(doc.text(), 'a');
+  h.undo();
+  assertEqual(doc.text(), '');
+});
+
+test('History.breakCoalescing still splits later edits after a transaction', () => {
+  const doc = new TextDocument('');
+  const h = new History(doc, { mergeWindowMs: 60_000 });
+  h.transact(() => {
+    h.dispatch([{ start: 0, removed: 0, inserted: 'a' }], { origin: 'type' });
+  });
+  h.dispatch([{ start: 1, removed: 0, inserted: 'b' }], { origin: 'type' });
+  h.breakCoalescing();
+  h.dispatch([{ start: 2, removed: 0, inserted: 'c' }], { origin: 'type' });
+  assertEqual(doc.text(), 'abc');
+  h.undo();
+  assertEqual(doc.text(), 'ab');
+  h.undo();
+  assertEqual(doc.text(), 'a');
+  h.undo();
+  assertEqual(doc.text(), '');
 });
 
 test('MultiRangeSelection.cursor creates a single zero-width range', () => {
@@ -112,3 +205,5 @@ test('Decorations.map shifts ranges past edits', () => {
   assertEqual(after.size, 1);
   assertDeepEqual({ start: after.all()[0].start, end: after.all()[0].end }, { start: 7, end: 10 });
 });
+
+await run();

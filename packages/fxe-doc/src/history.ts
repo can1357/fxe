@@ -28,13 +28,21 @@ export interface DispatchOptions {
   break?: boolean;
 }
 
+export interface TransactOptions {
+  /** Origin recorded on the transaction's undo entry. */
+  origin?: string;
+}
+
 interface Entry {
   /** Edits to *replay* this group's mutation. */
-  forward: ReadonlyArray<{ start: number; removed: number; inserted: string }>;
+  forward: Array<{ start: number; removed: number; inserted: string }>;
   /** Edits to *undo* this group's mutation. */
-  inverse: ReadonlyArray<{ start: number; removed: number; inserted: string }>;
+  inverse: Array<{ start: number; removed: number; inserted: string }>;
+  forwardBatches: Array<Array<{ start: number; removed: number; inserted: string }>>;
+  inverseBatches: Array<Array<{ start: number; removed: number; inserted: string }>>;
   origin: string;
   timestamp: number;
+  mergeable: boolean;
 }
 
 export class History {
@@ -43,6 +51,9 @@ export class History {
   private limit: number;
   private mergeWindowMs: number;
   private suppress = false;
+  private txDepth = 0;
+  private txEntry: Entry | null = null;
+  private txOrigin = 'transaction';
 
   constructor(
     private readonly doc: TextDocumentLike,
@@ -57,6 +68,41 @@ export class History {
   }
   canRedo(): boolean {
     return this.redo_.length > 0;
+  }
+  /**
+   * Group every `dispatch()` made inside `fn` into a single undo entry.
+   * Nested transactions flatten into the outermost group. If `fn` throws,
+   * already-applied edits are still committed as one undo step so the caller
+   * can undo the partial change. Async transactions stay open across awaits;
+   * callers must avoid interleaving unrelated dispatches while one is open.
+   */
+  transact<T>(fn: () => T, opts: TransactOptions = {}): T {
+    if (this.txDepth === 0) {
+      this.redo_.length = 0;
+      this.txOrigin = opts.origin ?? 'transaction';
+      this.txEntry = {
+        forward: [],
+        inverse: [],
+        forwardBatches: [],
+        inverseBatches: [],
+        origin: this.txOrigin,
+        timestamp: Date.now(),
+        mergeable: false,
+      };
+    }
+    ++this.txDepth;
+    let result: T;
+    try {
+      result = fn();
+    } catch (error) {
+      this.finishTransaction();
+      throw error;
+    }
+    if (result instanceof Promise) {
+      return result.finally(() => this.finishTransaction()) as T;
+    }
+    this.finishTransaction();
+    return result;
   }
 
   /**
@@ -82,19 +128,46 @@ export class History {
     const entry: Entry = {
       forward: edits.map((e) => ({ ...e })),
       inverse,
+      forwardBatches: [edits.map((e) => ({ ...e }))],
+      inverseBatches: [inverse.map((e) => ({ ...e }))],
       origin,
       timestamp: now,
+      mergeable: true,
     };
+    if (this.txDepth > 0) {
+      const txEntry = this.txEntry ?? {
+        forward: [],
+        inverse: [],
+        forwardBatches: [],
+        inverseBatches: [],
+        origin: this.txOrigin,
+        timestamp: now,
+        mergeable: false,
+      };
+      txEntry.forward.push(...entry.forward);
+      txEntry.inverse.unshift(...entry.inverse);
+      txEntry.forwardBatches.push(entry.forward);
+      txEntry.inverseBatches.unshift(entry.inverse.map((e) => ({ ...e })));
+      txEntry.timestamp = now;
+      this.txEntry = txEntry;
+      return applied;
+    }
     this.redo_.length = 0;
     const top = this.undo_[this.undo_.length - 1];
-    if (!opts.break && top && top.origin === origin && now - top.timestamp < this.mergeWindowMs) {
-      // Merge: keep the *earliest* inverse so undo reverts the whole group.
-      this.undo_[this.undo_.length - 1] = {
-        forward: entry.forward,
-        inverse: top.inverse,
-        origin: top.origin,
-        timestamp: now,
-      };
+    if (
+      !opts.break &&
+      top &&
+      top.mergeable &&
+      top.origin === origin &&
+      now - top.timestamp < this.mergeWindowMs
+    ) {
+      // Merge: append forward batches and keep inverse batches in reverse
+      // application order so one undo reverts the whole group.
+      top.forward.push(...entry.forward);
+      top.inverse.unshift(...entry.inverse);
+      top.forwardBatches.push(entry.forward);
+      top.inverseBatches.unshift(entry.inverse.map((e) => ({ ...e })));
+      top.timestamp = now;
     } else {
       this.undo_.push(entry);
       while (this.undo_.length > this.limit) this.undo_.shift();
@@ -105,39 +178,39 @@ export class History {
   undo(): boolean {
     const e = this.undo_.pop();
     if (!e) return false;
-    this.suppress = true;
-    let applied: TextDocumentEdit[];
-    try {
-      applied = this.doc.applyBatch(e.inverse);
-    } finally {
-      this.suppress = false;
-    }
-    this.redo_.push({
-      forward: e.inverse,
-      inverse: inverseEditsFromApplied(applied),
-      origin: e.origin,
-      timestamp: Date.now(),
-    });
+    this.applyBatches(e.inverseBatches);
+    this.redo_.push(e);
     return true;
   }
 
   redo(): boolean {
     const e = this.redo_.pop();
     if (!e) return false;
+    this.applyBatches(e.forwardBatches);
+    this.undo_.push(e);
+    return true;
+  }
+
+  private finishTransaction(): void {
+    --this.txDepth;
+    if (this.txDepth !== 0) return;
+    const entry = this.txEntry;
+    this.txEntry = null;
+    if (!entry || entry.forward.length === 0) return;
+    entry.timestamp = Date.now();
+    this.undo_.push(entry);
+    while (this.undo_.length > this.limit) this.undo_.shift();
+  }
+
+  private applyBatches(
+    batches: ReadonlyArray<ReadonlyArray<{ start: number; removed: number; inserted: string }>>,
+  ): void {
     this.suppress = true;
-    let applied: TextDocumentEdit[];
     try {
-      applied = this.doc.applyBatch(e.inverse);
+      for (const batch of batches) this.doc.applyBatch(batch);
     } finally {
       this.suppress = false;
     }
-    this.undo_.push({
-      forward: e.inverse,
-      inverse: inverseEditsFromApplied(applied),
-      origin: e.origin,
-      timestamp: Date.now(),
-    });
-    return true;
   }
 
   /** Force the next dispatch to start a new undo entry. */

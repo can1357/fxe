@@ -6,7 +6,7 @@
 
 export type { Decoration } from './decorations.ts';
 export { Decorations } from './decorations.ts';
-export type { DispatchOptions, HistoryOptions } from './history.ts';
+export type { DispatchOptions, HistoryOptions, TransactOptions } from './history.ts';
 export { History } from './history.ts';
 export type { Range } from './selection.ts';
 export { MultiRangeSelection } from './selection.ts';

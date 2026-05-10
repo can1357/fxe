@@ -54,6 +54,27 @@ test('tree-sitter provider forwards to callback when present', () => {
   assertDeepEqual(outline.getStickyEntries(doc, 3, 2), [{ line: 1, depth: 0, label: 'outer' }]);
 });
 
+test('tree-sitter outline uses highlighted definition lines when available', () => {
+  const doc = new TextDocument('function outer() {\n  function inner() {\n    body();\n  }\n}');
+  const outline = createTreeSitterOutlineProvider({ language: 'typescript' });
+  const entries = outline.getStickyEntries(doc, 3, 2);
+  assertEqual(
+    entries.some((entry) => entry.line === 0),
+    true,
+  );
+});
+
+test('tree-sitter outline falls back cleanly when highlighting is unavailable', () => {
+  const doc = new TextDocument('function outer() {\n  body();\n}');
+  const outline = createTreeSitterOutlineProvider({ language: 'lang-that-does-not-exist' });
+  const entries = outline.getStickyEntries(doc, 1, 4);
+  assertEqual(Array.isArray(entries), true);
+  for (const entry of entries) {
+    assertEqual(typeof entry.line, 'number');
+    assertEqual(typeof entry.depth, 'number');
+  }
+});
+
 test('StickyScroll renders nothing when topVisibleLine is 0', () => {
   const doc = new TextDocument('function outer() {\n  body();\n}');
   const outline = createIndentOutlineProvider();

@@ -4,6 +4,7 @@ import {
   type AnimationEndCallback,
   type CompositeAnimation,
   clearActiveAnimation,
+  getActiveAnimationVelocity,
   registerAnimatedFrameStep,
   replaceActiveAnimation,
 } from './timing.ts';
@@ -14,6 +15,7 @@ export interface SpringAnimationConfig {
   damping?: number;
   mass?: number;
   restThreshold?: number;
+  velocity?: number;
 }
 
 interface SpringState {
@@ -32,7 +34,32 @@ const DEFAULT_MASS = 1;
 const DEFAULT_REST_THRESHOLD = 0.001;
 const MAX_STEP_SECONDS = 1 / 60;
 const MAX_ACCUMULATED_SECONDS = 0.064;
+export type SpringPresetName = 'snappy' | 'gentle' | 'wobbly' | 'stiff';
 
+export const springPresets: Readonly<
+  Record<SpringPresetName, { stiffness: number; damping: number; mass: number }>
+> = {
+  gentle: { stiffness: 120, damping: 14, mass: 1 },
+  wobbly: { stiffness: 180, damping: 12, mass: 1 },
+  stiff: { stiffness: 210, damping: 20, mass: 1 },
+  snappy: { stiffness: 320, damping: 28, mass: 1 },
+};
+
+export function springPreset(name: SpringPresetName): {
+  stiffness: number;
+  damping: number;
+  mass: number;
+} {
+  const preset = springPresets[name];
+  if (!preset) throw new RangeError(`unknown spring preset: ${String(name)}`);
+  return { stiffness: preset.stiffness, damping: preset.damping, mass: preset.mass };
+}
+
+/**
+ * When a spring is re-targeted while still animating against `value`, the previous
+ * animation's current velocity is carried into the new spring unless `config.velocity`
+ * explicitly overrides it.
+ */
 export function spring(
   value: AnimatedValue<number>,
   config: SpringAnimationConfig,
@@ -52,11 +79,13 @@ export function spring(
 
   const animation: ActiveAnimation & CompositeAnimation = {
     start(cb?: AnimationEndCallback): void {
+      const initialVelocity =
+        config.velocity ?? (running ? state.v : (getActiveAnimationVelocity(value) ?? 0));
       if (running) animation.stopFromOwner(false);
       callback = cb;
       running = true;
       settled = false;
-      state = { x: value.getValue(), v: 0 };
+      state = { x: value.getValue(), v: initialVelocity };
       replaceActiveAnimation(value, animation);
       disposeFrame = registerAnimatedFrameStep(step);
       if (isAtRest(state)) finish(true);
@@ -66,6 +95,9 @@ export function spring(
     },
     stopFromOwner(finished: boolean): void {
       finish(finished);
+    },
+    currentVelocity(): number {
+      return state.v;
     },
   };
 
@@ -163,6 +195,8 @@ function validateSpringConfig(config: SpringAnimationConfig): void {
   if (damping < 0) throw new RangeError('Animated.spring damping must be >= 0');
   assertPositive(config.mass ?? DEFAULT_MASS, 'Animated.spring mass');
   assertPositive(config.restThreshold ?? DEFAULT_REST_THRESHOLD, 'Animated.spring restThreshold');
+  if (config.velocity !== undefined)
+    assertFiniteNumber(config.velocity, 'Animated.spring velocity');
 }
 
 function assertPositive(value: number, label: string): void {
