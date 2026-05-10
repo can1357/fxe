@@ -182,6 +182,9 @@ namespace fxe::primitives {
                  float thickness = 0.0f);
   void fill_rect(command_sink& r, math::vec2 at, math::vec2 size, float depth, r8g8b8a8 color,
                  const texture_info& tx = {});
+  void draw_textured_quad(command_buffer& r, const math::vec2& pos, const math::vec2& size,
+                          float depth, texture_id tex, math::vec2 uv0, math::vec2 uv1,
+                          r8g8b8a8 tint);
   void fill_rect(command_sink& r, math::vec2 at, math::vec2 size, float depth,
                  const paint_value& paint);
   void fill_rect_rounded(command_sink& r, const math::mat4x4& transform,

@@ -1124,6 +1124,21 @@ declare namespace FXE {
       tint?: Color,
       depth?: number,
     ): void;
+    /**
+     * Emit a sprite/textured quad. Sprite ids sample the default spritesheet as
+     * before; external image texture handles sample the full `[0,0]..[1,1]`
+     * range of the registered image.
+     */
+    drawSprite(
+      cb: CommandBuffer | Renderer,
+      spriteId: number,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      depth?: number,
+      tint?: Color,
+    ): void;
     linearGradient(p0: Vec2, p1: Vec2, stops: Float32Array): GradientPaint;
     radialGradient(center: Vec2, radius: number, stops: Float32Array): GradientPaint;
     conicGradient(center: Vec2, angle: number, stops: Float32Array): GradientPaint;
@@ -2057,6 +2072,7 @@ declare module 'fxe' {
     height(): number;
     bytes(): Uint8Array;
     dispose(): void;
+    textureId(): number;
   }
   export interface ImageNamespace {
     load(path: string): ImageHandle;
@@ -2065,7 +2081,6 @@ declare module 'fxe' {
     fromBytes(bytes: Uint8Array, width: number, height: number): ImageHandle;
   }
   export const Image: ImageNamespace;
-
   export interface SpriteResolved {
     textureId: number;
     u0: number;
@@ -2118,6 +2133,7 @@ interface ImageHandle {
   height(): number;
   bytes(): Uint8Array;
   dispose(): void;
+  textureId(): number;
 }
 interface ImageNamespace {
   load(path: string): ImageHandle;

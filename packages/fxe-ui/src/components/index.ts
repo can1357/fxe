@@ -6,7 +6,7 @@ export type { FindReplaceBarProps } from './FindReplaceBar.ts';
 export { FindReplaceBar } from './FindReplaceBar.ts';
 export type { GutterMark, GutterMarkFn, GutterProps } from './Gutter.ts';
 export { Gutter } from './Gutter.ts';
-export type { ImageProps } from './Image.ts';
+export type { ImagePlaceholder, ImageProps, ImageResizeMode, ImageSource } from './Image.ts';
 export { Image } from './Image.ts';
 export type {
   DiagnosticUnderline,

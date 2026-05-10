@@ -23,6 +23,7 @@
 #include <fxe/font.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/spritesheet.hpp>
+#include <fxe/texture_registry.hpp>
 #include <fxe/window.hpp>
 
 #include "pipeline.hpp"
@@ -40,6 +41,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace fxe {
@@ -198,8 +200,9 @@ namespace fxe {
       return std::bit_cast<texture_id>(v.uv.z);
     }
 
-    constexpr texture_id kFontColorFlag = 0x080000u;
-    constexpr texture_id kFontMaskFlag = 0x040000u;
+    constexpr texture_id kFontColorFlag = font_color_flag;
+    constexpr texture_id kFontMaskFlag = font_mask_flag;
+    constexpr texture_id kExternalTextureFlag = external_texture_flag;
 
     [[nodiscard]] primitive_effect classify_triangle(const std::vector<vertex>& vertices,
                                                      const u32* indices) noexcept {
@@ -215,10 +218,30 @@ namespace fxe {
           return primitive_effect::text_mask;
         if ((tx & kFontColorFlag) != 0u)
           return primitive_effect::text_color;
+        if ((tx & kExternalTextureFlag) != 0u)
+          alpha_effect = primitive_effect::alpha_blend;
         if (v.color.a < 255)
           alpha_effect = primitive_effect::alpha_blend;
       }
       return alpha_effect;
+    }
+
+    [[nodiscard]] texture_id triangle_external_texture_id(const std::vector<vertex>& vertices,
+                                                          const u32* indices) noexcept {
+      texture_id external = null_texture;
+      for (u32 i = 0; i != 3; ++i) {
+        if (indices[i] >= vertices.size())
+          continue;
+        const texture_id tx = vertex_texture_id(vertices[indices[i]]);
+        if ((tx & kExternalTextureFlag) == 0u)
+          continue;
+        if (external == null_texture) {
+          external = tx;
+        } else if (external != tx) {
+          return null_texture;
+        }
+      }
+      return external;
     }
 
     // ---------------------------------------------------------------------
@@ -399,17 +422,18 @@ namespace fxe {
           pass.SetBindGroup(0, frame_bind_group);
           if (vbuf_size_used_ > 0) {
             pass.SetVertexBuffer(0, vbuf_, 0, vbuf_size_used_);
-            draw_indexed_ranges(pass, frame_bind_group, 0, main_tri_index_count_, 0,
-                                main_line_index_count_, render_config{}, mode);
+            draw_indexed_ranges(pass, frame_bind_group, ubo_, framebuffer_view, 0,
+                                main_tri_index_count_, 0, main_line_index_count_, render_config{},
+                                mode);
 
             for (auto& draw : queued_dev_draws_) {
               const wgpu::BindGroup draw_bind_group =
                   framebuffer_view
                       ? create_bind_group(draw.ubo, "fxe-queued-bg-framebuffer", framebuffer_view)
                       : draw.bind_group;
-              draw_indexed_ranges(pass, draw_bind_group, draw.tri_index_offset,
-                                  draw.tri_index_count, draw.line_index_offset,
-                                  draw.line_index_count, draw.cfg, mode);
+              draw_indexed_ranges(pass, draw_bind_group, draw.ubo, framebuffer_view,
+                                  draw.tri_index_offset, draw.tri_index_count,
+                                  draw.line_index_offset, draw.line_index_count, draw.cfg, mode);
             }
           }
           if (mode != blur_draw_mode::composite)
@@ -930,7 +954,8 @@ namespace fxe {
       }
 
       wgpu::BindGroup create_bind_group(const wgpu::Buffer& ubo, const char* label,
-                                        const wgpu::TextureView& framebuffer_view = {}) {
+                                        const wgpu::TextureView& framebuffer_view = {},
+                                        const wgpu::TextureView& external_view = {}) {
         std::array<wgpu::BindGroupEntry, 12> entries{};
         entries[0].binding = 0;
         entries[0].buffer = ubo;
@@ -951,7 +976,10 @@ namespace fxe {
                                      : (blur_capture_view_ ? blur_capture_view_ : atlas_view_);
         entries[7].binding = 7;
         entries[7].sampler = mask_sampler_;
-        for (u32 i = 0; i < 4; ++i) {
+        entries[8].binding = 8;
+        entries[8].textureView =
+            external_view ? external_view : (user_tex_views_[0] ? user_tex_views_[0] : atlas_view_);
+        for (u32 i = 1; i < 4; ++i) {
           entries[8 + i].binding = 8 + i;
           entries[8 + i].textureView = user_tex_views_[i] ? user_tex_views_[i] : atlas_view_;
         }
@@ -1091,6 +1119,50 @@ namespace fxe {
           draw.bind_group = create_bind_group(draw.ubo, "fxe-queued-bg");
         atlas_dirty_ = false;
       }
+      wgpu::TextureView resolve_external_texture_view(texture_id id) {
+        if ((id & kExternalTextureFlag) == 0u)
+          return {};
+        auto it = external_textures_.find(id);
+        auto tex = find_external_texture(id);
+        if (!tex) {
+          return it != external_textures_.end() ? it->second.view : wgpu::TextureView{};
+        }
+        if (tex->size.x == 0 || tex->size.y == 0 || tex->pixels.empty())
+          return {};
+        const u64 pixel_hash = hash_atlas_pixels(*tex);
+        auto& cached = external_textures_[id];
+        if (!cached.texture || cached.width != tex->size.x || cached.height != tex->size.y ||
+            cached.hash != pixel_hash) {
+          destroy_texture(cached.texture);
+          cached.view = {};
+          wgpu::TextureDescriptor td{};
+          td.label = "fxe-external-texture";
+          td.dimension = wgpu::TextureDimension::e2D;
+          td.size = {tex->size.x, tex->size.y, 1};
+          td.format = wgpu::TextureFormat::RGBA8Unorm;
+          td.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+          td.mipLevelCount = 1;
+          td.sampleCount = 1;
+          cached.texture = device_.CreateTexture(&td);
+          cached.view = cached.texture.CreateView();
+          cached.width = tex->size.x;
+          cached.height = tex->size.y;
+          cached.hash = pixel_hash;
+          wgpu::TexelCopyTextureInfo dst{};
+          dst.texture = cached.texture;
+          dst.mipLevel = 0;
+          dst.origin = {0, 0, 0};
+          dst.aspect = wgpu::TextureAspect::All;
+          wgpu::TexelCopyBufferLayout layout{};
+          layout.offset = 0;
+          layout.bytesPerRow = tex->size.x * 4;
+          layout.rowsPerImage = tex->size.y;
+          wgpu::Extent3D extent{tex->size.x, tex->size.y, 1};
+          queue_.WriteTexture(&dst, tex->pixels.data(), static_cast<usize>(tex->pixels.size()) * 4,
+                              &layout, &extent);
+        }
+        return cached.view;
+      }
 
       void ensure_buffer(wgpu::Buffer& buf, u64& cap, wgpu::BufferUsage usage, u64 needed,
                          const char* label) {
@@ -1141,7 +1213,15 @@ namespace fxe {
                       line_idx_bytes ? line_idx_bytes : kInitialDynamicBytes, "fxe-line-ibuf");
 
         if (vbytes) {
-          queue_.WriteBuffer(vbuf_, 0, upload_buf_.vertex_buffer.data(), vbytes);
+          upload_gpu_vertices_ = upload_buf_.vertex_buffer;
+          for (auto& v : upload_gpu_vertices_) {
+            const texture_id tx = vertex_texture_id(v);
+            if ((tx & kExternalTextureFlag) != 0u)
+              v.uv.z = std::bit_cast<float>(user_tex_flag);
+          }
+          queue_.WriteBuffer(vbuf_, 0, upload_gpu_vertices_.data(), vbytes);
+        } else {
+          upload_gpu_vertices_.clear();
         }
         if (tri_idx_bytes) {
           queue_.WriteBuffer(tri_ibuf_, 0,
@@ -1294,32 +1374,49 @@ namespace fxe {
         }
       }
 
-      void draw_triangle_batch(wgpu::RenderPassEncoder& pass, primitive_effect effect,
+      void draw_triangle_batch(wgpu::RenderPassEncoder& pass, const wgpu::BindGroup& bind_group,
+                               const wgpu::Buffer& ubo, const wgpu::TextureView& framebuffer_view,
+                               primitive_effect effect, texture_id external_texture,
                                u64 base_offset, u32 first, u32 count) {
         if (count == 0)
           return;
+        if (external_texture != null_texture) {
+          const wgpu::TextureView view = resolve_external_texture_view(external_texture);
+          if (!view)
+            return;
+          pass.SetBindGroup(0, create_bind_group(ubo, "fxe-bg-external", framebuffer_view, view));
+        } else {
+          pass.SetBindGroup(0, bind_group);
+        }
         pass.SetPipeline(pipeline_for_effect(effect));
         pass.SetIndexBuffer(tri_ibuf_, wgpu::IndexFormat::Uint32,
                             base_offset + u64(first) * sizeof(u32), count * sizeof(u32));
         pass.DrawIndexed(count, 1, 0, 0, 0);
       }
 
-      void draw_triangles_for_mode(wgpu::RenderPassEncoder& pass, u64 tri_offset, u32 tri_count,
-                                   blur_draw_mode mode) {
+      void draw_triangles_for_mode(wgpu::RenderPassEncoder& pass, const wgpu::BindGroup& bind_group,
+                                   const wgpu::Buffer& ubo,
+                                   const wgpu::TextureView& framebuffer_view, u64 tri_offset,
+                                   u32 tri_count, blur_draw_mode mode) {
         const auto& tri = upload_buf_.index_buffers[usize(vertex_topology::triangle)];
         const usize begin = static_cast<usize>(tri_offset / sizeof(u32));
         const usize end = std::min<usize>(begin + tri_count, tri.size());
         u32 batch_first = 0;
         u32 batch_count = 0;
         primitive_effect batch_effect = primitive_effect::color;
+        texture_id batch_external_texture = null_texture;
         auto flush = [&] {
-          draw_triangle_batch(pass, batch_effect, tri_offset, batch_first, batch_count);
+          draw_triangle_batch(pass, bind_group, ubo, framebuffer_view, batch_effect,
+                              batch_external_texture, tri_offset, batch_first, batch_count);
           batch_count = 0;
         };
         for (usize i = begin; i + 2 < end; i += 3) {
           const primitive_effect effect = classify_triangle(upload_buf_.vertex_buffer, &tri[i]);
-          const bool composite_effect = effect == primitive_effect::framebuffer_sample ||
-                                        effect == primitive_effect::alpha_blend;
+          const texture_id external_texture =
+              triangle_external_texture_id(upload_buf_.vertex_buffer, &tri[i]);
+          const bool composite_effect =
+              effect == primitive_effect::framebuffer_sample ||
+              (effect == primitive_effect::alpha_blend && external_texture == null_texture);
           if (mode == blur_draw_mode::base && composite_effect)
             continue;
           if (mode == blur_draw_mode::composite && !composite_effect)
@@ -1329,19 +1426,23 @@ namespace fxe {
             batch_first = rel;
             batch_count = 3;
             batch_effect = effect;
-          } else if (effect == batch_effect && batch_first + batch_count == rel) {
+            batch_external_texture = external_texture;
+          } else if (effect == batch_effect && batch_external_texture == external_texture &&
+                     batch_first + batch_count == rel) {
             batch_count += 3;
           } else {
             flush();
             batch_first = rel;
             batch_count = 3;
             batch_effect = effect;
+            batch_external_texture = external_texture;
           }
         }
         flush();
       }
 
       void draw_indexed_ranges(wgpu::RenderPassEncoder& pass, const wgpu::BindGroup& bind_group,
+                               const wgpu::Buffer& ubo, const wgpu::TextureView& framebuffer_view,
                                u64 tri_offset, u32 tri_count, u64 line_offset, u32 line_count,
                                const render_config& cfg,
                                blur_draw_mode mode = blur_draw_mode::all) {
@@ -1358,7 +1459,8 @@ namespace fxe {
                               static_cast<u32>(cfg.scissor.end.y - cfg.scissor.begin.y));
         }
         if (tri_count > 0)
-          draw_triangles_for_mode(pass, tri_offset, tri_count, mode);
+          draw_triangles_for_mode(pass, bind_group, ubo, framebuffer_view, tri_offset, tri_count,
+                                  mode);
         if (line_count > 0 && mode != blur_draw_mode::composite) {
           pass.SetPipeline(line_pipeline_);
           pass.SetIndexBuffer(line_ibuf_, wgpu::IndexFormat::Uint32, line_offset,
@@ -1507,6 +1609,15 @@ namespace fxe {
       // Default-empty; falls back to atlas_view_ in the bind group when
       // unbound. Indexed via `bind_user_texture(slot, view)`.
       std::array<wgpu::TextureView, 4> user_tex_views_{};
+      struct external_texture_gpu {
+        wgpu::Texture texture;
+        wgpu::TextureView view;
+        u32 width = 0;
+        u32 height = 0;
+        u64 hash = 0;
+      };
+      std::unordered_map<texture_id, external_texture_gpu> external_textures_;
+
       wgpu::Sampler atlas_sampler_;
       wgpu::Sampler mask_sampler_;
       u32 atlas_w_ = 0;
@@ -1554,6 +1665,7 @@ namespace fxe {
       u32 fb_h_ = 0;
       bool captured_frame_available_ = false;
       bool queued_dev_prepared_ = false;
+      std::vector<vertex> upload_gpu_vertices_;
     };
   } // namespace
 

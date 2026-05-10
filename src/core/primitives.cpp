@@ -712,6 +712,15 @@ namespace fxe::primitives {
     fill_rect(r, make_screen_transform(at, size, depth), 0.0f,
               color_list<4>{color, color, color, color}, ti);
   }
+  void draw_textured_quad(command_buffer& r, const math::vec2& pos, const math::vec2& size,
+                          float depth, texture_id tex, math::vec2 uv0, math::vec2 uv1,
+                          r8g8b8a8 tint) {
+    auto* vp = r.allocate_strip(4, vertex_topology::triangle);
+    vp[0] = make_vertex({pos.x, pos.y}, depth, {uv0.x, uv0.y}, tex, tint);
+    vp[1] = make_vertex({pos.x + size.x, pos.y}, depth, {uv1.x, uv0.y}, tex, tint);
+    vp[2] = make_vertex({pos.x, pos.y + size.y}, depth, {uv0.x, uv1.y}, tex, tint);
+    vp[3] = make_vertex({pos.x + size.x, pos.y + size.y}, depth, {uv1.x, uv1.y}, tex, tint);
+  }
 
   void fill_rect(command_sink& r, math::vec2 at, math::vec2 size, float depth,
                  const paint_value& paint) {

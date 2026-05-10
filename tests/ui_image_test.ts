@@ -1,13 +1,14 @@
-import { Image as NativeImage, type ImageHandle, CommandBuffer } from 'fxe';
-import { Animated, Image as UIImage, render } from 'fxe-ui';
+import { CommandBuffer, type ImageHandle, Image as NativeImage } from 'fxe';
+import { render, Image as UIImage } from 'fxe-ui';
 
-import { tickFrame } from '../packages/fxe-ui/src/reconciler/frame_loop.ts';
+import { AnimatedValue } from '../packages/fxe-ui/src/animated/timing.ts';
 import {
   DEFAULT_IMAGE_PLACEHOLDER_COLOR,
   resolveImageContentRect,
   resolveImagePlaceholderColor,
   startImageFadeAnimation,
 } from '../packages/fxe-ui/src/components/Image.ts';
+import { tickFrame } from '../packages/fxe-ui/src/reconciler/frame_loop.ts';
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 
 type MutableImageNamespace = typeof NativeImage & {
@@ -39,7 +40,10 @@ function hasColor(cb: CommandBuffer, color: number): boolean {
 }
 
 function assertNear(actual: number, expected: number, epsilon = 1e-3): void {
-  assert(Math.abs(actual - expected) <= epsilon, `expected ${actual} to be within ${epsilon} of ${expected}`);
+  assert(
+    Math.abs(actual - expected) <= epsilon,
+    `expected ${actual} to be within ${epsilon} of ${expected}`,
+  );
 }
 
 test('Image uses placeholder color while async source is pending and falls back to the default color', async () => {
@@ -63,19 +67,25 @@ test('Image uses placeholder color while async source is pending and falls back 
       explicit,
     );
     assertDeepEqual(requested, ['explicit.png']);
-    assert(hasColor(explicit, 0x112233ff), 'explicit placeholder color should render while decode is pending');
+    assert(
+      hasColor(explicit, 0x112233ff),
+      'explicit placeholder color should render while decode is pending',
+    );
 
     const fallback = new CommandBuffer();
-    render(UIImage({ key: 'ui-image-pending-default', source: 'fallback.png', style: { width: 12, height: 8 } }), fallback);
+    render(
+      UIImage({
+        key: 'ui-image-pending-default',
+        source: 'fallback.png',
+        style: { width: 12, height: 8 },
+      }),
+      fallback,
+    );
     assertDeepEqual(requested, ['explicit.png', 'fallback.png']);
     assert(
       hasColor(fallback, DEFAULT_IMAGE_PLACEHOLDER_COLOR),
       'default placeholder color should render when placeholder is omitted',
     );
-
-    pending.resolve(makeImage(2, 1, 31));
-    await Promise.resolve();
-    await Promise.resolve();
   } finally {
     mutableImage.loadAsync = originalLoadAsync;
   }
@@ -174,7 +184,7 @@ test('ImageHandle source skips async loading and uses intrinsic size when style 
 });
 
 test('Image fade timeline animates opacity from 0 to 1 with Animated.timing', () => {
-  const value = new Animated.Value(0);
+  const value = new AnimatedValue(0);
   const animation = startImageFadeAnimation(value, 180);
   tickFrame(90);
   const midway = value.getValue();
@@ -187,16 +197,36 @@ test('Image fade timeline animates opacity from 0 to 1 with Animated.timing', ()
 test('Image resize modes compute the expected destination rect', () => {
   const box = { x: 10, y: 20, width: 100, height: 60 };
   assertDeepEqual(resolveImageContentRect(box, 50, 50, 'stretch'), box);
-  assertDeepEqual(resolveImageContentRect(box, 50, 50, 'center'), { x: 35, y: 25, width: 50, height: 50 });
-  assertDeepEqual(resolveImageContentRect(box, 50, 100, 'contain'), { x: 45, y: 20, width: 30, height: 60 });
-  assertDeepEqual(resolveImageContentRect(box, 100, 50, 'cover'), { x: 10, y: -5, width: 100, height: 50 + 0 });
+  assertDeepEqual(resolveImageContentRect(box, 50, 50, 'center'), {
+    x: 35,
+    y: 25,
+    width: 50,
+    height: 50,
+  });
+  assertDeepEqual(resolveImageContentRect(box, 50, 100, 'contain'), {
+    x: 45,
+    y: 20,
+    width: 30,
+    height: 60,
+  });
+  assertDeepEqual(resolveImageContentRect(box, 100, 50, 'cover'), {
+    x: 0,
+    y: 20,
+    width: 120,
+    height: 60,
+  });
 });
 
 test('Image placeholder color helper resolves both explicit and implicit color fallbacks', () => {
-  assertEqual(resolveImagePlaceholderColor(undefined), DEFAULT_IMAGE_PLACEHOLDER_COLOR);
-  assertEqual(resolveImagePlaceholderColor('color'), DEFAULT_IMAGE_PLACEHOLDER_COLOR);
-  assertEqual(resolveImagePlaceholderColor({ color: 0xaabbccdd }), 0xaabbccdd);
-  assertEqual(resolveImagePlaceholderColor(makeImage(1, 1, 7)), undefined);
+  const preview = makeImage(1, 1, 7);
+  try {
+    assertEqual(resolveImagePlaceholderColor(undefined), DEFAULT_IMAGE_PLACEHOLDER_COLOR);
+    assertEqual(resolveImagePlaceholderColor('color'), DEFAULT_IMAGE_PLACEHOLDER_COLOR);
+    assertEqual(resolveImagePlaceholderColor({ color: 0xaabbccdd }), 0xaabbccdd);
+    assertEqual(resolveImagePlaceholderColor(preview), undefined);
+  } finally {
+    preview.dispose();
+  }
 });
 
 await run();

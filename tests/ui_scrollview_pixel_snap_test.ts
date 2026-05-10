@@ -36,7 +36,16 @@ test('ScrollView keeps fractional logical offset but snaps painted child hit rec
   };
 
   draw();
-  dispatchWheel({ type: 'wheel', x: 5, y: 5, dx: 0, dy: -0.01, modifiers: 0 });
+  dispatchWheel({
+    type: 'wheel',
+    x: 5,
+    y: 5,
+    dx: 0,
+    dy: -0.01,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+  });
   assert(
     Math.abs(observedY - 0.48) < 1e-9,
     `logical scroll offset ${observedY} should remain fractional`,

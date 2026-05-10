@@ -1646,7 +1646,8 @@ namespace fxe::js {
       primitives::color_list<4> cl{c, c, c, c};
       primitives::blur_quad(*cb, p1, p2, p3, p4, cl, disp, math::vec2{sw, sh});
     }
-    // drawSprite(cb, spriteId, x, y, w, h, depth?, tint?) — samples from the default spritesheet.
+    // drawSprite(cb, spriteId, x, y, w, h, depth?, tint?) — samples from the
+    // default spritesheet or any registered external texture handle.
     void p_drawSprite(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -1664,41 +1665,62 @@ namespace fxe::js {
       const float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
       const auto tint = info.Length() >= 8 ? decode_color(iso, ctx, info[7]) : white;
       const auto fallback = [&] { primitives::fill_rect(*cb, at, size, depth, tint); };
+      const auto emit = [&](texture_id texture, math::vec2 uv0, math::vec2 uv1) {
+        if (auto* out = dynamic_cast<command_buffer*>(cb)) {
+          primitives::draw_textured_quad(*out, at, size, depth, texture, uv0, uv1, tint);
+          return;
+        }
+        auto* vp = cb->allocate_strip(4, vertex_topology::triangle);
+        vp[0] = make_vertex({at.x, at.y}, depth, {uv0.x, uv0.y}, texture, tint);
+        vp[1] = make_vertex({at.x + size.x, at.y}, depth, {uv1.x, uv0.y}, texture, tint);
+        vp[2] = make_vertex({at.x, at.y + size.y}, depth, {uv0.x, uv1.y}, texture, tint);
+        vp[3] = make_vertex({at.x + size.x, at.y + size.y}, depth, {uv1.x, uv1.y}, texture, tint);
+      };
+      const auto emit_texture = [&](texture_id texture) -> bool {
+        const texture_id texture_index = texture & sprite_index_mask;
+        if (texture_index == 0)
+          return false;
+        if ((texture & external_texture_flag) != 0) {
+          emit(texture, {0.0f, 0.0f}, {1.0f, 1.0f});
+          return true;
+        }
+        auto& sheet = get_default_spritesheet();
+        if (texture_index > sheet.textures.size())
+          return false;
+        const texture_data& td = sheet.textures[texture_index - 1];
+        if (td.size.x == 0 || td.size.y == 0)
+          return false;
+        emit(texture, {0.0f, 0.0f}, {1.0f, 1.0f});
+        return true;
+      };
       if (sprite_id == null_texture) {
         fallback();
         return;
       }
       auto& sheet = get_default_spritesheet();
       const texture_id resolved = sheet.resolve_if(sprite_id, 0.0f);
-      if ((resolved & (msprite_flag | xlsprite_flag)) != 0) {
-        fallback();
-        return;
+      if ((resolved & (msprite_flag | xlsprite_flag | external_texture_flag)) == 0) {
+        const texture_id sprite_index = resolved & sprite_index_mask;
+        if (sprite_index > 0 && sprite_index <= sheet.sprites.size()) {
+          const sprite& spr = sheet.sprites[sprite_index - 1];
+          const texture_id texture_index = spr.texture & sprite_index_mask;
+          if (texture_index > 0 && texture_index <= sheet.textures.size()) {
+            const texture_data& td = sheet.textures[texture_index - 1];
+            if (td.size.x != 0 && td.size.y != 0) {
+              const math::vec2 uv0{static_cast<float>(spr.at.x) / static_cast<float>(td.size.x),
+                                   static_cast<float>(spr.at.y) / static_cast<float>(td.size.y)};
+              const math::vec2 uv1{
+                  static_cast<float>(spr.at.x + spr.size.x) / static_cast<float>(td.size.x),
+                  static_cast<float>(spr.at.y + spr.size.y) / static_cast<float>(td.size.y)};
+              emit(spr.texture, uv0, uv1);
+              return;
+            }
+          }
+        }
       }
-      const texture_id sprite_index = resolved & sprite_index_mask;
-      if (sprite_index == 0 || sprite_index > sheet.sprites.size()) {
-        fallback();
+      if (emit_texture(resolved))
         return;
-      }
-      const sprite& spr = sheet.sprites[sprite_index - 1];
-      const texture_id texture_index = spr.texture & sprite_index_mask;
-      if (texture_index == 0 || texture_index > sheet.textures.size()) {
-        fallback();
-        return;
-      }
-      const texture_data& td = sheet.textures[texture_index - 1];
-      if (td.size.x == 0 || td.size.y == 0) {
-        fallback();
-        return;
-      }
-      const float u0 = static_cast<float>(spr.at.x) / static_cast<float>(td.size.x);
-      const float v0 = static_cast<float>(spr.at.y) / static_cast<float>(td.size.y);
-      const float u1 = static_cast<float>(spr.at.x + spr.size.x) / static_cast<float>(td.size.x);
-      const float v1 = static_cast<float>(spr.at.y + spr.size.y) / static_cast<float>(td.size.y);
-      auto* vp = cb->allocate_strip(4, vertex_topology::triangle);
-      vp[0] = make_vertex({at.x, at.y}, depth, {u0, v0}, spr.texture, tint);
-      vp[1] = make_vertex({at.x + size.x, at.y}, depth, {u1, v0}, spr.texture, tint);
-      vp[2] = make_vertex({at.x, at.y + size.y}, depth, {u0, v1}, spr.texture, tint);
-      vp[3] = make_vertex({at.x + size.x, at.y + size.y}, depth, {u1, v1}, spr.texture, tint);
+      fallback();
     }
 
     // Primitives.atlasEpoch() — combined UV-layout generation of the shared

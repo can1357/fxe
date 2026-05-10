@@ -33,13 +33,15 @@ namespace fxe {
   inline constexpr u32 msprite_flag = multi_sprite_flag;
   inline constexpr u32 xlsprite_flag = xl_sprite_flag;
 
-  // Font module flag bits (mirrored in src/wgpu/shaders/main.wgsl).
+  // Font/external texture flag bits (mirrored in the WGPU shader path).
   // FONT_MASK_FLAG samples the R8 mask atlas with vertex-color modulation;
-  // FONT_COLOR_FLAG samples the BGRA color emoji atlas as-is. Both bits
-  // live below the sprite_index_mask high-water so they never collide with
-  // ids returned by `add_sprite`.
+  // FONT_COLOR_FLAG samples the BGRA color emoji atlas as-is. EXTERNAL_TEXTURE_FLAG
+  // tags image-backed handles registered through texture_registry. The low
+  // sprite_index_mask bits remain the caller-visible handle payload.
   inline constexpr u32 font_mask_flag = 0x040000u;
   inline constexpr u32 font_color_flag = 0x080000u;
+  inline constexpr u32 external_texture_flag = 0x400000u;
+  inline constexpr u32 external_texture_handle_mask = sprite_index_mask;
   // User-texture flag for surface caching. The lower 2 bits select one of
   // four user texture slots bound via `renderer::bind_user_texture`. Mirrored
   // in src/wgpu/shaders/main.wgsl as USER_TEX_FLAG / USER_TEX_SLOT_MASK.

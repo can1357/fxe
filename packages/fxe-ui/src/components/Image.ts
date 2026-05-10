@@ -319,7 +319,8 @@ export const Image = Component((props: ImageProps): Node => {
   }, [directHandle, props.source, fadeValue]);
 
   useEffect(() => {
-    if (typeof props.source !== 'string' || asyncPhase !== 'loaded' || asyncHandle === null) return;
+    if (typeof props.source !== 'string' || asyncPhase !== 'loaded' || asyncHandle === null)
+      return undefined;
     const animation = startImageFadeAnimation(fadeValue, props.fadeInMs);
     return () => {
       animation.stop();
@@ -327,16 +328,18 @@ export const Image = Component((props: ImageProps): Node => {
   }, [asyncHandle, asyncPhase, fadeValue, props.fadeInMs, props.source]);
 
   useEffect(() => {
-    if (phase !== 'loaded' || displayHandle === null) return;
-    if (lastLoadedRef.current === displayHandle) return;
+    if (phase !== 'loaded' || displayHandle === null) return undefined;
+    if (lastLoadedRef.current === displayHandle) return undefined;
     lastLoadedRef.current = displayHandle;
     props.onLoad?.(displayHandle.width(), displayHandle.height());
+    return undefined;
   }, [displayHandle, phase, props.onLoad]);
 
   useEffect(() => {
-    if (error === null || lastErrorRef.current === error) return;
+    if (error === null || lastErrorRef.current === error) return undefined;
     lastErrorRef.current = error;
     props.onError?.(error);
+    return undefined;
   }, [error, props.onError]);
 
   const drawNode = Draw(

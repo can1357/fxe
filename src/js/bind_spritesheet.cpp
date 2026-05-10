@@ -85,6 +85,24 @@ namespace fxe::js {
       size = {t[2], t[3]};
       return true;
     }
+    void remember_external_texture(spritesheet_holder& sh, texture_id local_texture,
+                                   texture_id external_texture) {
+      const texture_id local_index = local_texture & sprite_mask;
+      if (local_index == 0)
+        return;
+      if (sh.external_textures.size() < local_index)
+        sh.external_textures.resize(local_index, null_texture);
+      sh.external_textures[local_index - 1] = external_texture;
+    }
+
+    [[nodiscard]] texture_id external_texture_for(const spritesheet_holder& sh,
+                                                  texture_id local_texture) {
+      const texture_id local_index = local_texture & sprite_mask;
+      if (local_index == 0 || local_index > sh.external_textures.size())
+        return local_texture;
+      const texture_id external_texture = sh.external_textures[local_index - 1];
+      return external_texture != null_texture ? external_texture : local_texture;
+    }
 
     void m_add(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -102,12 +120,14 @@ namespace fxe::js {
       // anyone else (the JS handle, other sheets) holding it.
       sh->retained.push_back(img->tex);
       texture_data copy = *img->tex;
+      const texture_id external_texture = ensure_image_texture_id(img);
       const u32 iw = copy.size.x;
       const u32 ih = copy.size.y;
       math::uvec2 at{}, size{};
       if (!decode_rect(iso, ctx, info.Length() >= 2 ? info[1] : Local<Value>(), iw, ih, at, size))
         return throw_type(iso, "Spritesheet.add: rect must be [x,y,w,h]");
       texture_id tex_id = sh->sheet.add_texture(std::move(copy));
+      remember_external_texture(*sh, tex_id, external_texture);
       sprite spr{};
       spr.at = at;
       spr.size = size;
@@ -142,7 +162,9 @@ namespace fxe::js {
         if (!img || !img->tex)
           return throw_type(iso, "Spritesheet.addAnimated: live ImageHandle required");
         sh->retained.push_back(img->tex);
+        const texture_id external_texture = ensure_image_texture_id(img);
         texture_id id = sh->sheet.add_texture(*img->tex);
+        remember_external_texture(*sh, id, external_texture);
         if (i == 0)
           base = id;
       }
@@ -194,13 +216,20 @@ namespace fxe::js {
         spr = &sh->sheet.sprites[idx - 1];
       }
       if (!spr) {
-        setU("textureId"_v8(iso), resolved);
+        const texture_id texture_id = external_texture_for(*sh, resolved);
+        setU("textureId"_v8(iso), texture_id);
         set("u0"_v8(iso), 0.0);
         set("v0"_v8(iso), 0.0);
         set("u1"_v8(iso), 1.0);
         set("v1"_v8(iso), 1.0);
-        setU("width"_v8(iso), 0);
-        setU("height"_v8(iso), 0);
+        if (idx > 0 && idx <= sh->sheet.textures.size()) {
+          const auto& td = sh->sheet.textures[idx - 1];
+          setU("width"_v8(iso), td.size.x);
+          setU("height"_v8(iso), td.size.y);
+        } else {
+          setU("width"_v8(iso), 0);
+          setU("height"_v8(iso), 0);
+        }
         info.GetReturnValue().Set(out);
         return;
       }
@@ -215,7 +244,7 @@ namespace fxe::js {
         u1 = double(spr->at.x + spr->size.x) / tw;
         v1 = double(spr->at.y + spr->size.y) / th;
       }
-      setU("textureId"_v8(iso), spr->texture);
+      setU("textureId"_v8(iso), external_texture_for(*sh, spr->texture));
       set("u0"_v8(iso), u0);
       set("v0"_v8(iso), v0);
       set("u1"_v8(iso), u1);

@@ -50,8 +50,26 @@ test('wheel dispatch forwards deltas to scroll target', () => {
       offsets.push(state);
     },
   });
-  dispatchWheel({ type: 'wheel', dx: 4, dy: 10, modifiers: 0, x: 10, y: 10 });
-  dispatchWheel({ type: 'wheel', dx: -10, dy: -20, modifiers: 0, x: 10, y: 10 });
+  dispatchWheel({
+    type: 'wheel',
+    dx: 4,
+    dy: 10,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+    x: 10,
+    y: 10,
+  });
+  dispatchWheel({
+    type: 'wheel',
+    dx: -10,
+    dy: -20,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+    x: 10,
+    y: 10,
+  });
   assertDeepEqual(offsets, [
     { x: 4, y: 10 },
     { x: 0, y: 0 },
@@ -71,8 +89,26 @@ test('ScrollView wheel uses native scroll direction and line-sized steps', () =>
     new CommandBuffer(),
   );
 
-  dispatchWheel({ type: 'wheel', dx: 0, dy: -1, modifiers: 0, x: 10, y: 10 });
-  dispatchWheel({ type: 'wheel', dx: 0, dy: 1, modifiers: 0, x: 10, y: 10 });
+  dispatchWheel({
+    type: 'wheel',
+    dx: 0,
+    dy: -1,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+    x: 10,
+    y: 10,
+  });
+  dispatchWheel({
+    type: 'wheel',
+    dx: 0,
+    dy: 1,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+    x: 10,
+    y: 10,
+  });
 
   assertDeepEqual(offsets, [
     { x: 0, y: 48 },
@@ -137,7 +173,16 @@ test('ScrollView scrolls measured children without contentStyle', () => {
     new CommandBuffer(),
   );
 
-  dispatchWheel({ type: 'wheel', dx: 0, dy: -1, modifiers: 0, x: 10, y: 10 });
+  dispatchWheel({
+    type: 'wheel',
+    dx: 0,
+    dy: -1,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+    x: 10,
+    y: 10,
+  });
 
   assertDeepEqual(offsets, [{ x: 0, y: 48 }]);
 });
@@ -155,7 +200,16 @@ test('ScrollView moves painted content on rerender after wheel', () => {
     });
 
   render(root(), new CommandBuffer());
-  dispatchWheel({ type: 'wheel', dx: 0, dy: -1, modifiers: 0, x: 10, y: 10 });
+  dispatchWheel({
+    type: 'wheel',
+    dx: 0,
+    dy: -1,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+    x: 10,
+    y: 10,
+  });
 
   clearHitTargets();
   const after = new CommandBuffer();
@@ -189,7 +243,16 @@ test('ScrollView does not block child mouse targets', () => {
     hitTest(10, 10)?.componentType === 'Pressable',
     'child Pressable should receive mouse hits',
   );
-  dispatchWheel({ type: 'wheel', dx: 0, dy: -1, modifiers: 0, x: 10, y: 10 });
+  dispatchWheel({
+    type: 'wheel',
+    dx: 0,
+    dy: -1,
+    modifiers: 0,
+    phase: 'none',
+    precision: false,
+    x: 10,
+    y: 10,
+  });
   assertDeepEqual(offsets, [{ x: 0, y: 48 }]);
 });
 
