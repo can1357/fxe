@@ -37,8 +37,10 @@
 #include "bind_layout.hpp"
 #include "bind_markdown.hpp"
 #include "bind_menu.hpp"
+#include "bind_net.hpp"
 #include "bind_notification.hpp"
 #include "bind_offscreen.hpp"
+#include "bind_os.hpp"
 #include "bind_path.hpp"
 #include "bind_performance.hpp"
 #include "bind_power.hpp"
@@ -488,6 +490,8 @@ namespace fxe::js {
     v8::Global<v8::Module> fxe_module;
     v8::Global<v8::Module> sqlite_module;
     v8::Global<v8::Module> ipc_module;
+    v8::Global<v8::Module> net_module;
+    v8::Global<v8::Module> os_module;
     struct module_cache_entry {
       v8::Global<v8::Module> mod;
       std::filesystem::file_time_type mtime{};
@@ -1680,6 +1684,16 @@ Error.prepareStackTrace = function(err, frames) {
           return p->ipc_module.Get(iso);
         return v8::MaybeLocal<v8::Module>();
       }
+      if (spec == "fxe:net") {
+        if (p)
+          return p->net_module.Get(iso);
+        return v8::MaybeLocal<v8::Module>();
+      }
+      if (spec == "fxe:os") {
+        if (p)
+          return p->os_module.Get(iso);
+        return v8::MaybeLocal<v8::Module>();
+      }
       std::string referrer_path = to_std_string(iso, referrer->GetResourceName());
       std::string resolved;
       std::string error;
@@ -2205,6 +2219,18 @@ Error.prepareStackTrace = function(err, frames) {
         if (build_ipc_module(isolate, ctx).ToLocal(&mod))
           ipc_module.Reset(isolate, mod);
       }
+      // Synthetic `fxe:net` module — re-exports native dns/socket namespaces.
+      {
+        v8::Local<v8::Module> mod;
+        if (build_net_module(isolate, ctx).ToLocal(&mod))
+          net_module.Reset(isolate, mod);
+      }
+      // Synthetic `fxe:os` module — re-exports the native OS namespace as named exports.
+      {
+        v8::Local<v8::Module> mod;
+        if (build_os_module(isolate, ctx).ToLocal(&mod))
+          os_module.Reset(isolate, mod);
+      }
 
       // Install per-module import.meta hook (must be set on the isolate).
       isolate->SetHostInitializeImportMetaObjectCallback(&import_meta_callback);
@@ -2261,6 +2287,8 @@ Error.prepareStackTrace = function(err, frames) {
     fxe_module.Reset();
     sqlite_module.Reset();
     ipc_module.Reset();
+    net_module.Reset();
+    os_module.Reset();
     if (cpu_profiler) {
       if (cpu_profile_active && isolate) {
         v8::Isolate::Scope is(isolate);
