@@ -727,6 +727,30 @@ declare module 'fxe-ui' {
     tabBehavior?: 'focus' | 'insert';
   }
 
+  export type CaptureName = string;
+  export interface HighlightStyle {
+    color?: number;
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strikethrough?: boolean;
+  }
+  export type HighlightTheme =
+    | ReadonlyMap<CaptureName, HighlightStyle>
+    | Record<CaptureName, HighlightStyle>;
+  export interface IncrementalHighlighterOptions {
+    document: import('fxe').TextDocument;
+    language: string;
+    theme: HighlightTheme;
+    defaultStyle?: HighlightStyle;
+  }
+  export interface IncrementalHighlighter {
+    getLineDecorations: (line: number) => LineDecorations | null;
+    invalidate(): void;
+    revision(): number;
+    dispose(): void;
+  }
+
   // Editor primitives ------------------------------------------------------
   export interface LineSpan {
     start: number;
@@ -804,6 +828,38 @@ declare module 'fxe-ui' {
     scrollY?: number;
     onScrollChange?: (scrollY: number) => void;
   }
+  export interface SyntaxPalette {
+    comment: number;
+    string: number;
+    number: number;
+    constant: number;
+    keyword: number;
+    type: number;
+    function: number;
+    property: number;
+    tag: number;
+    attribute: number;
+  }
+  export interface MarkdownTheme extends Theme {
+    colors: Theme['colors'] & {
+      code: number;
+      codeBg: number;
+      quote: number;
+      link: number;
+      headingRule: number;
+      tableHeaderBg: number;
+    };
+    fonts: { body: string; mono: string };
+    syntax: SyntaxPalette;
+  }
+  export interface MarkdownProps {
+    key?: string;
+    source: string;
+    style?: StyleValue;
+    theme?: Partial<MarkdownTheme>;
+    onLinkPress?(href: string): void;
+    onWikilinkPress?(target: string): void;
+  }
 
   export function View(props: ViewProps): Node;
   export function Text(props: TextProps): Node;
@@ -817,10 +873,30 @@ declare module 'fxe-ui' {
   export function LineViewport(props: LineViewportProps): Node;
   export function Gutter(props: GutterProps): Node;
   export function EditableArea(props: EditableAreaProps): Node;
+  export const Markdown: (props: MarkdownProps) => Node;
   export function usePressableState(): PressableState;
   export function useHover(): boolean;
   export function useFocus(): boolean;
+  export function createIncrementalHighlighter(
+    opts: IncrementalHighlighterOptions,
+  ): IncrementalHighlighter;
+  export function defaultHighlightTheme(theme: Theme): HighlightTheme;
 
+  export interface DevToolsShortcutOptions {
+    accelerator?: string;
+    window?: Window;
+    onError?: (err: unknown) => void;
+  }
+
+  export interface DevToolsShortcutHandle {
+    dispose(): void;
+    accelerator: string;
+  }
+
+  export function defaultDevToolsAccelerator(): string;
+  export function installDevToolsShortcut(
+    opts?: DevToolsShortcutOptions,
+  ): DevToolsShortcutHandle | null;
   export interface MountOptions {
     renderer?: Renderer;
     theme?: Theme;
@@ -838,6 +914,12 @@ declare module 'fxe-ui' {
      * `lazy: false` if you genuinely need every frame.
      */
     lazy?: boolean;
+    /**
+     * When `undefined` (default) or `true`, mount auto-registers the standard
+     * DevTools shortcut if `FXE_DEBUG_PORT` is set in the process environment.
+     * Pass `false` to opt out, or provide a custom accelerator string.
+     */
+    devTools?: boolean | { accelerator?: string };
   }
   export function mount(root: Node, window: Window, opts?: MountOptions): () => void;
   export function useFocusTrap(groupId: string | null, enabled?: boolean): void;

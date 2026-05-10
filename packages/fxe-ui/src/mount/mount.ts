@@ -22,6 +22,7 @@ import {
 } from './event_pipeline.ts';
 import { clearFocus } from './focus.ts';
 import { clearHitTargets } from './hit_test.ts';
+import { installDevToolsShortcut } from './devtools_shortcut.ts';
 
 export interface MountOptions {
   renderer?: Renderer;
@@ -51,6 +52,12 @@ export interface MountOptions {
    * default (transparent on macOS Metal, which presents as black).
    */
   backgroundColor?: number;
+  /**
+   * When `undefined` (default) or `true`, mount auto-registers the standard
+   * DevTools shortcut if `FXE_DEBUG_PORT` is set in the process environment.
+   * Pass `false` to opt out, or provide a custom accelerator string.
+   */
+  devTools?: boolean | { accelerator?: string };
 }
 
 let nextMountId = 0;
@@ -168,12 +175,20 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
       window.requestRedraw();
     }
   }
+  const devToolsHandle =
+    opts.devTools === false
+      ? null
+      : installDevToolsShortcut({
+          window,
+          accelerator: typeof opts.devTools === 'object' ? opts.devTools.accelerator : undefined,
+        });
 
   return () => {
     if (disposed) return;
     disposed = true;
     frameLoopDispose?.();
     frameLoopDispose = null;
+    devToolsHandle?.dispose();
     if (!shouldRunFrameLoop && typeof window.setFrameCallback === 'function') {
       window.setFrameCallback(null);
     }

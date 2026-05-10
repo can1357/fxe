@@ -2,6 +2,7 @@ export * from './a11y/index.ts';
 export * from './animated/index.ts';
 export * from './components/index.ts';
 export * from './debug/layout_trace.ts';
+export * from './highlight/index.ts';
 export * from './layout/index.ts';
 export * from './mount/focus_trap.ts';
 export * from './mount/index.ts';
