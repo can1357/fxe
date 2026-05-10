@@ -82,6 +82,7 @@ elseif(TARGET libjpeg-turbo::turbojpeg-static)
 else()
     message(FATAL_ERROR "libjpeg-turbo::turbojpeg target not found")
 endif()
+find_package(RapidJSON CONFIG REQUIRED)
 find_package(rlottie CONFIG REQUIRED)
 
 # spdlog — fast structured logger. Used by `fxe::log` (include/fxe/log.hpp)

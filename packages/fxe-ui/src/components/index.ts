@@ -24,6 +24,8 @@ export type { PressableProps, PressableState } from './Pressable.ts';
 export { Pressable, useFocus, useHover, usePressableState } from './Pressable.ts';
 export type { ScrollViewProps } from './ScrollView.ts';
 export { ScrollView } from './ScrollView.ts';
+export type { SectionListProps, SectionListSection } from './SectionList.ts';
+export { SectionList } from './SectionList.ts';
 export type { StickyScrollProps } from './StickyScroll.ts';
 export { StickyScroll } from './StickyScroll.ts';
 export type { OutlineEntry, OutlineProvider } from './sticky_scroll_outline.ts';

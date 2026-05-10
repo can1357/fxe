@@ -1,8 +1,8 @@
 #include "screenshot.hpp"
 #include <fxe/types.hpp>
 
-#include <csetjmp>
 #include <algorithm>
+#include <csetjmp>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -131,9 +131,8 @@ namespace fxe::debug {
     unsigned char* jpeg_buf = nullptr;
     size_t jpeg_size = 0;
     const int rc =
-        tj3Compress8(handle, pixels, static_cast<int>(width),
-                     static_cast<int>(row_stride_bytes), static_cast<int>(height), TJPF_RGBA,
-                     &jpeg_buf, &jpeg_size);
+        tj3Compress8(handle, pixels, static_cast<int>(width), static_cast<int>(row_stride_bytes),
+                     static_cast<int>(height), TJPF_RGBA, &jpeg_buf, &jpeg_size);
     if (rc < 0) {
       set_error(err_out, std::string("libjpeg-turbo: ") + tj3GetErrorStr(handle));
       if (jpeg_buf)

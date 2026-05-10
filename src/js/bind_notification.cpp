@@ -199,7 +199,7 @@ namespace fxe::js {
     }
 
     void notif_permission_getter(Local<Name>, const PropertyCallbackInfo<Value>& info) {
-      info.GetReturnValue().Set(s(info.GetIsolate(), "granted"));
+      info.GetReturnValue().Set("granted"_v8(info.GetIsolate()));
     }
     void notif_request_permission(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -208,16 +208,22 @@ namespace fxe::js {
       (void)r->Resolve(ctx, "granted"_v8(iso));
       info.GetReturnValue().Set(r->GetPromise());
     }
+    void notification_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto tpl = FunctionTemplate::New(iso, notif_constructor);
+      tpl->SetClassName("Notification"_v8(iso));
+      tpl->InstanceTemplate()->SetInternalFieldCount(1);
+      auto proto = tpl->PrototypeTemplate();
+      proto->Set("show"_v8(iso), FunctionTemplate::New(iso, notif_show));
+      tpl->SetNativeDataProperty("permission"_v8(iso), notif_permission_getter);
+      tpl->Set("requestPermission"_v8(iso), FunctionTemplate::New(iso, notif_request_permission));
+      info.GetReturnValue().Set(tpl->GetFunction(ctx).ToLocalChecked());
+    }
   } // namespace
 
   void install_notification_global(Isolate* iso, Local<ObjectTemplate> global) {
-    auto tpl = FunctionTemplate::New(iso, notif_constructor);
-    tpl->SetClassName("Notification"_v8(iso));
-    tpl->InstanceTemplate()->SetInternalFieldCount(1);
-    auto proto = tpl->PrototypeTemplate();
-    proto->Set(iso, "show", FunctionTemplate::New(iso, notif_show));
-    tpl->SetNativeDataProperty("permission"_v8(iso), notif_permission_getter);
-    tpl->Set(iso, "requestPermission", FunctionTemplate::New(iso, notif_request_permission));
-    global->Set(iso, "Notification", tpl);
+    global->SetLazyDataProperty("Notification"_v8(iso), notification_getter);
   }
 } // namespace fxe::js

@@ -88,7 +88,9 @@ namespace fxe {
         throw std::runtime_error("load_texture: tj3Init failed");
       struct tj_guard {
         tjhandle h;
-        ~tj_guard() { tj3Destroy(h); }
+        ~tj_guard() {
+          tj3Destroy(h);
+        }
       } guard{handle};
 
       if (tj3DecompressHeader(handle, encoded.data(), encoded.size()) < 0) {
@@ -180,8 +182,7 @@ namespace fxe {
       const u32 cw = static_cast<u32>(gif->SWidth);
       const u32 ch = static_cast<u32>(gif->SHeight);
       const SavedImage& img = gif->SavedImages[0];
-      const ColorMapObject* map =
-          img.ImageDesc.ColorMap ? img.ImageDesc.ColorMap : gif->SColorMap;
+      const ColorMapObject* map = img.ImageDesc.ColorMap ? img.ImageDesc.ColorMap : gif->SColorMap;
 
       GraphicsControlBlock gcb{};
       gcb.TransparentColor = NO_TRANSPARENT_COLOR;

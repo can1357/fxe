@@ -880,6 +880,25 @@ declare module 'fxe-ui' {
     keyExtractor?: (item: T, index: number) => string;
     onScroll?: (offset: { x: number; y: number }) => void;
   }
+  export interface SectionListSection<T> {
+    key: string;
+    data: readonly T[];
+    header?: Node;
+  }
+  export interface SectionListProps<T> extends AccessibilityProps {
+    key?: string;
+    style?: StyleValue;
+    contentStyle?: StyleValue;
+    sections: readonly SectionListSection<T>[];
+    renderItem: (item: T, index: number, sectionIndex: number) => Node;
+    renderSectionHeader?: (section: SectionListSection<T>, sectionIndex: number) => Node;
+    itemHeight: number;
+    sectionHeaderHeight: number;
+    keyExtractor?: (item: T, index: number, sectionIndex: number) => string;
+    overscan?: number;
+    onScroll?: (offset: { x: number; y: number }) => void;
+    stickyHeaders?: boolean;
+  }
   export interface TextInputProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
@@ -1152,6 +1171,7 @@ declare module 'fxe-ui' {
   export function Button(props: ButtonProps): Node;
   export function ScrollView(props: ScrollViewProps): Node;
   export function VirtualList<T>(props: VirtualListProps<T>): Node;
+  export function SectionList<T>(props: SectionListProps<T>): Node;
   export function TextInput(props: TextInputProps): Node;
   export function TextArea(props: TextAreaProps): Node;
   export function LineViewport(props: LineViewportProps): Node;

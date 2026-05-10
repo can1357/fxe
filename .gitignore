@@ -43,4 +43,7 @@ vcpkg_installed/
 node_modules/
 
 __pycache__/
+
+# Test artifacts (per-run outputs, not goldens)
+tests/golden/**/*.actual.png
 TODO.md

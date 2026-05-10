@@ -97,12 +97,18 @@ namespace fxe::js {
         FXE_ERROR("js.print", "Print.toPdf failed: {}", err);
       info.GetReturnValue().Set(Boolean::New(iso, ok));
     }
+    void print_namespace_getter(Local<Name> /*name*/, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto ns = Object::New(iso);
+      (void)ns->Set(ctx, "toPdf"_v8(iso), Function::New(ctx, print_to_pdf).ToLocalChecked());
+      info.GetReturnValue().Set(ns);
+    }
+
   } // namespace
 
   void install_print_global(Isolate* iso, Local<ObjectTemplate> global) {
-    HandleScope hs(iso);
-    auto ns = ObjectTemplate::New(iso);
-    ns->Set(iso, "toPdf", FunctionTemplate::New(iso, print_to_pdf));
-    global->Set(iso, "Print", ns);
+    global->SetLazyDataProperty("Print"_v8(iso), print_namespace_getter);
   }
 } // namespace fxe::js
