@@ -128,6 +128,9 @@ namespace {
       r.rgba = known_rgba_;
       return r;
     }
+    std::vector<::u32> supported_multisample_counts() const override {
+      return {1u, 4u};
+    }
     fxe::window& get_window() override {
       return win_;
     }

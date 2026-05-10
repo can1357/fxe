@@ -204,6 +204,74 @@ namespace fxe::js {
       }
       return false;
     }
+    bool decode_point_array(Local<Value> v, std::vector<math::vec2>& out) {
+      if (!v->IsFloat32Array())
+        return false;
+      auto a = v.As<Float32Array>();
+      if ((a->Length() & 1u) != 0)
+        return false;
+      std::vector<float> raw(a->Length());
+      if (!raw.empty())
+        a->CopyContents(raw.data(), raw.size() * sizeof(float));
+      out.clear();
+      out.reserve(raw.size() / 2);
+      for (usize i = 0; i < raw.size(); i += 2)
+        out.push_back({raw[i], raw[i + 1]});
+      return true;
+    }
+
+    bool decode_float_array(Local<Value> v, std::vector<float>& out) {
+      if (!v->IsFloat32Array())
+        return false;
+      auto a = v.As<Float32Array>();
+      out.resize(a->Length());
+      if (!out.empty())
+        a->CopyContents(out.data(), out.size() * sizeof(float));
+      return true;
+    }
+
+    primitives::line_join decode_line_join(Local<Context> ctx, Local<Value> v) {
+      if (v->IsNumber()) {
+        const u32 raw = static_cast<u32>(v->Uint32Value(ctx).FromMaybe(0));
+        if (raw <= static_cast<u32>(primitives::line_join::round))
+          return static_cast<primitives::line_join>(raw);
+      }
+      if (v->IsString()) {
+        if (v == "bevel"_v8(Isolate::GetCurrent()))
+          return primitives::line_join::bevel;
+        if (v == "round"_v8(Isolate::GetCurrent()))
+          return primitives::line_join::round;
+      }
+      return primitives::line_join::miter;
+    }
+
+    primitives::line_cap decode_line_cap(Local<Context> ctx, Local<Value> v) {
+      if (v->IsNumber()) {
+        const u32 raw = static_cast<u32>(v->Uint32Value(ctx).FromMaybe(0));
+        if (raw <= static_cast<u32>(primitives::line_cap::round))
+          return static_cast<primitives::line_cap>(raw);
+      }
+      if (v->IsString()) {
+        if (v == "square"_v8(Isolate::GetCurrent()))
+          return primitives::line_cap::square;
+        if (v == "round"_v8(Isolate::GetCurrent()))
+          return primitives::line_cap::round;
+      }
+      return primitives::line_cap::butt;
+    }
+
+    const font_info* decode_font_arg(Local<Context> ctx, Local<Value> v) {
+      if (v->IsUint32() || v->IsNumber()) {
+        const u32 font_id = static_cast<u32>(v->Uint32Value(ctx).FromMaybe(0));
+        return resolve_font_id(font_id);
+      }
+      if (v->IsObject() && !v->IsArray()) {
+        auto o = v.As<Object>();
+        if (auto font_id = get_prop<u32>(ctx, o, "fontId"_v8(Isolate::GetCurrent())))
+          return resolve_font_id(*font_id);
+      }
+      return nullptr;
+    }
 
     double num(Local<Context> ctx, Local<Value> v, double def = 0) {
       return v->NumberValue(ctx).FromMaybe(def);
@@ -773,6 +841,38 @@ namespace fxe::js {
         }
       }
     }
+    void p_drawTextOnPath(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      auto* path = info.Length() >= 2 ? unwrap_path(info[1]) : nullptr;
+      if (!path || info.Length() < 4) {
+        (void)throw_type_error(iso, "drawTextOnPath: expected (CommandBuffer, Path, text, font, "
+                                    "style?, pathOffset?, depth?)");
+        return;
+      }
+      const std::string text = to_std_string(iso, info[2]);
+      const auto* font = decode_font_arg(ctx, info[3]);
+      primitives::text_style style{};
+      u32 font_id = 0;
+      if (info.Length() >= 5)
+        decode_text_style_opts(iso, ctx, info[4], style, &font_id);
+      if (!font && font_id != 0)
+        font = resolve_font_id(font_id);
+      const float path_offset = info.Length() >= 6 ? float(num(ctx, info[5])) : 0.0f;
+      const float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
+      auto out = primitives::draw_text_on_path(*cb, path->path, path_offset, depth, text,
+                                               font ? *font : get_font_info(), style);
+      auto arr = Array::New(iso, 4);
+      set_index(ctx, arr, 0, static_cast<double>(out.x));
+      set_index(ctx, arr, 1, static_cast<double>(out.y));
+      set_index(ctx, arr, 2, static_cast<double>(out.z));
+      set_index(ctx, arr, 3, static_cast<double>(out.w));
+      info.GetReturnValue().Set(arr);
+    }
 
     // drawTextSpans(cb, x, y, depth, spans[, opts])
     //  spans: Array<{ text, color?, size?, fontId?, bold?, italic?, underline?,
@@ -1105,6 +1205,48 @@ namespace fxe::js {
       primitives::fill_path(*cb, p->path, paint, rule, depth);
     }
 
+    void p_fillPolygon(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      std::vector<math::vec2> points;
+      if (info.Length() < 3 || !decode_point_array(info[1], points)) {
+        (void)throw_type_error(
+            iso, "fillPolygon: expected (CommandBuffer, Float32Array, color, depth?)");
+        return;
+      }
+      const r8g8b8a8 color = decode_color(iso, ctx, info[2]);
+      const float depth = info.Length() >= 4 ? float(num(ctx, info[3])) : 0.0f;
+      primitives::fill_polygon(*cb, points, color, depth);
+    }
+
+    void p_strokePolygon(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      std::vector<math::vec2> points;
+      if (info.Length() < 4 || !decode_point_array(info[1], points)) {
+        (void)throw_type_error(iso, "strokePolygon: expected (CommandBuffer, Float32Array, color, "
+                                    "lineWidth, closed?, join?, cap?, depth?)");
+        return;
+      }
+      const r8g8b8a8 color = decode_color(iso, ctx, info[2]);
+      const float width = float(num(ctx, info[3], 1.0));
+      const bool closed = info.Length() >= 5 ? info[4]->BooleanValue(iso) : true;
+      const primitives::line_join join =
+          info.Length() >= 6 ? decode_line_join(ctx, info[5]) : primitives::line_join::miter;
+      const primitives::line_cap cap =
+          info.Length() >= 7 ? decode_line_cap(ctx, info[6]) : primitives::line_cap::butt;
+      const float depth = info.Length() >= 8 ? float(num(ctx, info[7])) : 0.0f;
+      primitives::stroke_polygon(*cb, points, color, width, closed, join, cap, depth);
+    }
+
     void p_strokePath(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -1115,15 +1257,24 @@ namespace fxe::js {
       auto* p = info.Length() >= 2 ? unwrap_path(info[1]) : nullptr;
       if (!p) {
         (void)throw_type_error(iso, "strokePath: expected (CommandBuffer, Path, paint?, "
-                                    "lineWidth?, join?, cap?, depth?)");
+                                    "lineWidth?, join?, cap?, depth?, dash?, dashOffset?)");
         return;
       }
       auto paint = info.Length() >= 3 ? decode_paint(iso, ctx, info[2])
                                       : primitives::paint_value::solid(white);
-      float width = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
-      float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
-      primitives::stroke_path(*cb, p->path, paint, width, primitives::line_join::miter,
-                              primitives::line_cap::butt, depth);
+      const float width = info.Length() >= 4 ? float(num(ctx, info[3], 1.0)) : 1.0f;
+      const primitives::line_join join =
+          info.Length() >= 5 ? decode_line_join(ctx, info[4]) : primitives::line_join::miter;
+      const primitives::line_cap cap =
+          info.Length() >= 6 ? decode_line_cap(ctx, info[5]) : primitives::line_cap::butt;
+      const float depth = info.Length() >= 7 ? float(num(ctx, info[6])) : 0.0f;
+      std::vector<float> dash;
+      if (info.Length() >= 8 && !info[7]->IsUndefined() && !decode_float_array(info[7], dash)) {
+        (void)throw_type_error(iso, "strokePath: dash must be a Float32Array");
+        return;
+      }
+      const float dash_offset = info.Length() >= 9 ? float(num(ctx, info[8])) : 0.0f;
+      primitives::stroke_path(*cb, p->path, paint, width, join, cap, depth, dash, dash_offset);
     }
 
     struct wrapped_text_native {
@@ -1793,6 +1944,7 @@ namespace fxe::js {
     P("fillRectRounded", p_fillRectRounded);
     P("drawRectRounded", p_drawRectRounded);
     P("drawText", p_drawText);
+    P("drawTextOnPath", p_drawTextOnPath);
     P("atlasEpoch", p_atlasEpoch);
     P("drawTextSpans", p_drawTextSpans);
     P("drawSelectionRects", p_drawSelectionRects);
@@ -1807,7 +1959,9 @@ namespace fxe::js {
     P("radialGradient", p_radialGradient);
     P("conicGradient", p_conicGradient);
     P("fillPath", p_fillPath);
+    P("fillPolygon", p_fillPolygon);
     P("strokePath", p_strokePath);
+    P("strokePolygon", p_strokePolygon);
     P("drawShadowRect", p_drawShadowRect);
     P("drawShadowRectRounded", p_drawShadowRectRounded);
     P("innerShadowRect", p_innerShadowRect);

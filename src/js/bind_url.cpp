@@ -10,6 +10,7 @@
 #include "bind_url.hpp"
 #include "weak_holder.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstring>
@@ -31,8 +32,9 @@ namespace fxe::js {
   namespace {
     using namespace v8;
 
-    constexpr u32 TAG_URL = 0x55524C5Fu;       // 'URL_'
-    constexpr u32 TAG_URLSEARCH = 0x55534552u; // 'USER' (URL Search)
+    constexpr u32 TAG_URL = 0x55524C5Fu;            // 'URL_'
+    constexpr u32 TAG_URLSEARCH = 0x55534552u;      // 'USER' (URL Search)
+    constexpr u32 TAG_URLSEARCH_ITER = 0x55534954u; // 'USIT' (URL Search Iter)
 
     struct url_tag {};
     using url_tpl_cache = template_isolate_cache<url_tag>;
@@ -67,6 +69,36 @@ namespace fxe::js {
       if (s == "ftp:")
         return 21;
       return -1;
+    }
+    std::string normalize_pathname(const std::string& path, bool absolute) {
+      std::vector<std::string> segments;
+      usize i = absolute && !path.empty() && path.front() == '/' ? 1 : 0;
+      const bool trailing_slash = path.size() > i && path.back() == '/';
+      while (i <= path.size()) {
+        const usize slash = path.find('/', i);
+        const std::string segment =
+            slash == std::string::npos ? path.substr(i) : path.substr(i, slash - i);
+        if (segment == "..") {
+          if (!segments.empty())
+            segments.pop_back();
+        } else if (!segment.empty() && segment != ".") {
+          segments.push_back(segment);
+        }
+        if (slash == std::string::npos)
+          break;
+        i = slash + 1;
+      }
+      std::string out = absolute ? "/" : "";
+      for (usize j = 0; j < segments.size(); ++j) {
+        if (j)
+          out.push_back('/');
+        out += segments[j];
+      }
+      if (trailing_slash && (out.empty() || out.back() != '/'))
+        out.push_back('/');
+      if (out.empty() && absolute)
+        return "/";
+      return out;
     }
 
     bool parse_url(const std::string& input, const url_data* base, url_data& out) {
@@ -130,14 +162,14 @@ namespace fxe::js {
           out.search = before_hash.substr(qp);
         if (!path_part.empty()) {
           if (path_part.front() == '/') {
-            out.pathname = path_part;
+            out.pathname = normalize_pathname(path_part, true);
           } else {
             // Replace last segment of base pathname.
             usize slash = out.pathname.find_last_of('/');
             std::string dir = slash == std::string::npos ? "/" : out.pathname.substr(0, slash + 1);
             if (dir.empty())
               dir = "/";
-            out.pathname = dir + path_part;
+            out.pathname = normalize_pathname(dir + path_part, true);
           }
         }
         return true;
@@ -361,28 +393,137 @@ namespace fxe::js {
 
     struct url_holder : weak_holder<url_holder> {
       std::unique_ptr<url_data> data;
+      Global<Object> search_params;
+
+      void on_finalize(Isolate*) {
+        search_params.Reset();
+      }
     };
     struct usp_holder : weak_holder<usp_holder> {
       std::unique_ptr<usp_data> data;
-      // Optional weak reference to a parent URL holder so writes to the
-      // search params propagate back to the URL's `search`.
       url_holder* parent = nullptr;
     };
+    enum class usp_iter_kind : u8 { entries, keys, values };
+    struct usp_iter_holder : weak_holder<usp_iter_holder> {
+      std::vector<std::pair<std::string, std::string>> snapshot;
+      usize index = 0;
+      usp_iter_kind kind = usp_iter_kind::entries;
+    };
 
-    Local<Object> wrap_usp(Isolate* iso, Local<Context> ctx, std::unique_ptr<usp_data> d) {
+    Local<Object> wrap_usp(Isolate* iso, Local<Context> ctx, std::unique_ptr<usp_data> d,
+                           url_holder* parent = nullptr) {
       auto tpl = usp_tpl_cache::resolve(iso);
       Local<Object> obj = tpl->InstanceTemplate()->NewInstance(ctx).ToLocalChecked();
-      auto* h = new usp_holder{{}, std::move(d)};
-      set_native(iso, obj, h->data.get(), TAG_URLSEARCH);
+      auto* h = new usp_holder{{}, std::move(d), parent};
+      set_native(iso, obj, h, TAG_URLSEARCH);
       h->bind(iso, obj);
       return obj;
     }
 
+    url_holder* unwrap_url_holder(Local<Object> o) {
+      return static_cast<url_holder*>(unwrap(o, TAG_URL));
+    }
     url_data* unwrap_url(Local<Object> o) {
-      return static_cast<url_data*>(unwrap(o, TAG_URL));
+      auto* h = unwrap_url_holder(o);
+      return h ? h->data.get() : nullptr;
+    }
+    usp_holder* unwrap_usp_holder(Local<Object> o) {
+      return static_cast<usp_holder*>(unwrap(o, TAG_URLSEARCH));
     }
     usp_data* unwrap_usp(Local<Object> o) {
-      return static_cast<usp_data*>(unwrap(o, TAG_URLSEARCH));
+      auto* h = unwrap_usp_holder(o);
+      return h ? h->data.get() : nullptr;
+    }
+    usp_iter_holder* unwrap_usp_iter(Local<Object> o) {
+      return static_cast<usp_iter_holder*>(unwrap(o, TAG_URLSEARCH_ITER));
+    }
+
+    void sync_usp_from_url(Isolate* iso, url_holder* h) {
+      if (!h || h->search_params.IsEmpty())
+        return;
+      auto obj = h->search_params.Get(iso);
+      auto* usp = unwrap_usp_holder(obj);
+      if (!usp || !usp->data)
+        return;
+      std::string q = h->data->search;
+      if (!q.empty() && q.front() == '?')
+        q.erase(0, 1);
+      usp_parse(q, *usp->data);
+    }
+
+    void sync_url_from_usp(usp_holder* h) {
+      if (!h || !h->parent || !h->parent->data)
+        return;
+      std::string q = usp_serialize(*h->data);
+      if (q.empty())
+        h->parent->data->search.clear();
+      else
+        h->parent->data->search = "?" + q;
+    }
+
+    void usp_iter_next(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* h = unwrap_usp_iter(info.This());
+      if (!h) {
+        return;
+      }
+      auto out = Object::New(iso);
+      if (h->index >= h->snapshot.size()) {
+        set_prop(ctx, out, "value", Undefined(iso));
+        set_prop(ctx, out, "done", true);
+        info.GetReturnValue().Set(out);
+        return;
+      }
+      const auto& [key, value] = h->snapshot[h->index++];
+      Local<Value> result;
+      if (h->kind == usp_iter_kind::keys) {
+        result = to_v8_string(iso, key);
+      } else if (h->kind == usp_iter_kind::values) {
+        result = to_v8_string(iso, value);
+      } else {
+        auto pair = Array::New(iso, 2);
+        pair->Set(ctx, 0, to_v8_string(iso, key)).Check();
+        pair->Set(ctx, 1, to_v8_string(iso, value)).Check();
+        result = pair;
+      }
+      set_prop(ctx, out, "value", result);
+      set_prop(ctx, out, "done", false);
+      info.GetReturnValue().Set(out);
+    }
+
+    void usp_iter_self(const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(info.This());
+    }
+
+    Global<FunctionTemplate>& usp_iter_tpl_for(Isolate* iso) {
+      static std::unordered_map<Isolate*, Global<FunctionTemplate>> cache;
+      auto& slot = cache[iso];
+      if (slot.IsEmpty()) {
+        HandleScope hs(iso);
+        auto tpl = FunctionTemplate::New(iso);
+        tpl->SetClassName("URLSearchParamsIterator"_v8(iso));
+        tpl->InstanceTemplate()->SetInternalFieldCount(2);
+        auto proto = tpl->PrototypeTemplate();
+        proto->Set(iso, "next", FunctionTemplate::New(iso, usp_iter_next));
+        proto->Set(Symbol::GetIterator(iso), FunctionTemplate::New(iso, usp_iter_self));
+        slot.Reset(iso, tpl);
+      }
+      return slot;
+    }
+
+    Local<Object> make_usp_iter(Isolate* iso, Local<Context> ctx, usp_data& data,
+                                usp_iter_kind kind) {
+      auto tpl = usp_iter_tpl_for(iso).Get(iso);
+      auto fn = tpl->GetFunction(ctx).ToLocalChecked();
+      auto obj = fn->NewInstance(ctx).ToLocalChecked();
+      auto* h = new usp_iter_holder{};
+      h->snapshot = data.pairs;
+      h->kind = kind;
+      set_native(iso, obj, h, TAG_URLSEARCH_ITER);
+      h->bind(iso, obj);
+      return obj;
     }
 
     // ---------------- URL ctor + accessors ----------------------------------
@@ -419,9 +560,9 @@ namespace fxe::js {
       // Replace `this`'s instance bookkeeping by re-wrapping. We installed
       // an instance template with internal field count 2; populate them
       // directly on `info.This()`.
-      auto* h = new url_holder{{}, std::move(d)};
+      auto* h = new url_holder{{}, std::move(d), {}};
       auto self = info.This();
-      set_native(iso, self, h->data.get(), TAG_URL);
+      set_native(iso, self, h, TAG_URL);
       h->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
@@ -435,15 +576,16 @@ namespace fxe::js {
     }
     void url_set_href(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
       auto* iso = info.GetIsolate();
-      auto* d = unwrap_url(info.HolderV2());
-      if (!d)
+      auto* h = unwrap_url_holder(info.HolderV2());
+      if (!h || !h->data)
         return;
       url_data next;
       if (!parse_url(to_std_string(iso, v), nullptr, next)) {
         (void)throw_type_error(iso, "URL.href: invalid url");
         return;
       }
-      *d = std::move(next);
+      *h->data = std::move(next);
+      sync_usp_from_url(iso, h);
     }
 
 #define URL_STRING_GETTER(NAME, FIELD)                                                             \
@@ -488,16 +630,17 @@ namespace fxe::js {
 
     void url_set_search(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
       auto* iso = info.GetIsolate();
-      auto* d = unwrap_url(info.HolderV2());
-      if (!d)
+      auto* h = unwrap_url_holder(info.HolderV2());
+      if (!h || !h->data)
         return;
       std::string s = to_std_string(iso, v);
       if (s.empty())
-        d->search.clear();
+        h->data->search.clear();
       else if (s.front() == '?')
-        d->search = s;
+        h->data->search = s;
       else
-        d->search = "?" + s;
+        h->data->search = "?" + s;
+      sync_usp_from_url(iso, h);
     }
     void url_set_hash(Local<Name>, Local<Value> v, const PropertyCallbackInfo<void>& info) {
       auto* iso = info.GetIsolate();
@@ -560,15 +703,21 @@ namespace fxe::js {
     void url_get_search_params(Local<Name>, const PropertyCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
-      auto* d = unwrap_url(info.HolderV2());
-      if (!d)
+      auto* h = unwrap_url_holder(info.HolderV2());
+      if (!h || !h->data)
         return;
+      if (!h->search_params.IsEmpty()) {
+        info.GetReturnValue().Set(h->search_params.Get(iso));
+        return;
+      }
       auto usp = std::make_unique<usp_data>();
-      std::string q = d->search;
+      std::string q = h->data->search;
       if (!q.empty() && q.front() == '?')
         q.erase(0, 1);
       usp_parse(q, *usp);
-      info.GetReturnValue().Set(wrap_usp(iso, ctx, std::move(usp)));
+      auto obj = wrap_usp(iso, ctx, std::move(usp), h);
+      h->search_params.Reset(iso, obj);
+      info.GetReturnValue().Set(obj);
     }
 
     // ---------------- URLSearchParams ---------------------------------------
@@ -601,23 +750,27 @@ namespace fxe::js {
           }
         } else if (info[0]->IsObject()) {
           auto o = info[0].As<Object>();
-          Local<Array> names;
-          if (o->GetOwnPropertyNames(ctx).ToLocal(&names)) {
-            for (u32 i = 0; i < names->Length(); ++i) {
-              Local<Value> k;
-              if (!names->Get(ctx, i).ToLocal(&k))
-                continue;
-              Local<Value> v;
-              if (!o->Get(ctx, k).ToLocal(&v))
-                continue;
-              data->pairs.emplace_back(to_std_string(iso, k), to_std_string(iso, v));
+          if (auto* other = unwrap_usp(o)) {
+            data->pairs = other->pairs;
+          } else {
+            Local<Array> names;
+            if (o->GetOwnPropertyNames(ctx).ToLocal(&names)) {
+              for (u32 i = 0; i < names->Length(); ++i) {
+                Local<Value> k;
+                if (!names->Get(ctx, i).ToLocal(&k))
+                  continue;
+                Local<Value> v;
+                if (!o->Get(ctx, k).ToLocal(&v))
+                  continue;
+                data->pairs.emplace_back(to_std_string(iso, k), to_std_string(iso, v));
+              }
             }
           }
         }
       }
       auto* h = new usp_holder{{}, std::move(data), nullptr};
       auto self = info.This();
-      set_native(iso, self, h->data.get(), TAG_URLSEARCH);
+      set_native(iso, self, h, TAG_URLSEARCH);
       h->bind(iso, self);
       info.GetReturnValue().Set(self);
     }
@@ -668,50 +821,62 @@ namespace fxe::js {
     void usp_set(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* d = unwrap_usp(info.This());
-      if (!d || info.Length() < 2)
+      auto* h = unwrap_usp_holder(info.This());
+      if (!h || !h->data || info.Length() < 2)
         return;
       std::string k = to_std_string(iso, info[0]);
       std::string v = to_std_string(iso, info[1]);
       bool replaced = false;
-      auto it = d->pairs.begin();
-      while (it != d->pairs.end()) {
+      auto it = h->data->pairs.begin();
+      while (it != h->data->pairs.end()) {
         if (it->first == k) {
           if (!replaced) {
             it->second = v;
             replaced = true;
             ++it;
           } else {
-            it = d->pairs.erase(it);
+            it = h->data->pairs.erase(it);
           }
-        } else
+        } else {
           ++it;
+        }
       }
       if (!replaced)
-        d->pairs.emplace_back(std::move(k), std::move(v));
+        h->data->pairs.emplace_back(std::move(k), std::move(v));
+      sync_url_from_usp(h);
     }
     void usp_append(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* d = unwrap_usp(info.This());
-      if (!d || info.Length() < 2)
+      auto* h = unwrap_usp_holder(info.This());
+      if (!h || !h->data || info.Length() < 2)
         return;
-      d->pairs.emplace_back(to_std_string(iso, info[0]), to_std_string(iso, info[1]));
+      h->data->pairs.emplace_back(to_std_string(iso, info[0]), to_std_string(iso, info[1]));
+      sync_url_from_usp(h);
     }
     void usp_delete(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
-      auto* d = unwrap_usp(info.This());
-      if (!d || info.Length() < 1)
+      auto* h = unwrap_usp_holder(info.This());
+      if (!h || !h->data || info.Length() < 1)
         return;
       std::string k = to_std_string(iso, info[0]);
-      auto it = d->pairs.begin();
-      while (it != d->pairs.end()) {
+      auto it = h->data->pairs.begin();
+      while (it != h->data->pairs.end()) {
         if (it->first == k)
-          it = d->pairs.erase(it);
+          it = h->data->pairs.erase(it);
         else
           ++it;
       }
+      sync_url_from_usp(h);
+    }
+    void usp_sort(const FunctionCallbackInfo<Value>& info) {
+      auto* h = unwrap_usp_holder(info.This());
+      if (!h || !h->data)
+        return;
+      std::stable_sort(h->data->pairs.begin(), h->data->pairs.end(),
+                       [](const auto& a, const auto& b) { return a.first < b.first; });
+      sync_url_from_usp(h);
     }
     void usp_to_string(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -735,6 +900,40 @@ namespace fxe::js {
         Local<Value> ignored;
         (void)fn->Call(ctx, Undefined(iso), 3, argv).ToLocal(&ignored);
       }
+    }
+    void usp_entries(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* d = unwrap_usp(info.This());
+      if (!d)
+        return;
+      info.GetReturnValue().Set(make_usp_iter(iso, ctx, *d, usp_iter_kind::entries));
+    }
+    void usp_keys(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* d = unwrap_usp(info.This());
+      if (!d)
+        return;
+      info.GetReturnValue().Set(make_usp_iter(iso, ctx, *d, usp_iter_kind::keys));
+    }
+    void usp_values(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* d = unwrap_usp(info.This());
+      if (!d)
+        return;
+      info.GetReturnValue().Set(make_usp_iter(iso, ctx, *d, usp_iter_kind::values));
+    }
+    void usp_get_size(Local<Name>, const PropertyCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto* d = unwrap_usp(info.HolderV2());
+      if (!d)
+        return;
+      info.GetReturnValue().Set(to_v8(iso, static_cast<u32>(d->pairs.size())));
     }
 
   } // namespace
@@ -772,14 +971,21 @@ namespace fxe::js {
     stpl->SetClassName("URLSearchParams"_v8(iso));
     stpl->InstanceTemplate()->SetInternalFieldCount(2);
     auto sproto = stpl->PrototypeTemplate();
+    auto sinst = stpl->InstanceTemplate();
     sproto->Set(iso, "get", FunctionTemplate::New(iso, usp_get));
     sproto->Set(iso, "getAll", FunctionTemplate::New(iso, usp_get_all));
     sproto->Set(iso, "has", FunctionTemplate::New(iso, usp_has));
     sproto->Set(iso, "set", FunctionTemplate::New(iso, usp_set));
     sproto->Set(iso, "append", FunctionTemplate::New(iso, usp_append));
     sproto->Set(iso, "delete", FunctionTemplate::New(iso, usp_delete));
+    sproto->Set(iso, "sort", FunctionTemplate::New(iso, usp_sort));
+    sproto->Set(iso, "entries", FunctionTemplate::New(iso, usp_entries));
+    sproto->Set(iso, "keys", FunctionTemplate::New(iso, usp_keys));
+    sproto->Set(iso, "values", FunctionTemplate::New(iso, usp_values));
+    sproto->Set(Symbol::GetIterator(iso), FunctionTemplate::New(iso, usp_entries));
     sproto->Set(iso, "toString", FunctionTemplate::New(iso, usp_to_string));
     sproto->Set(iso, "forEach", FunctionTemplate::New(iso, usp_for_each));
+    sinst->SetNativeDataProperty("size"_v8(iso), usp_get_size, nullptr);
 
     global->Set(iso, "URLSearchParams", stpl);
     usp_tpl_cache::install(iso, stpl);

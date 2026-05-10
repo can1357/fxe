@@ -59,6 +59,9 @@ namespace fxe {
     const window& get_window() const override {
       return win_;
     }
+    std::vector<u32> supported_multisample_counts() const override {
+      return {1, default_multisample_count};
+    }
 
   private:
     window& win_;

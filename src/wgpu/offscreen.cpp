@@ -117,6 +117,9 @@ namespace fxe {
       const window& get_window() const override {
         return window_;
       }
+      std::vector<u32> supported_multisample_counts() const override {
+        return {1, default_multisample_count};
+      }
 
     private:
       static offscreen_options sanitize(offscreen_options options) {
@@ -245,6 +248,64 @@ namespace fxe {
         throw std::runtime_error("RequestDevice returned null");
       return device;
     }
+    void destroy_texture(wgpu::Texture& texture);
+
+    [[nodiscard]] bool probe_render_attachment_sample_count(const wgpu::Device& device,
+                                                            wgpu::TextureFormat color_format,
+                                                            wgpu::TextureFormat depth_format,
+                                                            u32 sample_count) {
+      if (sample_count <= 1)
+        return true;
+      auto instance = device.GetAdapter().GetInstance();
+      if (!instance)
+        return false;
+
+      wgpu::TextureDescriptor color_desc{};
+      color_desc.label = "fxe-offscreen-msaa-probe-color";
+      color_desc.dimension = wgpu::TextureDimension::e2D;
+      color_desc.size = {4, 4, 1};
+      color_desc.format = color_format;
+      color_desc.mipLevelCount = 1;
+      color_desc.sampleCount = sample_count;
+      color_desc.usage = wgpu::TextureUsage::RenderAttachment;
+
+      device.PushErrorScope(wgpu::ErrorFilter::Validation);
+      auto color = device.CreateTexture(&color_desc);
+      wgpu::Texture depth;
+      if (depth_format != wgpu::TextureFormat::Undefined) {
+        wgpu::TextureDescriptor depth_desc = color_desc;
+        depth_desc.label = "fxe-offscreen-msaa-probe-depth";
+        depth_desc.format = depth_format;
+        depth = device.CreateTexture(&depth_desc);
+      }
+
+      wgpu::PopErrorScopeStatus pop_status = wgpu::PopErrorScopeStatus::Error;
+      wgpu::ErrorType error_type = wgpu::ErrorType::NoError;
+      auto fut = device.PopErrorScope(
+          wgpu::CallbackMode::WaitAnyOnly,
+          [&](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type, wgpu::StringView) {
+            pop_status = status;
+            error_type = type;
+          });
+      wait_future(instance, fut);
+
+      destroy_texture(depth);
+      destroy_texture(color);
+      return pop_status == wgpu::PopErrorScopeStatus::Success &&
+             error_type == wgpu::ErrorType::NoError;
+    }
+
+    [[nodiscard]] std::vector<u32>
+    probe_supported_multisample_counts(const wgpu::Device& device, wgpu::TextureFormat color_format,
+                                       wgpu::TextureFormat depth_format) {
+      std::vector<u32> supported;
+      supported.push_back(1);
+      for (u32 sample_count : std::array<u32, 4>{2, 4, 8, 16}) {
+        if (probe_render_attachment_sample_count(device, color_format, depth_format, sample_count))
+          supported.push_back(sample_count);
+      }
+      return supported;
+    }
 
     void destroy_texture(wgpu::Texture& texture) {
       if (!texture)
@@ -290,14 +351,14 @@ namespace fxe {
           device_ = request_device(instance_, adapter_);
           queue_ = device_.GetQueue();
         }
+        target_format_ = options_.color_format;
+        depth_format_ = options_.depth_format;
         if (!check_multisample_count(options_.multisample)) {
           FXE_WARN("wgpu.offscreen", "unsupported multisample count {}; falling back to 1",
                    options_.multisample);
           options_.multisample = 1;
         }
         multisample_count_ = options_.multisample;
-        target_format_ = options_.color_format;
-        depth_format_ = options_.depth_format;
         build_resources();
         resize_targets();
       }
@@ -538,6 +599,15 @@ namespace fxe {
       wgpu::TextureFormat depth_format() const override {
         return options_.enable_depth ? depth_format_ : wgpu::TextureFormat::Undefined;
       }
+      std::vector<u32> supported_multisample_counts() const override {
+        if (supported_msaa_cache_.empty()) {
+          supported_msaa_cache_ = probe_supported_multisample_counts(
+              device_, target_format_,
+              options_.enable_depth ? depth_format_ : wgpu::TextureFormat::Undefined);
+        }
+        return supported_msaa_cache_;
+      }
+
       u32 sample_count() const override {
         return multisample_count_;
       }
@@ -1195,6 +1265,8 @@ namespace fxe {
       wgpu::Queue queue_;
       wgpu::TextureFormat target_format_ = wgpu::TextureFormat::RGBA8Unorm;
       wgpu::TextureFormat depth_format_ = wgpu::TextureFormat::Depth24Plus;
+      mutable std::vector<u32> supported_msaa_cache_;
+
       wgpu::Buffer ubo_;
       wgpu::Buffer vbuf_;
       wgpu::Buffer tri_ibuf_;

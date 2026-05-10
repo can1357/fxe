@@ -1513,6 +1513,48 @@ Error.prepareStackTrace = function(err, frames) {
           });
       return mod;
     }
+    std::optional<std::string> extract_import_type(v8::Isolate* iso,
+                                                   v8::Local<v8::FixedArray> import_attributes) {
+      const int count = import_attributes->Length();
+      if (count <= 0)
+        return std::nullopt;
+      const int stride = count % 3 == 0 ? 3 : (count % 2 == 0 ? 2 : 0);
+      if (stride == 0)
+        return std::nullopt;
+      const auto type_key = "type"_v8(iso);
+      for (int i = 0; i + 1 < count; i += stride) {
+        auto key = import_attributes->Get(i).As<v8::Value>();
+        auto value = import_attributes->Get(i + 1).As<v8::Value>();
+        if (!key->IsString() || !value->IsString()) {
+          continue;
+        }
+        if (key->StrictEquals(type_key))
+          return to_std_string(iso, value.As<v8::String>());
+      }
+      return std::nullopt;
+    }
+
+    bool validate_import_type(v8::Isolate* iso, std::string_view resolved_name,
+                              const std::optional<std::string>& import_type) {
+      if (!import_type)
+        return true;
+      const bool is_json_module = fs::path(std::string(resolved_name)).extension() == ".json";
+      if (is_json_module) {
+        if (*import_type == "json")
+          return true;
+        iso->ThrowException(v8::Exception::TypeError(to_v8_string(
+            iso, "JSON module imported with mismatched type assertion: '" + *import_type + "'")));
+        return false;
+      }
+      if (*import_type == "json") {
+        iso->ThrowException(v8::Exception::TypeError(
+            "Non-JSON module imported with type='json' attribute"_v8(iso)));
+        return false;
+      }
+      iso->ThrowException(v8::Exception::TypeError(
+          to_v8_string(iso, "Unsupported import attribute type='" + *import_type + "'")));
+      return false;
+    }
 
     v8::MaybeLocal<v8::Module> compile_module_file(v8::Isolate* iso, v8::Local<v8::Context> ctx,
                                                    host::impl* p, const std::string& path) {
@@ -1642,86 +1684,124 @@ Error.prepareStackTrace = function(err, frames) {
       return fxe::runtime::resolve_node_compat_asset_path(normalize_slashes(resolved.string()));
     }
 
-    v8::MaybeLocal<v8::Module> resolve_module(v8::Local<v8::Context> ctx,
-                                              v8::Local<v8::String> specifier,
-                                              v8::Local<v8::FixedArray> /*import_attributes*/,
-                                              v8::Local<v8::Module> referrer) {
-      auto* iso = v8::Isolate::GetCurrent();
-      std::string spec = to_std_string(iso, specifier);
-      auto* p = static_cast<host::impl*>(iso->GetData(kIsolateSlotHostImpl));
+    v8::MaybeLocal<v8::Module> load_module_for_request(v8::Isolate* iso, v8::Local<v8::Context> ctx,
+                                                       host::impl* p, std::string_view spec,
+                                                       v8::Local<v8::FixedArray> import_attributes,
+                                                       std::string_view referrer_path,
+                                                       std::string* dependency_key = nullptr) {
+      const auto import_type = extract_import_type(iso, import_attributes);
+      auto validate = [&](std::string_view resolved_name) {
+        return validate_import_type(iso, resolved_name, import_type);
+      };
+      const std::string spec_text{spec};
       if (spec == "fxe") {
+        if (!validate("fxe"))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = "fxe";
         if (p)
           return p->fxe_module.Get(iso);
         return v8::MaybeLocal<v8::Module>();
       }
       if (spec == "fxe:sqlite") {
+        if (!validate("fxe:sqlite"))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = "fxe:sqlite";
         if (p)
           return p->sqlite_module.Get(iso);
         return v8::MaybeLocal<v8::Module>();
       }
       if (spec == "fxe:ipc") {
+        if (!validate("fxe:ipc"))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = "fxe:ipc";
         if (p)
           return p->ipc_module.Get(iso);
         return v8::MaybeLocal<v8::Module>();
       }
       if (spec == "fxe:net") {
+        if (!validate("fxe:net"))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = "fxe:net";
         if (p)
           return p->net_module.Get(iso);
         return v8::MaybeLocal<v8::Module>();
       }
       if (spec == "fxe:os") {
+        if (!validate("fxe:os"))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = "fxe:os";
         if (p)
           return p->os_module.Get(iso);
         return v8::MaybeLocal<v8::Module>();
       }
-      std::string referrer_path = to_std_string(iso, referrer->GetResourceName());
-      std::string resolved;
-      std::string error;
-      auto record_dependency = [&](std::string_view dependency) {
-        if (p)
-          p->record_import(referrer_path, dependency);
-      };
-      if (fxe::runtime::is_node_builtin_specifier(spec)) {
-        auto asset = fxe::runtime::resolve_node_compat_asset(spec);
+      if (fxe::runtime::is_node_builtin_specifier(spec_text)) {
+        auto asset = fxe::runtime::resolve_node_compat_asset(spec_text);
         if (asset) {
-          auto mod = compile_embedded_module(iso, ctx, p, *asset);
-          if (!mod.IsEmpty())
-            record_dependency(asset->canonical_specifier);
-          return mod;
+          if (!validate(asset->asset_path))
+            return v8::MaybeLocal<v8::Module>();
+          if (dependency_key)
+            *dependency_key = asset->canonical_specifier;
+          return compile_embedded_module(iso, ctx, p, *asset);
         }
-        throw_error(iso, "node compat disabled for specifier '{}'", spec);
+        throw_error(iso, "node compat disabled for specifier '{}'", spec_text);
         return v8::MaybeLocal<v8::Module>();
       }
       if (auto asset = resolve_embedded_bare_asset(spec, referrer_path)) {
-        auto mod = compile_embedded_module(iso, ctx, p, *asset);
-        if (!mod.IsEmpty())
-          record_dependency(asset->canonical_specifier);
-        return mod;
+        if (!validate(asset->asset_path))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = asset->canonical_specifier;
+        return compile_embedded_module(iso, ctx, p, *asset);
       }
       if (auto asset = resolve_embedded_relative_asset(spec, referrer_path)) {
-        auto mod = compile_embedded_module(iso, ctx, p, *asset);
-        if (!mod.IsEmpty())
-          record_dependency(asset->canonical_specifier);
-        return mod;
+        if (!validate(asset->asset_path))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = asset->canonical_specifier;
+        return compile_embedded_module(iso, ctx, p, *asset);
       }
 
+      std::string resolved;
+      std::string error;
       if (resolve_synthetic_package_module(spec, resolved, error)) {
         if (!error.empty()) {
           iso->ThrowError(to_v8_string(iso, error));
           return v8::MaybeLocal<v8::Module>();
         }
-        auto mod = compile_module_file(iso, ctx, p, resolved);
-        if (!mod.IsEmpty())
-          record_dependency(resolved);
-        return mod;
+        if (!validate(resolved))
+          return v8::MaybeLocal<v8::Module>();
+        if (dependency_key)
+          *dependency_key = resolved;
+        return compile_module_file(iso, ctx, p, resolved);
       }
       if (!resolve_file_specifier(iso, spec, referrer_path, resolved, error)) {
         iso->ThrowError(to_v8_string(iso, error));
         return v8::MaybeLocal<v8::Module>();
       }
-      auto mod = compile_module_file(iso, ctx, p, resolved);
-      if (!mod.IsEmpty())
-        record_dependency(resolved);
+      if (!validate(resolved))
+        return v8::MaybeLocal<v8::Module>();
+      if (dependency_key)
+        *dependency_key = resolved;
+      return compile_module_file(iso, ctx, p, resolved);
+    }
+
+    v8::MaybeLocal<v8::Module> resolve_module(v8::Local<v8::Context> ctx,
+                                              v8::Local<v8::String> specifier,
+                                              v8::Local<v8::FixedArray> import_attributes,
+                                              v8::Local<v8::Module> referrer) {
+      auto* iso = v8::Isolate::GetCurrent();
+      auto* p = static_cast<host::impl*>(iso->GetData(kIsolateSlotHostImpl));
+      const std::string referrer_path = to_std_string(iso, referrer->GetResourceName());
+      std::string dependency_key;
+      auto mod = load_module_for_request(iso, ctx, p, to_std_string(iso, specifier),
+                                         import_attributes, referrer_path, &dependency_key);
+      if (!mod.IsEmpty() && p && !dependency_key.empty())
+        p->record_import(referrer_path, dependency_key);
       return mod;
     }
     // Drains microtasks and host message-loop tasks until the supplied promise
@@ -1754,6 +1834,107 @@ Error.prepareStackTrace = function(err, frames) {
           std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
       return state;
+    }
+    struct dynamic_import_promise_state {
+      v8::Global<v8::Module> module;
+      v8::Global<v8::Promise::Resolver> resolver;
+    };
+
+    void dynamic_import_resolve(const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto* iso = info.GetIsolate();
+      v8::HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      std::unique_ptr<dynamic_import_promise_state> state(
+          external_ptr<dynamic_import_promise_state>(info.Data()));
+      if (!state)
+        return;
+      auto mod = state->module.Get(iso);
+      auto resolver = state->resolver.Get(iso);
+      auto ns = mod->GetModuleNamespace();
+      (void)resolver->Resolve(ctx, ns);
+      info.GetReturnValue().Set(ns);
+    }
+
+    void dynamic_import_reject(const v8::FunctionCallbackInfo<v8::Value>& info) {
+      auto* iso = info.GetIsolate();
+      v8::HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      std::unique_ptr<dynamic_import_promise_state> state(
+          external_ptr<dynamic_import_promise_state>(info.Data()));
+      if (!state)
+        return;
+      auto resolver = state->resolver.Get(iso);
+      auto reason = info.Length() > 0 ? info[0] : v8::Undefined(iso);
+      (void)resolver->Reject(ctx, reason);
+      info.GetReturnValue().Set(reason);
+    }
+
+    v8::MaybeLocal<v8::Promise> host_import_module_dynamically(
+        v8::Local<v8::Context> ctx, [[maybe_unused]] v8::Local<v8::Data> host_defined_options,
+        v8::Local<v8::Value> resource_name, v8::Local<v8::String> specifier,
+        v8::Local<v8::FixedArray> import_attributes) {
+      auto* iso = v8::Isolate::GetCurrent();
+      auto* p = static_cast<host::impl*>(iso->GetData(kIsolateSlotHostImpl));
+      const std::string referrer_path = resource_name->IsString()
+                                            ? to_std_string(iso, resource_name.As<v8::String>())
+                                            : std::string{};
+      std::string dependency_key;
+      v8::Local<v8::Module> mod;
+      if (!load_module_for_request(iso, ctx, p, to_std_string(iso, specifier), import_attributes,
+                                   referrer_path, &dependency_key)
+               .ToLocal(&mod)) {
+        return v8::MaybeLocal<v8::Promise>();
+      }
+      if (p && !referrer_path.empty() && !dependency_key.empty())
+        p->record_import(referrer_path, dependency_key);
+      if (mod->GetStatus() == v8::Module::kUninstantiated) {
+        auto instantiated = mod->InstantiateModule(ctx, &resolve_module);
+        if (instantiated.IsNothing() || !instantiated.FromJust())
+          return v8::MaybeLocal<v8::Promise>();
+      }
+      auto resolver = v8::Promise::Resolver::New(ctx);
+      if (resolver.IsEmpty())
+        return v8::MaybeLocal<v8::Promise>();
+      if (mod->GetStatus() == v8::Module::kEvaluated) {
+        (void)resolver.ToLocalChecked()->Resolve(ctx, mod->GetModuleNamespace());
+        return resolver.ToLocalChecked()->GetPromise();
+      }
+      if (mod->GetStatus() == v8::Module::kErrored) {
+        (void)resolver.ToLocalChecked()->Reject(ctx, mod->GetException());
+        return resolver.ToLocalChecked()->GetPromise();
+      }
+      v8::Local<v8::Value> eval_result;
+      if (!mod->Evaluate(ctx).ToLocal(&eval_result))
+        return v8::MaybeLocal<v8::Promise>();
+      if (!eval_result->IsPromise()) {
+        (void)resolver.ToLocalChecked()->Resolve(ctx, mod->GetModuleNamespace());
+        return resolver.ToLocalChecked()->GetPromise();
+      }
+      auto eval_promise = eval_result.As<v8::Promise>();
+      if (eval_promise->State() == v8::Promise::kFulfilled) {
+        (void)resolver.ToLocalChecked()->Resolve(ctx, mod->GetModuleNamespace());
+        return resolver.ToLocalChecked()->GetPromise();
+      }
+      if (eval_promise->State() == v8::Promise::kRejected) {
+        (void)resolver.ToLocalChecked()->Reject(ctx, eval_promise->Result());
+        return resolver.ToLocalChecked()->GetPromise();
+      }
+      auto* state = new dynamic_import_promise_state{
+          v8::Global<v8::Module>(iso, mod),
+          v8::Global<v8::Promise::Resolver>(iso, resolver.ToLocalChecked())};
+      const auto data = make_external(iso, state);
+      v8::Local<v8::Function> on_resolve;
+      v8::Local<v8::Function> on_reject;
+      if (!v8::Function::New(ctx, dynamic_import_resolve, data).ToLocal(&on_resolve) ||
+          !v8::Function::New(ctx, dynamic_import_reject, data).ToLocal(&on_reject)) {
+        delete state;
+        return v8::MaybeLocal<v8::Promise>();
+      }
+      if (eval_promise->Then(ctx, on_resolve, on_reject).IsEmpty()) {
+        delete state;
+        return v8::MaybeLocal<v8::Promise>();
+      }
+      return resolver.ToLocalChecked()->GetPromise();
     }
 
     bool reload_hmr_module(v8::Isolate* iso, v8::Local<v8::Context> ctx, host::impl* p,
@@ -2211,6 +2392,7 @@ Error.prepareStackTrace = function(err, frames) {
 
       // Install per-module import.meta hook (must be set on the isolate).
       isolate->SetHostInitializeImportMetaObjectCallback(&import_meta_callback);
+      isolate->SetHostImportModuleDynamicallyCallback(&host_import_module_dynamically);
 
       // Install __fxe_remap_frame native + Error.prepareStackTrace JS.
       add_function(ctx, ctx->Global(), "__fxe_remap_frame", remap_frame_callback);

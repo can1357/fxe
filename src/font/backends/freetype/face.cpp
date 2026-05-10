@@ -9,6 +9,8 @@
 #include <fxe/font/face.hpp>
 #include <fxe/font/library.hpp>
 
+#include "../../bytes_owner.hpp"
+
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_MULTIPLE_MASTERS_H
@@ -57,7 +59,7 @@ namespace fxe::font {
 
     class FreeTypeFace final : public Face {
     public:
-      FreeTypeFace(FT_Face face, std::vector<u8> bytes, float pixel_size)
+      FreeTypeFace(FT_Face face, std::unique_ptr<bytes_owner> bytes, float pixel_size)
           : face_(face), bytes_(std::move(bytes)), pixel_size_(pixel_size),
             id_(g_face_id.fetch_add(1)) {
         // Set pixel size up-front. FT requires pixel sizes in 26.6 fixed-point
@@ -231,7 +233,7 @@ namespace fxe::font {
 
     private:
       FT_Face face_ = nullptr;
-      std::vector<u8> bytes_;
+      std::unique_ptr<bytes_owner> bytes_;
       float pixel_size_ = 0.0f;
       u64 id_ = 0;
 #if FXE_FONT_HAS_HARFBUZZ
@@ -250,24 +252,37 @@ namespace fxe::font {
   }
 #endif
 
-  std::unique_ptr<Face> load_face_freetype(std::span<const u8> bytes, float pixel_size,
-                                           u32 face_index) {
+  std::unique_ptr<Face> load_face_freetype_owned(std::unique_ptr<bytes_owner> owner,
+                                                 float pixel_size, u32 face_index) {
+    if (!owner)
+      return nullptr;
+    const auto bytes = owner->bytes();
     if (bytes.empty())
       return nullptr;
     FT_Face face = nullptr;
-    std::vector<u8> owned(bytes.begin(), bytes.end());
     {
       auto& lib = shared_library();
       auto guard = lib.lock();
       FT_Library ftlib = static_cast<FT_Library>(lib.raw());
       if (!ftlib)
         return nullptr;
-      if (FT_New_Memory_Face(ftlib, owned.data(), static_cast<FT_Long>(owned.size()),
+      // FT does not copy bytes; the `owner` keeps them alive for the Face's
+      // lifetime (vector_bytes_owner = heap copy, mmap_bytes_owner = zero-copy
+      // file mapping).
+      if (FT_New_Memory_Face(ftlib, bytes.data(), static_cast<FT_Long>(bytes.size()),
                              static_cast<FT_Long>(face_index), &face) != 0) {
         return nullptr;
       }
     }
-    return std::make_unique<FreeTypeFace>(face, std::move(owned), pixel_size);
+    return std::make_unique<FreeTypeFace>(face, std::move(owner), pixel_size);
+  }
+
+  std::unique_ptr<Face> load_face_freetype(std::span<const u8> bytes, float pixel_size,
+                                           u32 face_index) {
+    if (bytes.empty())
+      return nullptr;
+    auto owner = std::make_unique<vector_bytes_owner>(std::vector<u8>{bytes.begin(), bytes.end()});
+    return load_face_freetype_owned(std::move(owner), pixel_size, face_index);
   }
 
 } // namespace fxe::font

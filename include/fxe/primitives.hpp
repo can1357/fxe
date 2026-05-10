@@ -244,12 +244,29 @@ namespace fxe::primitives {
                  fill_rule rule = fill_rule::nonzero, float depth = 0.0f);
   void fill_path(command_sink& r, const path_2d& path, r8g8b8a8 color,
                  fill_rule rule = fill_rule::nonzero, float depth = 0.0f);
+  void fill_polygon(command_sink& r, std::span<const math::vec2> points, r8g8b8a8 color,
+                    float depth = 0.0f);
+  void fill_polygon(command_sink& r, std::span<const math::vec2> points, const paint_value& paint,
+                    fill_rule rule = fill_rule::nonzero, float depth = 0.0f);
   void stroke_path(command_sink& r, const path_2d& path, const paint_value& paint, float line_width,
+                   line_join join = line_join::miter, line_cap cap = line_cap::butt,
+                   float depth = 0.0f, std::span<const float> dash_pattern = {},
+                   float dash_offset = 0.0f);
+  void stroke_path(command_sink& r, const path_2d& path, const paint_value& paint, float line_width,
+                   std::span<const float> dash_pattern, float dash_offset,
                    line_join join = line_join::miter, line_cap cap = line_cap::butt,
                    float depth = 0.0f);
   void stroke_path(command_sink& r, const path_2d& path, r8g8b8a8 color, float line_width,
                    line_join join = line_join::miter, line_cap cap = line_cap::butt,
+                   float depth = 0.0f, std::span<const float> dash_pattern = {},
+                   float dash_offset = 0.0f);
+  void stroke_path(command_sink& r, const path_2d& path, r8g8b8a8 color, float line_width,
+                   std::span<const float> dash_pattern, float dash_offset,
+                   line_join join = line_join::miter, line_cap cap = line_cap::butt,
                    float depth = 0.0f);
+  void stroke_polygon(command_sink& r, std::span<const math::vec2> points, r8g8b8a8 color,
+                      float line_width, bool closed = true, line_join join = line_join::miter,
+                      line_cap cap = line_cap::butt, float depth = 0.0f);
 
   void draw_shadow_rect(command_sink& r, float x, float y, float w, float h, float depth,
                         r8g8b8a8 color, float blur, float spread, float offset_x, float offset_y,
@@ -275,6 +292,8 @@ namespace fxe::primitives {
                        const font_info& font, text_style style = {});
   math::vec4 draw_text(command_sink& r, const math::mat4x4& transform, std::string_view text,
                        const font_info& font, text_style style = {});
+  math::vec4 draw_text_on_path(command_sink& r, const path_2d& path, float path_offset, float depth,
+                               std::string_view text, const font_info& font, text_style style = {});
 
   // --- Phase 0 editor primitives -------------------------------------------
   // One trampoline, N styled spans on the same baseline.

@@ -190,3 +190,100 @@ test('URL searchParams reflects the current search string', () => {
   assertEqual(url.searchParams.get('b'), '3');
   assertEqual(url.searchParams.get('space'), 'two words');
 });
+
+test('URL exposes WHATWG-compatible getters for supported components', () => {
+  const url = new URL('https://user:pw@example.com:8443/path/sub?q=1#h');
+
+  assertEqual(url.protocol, 'https:');
+  assertEqual(url.username, 'user');
+  assertEqual(url.password, 'pw');
+  assertEqual(url.hostname, 'example.com');
+  assertEqual(url.port, '8443');
+  assertEqual(url.host, 'example.com:8443');
+  assertEqual(url.pathname, '/path/sub');
+  assertEqual(url.search, '?q=1');
+  assertEqual(url.hash, '#h');
+  assertEqual(url.origin, 'https://example.com:8443');
+  assertEqual(url.href, 'https://user:pw@example.com:8443/path/sub?q=1#h');
+  assertEqual(url.toString(), url.href);
+});
+
+test('URL resolves relatives and keeps search/searchParams in sync', () => {
+  assertEqual(new URL('../a', 'https://x.com/b/c/').href, 'https://x.com/b/a');
+  assertThrows(() => new URL('a'));
+
+  const url = new URL('https://example.com/root/start?q=1');
+  const params = url.searchParams;
+
+  assert(params === url.searchParams);
+
+  url.pathname = '/next';
+  assertEqual(url.href, 'https://example.com/next?q=1');
+
+  url.search = '?name=fxe&name=url';
+  assertDeepEqual(params.getAll('name'), ['fxe', 'url']);
+
+  params.set('name', 'bound');
+  params.append('extra', '1');
+  assertEqual(url.search, '?name=bound&extra=1');
+  assertEqual(url.href, 'https://example.com/next?name=bound&extra=1');
+});
+
+test('URLSearchParams iterators preserve insertion order and spec sort stability', () => {
+  const params = new URLSearchParams('b=1&a=first&a=second&c=3');
+  const seen: [string, string][] = [];
+
+  for (const entry of params) {
+    seen.push(entry);
+  }
+
+  assertDeepEqual(seen, [
+    ['b', '1'],
+    ['a', 'first'],
+    ['a', 'second'],
+    ['c', '3'],
+  ]);
+  assertDeepEqual([...params.entries()], seen);
+  assertDeepEqual([...params.keys()], ['b', 'a', 'a', 'c']);
+  assertDeepEqual([...params.values()], ['1', 'first', 'second', '3']);
+
+  params.sort();
+  assertDeepEqual(
+    [...params.entries()],
+    [
+      ['a', 'first'],
+      ['a', 'second'],
+      ['b', '1'],
+      ['c', '3'],
+    ],
+  );
+});
+
+test('URLSearchParams handles deletion, size, encoding, and parsing edges', () => {
+  const params = new URLSearchParams('dup=1&dup=2&space+key=a+b&encoded=%E2%98%83');
+  params.delete('dup');
+  assertEqual(params.has('dup'), false);
+
+  const expectedSize = params.getAll('space key').length + params.getAll('encoded').length;
+  assertEqual('size' in params ? params.size : [...params].length, expectedSize);
+
+  const special = new URLSearchParams([
+    ['a&b', '1=2'],
+    ['plus+', 'x+y'],
+    ['space key', 'two words'],
+    ['unicode', '雪'],
+  ]);
+  const reparsed = new URLSearchParams(special.toString());
+  assertDeepEqual(
+    [...reparsed.entries()],
+    [
+      ['a&b', '1=2'],
+      ['plus+', 'x+y'],
+      ['space key', 'two words'],
+      ['unicode', '雪'],
+    ],
+  );
+
+  assertEqual(new URLSearchParams('?a=1').get('a'), '1');
+  assertEqual(new URLSearchParams('a').get('a'), '');
+});

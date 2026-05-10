@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include <fxe/types.hpp>
 
 #include <chrono>
@@ -100,8 +102,10 @@ namespace fxe {
     [[nodiscard]] virtual const window& get_window() const = 0;
 
     // Graphics options.
-    virtual bool check_multisample_count(u32 count) const noexcept {
-      return count == 1 || count == default_multisample_count;
+    [[nodiscard]] virtual std::vector<u32> supported_multisample_counts() const = 0;
+    [[nodiscard]] virtual bool check_multisample_count(u32 count) const noexcept {
+      auto sup = supported_multisample_counts();
+      return std::find(sup.begin(), sup.end(), count) != sup.end();
     }
     bool set_multisample_count(u32 count) noexcept {
       if (multisample_count_ == count)

@@ -180,6 +180,7 @@ declare namespace FXE {
     setClearColor(r: number, g: number, b: number, a?: number): void;
     setClearColor(rgba: Vec4): void;
     setMultisample(count: number): void;
+    supportedMultisampleCounts(): number[];
     setBloom(enabled: boolean): void;
     setSelfBackdropBlur(enabled: boolean, radius?: number): void;
     screen(): [number, number];
@@ -853,6 +854,10 @@ declare namespace FXE {
     __fxeUpdateAccessibilityTree(windowId: number, snapshotJson: string): void;
   }
 
+  type LineJoin = 'miter' | 'bevel' | 'round';
+  type LineCap = 'butt' | 'square' | 'round';
+  type FontInfo = number | { fontId?: number };
+
   interface PrimitivesNamespace {
     readonly OP_FILL_RECT: 1;
     readonly OP_DRAW_RECT: 2;
@@ -1030,6 +1035,26 @@ declare namespace FXE {
         showWhitespace?: boolean;
       },
     ): [number, number, number, number];
+    drawTextOnPath(
+      cb: CommandBuffer | Renderer,
+      path: Path,
+      text: string,
+      font: FontInfo,
+      style?: {
+        color?: Color;
+        size?: number;
+        pt?: number;
+        fontId?: number;
+        lineHeight?: number;
+        features?: ReadonlyArray<string | readonly [string, number]>;
+        variations?: { readonly [axisTag: string]: number };
+        tabSize?: number;
+        tabOriginX?: number;
+        showWhitespace?: boolean;
+      },
+      pathOffset?: number,
+      depth?: number,
+    ): [number, number, number, number];
     drawText(
       cb: CommandBuffer | Renderer,
       x: number,
@@ -1161,13 +1186,31 @@ declare namespace FXE {
       fillRule?: 'nonzero' | 'evenodd',
       depth?: number,
     ): void;
+    fillPolygon(
+      cb: CommandBuffer | Renderer,
+      points: Float32Array,
+      color: Color,
+      depth?: number,
+    ): void;
     strokePath(
       cb: CommandBuffer | Renderer,
       path: Path,
       paint?: Paint,
       lineWidth?: number,
-      lineJoin?: 'miter' | 'bevel' | 'round',
-      lineCap?: 'butt' | 'square' | 'round',
+      lineJoin?: LineJoin,
+      lineCap?: LineCap,
+      depth?: number,
+      dash?: Float32Array,
+      dashOffset?: number,
+    ): void;
+    strokePolygon(
+      cb: CommandBuffer | Renderer,
+      points: Float32Array,
+      color: Color,
+      lineWidth: number,
+      closed?: boolean,
+      join?: LineJoin,
+      cap?: LineCap,
       depth?: number,
     ): void;
     drawShadowRect(
@@ -2822,12 +2865,18 @@ declare class BroadcastChannel {
 
 declare class URLSearchParams {
   constructor(init?: string | URLSearchParams | Record<string, string> | [string, string][]);
+  readonly size: number;
   get(name: string): string | null;
   getAll(name: string): string[];
   has(name: string): boolean;
   set(name: string, value: string): void;
   append(name: string, value: string): void;
   delete(name: string): void;
+  sort(): void;
+  entries(): IterableIterator<[string, string]>;
+  keys(): IterableIterator<string>;
+  values(): IterableIterator<string>;
+  [Symbol.iterator](): IterableIterator<[string, string]>;
   toString(): string;
   forEach(cb: (value: string, key: string, parent: URLSearchParams) => void): void;
 }

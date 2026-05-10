@@ -133,6 +133,64 @@ namespace fxe {
         throw std::runtime_error("RequestDevice returned null");
       return device;
     }
+    void destroy_texture(wgpu::Texture& texture);
+
+    [[nodiscard]] bool probe_render_attachment_sample_count(const wgpu::Device& device,
+                                                            wgpu::TextureFormat color_format,
+                                                            wgpu::TextureFormat depth_format,
+                                                            u32 sample_count) {
+      if (sample_count <= 1)
+        return true;
+      auto instance = device.GetAdapter().GetInstance();
+      if (!instance)
+        return false;
+
+      wgpu::TextureDescriptor color_desc{};
+      color_desc.label = "fxe-renderer-msaa-probe-color";
+      color_desc.dimension = wgpu::TextureDimension::e2D;
+      color_desc.size = {4, 4, 1};
+      color_desc.format = color_format;
+      color_desc.mipLevelCount = 1;
+      color_desc.sampleCount = sample_count;
+      color_desc.usage = wgpu::TextureUsage::RenderAttachment;
+
+      device.PushErrorScope(wgpu::ErrorFilter::Validation);
+      auto color = device.CreateTexture(&color_desc);
+      wgpu::Texture depth;
+      if (depth_format != wgpu::TextureFormat::Undefined) {
+        wgpu::TextureDescriptor depth_desc = color_desc;
+        depth_desc.label = "fxe-renderer-msaa-probe-depth";
+        depth_desc.format = depth_format;
+        depth = device.CreateTexture(&depth_desc);
+      }
+
+      wgpu::PopErrorScopeStatus pop_status = wgpu::PopErrorScopeStatus::Error;
+      wgpu::ErrorType error_type = wgpu::ErrorType::NoError;
+      auto fut = device.PopErrorScope(
+          wgpu::CallbackMode::WaitAnyOnly,
+          [&](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type, wgpu::StringView) {
+            pop_status = status;
+            error_type = type;
+          });
+      wait_future(instance, fut);
+
+      destroy_texture(depth);
+      destroy_texture(color);
+      return pop_status == wgpu::PopErrorScopeStatus::Success &&
+             error_type == wgpu::ErrorType::NoError;
+    }
+
+    [[nodiscard]] std::vector<u32>
+    probe_supported_multisample_counts(const wgpu::Device& device, wgpu::TextureFormat color_format,
+                                       wgpu::TextureFormat depth_format) {
+      std::vector<u32> supported;
+      supported.push_back(1);
+      for (u32 sample_count : std::array<u32, 4>{2, 4, 8, 16}) {
+        if (probe_render_attachment_sample_count(device, color_format, depth_format, sample_count))
+          supported.push_back(sample_count);
+      }
+      return supported;
+    }
 
     void destroy_texture(wgpu::Texture& texture) {
       if (!texture)
@@ -796,6 +854,13 @@ namespace fxe {
       wgpu::TextureFormat depth_format() const override {
         return depth_format_;
       }
+      std::vector<u32> supported_multisample_counts() const override {
+        if (supported_msaa_cache_.empty())
+          supported_msaa_cache_ =
+              probe_supported_multisample_counts(device_, surface_format_, depth_format_);
+        return supported_msaa_cache_;
+      }
+
       u32 sample_count() const override {
         return multisample_count_;
       }
@@ -1623,6 +1688,8 @@ namespace fxe {
       wgpu::Queue queue_;
       wgpu::TextureFormat surface_format_ = wgpu::TextureFormat::BGRA8Unorm;
       wgpu::TextureFormat depth_format_ = wgpu::TextureFormat::Depth24Plus;
+      mutable std::vector<u32> supported_msaa_cache_;
+
       wgpu::CompositeAlphaMode alpha_mode_ = wgpu::CompositeAlphaMode::Auto;
       wgpu::PresentMode present_mode_ = wgpu::PresentMode::Fifo;
       bool want_vsync_ = true;

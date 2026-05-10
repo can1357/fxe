@@ -124,7 +124,24 @@ namespace fxe::js {
         return;
       auto ctx = iso->GetCurrentContext();
       auto n = info.Length() >= 1 ? info[0]->Uint32Value(ctx).FromMaybe(1) : 1u;
-      r->set_multisample_count(n);
+      if (!r->set_multisample_count(n)) {
+        (void)throw_error(iso, "setMultisample: unsupported multisample count {}", n);
+        return;
+      }
+    }
+
+    void rend_supported_multisample_counts(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      const auto counts = r->supported_multisample_counts();
+      auto out = Array::New(iso, static_cast<int>(counts.size()));
+      for (u32 i = 0; i < counts.size(); ++i)
+        set_index(ctx, out, i, counts[i]);
+      info.GetReturnValue().Set(out);
     }
     void rend_set_bloom(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -591,6 +608,9 @@ namespace fxe::js {
     proto->Set(iso, "beginFrame", FunctionTemplate::New(iso, rend_begin_frame));
     proto->Set(iso, "endFrame", FunctionTemplate::New(iso, rend_end_frame));
     proto->Set(iso, "setMultisample", FunctionTemplate::New(iso, rend_set_multisample));
+    proto->Set(iso, "supportedMultisampleCounts",
+               FunctionTemplate::New(iso, rend_supported_multisample_counts));
+
     proto->Set(iso, "setBloom", FunctionTemplate::New(iso, rend_set_bloom));
     proto->Set(iso, "setSelfBackdropBlur", FunctionTemplate::New(iso, rend_set_self_backdrop_blur));
     proto->Set(iso, "setClearColor", FunctionTemplate::New(iso, rend_set_clear_color));

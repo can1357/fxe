@@ -5,8 +5,10 @@ import './bind_harness_test.ts';
 // === bind test imports begin ===
 import './bind_window_test.ts';
 import './bind_renderer_test.ts';
+import './bind_renderer_multisample_test.ts';
 import './bind_command_buffer_test.ts';
 import './bind_primitives_test.ts';
+import './bind_primitives_polygon_test.ts';
 import './bind_fs_test.ts';
 import './bind_path_test.ts';
 import './bind_timers_test.ts';
@@ -32,6 +34,8 @@ import './bind_sqlite_test.ts';
 import './bind_storage_test.ts';
 import './ui_text_input_tab_behavior_test.ts';
 import './ui_icon_test.ts';
+import './js_json_import_attrs_test.ts';
+import './js_dynamic_import_source_map_test.ts';
 // === bind test imports end ===
 
 await run();

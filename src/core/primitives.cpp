@@ -1123,13 +1123,189 @@ namespace fxe::primitives {
     fill_path(r, path, paint_value::solid(color), rule, depth);
   }
 
+  namespace {
+    [[nodiscard]] path_2d make_polygon_path(std::span<const math::vec2> points, bool closed) {
+      path_2d path;
+      if (points.empty())
+        return path;
+      path.move_to(points.front().x, points.front().y);
+      for (usize i = 1; i < points.size(); ++i)
+        path.line_to(points[i].x, points[i].y);
+      if (closed)
+        path.close();
+      return path;
+    }
+
+    void emit_stroke_segment(command_sink& r, math::vec2 a, math::vec2 b, const paint_value& paint,
+                             float line_width, float depth, line_cap start_cap, line_cap end_cap) {
+      math::vec2 dir = b - a;
+      const float len = math::length(dir);
+      if (len <= 0.0001f)
+        return;
+      dir *= 1.0f / len;
+      const float half = line_width * 0.5f;
+      if (start_cap == line_cap::square)
+        a -= dir * half;
+      if (end_cap == line_cap::square)
+        b += dir * half;
+      const math::vec2 normal{-dir.y * half, dir.x * half};
+      auto [vt, id] = r.allocate(4, 6, vertex_topology::triangle);
+      const texture_id tag = paint_texture_id(paint);
+      vt[0] = make_vertex4({a.x - normal.x, a.y - normal.y, depth, 0.0f}, {}, tag,
+                           sample_paint(paint, a));
+      vt[1] = make_vertex4({a.x + normal.x, a.y + normal.y, depth, 0.0f}, {}, tag,
+                           sample_paint(paint, a));
+      vt[2] = make_vertex4({b.x - normal.x, b.y - normal.y, depth, 0.0f}, {}, tag,
+                           sample_paint(paint, b));
+      vt[3] = make_vertex4({b.x + normal.x, b.y + normal.y, depth, 0.0f}, {}, tag,
+                           sample_paint(paint, b));
+      id[0] += 0u;
+      id[1] += 1u;
+      id[2] += 2u;
+      id[3] += 1u;
+      id[4] += 2u;
+      id[5] += 3u;
+      if (start_cap == line_cap::round) {
+        fill_ellipse(
+            r, make_screen_transform(a - math::vec2{half, half}, {line_width, line_width}, depth),
+            sample_paint(paint, a), 1.0f, 12);
+      }
+      if (end_cap == line_cap::round) {
+        fill_ellipse(
+            r, make_screen_transform(b - math::vec2{half, half}, {line_width, line_width}, depth),
+            sample_paint(paint, b), 1.0f, 12);
+      }
+    }
+
+    void emit_stroke_polyline(command_sink& r, std::span<const math::vec2> points, bool closed,
+                              const paint_value& paint, float line_width, line_join join,
+                              line_cap cap, float depth) {
+      if (points.size() < 2)
+        return;
+      const usize segment_count = closed ? points.size() : points.size() - 1;
+      for (usize i = 0; i < segment_count; ++i) {
+        line_cap start_cap = line_cap::butt;
+        line_cap end_cap = line_cap::butt;
+        if (!closed && i == 0)
+          start_cap = cap;
+        if (!closed && i + 1 == segment_count)
+          end_cap = cap;
+        emit_stroke_segment(r, points[i], points[(i + 1) % points.size()], paint, line_width, depth,
+                            start_cap, end_cap);
+      }
+      if (join == line_join::round && points.size() > 2) {
+        const usize join_begin = closed ? 0 : 1;
+        const usize join_end = closed ? points.size() : points.size() - 1;
+        for (usize i = join_begin; i < join_end; ++i) {
+          const float half = line_width * 0.5f;
+          fill_ellipse(r,
+                       make_screen_transform(points[i] - math::vec2{half, half},
+                                             {line_width, line_width}, depth),
+                       sample_paint(paint, points[i]), 1.0f, 12);
+        }
+      }
+    }
+
+    [[nodiscard]] std::vector<float> normalize_dash_pattern(std::span<const float> dash_pattern) {
+      std::vector<float> out;
+      out.reserve(dash_pattern.size());
+      for (float entry : dash_pattern) {
+        if (std::isfinite(entry) && entry > 0.0001f)
+          out.push_back(entry);
+      }
+      return out;
+    }
+
+    void emit_dashed_subpath(command_sink& r, std::span<const math::vec2> points, bool closed,
+                             const paint_value& paint, float line_width, line_cap cap, float depth,
+                             std::span<const float> dash_pattern, float dash_offset) {
+      if (points.size() < 2)
+        return;
+      std::vector<float> pattern = normalize_dash_pattern(dash_pattern);
+      if (pattern.empty()) {
+        emit_stroke_polyline(r, points, closed, paint, line_width, line_join::miter, cap, depth);
+        return;
+      }
+      float pattern_total = 0.0f;
+      for (float entry : pattern)
+        pattern_total += entry;
+      if (pattern_total <= 0.0001f) {
+        emit_stroke_polyline(r, points, closed, paint, line_width, line_join::miter, cap, depth);
+        return;
+      }
+      dash_offset = std::fmod(dash_offset, pattern_total);
+      if (dash_offset < 0.0f)
+        dash_offset += pattern_total;
+      usize pattern_index = 0;
+      bool draw = true;
+      float pattern_remaining = pattern.front();
+      while (dash_offset > 0.0001f) {
+        const float step = std::min(pattern_remaining, dash_offset);
+        pattern_remaining -= step;
+        dash_offset -= step;
+        if (pattern_remaining <= 0.0001f) {
+          pattern_index = (pattern_index + 1) % pattern.size();
+          pattern_remaining = pattern[pattern_index];
+          draw = !draw;
+        }
+      }
+      const usize segment_count = closed ? points.size() : points.size() - 1;
+      for (usize i = 0; i < segment_count; ++i) {
+        const math::vec2 a = points[i];
+        const math::vec2 b = points[(i + 1) % points.size()];
+        math::vec2 dir = b - a;
+        const float len = math::length(dir);
+        if (len <= 0.0001f)
+          continue;
+        dir *= 1.0f / len;
+        float consumed = 0.0f;
+        while (consumed < len - 0.0001f) {
+          const float step = std::min(pattern_remaining, len - consumed);
+          const float next_consumed = consumed + step;
+          if (draw && step > 0.0001f) {
+            line_cap start_cap = cap;
+            line_cap end_cap = cap;
+            if (consumed <= 0.0001f && (closed || i != 0))
+              start_cap = line_cap::butt;
+            if (next_consumed >= len - 0.0001f && (closed || i + 1 != segment_count))
+              end_cap = line_cap::butt;
+            // When a dash reaches a polyline join we terminate that dash at the
+            // vertex with a butt cap instead of carrying join geometry through the
+            // corner; this keeps dashed stroke emission deterministic and simple.
+            emit_stroke_segment(r, a + dir * consumed, a + dir * next_consumed, paint, line_width,
+                                depth, start_cap, end_cap);
+          }
+          consumed = next_consumed;
+          pattern_remaining -= step;
+          if (pattern_remaining <= 0.0001f) {
+            pattern_index = (pattern_index + 1) % pattern.size();
+            pattern_remaining = pattern[pattern_index];
+            draw = !draw;
+          }
+        }
+      }
+    }
+  } // namespace
+
+  void fill_polygon(command_sink& r, std::span<const math::vec2> points, r8g8b8a8 color,
+                    float depth) {
+    fill_polygon(r, points, paint_value::solid(color), fill_rule::nonzero, depth);
+  }
+
+  void fill_polygon(command_sink& r, std::span<const math::vec2> points, const paint_value& paint,
+                    fill_rule rule, float depth) {
+    if (points.size() < 3)
+      return;
+    fill_path(r, make_polygon_path(points, true), paint, rule, depth);
+  }
+
   void stroke_path(command_sink& r, const path_2d& path, const paint_value& paint, float line_width,
-                   line_join join, line_cap, float depth) {
+                   line_join join, line_cap cap, float depth, std::span<const float> dash_pattern,
+                   float dash_offset) {
     if (line_width <= 0.0f)
       return;
     std::vector<flat_subpath> subpaths;
     flatten_path(path, subpaths);
-    const float half = line_width * 0.5f;
     for (auto& sub : subpaths) {
       if (sub.points.size() < 2)
         continue;
@@ -1137,50 +1313,41 @@ namespace fxe::primitives {
           sub.closed || math::length(sub.points.front() - sub.points.back()) < 0.001f;
       if (closed && math::length(sub.points.front() - sub.points.back()) < 0.001f)
         sub.points.pop_back();
-      const usize n = sub.points.size();
-      if (n < 2)
+      if (sub.points.size() < 2)
         continue;
-      const usize segment_count = closed ? n : n - 1;
-      auto [vt, id] = r.allocate(segment_count * 4, segment_count * 6, vertex_topology::triangle);
-      const texture_id tag = paint_texture_id(paint);
-      for (usize i = 0; i < segment_count; ++i) {
-        const math::vec2 a = sub.points[i];
-        const math::vec2 b = sub.points[(i + 1) % n];
-        math::vec2 d = b - a;
-        const float len = math::length(d);
-        if (len <= 0.0001f)
-          continue;
-        d *= 1.0f / len;
-        const math::vec2 normal{-d.y * half, d.x * half};
-        const usize base = i * 4;
-        vt[base + 0] = make_vertex4({a.x - normal.x, a.y - normal.y, depth, 0.0f}, {}, tag,
-                                    sample_paint(paint, a));
-        vt[base + 1] = make_vertex4({a.x + normal.x, a.y + normal.y, depth, 0.0f}, {}, tag,
-                                    sample_paint(paint, a));
-        vt[base + 2] = make_vertex4({b.x - normal.x, b.y - normal.y, depth, 0.0f}, {}, tag,
-                                    sample_paint(paint, b));
-        vt[base + 3] = make_vertex4({b.x + normal.x, b.y + normal.y, depth, 0.0f}, {}, tag,
-                                    sample_paint(paint, b));
-        id[i * 6 + 0] += u32(base + 0);
-        id[i * 6 + 1] += u32(base + 1);
-        id[i * 6 + 2] += u32(base + 2);
-        id[i * 6 + 3] += u32(base + 1);
-        id[i * 6 + 4] += u32(base + 2);
-        id[i * 6 + 5] += u32(base + 3);
-      }
-      if (join == line_join::round && n > 2) {
-        for (usize i = 0; i < n; ++i)
-          fill_ellipse(r,
-                       make_screen_transform(sub.points[i] - math::vec2{half, half},
-                                             {line_width, line_width}, depth),
-                       sample_paint(paint, sub.points[i]), 1.0f, 12);
-      }
+      if (dash_pattern.empty())
+        emit_stroke_polyline(r, sub.points, closed, paint, line_width, join, cap, depth);
+      else
+        emit_dashed_subpath(r, sub.points, closed, paint, line_width, cap, depth, dash_pattern,
+                            dash_offset);
     }
   }
 
+  void stroke_path(command_sink& r, const path_2d& path, const paint_value& paint, float line_width,
+                   std::span<const float> dash_pattern, float dash_offset, line_join join,
+                   line_cap cap, float depth) {
+    stroke_path(r, path, paint, line_width, join, cap, depth, dash_pattern, dash_offset);
+  }
+
   void stroke_path(command_sink& r, const path_2d& path, r8g8b8a8 color, float line_width,
-                   line_join join, line_cap cap, float depth) {
-    stroke_path(r, path, paint_value::solid(color), line_width, join, cap, depth);
+                   line_join join, line_cap cap, float depth, std::span<const float> dash_pattern,
+                   float dash_offset) {
+    stroke_path(r, path, paint_value::solid(color), line_width, join, cap, depth, dash_pattern,
+                dash_offset);
+  }
+
+  void stroke_path(command_sink& r, const path_2d& path, r8g8b8a8 color, float line_width,
+                   std::span<const float> dash_pattern, float dash_offset, line_join join,
+                   line_cap cap, float depth) {
+    stroke_path(r, path, paint_value::solid(color), line_width, join, cap, depth, dash_pattern,
+                dash_offset);
+  }
+
+  void stroke_polygon(command_sink& r, std::span<const math::vec2> points, r8g8b8a8 color,
+                      float line_width, bool closed, line_join join, line_cap cap, float depth) {
+    if (points.size() < 2)
+      return;
+    stroke_path(r, make_polygon_path(points, closed), color, line_width, join, cap, depth);
   }
   namespace {
     [[nodiscard]] optional_list<float, 4> offset_corner_radii(const optional_list<float, 4>& rnd,
@@ -1698,6 +1865,197 @@ namespace fxe::primitives {
     max_advance = math::fmax(max_advance, row_advance);
     const float h = pen_y - variant.ascent + (glyph_count ? line_height : 0.0f);
     return math::vec4{max_advance, h, advance_total, float(glyph_count)};
+  }
+
+  namespace {
+    struct path_arc_segment {
+      math::vec2 a;
+      math::vec2 b;
+      math::vec2 tangent;
+      float start = 0.0f;
+      float end = 0.0f;
+    };
+
+    [[nodiscard]] std::string_view first_path_text_line(std::string_view text) noexcept {
+      const usize newline = text.find('\n');
+      return newline == std::string_view::npos ? text : text.substr(0, newline);
+    }
+
+    void collect_path_arc_segments(const path_2d& path, std::vector<path_arc_segment>& segments) {
+      std::vector<flat_subpath> subpaths;
+      flatten_path(path, subpaths);
+      float length = 0.0f;
+      for (auto& sub : subpaths) {
+        if (sub.points.size() < 2)
+          continue;
+        const bool closed =
+            sub.closed || math::length(sub.points.front() - sub.points.back()) < 0.001f;
+        if (closed && math::length(sub.points.front() - sub.points.back()) < 0.001f)
+          sub.points.pop_back();
+        if (sub.points.size() < 2)
+          continue;
+        const usize segment_count = closed ? sub.points.size() : sub.points.size() - 1;
+        for (usize i = 0; i < segment_count; ++i) {
+          const math::vec2 a = sub.points[i];
+          const math::vec2 b = sub.points[(i + 1) % sub.points.size()];
+          math::vec2 tangent = b - a;
+          const float seg_len = math::length(tangent);
+          if (seg_len <= 0.0001f)
+            continue;
+          tangent *= 1.0f / seg_len;
+          segments.push_back({a, b, tangent, length, length + seg_len});
+          length += seg_len;
+        }
+      }
+    }
+
+    [[nodiscard]] bool sample_path_arc(std::span<const path_arc_segment> segments, float distance,
+                                       math::vec2& out_pos, math::vec2& out_tangent) {
+      if (segments.empty() || distance < 0.0f)
+        return false;
+      const auto& last = segments.back();
+      if (distance > last.end)
+        return false;
+      for (const auto& segment : segments) {
+        if (distance <= segment.end) {
+          const float seg_len = segment.end - segment.start;
+          const float t = seg_len > 0.0001f
+                              ? math::fclamp((distance - segment.start) / seg_len, 0.0f, 1.0f)
+                              : 0.0f;
+          out_pos = segment.a + (segment.b - segment.a) * t;
+          out_tangent = segment.tangent;
+          return true;
+        }
+      }
+      out_pos = last.b;
+      out_tangent = last.tangent;
+      return true;
+    }
+
+    void emit_path_glyph_quad(command_sink& r, math::vec2 baseline, math::vec2 tangent, float depth,
+                              math::vec2 offset, math::vec2 size, r8g8b8a8 color,
+                              const texture_info& ti) {
+      const math::vec2 right = tangent;
+      const math::vec2 down{-tangent.y, tangent.x};
+      const math::vec2 p1 = baseline + right * offset.x + down * offset.y;
+      const math::vec2 p2 = baseline + right * (offset.x + size.x) + down * offset.y;
+      const math::vec2 p3 = baseline + right * offset.x + down * (offset.y + size.y);
+      const math::vec2 p4 = baseline + right * (offset.x + size.x) + down * (offset.y + size.y);
+      fill_quad(r, {p1.x, p1.y, depth, 0.0f}, {p2.x, p2.y, depth, 0.0f}, {p3.x, p3.y, depth, 0.0f},
+                {p4.x, p4.y, depth, 0.0f}, color_list<4>{color, color, color, color}, ti);
+    }
+
+    void emit_face_glyph_on_path(command_sink& r, math::vec2 baseline, math::vec2 tangent,
+                                 float depth, float dpr, font::Face& face,
+                                 const font::ShapedGlyph& glyph, r8g8b8a8 color) {
+      auto& cache = font::shared_glyph_cache();
+      const auto& cached = cache.lookup(face, glyph.glyph_id, 0.0f);
+      if (cached.width == 0 || cached.height == 0)
+        return;
+      const float inv_dpr = dpr > 0.0f ? 1.0f / dpr : 1.0f;
+      texture_info ti;
+      ti.texture = cached.format == font::Format::bgra ? font_color_flag | 1u : font_mask_flag | 1u;
+      const auto& atlas =
+          cached.format == font::Format::bgra ? cache.color_atlas() : cache.mask_atlas();
+      const float aw = atlas.size().x ? float(atlas.size().x) : 1.0f;
+      const float ah = atlas.size().y ? float(atlas.size().y) : 1.0f;
+      ti.src = {(float(cached.atlas_x) + 0.5f) / aw, (float(cached.atlas_y) + 0.5f) / ah};
+      ti.dst = {(float(cached.atlas_x + cached.width) - 0.5f) / aw,
+                (float(cached.atlas_y + cached.height) - 0.5f) / ah};
+      emit_path_glyph_quad(r, baseline, tangent, depth,
+                           {(cached.offset_x + glyph.x_offset) * inv_dpr,
+                            std::nearbyint(cached.offset_y - glyph.y_offset) * inv_dpr},
+                           {float(cached.width) * inv_dpr, float(cached.height) * inv_dpr}, color,
+                           ti);
+    }
+  } // namespace
+
+  math::vec4 draw_text_on_path(command_sink& r, const path_2d& path, float path_offset, float depth,
+                               std::string_view text, const font_info& font, text_style style) {
+    std::vector<path_arc_segment> segments;
+    collect_path_arc_segments(path, segments);
+    text = first_path_text_line(text);
+    if (segments.empty() || text.empty())
+      return {0.0f, 0.0f, 0.0f, 0.0f};
+    const float path_length = segments.back().end;
+    const float dpr = font::device_pixel_ratio();
+    const float effective_pt = style.pt * dpr;
+    if (auto face = font_face_for(font, effective_pt); face) {
+      auto shaper = font::default_shaper();
+      if (!shaper)
+        return {0.0f, 0.0f, 0.0f, 0.0f};
+      const float safe_dpr = std::isfinite(dpr) && dpr > 0.0f ? dpr : 1.0f;
+      const float inv_dpr = 1.0f / safe_dpr;
+      const auto metrics = face->metrics();
+      const float face_line_h_fb =
+          metrics.line_height > 0.0f ? metrics.line_height : face->pixel_size() * 1.2f;
+      const float line_height =
+          style.line_height > 0.0f ? style.line_height : face_line_h_fb * inv_dpr;
+      const r8g8b8a8 color = style.color;
+      font::ShapeOptions opts = style_to_shape_opts(style);
+      auto runs = shaper->shape(*face, text, opts);
+      float advance_total = 0.0f;
+      u32 glyph_count = 0;
+      for (const auto& run : runs) {
+        font::Face* run_face = run.face ? run.face : &*face;
+        for (const auto& glyph : run.glyphs) {
+          const float glyph_advance = glyph.x_advance * inv_dpr;
+          const float glyph_pos = path_offset + advance_total;
+          if (glyph_pos > path_length)
+            return {advance_total, line_height, advance_total, float(glyph_count)};
+          math::vec2 baseline{};
+          math::vec2 tangent{};
+          if (sample_path_arc(segments, glyph_pos, baseline, tangent)) {
+            emit_face_glyph_on_path(r, baseline, tangent, depth, safe_dpr, *run_face, glyph, color);
+            ++glyph_count;
+          }
+          advance_total += glyph_advance;
+        }
+      }
+      return {advance_total, line_height, advance_total, float(glyph_count)};
+    }
+
+    const font_variant_info& variant = resolve_font_variant(font, style.pt);
+    {
+      const char* preload = text.data();
+      const char* preload_end = preload + text.size();
+      while (preload < preload_end) {
+        char32_t cp = decode_utf8(preload, preload_end);
+        if (cp == 0 || cp == U'\n')
+          continue;
+        (void)resolve_font_glyph(font, variant, apply_case(cp, style.flags));
+      }
+    }
+    float advance_total = 0.0f;
+    u32 glyph_count = 0;
+    const char* it = text.data();
+    const char* end = it + text.size();
+    while (it < end) {
+      char32_t cp = decode_utf8(it, end);
+      if (cp == 0)
+        continue;
+      if (cp == U'\n')
+        break;
+      cp = apply_case(cp, style.flags);
+      glyph_info glyph = resolve_font_glyph(font, variant, cp);
+      const float glyph_pos = path_offset + advance_total;
+      if (glyph_pos > path_length)
+        break;
+      math::vec2 baseline{};
+      math::vec2 tangent{};
+      if (sample_path_arc(segments, glyph_pos, baseline, tangent) && glyph.size.x > 0.0f &&
+          glyph.size.y > 0.0f) {
+        texture_info ti;
+        ti.texture = glyph.tx != null_texture ? glyph.tx : variant.texture;
+        ti.src = glyph.uv0;
+        ti.dst = glyph.uv1;
+        emit_path_glyph_quad(r, baseline, tangent, depth, glyph.offset, glyph.size, style.color,
+                             ti);
+        ++glyph_count;
+      }
+      advance_total += glyph.advance;
+    }
+    return {advance_total, variant.line_height, advance_total, float(glyph_count)};
   }
 
   // ---------------------------------------------------------------------------
