@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import sys
+import time
 from enum import Enum
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, TextIO
+from typing import Any, AsyncIterator, Awaitable, Callable, TextIO
 
 from .client import Client
 from .protocol import ConsoleMessage, Handshake
@@ -64,6 +65,31 @@ def _default_console_formatter(msg: ConsoleMessage) -> str:
     return f"[fxe:{level}] {msg.text}"
 
 
+_FRAME_COUNTER_EXPRESSION = r"""
+(() => {
+  const globalObject = globalThis;
+  const profile = globalObject.__fxeFrameProfile;
+  if (profile && typeof profile.snapshot === 'function') {
+    return profile.snapshot().length;
+  }
+  const counterKey = '__fxeSdkFrameCounter';
+  const patchedKey = '__fxeSdkFrameCounterPatched';
+  for (const ctor of [globalObject.Renderer, globalObject.Offscreen]) {
+    const proto = ctor && ctor.prototype;
+    const endFrame = proto && proto.endFrame;
+    if (typeof endFrame !== 'function' || endFrame[patchedKey]) continue;
+    const wrapped = function (...args) {
+      const result = endFrame.apply(this, args);
+      globalObject[counterKey] = Number(globalObject[counterKey] ?? 0) + 1;
+      return result;
+    };
+    wrapped[patchedKey] = true;
+    proto.endFrame = wrapped;
+  }
+  return Number(globalObject[counterKey] ?? 0);
+})()
+"""
+
 _WHEEL_LINE_PX = 48.0
 class Mouse:
     def __init__(self, page: "Page") -> None:
@@ -96,13 +122,12 @@ class Mouse:
 
     async def click(self, x: float, y: float, button: str | MouseButton = "left") -> None:
         await self.move(x, y)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.001)
         await self.move(x, y)
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.001)
         await self.down(x, y, button)
-        await asyncio.sleep(0.02)
+        await asyncio.sleep(0.001)
         await self.up(x, y, button)
-        await asyncio.sleep(0.3)
 
     async def wheel(self, dx: float, dy: float, x: float = 0.0, y: float = 0.0) -> None:
         """Scroll by browser-style pixel deltas at x/y.
@@ -299,6 +324,49 @@ class Page:
 
     async def request_redraw(self) -> None:
         await self._client.call("Page.requestRedraw")
+
+    async def _frame_counter(self) -> int:
+        # Prefer the fxe-ui frame-profile ring when present: snapshot().length only
+        # advances after a frame is committed, which is the closest signal we have
+        # to a missing debug-protocol Frame.end event. Plain `fxe` scripts such as
+        # examples/js/hello.ts never install __fxeFrameProfile, so lazily wrap
+        # Renderer/Offscreen.endFrame and count those calls instead.
+        result = await self.evaluate(_FRAME_COUNTER_EXPRESSION)
+        if not isinstance(result, (int, float)):
+            raise RuntimeError(f"frame counter: unexpected response: {result!r}")
+        return int(result)
+
+    async def _wait_for_frame_counter_advance(self, baseline: int, *, timeout_ms: float) -> int:
+        deadline = time.monotonic() + (timeout_ms / 1000.0)
+        while True:
+            current = await self._frame_counter()
+            if current > baseline:
+                return current
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"timed out waiting for next frame after {timeout_ms:.1f}ms")
+            await asyncio.sleep(min(0.001, remaining))
+
+    async def first_paint_after_event(
+        self,
+        event: Callable[[], Awaitable[None]],
+        *,
+        timeout_ms: float = 1000.0,
+    ) -> float:
+        """Return wall-clock ms from an injected event finishing to the next paint.
+
+        The helper arms a frame counter before running ``event()``, records
+        ``time.monotonic()`` when that coroutine returns, requests one redraw so
+        static apps still produce a post-input frame, then polls every 1 ms until
+        the next observed frame completes.
+        """
+        await self._frame_counter()
+        await event()
+        started = time.monotonic()
+        baseline = await self._frame_counter()
+        await self.request_redraw()
+        await self._wait_for_frame_counter_advance(baseline, timeout_ms=timeout_ms)
+        return (time.monotonic() - started) * 1000.0
 
     async def screenshot(
         self,
