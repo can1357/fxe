@@ -166,6 +166,11 @@ namespace fxe {
     virtual void post_redraw() = 0;
     // Atomically test-and-clear the dirty flag.
     [[nodiscard]] virtual bool take_redraw_request() = 0;
+    // Non-clearing peek: returns true if a redraw has been posted (e.g. from
+    // V8 calling `requestRedraw` during the current render). Used by the
+    // capture path so it can defer offscreen readback by one frame when JS
+    // signals that the frame just rendered isn't yet a settled layout.
+    [[nodiscard]] virtual bool peek_redraw_request() const = 0;
 
     virtual void close() = 0;
     [[nodiscard]] virtual bool should_close() const = 0;

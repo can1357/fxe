@@ -38,6 +38,9 @@ namespace fxe {
       bool take_redraw_request() override {
         return false;
       }
+      bool peek_redraw_request() const override {
+        return false;
+      }
       void close() override {
         closed_ = true;
       }

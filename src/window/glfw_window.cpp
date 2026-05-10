@@ -1043,6 +1043,9 @@ namespace fxe {
     bool take_redraw_request() override {
       return redraw_requested_.exchange(false, std::memory_order_acq_rel);
     }
+    bool peek_redraw_request() const override {
+      return redraw_requested_.load(std::memory_order_acquire);
+    }
     void set_redraw_handler(redraw_handler handler) override {
       redraw_handler_ = std::move(handler);
     }
@@ -2808,6 +2811,9 @@ namespace fxe {
     void wait_events_timeout(double) override {}
     void post_redraw() override {
       redraw_requested_.store(true, std::memory_order_release);
+    }
+    bool peek_redraw_request() const override {
+      return redraw_requested_.load(std::memory_order_acquire);
     }
     bool take_redraw_request() override {
       return redraw_requested_.exchange(false, std::memory_order_acq_rel);

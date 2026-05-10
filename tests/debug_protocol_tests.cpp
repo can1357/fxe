@@ -72,6 +72,9 @@ namespace {
       dirty_ = false;
       return out;
     }
+    bool peek_redraw_request() const override {
+      return dirty_;
+    }
     void close() override {
       closed_ = true;
     }
@@ -543,6 +546,9 @@ namespace {
     }
     bool take_redraw_request() override {
       return dirty_.exchange(false, std::memory_order_acq_rel);
+    }
+    bool peek_redraw_request() const override {
+      return dirty_.load(std::memory_order_acquire);
     }
     void close() override {
       closed_ = true;

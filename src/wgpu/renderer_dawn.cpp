@@ -492,12 +492,20 @@ namespace fxe {
         // encoder so the GPU executes copy after the render pass's resolve
         // and store ops are committed. Mapping is requested asynchronously
         // after submit; capture_frame() only polls the state machine.
+        //
+        // If JS called requestRedraw during this frame's render (typically
+        // because fxe-ui's first-frame layout was unresolved and dirtied
+        // ancestors for a follow-up rebuild), defer the readback: this
+        // frame's framebuffer doesn't reflect the settled layout yet.
+        // Stay armed; the next end_frame after the redraw cycle finishes
+        // will encode the copy from a stable frame.
+        const bool frame_unsettled = win_.peek_redraw_request();
         bool need_readback = false;
         u64 readback_size = 0;
         u32 readback_padded_row = 0;
         {
           std::lock_guard<std::mutex> lock(capture_mutex_);
-          if (capture_state_ == pending_capture::idle && capture_requested_) {
+          if (capture_state_ == pending_capture::idle && capture_requested_ && !frame_unsettled) {
             capture_requested_ = false;
             capture_state_ = pending_capture::copy_encoded;
             need_readback = true;
