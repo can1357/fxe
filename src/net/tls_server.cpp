@@ -1,4 +1,5 @@
 #include "tls_server.hpp"
+#include <fxe/log.hpp>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -25,7 +26,6 @@
 
 #include <atomic>
 #include <cctype>
-#include <cstdio>
 #include <cstring>
 #include <fxe/types.hpp>
 #include <memory>
@@ -168,7 +168,7 @@ namespace fxe::net {
     void warn_once(std::atomic<bool>& warned, const char* message) {
       bool expected = false;
       if (warned.compare_exchange_strong(expected, true))
-        std::fprintf(stderr, "%s\n", message);
+        FXE_WARN("net.tls.server", "{}", message);
     }
 
     struct server_state {
@@ -366,7 +366,7 @@ namespace fxe::net {
         const mbedtls_x509_crt* cert = mbedtls_ssl_get_peer_cert(&ssl_);
         if (state_->expected_client_cert.empty()) {
           warn_once(state_->warned_unverified_client_cert,
-                    "fxe.net.tls_server: request_client_cert accepts client certificates without "
+                    "request_client_cert accepts client certificates without "
                     "verification; call verify_client_cert() to enforce subject or fingerprint");
           return true;
         }

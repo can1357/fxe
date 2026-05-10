@@ -1,10 +1,10 @@
 #include "../../../include/fxe/power.hpp"
+#include <fxe/log.hpp>
 
 #include <atomic>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -339,7 +339,7 @@ namespace fxe::os {
 #if !defined(FXE_HAS_XSS) || !FXE_HAS_XSS
     void warn_xss_disabled_once() {
       std::call_once(g_xss_warning_once, [] {
-        std::fprintf(stderr, "fxe.os: systemIdleSeconds requires XScreenSaver (Xss) on Linux\n");
+        FXE_WARN("os.power", "systemIdleSeconds requires XScreenSaver (Xss) on Linux");
       });
     }
 #endif

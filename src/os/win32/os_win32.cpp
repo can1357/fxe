@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cwchar>
 #include <filesystem>
+#include <fxe/log.hpp>
 #include <limits>
 #include <map>
 #include <memory>
@@ -487,7 +488,7 @@ namespace fxe::os {
     void log_once(bool& flag, const char* message) {
       if (!flag) {
         flag = true;
-        std::fprintf(stderr, "%s\n", message);
+        FXE_WARN("os.win32", "{}", message);
       }
     }
 
@@ -1614,7 +1615,7 @@ namespace fxe::os {
       apply_badge_to_hwnd(hwnd, n);
     } else {
       static bool logged = false;
-      log_once(logged, "fxe.os: no active Win32 HWND registered for taskbar badge yet");
+      log_once(logged, "no active Win32 HWND registered for taskbar badge yet");
     }
   }
 
@@ -1856,7 +1857,7 @@ namespace fxe::os {
       DestroyMenu(old);
     if (!hwnd || !IsWindow(hwnd)) {
       static bool logged = false;
-      log_once(logged, "fxe.os: storing Win32 application menu until an active HWND is registered");
+      log_once(logged, "storing Win32 application menu until an active HWND is registered");
     }
   }
 

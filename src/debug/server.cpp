@@ -26,6 +26,7 @@
 // All shared server state is guarded by `mu` except atomics noted below.
 
 #include <fxe/debug.hpp>
+#include <fxe/log.hpp>
 #include <fxe/types.hpp>
 
 #include "cdp_ws.hpp"
@@ -501,7 +502,7 @@ namespace fxe::debug {
           if (e == EINTR)
             continue;
           if (opts.log_level > 0)
-            std::fprintf(stderr, "fxe.debug: accept failed: %d\n", e);
+            FXE_WARN("debug.server", "accept failed: {}", e);
           continue;
         }
         set_socket_close_on_exec(s);
@@ -517,8 +518,7 @@ namespace fxe::debug {
         }
         if (full) {
           if (opts.log_level > 0)
-            std::fprintf(stderr, "fxe.debug: rejecting client %s: server full\n",
-                         peer_addr.c_str());
+            FXE_WARN("debug.server", "rejecting client {}: server full", peer_addr);
           if (peek_first_byte_with_timeout(s, 250) == 'G') {
             cdp_ws::http_request req;
             std::string error;

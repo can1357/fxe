@@ -1,5 +1,6 @@
 #include "webauthn/credential_jar.hpp"
 
+#include <fxe/log.hpp>
 #include <fxe/webauthn.hpp>
 
 #include <mbedtls/ctr_drbg.h>
@@ -12,7 +13,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -96,7 +96,7 @@ namespace fxe::webauthn::detail {
         const int rc = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
                                              personalization, sizeof(personalization) - 1u);
         if (rc != 0) {
-          std::fprintf(stderr, "fxe_webauthn: failed to seed jar RNG: %d\n", rc);
+          FXE_ERROR("webauthn.jar", "failed to seed jar RNG: {}", rc);
         }
       }
 
@@ -124,8 +124,8 @@ namespace fxe::webauthn::detail {
     }
 
     void log_sqlite(sqlite3* db, std::string_view action) {
-      std::fprintf(stderr, "fxe_webauthn: %.*s failed: %s\n", static_cast<int>(action.size()),
-                   action.data(), db ? sqlite3_errmsg(db) : "sqlite unavailable");
+      FXE_ERROR("webauthn.jar", "{} failed: {}", action,
+                db ? sqlite3_errmsg(db) : "sqlite unavailable");
     }
 
     bool exec_sql(sqlite3* db, std::string_view sql, std::string_view action) {
@@ -141,8 +141,7 @@ namespace fxe::webauthn::detail {
         sqlite3_free(message);
         return true;
       }
-      std::fprintf(stderr, "fxe_webauthn: %.*s failed: %s\n", static_cast<int>(action.size()),
-                   action.data(), message ? message : sqlite3_errmsg(db));
+      FXE_ERROR("webauthn.jar", "{} failed: {}", action, message ? message : sqlite3_errmsg(db));
       sqlite3_free(message);
       return false;
     }
@@ -192,8 +191,7 @@ namespace fxe::webauthn::detail {
       const int rc = mbedtls_pk_parse_key(&pk.ctx, der.data(), der.size(), nullptr, 0);
 #endif
       if (rc != 0) {
-        std::fprintf(stderr, "fxe_webauthn: failed to parse PKCS8 private key: %s\n",
-                     mbedtls_err_str(rc).c_str());
+        FXE_ERROR("webauthn.jar", "failed to parse PKCS8 private key: {}", mbedtls_err_str(rc));
         return false;
       }
       return true;
@@ -251,7 +249,7 @@ namespace fxe::webauthn::detail {
       if (cred.credential_id.empty() || cred.rp_id_hash.size() != 32u || public_x.size() != 32u ||
           public_y.size() != 32u || alg != static_cast<int>(cose_algorithm::es256) ||
           sign_count < 0 || sign_count > UINT32_MAX) {
-        std::fprintf(stderr, "fxe_webauthn: dropping invalid credential row\n");
+        FXE_WARN("webauthn.jar", "dropping invalid credential row");
         return std::nullopt;
       }
 
@@ -260,12 +258,12 @@ namespace fxe::webauthn::detail {
         return std::nullopt;
       if (mbedtls_pk_get_type(&parsed.ctx) != MBEDTLS_PK_ECKEY &&
           mbedtls_pk_get_type(&parsed.ctx) != MBEDTLS_PK_ECKEY_DH) {
-        std::fprintf(stderr, "fxe_webauthn: dropping non-EC credential row\n");
+        FXE_WARN("webauthn.jar", "dropping non-EC credential row");
         return std::nullopt;
       }
       auto* ec = mbedtls_pk_ec(parsed.ctx);
       if (ec == nullptr || ec->MBEDTLS_PRIVATE(grp).id != MBEDTLS_ECP_DP_SECP256R1) {
-        std::fprintf(stderr, "fxe_webauthn: dropping non-P256 credential row\n");
+        FXE_WARN("webauthn.jar", "dropping non-P256 credential row");
         return std::nullopt;
       }
 
@@ -273,8 +271,8 @@ namespace fxe::webauthn::detail {
       const int rc = mbedtls_mpi_write_binary(&ec->MBEDTLS_PRIVATE(d), cred.private_key_d.data(),
                                               cred.private_key_d.size());
       if (rc != 0) {
-        std::fprintf(stderr, "fxe_webauthn: dropping credential with unreadable private key: %s\n",
-                     mbedtls_err_str(rc).c_str());
+        FXE_WARN("webauthn.jar", "dropping credential with unreadable private key: {}",
+                 mbedtls_err_str(rc));
         return std::nullopt;
       }
 
@@ -323,17 +321,15 @@ namespace fxe::webauthn::detail {
     try {
       const auto parent = path.parent_path();
       if (!parent.empty() && !std::filesystem::exists(parent)) {
-        std::fprintf(stderr, "fxe_webauthn: credential jar directory does not exist: %s\n",
-                     parent.string().c_str());
+        FXE_ERROR("webauthn.jar", "credential jar directory does not exist: {}", parent.string());
         return nullptr;
       }
       if (!parent.empty() && !std::filesystem::is_directory(parent)) {
-        std::fprintf(stderr, "fxe_webauthn: credential jar parent is not a directory: %s\n",
-                     parent.string().c_str());
+        FXE_ERROR("webauthn.jar", "credential jar parent is not a directory: {}", parent.string());
         return nullptr;
       }
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe_webauthn: credential jar path check failed: %s\n", e.what());
+      FXE_ERROR("webauthn.jar", "credential jar path check failed: {}", e.what());
       return nullptr;
     }
 
@@ -383,7 +379,7 @@ namespace fxe::webauthn::detail {
       }
       reset_stmt(impl_->load_stmt);
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe_webauthn: load_all failed: %s\n", e.what());
+      FXE_ERROR("webauthn.jar", "load_all failed: {}", e.what());
       out.clear();
     }
     return out;
@@ -394,7 +390,7 @@ namespace fxe::webauthn::detail {
       reset_stmt(impl_->upsert_stmt);
       const auto private_key_der = private_key_der_from_credential(cred);
       if (private_key_der.empty()) {
-        std::fprintf(stderr, "fxe_webauthn: failed to encode PKCS8 private key for credential\n");
+        FXE_ERROR("webauthn.jar", "failed to encode PKCS8 private key for credential");
         return false;
       }
       if (!bind_blob(impl_->upsert_stmt, 1, cred.credential_id) ||
@@ -423,7 +419,7 @@ namespace fxe::webauthn::detail {
         return true;
       log_sqlite(impl_->db, "upsert credential");
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe_webauthn: upsert failed: %s\n", e.what());
+      FXE_ERROR("webauthn.jar", "upsert failed: {}", e.what());
     }
     return false;
   }
@@ -446,7 +442,7 @@ namespace fxe::webauthn::detail {
         return changed;
       log_sqlite(impl_->db, "update sign count");
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe_webauthn: bump_sign_count failed: %s\n", e.what());
+      FXE_ERROR("webauthn.jar", "bump_sign_count failed: {}", e.what());
     }
     return false;
   }
@@ -466,7 +462,7 @@ namespace fxe::webauthn::detail {
         return changed;
       log_sqlite(impl_->db, "remove credential");
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe_webauthn: remove failed: %s\n", e.what());
+      FXE_ERROR("webauthn.jar", "remove failed: {}", e.what());
     }
     return false;
   }
@@ -480,7 +476,7 @@ namespace fxe::webauthn::detail {
         return true;
       log_sqlite(impl_->db, "clear credential jar");
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe_webauthn: clear failed: %s\n", e.what());
+      FXE_ERROR("webauthn.jar", "clear failed: {}", e.what());
     }
     return false;
   }

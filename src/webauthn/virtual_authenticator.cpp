@@ -1,3 +1,4 @@
+#include <fxe/log.hpp>
 #include <fxe/webauthn.hpp>
 
 #include "webauthn/credential_jar.hpp"
@@ -14,7 +15,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <memory>
@@ -296,7 +296,7 @@ namespace fxe::webauthn {
 
     impl_->credentials[credential_id] = credential;
     if (impl_->jar && !impl_->jar->upsert(credential)) {
-      std::fprintf(stderr, "fxe_webauthn: failed to persist registered credential\n");
+      FXE_ERROR("webauthn", "failed to persist registered credential");
     }
     return {};
   }
@@ -365,7 +365,7 @@ namespace fxe::webauthn {
 
     if (impl_->jar &&
         !impl_->jar->bump_sign_count(credential->credential_id, credential->sign_count)) {
-      std::fprintf(stderr, "fxe_webauthn: failed to persist sign counter bump\n");
+      FXE_ERROR("webauthn", "failed to persist sign counter bump");
     }
 
     out.credential_id = credential->credential_id;
@@ -388,7 +388,7 @@ namespace fxe::webauthn {
   void virtual_authenticator::clear() {
     impl_->credentials.clear();
     if (impl_->jar && !impl_->jar->clear())
-      std::fprintf(stderr, "fxe_webauthn: failed to clear credential jar\n");
+      FXE_ERROR("webauthn", "failed to clear credential jar");
   }
 
   bool virtual_authenticator::set_user_verified(bool verified) {

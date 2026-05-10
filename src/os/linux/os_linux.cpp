@@ -2,7 +2,7 @@
 // optional low-level libdbus-1 desktop integrations.
 
 #include "../os.hpp"
-#include <cstdio>
+#include <fxe/log.hpp>
 
 #if !defined(__APPLE__) && !defined(_WIN32)
 #include <fcntl.h>
@@ -977,7 +977,7 @@ namespace fxe::os {
     [[maybe_unused]] void warn_unsupported_once(bool& warned, const char* message) {
       if (!warned) {
         warned = true;
-        std::fprintf(stderr, "%s\n", message);
+        FXE_WARN("os.linux", "{}", message);
       }
     }
 
@@ -991,7 +991,7 @@ namespace fxe::os {
         if (!warned_features.insert(key).second)
           return;
       }
-      std::fprintf(stderr, "fxe.os: %s requires libdbus-1 on Linux\n", key.c_str());
+      FXE_WARN("os.linux", "{} requires libdbus-1 on Linux", key);
     }
 
 #if !defined(__APPLE__) && !defined(_WIN32) && defined(FXE_HAS_DBUS) && FXE_HAS_DBUS
@@ -2328,7 +2328,7 @@ namespace fxe::os {
     DBusConnection* conn = dbus_connection();
     if (!conn) {
       static bool warned = false;
-      warn_unsupported_once(warned, "fxe.os: setBadgeCount requires a D-Bus session bus");
+      warn_unsupported_once(warned, "setBadgeCount requires a D-Bus session bus");
       return;
     }
     DBusMessage* msg = dbus_message_new_signal(kUnityLauncherPath, kUnityLauncherIface, "Update");
@@ -2542,7 +2542,7 @@ namespace fxe::os {
     DBusConnection* conn = dbus_connection();
     if (!conn) {
       static bool warned = false;
-      warn_unsupported_once(warned, "fxe.os: notifications require a D-Bus session bus");
+      warn_unsupported_once(warned, "notifications require a D-Bus session bus");
       return 0;
     }
 
@@ -2712,7 +2712,7 @@ namespace fxe::os {
     DBusConnection* conn = dbus_connection();
     if (!conn) {
       static bool warned = false;
-      warn_unsupported_once(warned, "fxe.os: context menus require a D-Bus session bus");
+      warn_unsupported_once(warned, "context menus require a D-Bus session bus");
       if (on_select)
         on_select(std::string{});
       return;
@@ -2730,8 +2730,8 @@ namespace fxe::os {
     // not expose a Wayland/X11 popup-at-coordinate API, and fxe_os is not linked
     // against a Linux widget toolkit here, so Menu.popup resolves as cancelled.
     static bool popup_warned = false;
-    warn_unsupported_once(
-        popup_warned, "fxe.os: Linux context menu popup is unavailable; exported D-BusMenu only");
+    warn_unsupported_once(popup_warned,
+                          "Linux context menu popup is unavailable; exported D-BusMenu only");
     if (on_select)
       on_select(std::string{});
 #else
@@ -2749,12 +2749,12 @@ namespace fxe::os {
     DBusConnection* conn = dbus_connection();
     if (!conn) {
       static bool warned = false;
-      warn_unsupported_once(warned, "fxe.os: tray icons require a D-Bus session bus");
+      warn_unsupported_once(warned, "tray icons require a D-Bus session bus");
       return tray_handle{};
     }
     if (!name_has_owner(conn, kSniWatcherBus)) {
       static bool warned = false;
-      warn_unsupported_once(warned, "fxe.os: no StatusNotifierWatcher on this Linux desktop");
+      warn_unsupported_once(warned, "no StatusNotifierWatcher on this Linux desktop");
       return tray_handle{};
     }
 
@@ -2958,7 +2958,7 @@ namespace fxe::os {
     DBusConnection* conn = dbus_connection();
     if (!conn) {
       static bool warned = false;
-      warn_unsupported_once(warned, "fxe.os: global shortcuts require a D-Bus session bus");
+      warn_unsupported_once(warned, "global shortcuts require a D-Bus session bus");
       return false;
     }
     shortcut_entry entry;
@@ -2972,8 +2972,7 @@ namespace fxe::os {
     }
     if (!bind_portal_shortcut(conn, entry)) {
       static bool warned = false;
-      warn_unsupported_once(warned,
-                            "fxe.os: GlobalShortcuts portal is unavailable on this desktop");
+      warn_unsupported_once(warned, "GlobalShortcuts portal is unavailable on this desktop");
       return false;
     }
     std::lock_guard<std::mutex> lock(g_shortcut_mu);
