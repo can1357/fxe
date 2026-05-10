@@ -7,6 +7,7 @@ set(_fxe_os_sources
 )
 add_library(fxe_os STATIC ${_fxe_os_sources})
 target_include_directories(fxe_os PUBLIC src include)
+target_link_libraries(fxe_os PUBLIC fxe_deps)
 target_compile_features(fxe_os PUBLIC cxx_std_20)
 if(APPLE)
     set(_fxe_os_platform

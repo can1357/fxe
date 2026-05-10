@@ -10,15 +10,23 @@ target_compile_features(fxe_core PUBLIC cxx_std_20)
 embed_wgsl(fxe_shaders src/wgpu/shaders/main.wgsl)
 target_link_libraries(fxe_core PUBLIC fxe_shaders)
 
+add_library(fxe_log STATIC src/font/log.cpp)
+add_library(fxe::log ALIAS fxe_log)
+target_include_directories(fxe_log PUBLIC include)
+target_link_libraries(fxe_log PUBLIC fxe_deps)
+target_compile_features(fxe_log PUBLIC cxx_std_20)
+
 # fxe_font — FreeType/CoreText face/atlas/shaper module. Always-on sources
 # live at src/font/*.cpp; per-backend impls live in
 # src/font/backends/{freetype,harfbuzz,coretext,fontconfig,windows,null}/
 # and are pulled in by directory glob based on the discovered backend matrix.
 file(GLOB _fxe_font_sources CONFIGURE_DEPENDS src/font/*.cpp src/font/*.mm)
+list(REMOVE_ITEM _fxe_font_sources "${CMAKE_CURRENT_SOURCE_DIR}/src/font/log.cpp")
 add_library(fxe_font STATIC ${_fxe_font_sources})
 add_library(fxe::font ALIAS fxe_font)
 target_include_directories(fxe_font PUBLIC include)
 target_link_libraries(fxe_font PUBLIC fxe_deps)
+target_link_libraries(fxe_font PUBLIC fxe_log)
 target_compile_features(fxe_font PUBLIC cxx_std_20)
 
 if(FXE_FONT_HAS_FREETYPE)

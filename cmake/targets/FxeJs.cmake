@@ -172,6 +172,8 @@ if(FXE_ENABLE_V8)
     # plus the platform-selected fs_watcher above). The runner exec lives in
     # src/runner/ so it is not picked up here.
     file(GLOB _fxe_js_sources CONFIGURE_DEPENDS src/js/*.cpp)
+    list(APPEND _fxe_js_sources src/js/bind_net.cpp src/js/bind_os.cpp)
+    list(REMOVE_DUPLICATES _fxe_js_sources)
     file(GLOB _fxe_runtime_v8_sources CONFIGURE_DEPENDS src/runtime/v8/*.cpp)
     list(
         APPEND _fxe_runtime_v8_sources
@@ -189,7 +191,7 @@ if(FXE_ENABLE_V8)
         list(
             FILTER _fxe_runtime_v8_native
             EXCLUDE
-            REGEX "src/runtime/v8/native/v8_module\\.cpp$"
+            REGEX "src/runtime/v8/native/(v8_module|https_transport)\\.cpp$"
         )
         list(APPEND _fxe_runtime_v8_sources ${_fxe_runtime_v8_native})
     endif()

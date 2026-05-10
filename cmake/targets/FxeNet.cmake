@@ -7,6 +7,8 @@ add_library(
     src/net/websocket_client.cpp
 )
 target_include_directories(fxe_net PUBLIC src include)
+target_link_libraries(fxe_net PUBLIC fxe_deps)
+target_link_libraries(fxe_net PUBLIC fxe_log)
 target_compile_features(fxe_net PUBLIC cxx_std_20)
 find_package(CURL QUIET)
 if(CURL_FOUND)
@@ -40,6 +42,7 @@ if(FXE_ENABLE_NATIVE_TLS_HTTP2)
             src/net/tls_server.cpp
             src/net/http2_client.cpp
             src/net/http2_server.cpp
+            src/runtime/v8/native/https_transport.cpp
     )
 else()
     target_compile_definitions(fxe_net PUBLIC FXE_HAS_NATIVE_TLS_HTTP2_DEPS=0)
