@@ -3,6 +3,7 @@ import type {
   CommandBuffer,
   CursorKind,
   Color as FxeRuntimeColor,
+  ImageHandle,
   Mat4,
   Renderer,
   Vec4,
@@ -706,13 +707,21 @@ declare module 'fxe-ui' {
     children?: TextChild;
     selectable?: boolean;
   }
+  export type ImageSource = string | ImageHandle;
+  export type ImagePlaceholder = 'color' | { color: number } | ImageHandle;
+  export type ImageResizeMode = 'cover' | 'contain' | 'stretch' | 'center';
   export interface ImageProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
-    source?: unknown;
+    source?: ImageSource;
+    placeholder?: ImagePlaceholder;
+    fadeInMs?: number;
+    resizeMode?: ImageResizeMode;
     width?: number;
     height?: number;
     tint?: number;
+    onLoad?: (width: number, height: number) => void;
+    onError?: (err: Error) => void;
   }
   export interface PressableState {
     hovered: boolean;

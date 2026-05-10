@@ -1,4 +1,4 @@
-import { type CommandBuffer, Primitives } from 'fxe';
+import { CommandBuffer, Primitives } from 'fxe';
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import type { LayoutResult, LayoutStyle } from '../layout/types.ts';

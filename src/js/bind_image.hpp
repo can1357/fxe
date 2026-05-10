@@ -18,6 +18,9 @@ namespace fxe::js {
   // reference; remaining shared_ptr holders keep the pixels alive.
   struct image_holder : weak_holder<image_holder> {
     std::shared_ptr<fxe::texture_data> tex;
+    fxe::texture_id texture = fxe::null_texture;
+
+    void on_finalize(v8::Isolate*);
   };
 
   // Install the `Image` global namespace + ImageHandle constructor template
@@ -27,4 +30,5 @@ namespace fxe::js {
   // Recover an image_holder* from a JS ImageHandle. Returns nullptr if the
   // value is not an ImageHandle or has been disposed.
   image_holder* unwrap_image(v8::Local<v8::Value>);
+  [[nodiscard]] texture_id ensure_image_texture_id(image_holder* h);
 } // namespace fxe::js
