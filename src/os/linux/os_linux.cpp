@@ -401,7 +401,8 @@ namespace fxe::os {
       std::string path = absolute_path(raw);
       std::string uri = "file://";
       static constexpr char hex[] = "0123456789ABCDEF";
-      for (unsigned char c : path) {
+      for (char raw_c : path) {
+        unsigned char c = static_cast<unsigned char>(raw_c);
         const bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
                           (c >= '0' && c <= '9') || c == '/' || c == '-' || c == '_' || c == '.' ||
                           c == '~';
@@ -602,7 +603,8 @@ namespace fxe::os {
     std::string sanitize_lock_component(std::string_view app_id) {
       std::string out;
       out.reserve(app_id.size());
-      for (unsigned char c : app_id) {
+      for (char raw_c : app_id) {
+        unsigned char c = static_cast<unsigned char>(raw_c);
         if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
             c == '.' || c == '_' || c == '-') {
           out.push_back(static_cast<char>(c));
@@ -747,16 +749,20 @@ namespace fxe::os {
     std::string lower_ascii(std::string_view raw) {
       std::string out;
       out.reserve(raw.size());
-      for (unsigned char c : raw)
+      for (char raw_c : raw) {
+        unsigned char c = static_cast<unsigned char>(raw_c);
         out.push_back(static_cast<char>(std::tolower(c)));
+      }
       return out;
     }
 
     std::string upper_ascii(std::string_view raw) {
       std::string out;
       out.reserve(raw.size());
-      for (unsigned char c : raw)
+      for (char raw_c : raw) {
+        unsigned char c = static_cast<unsigned char>(raw_c);
         out.push_back(static_cast<char>(std::toupper(c)));
+      }
       return out;
     }
 
@@ -802,7 +808,7 @@ namespace fxe::os {
       return tokens;
     }
 
-    bool desktop_uses_gnome_interface_settings() {
+    [[maybe_unused]] bool desktop_uses_gnome_interface_settings() {
       for (const auto& token : desktop_environment_tokens()) {
         if (token == "gnome" || token == "ubuntu" || token == "unity" || token == "cinnamon" ||
             token == "budgie" || token == "pantheon" || token == "mate")
@@ -968,7 +974,7 @@ namespace fxe::os {
     }
 #endif
 
-    void warn_unsupported_once(bool& warned, const char* message) {
+    [[maybe_unused]] void warn_unsupported_once(bool& warned, const char* message) {
       if (!warned) {
         warned = true;
         std::fprintf(stderr, "%s\n", message);

@@ -304,14 +304,14 @@ namespace fxe {
     };
     usize i = 0;
     while (i + n <= m && out.size() < limit) {
-      bool match = true;
+      bool matched = true;
       for (usize k = 0; k < n; ++k) {
         if (!eq(hay[i + k], needle[k])) {
-          match = false;
+          matched = false;
           break;
         }
       }
-      if (match) {
+      if (matched) {
         out.push_back({static_cast<u32>(from + i), static_cast<u32>(from + i + n)});
         i += n;
       } else {

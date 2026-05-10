@@ -120,11 +120,11 @@ namespace fxe::os {
   struct menu_item {
     std::string id;
     std::string label;
-    std::string accelerator; // e.g. "Cmd+Shift+P"
+    std::string accelerator{}; // e.g. "Cmd+Shift+P"
     bool enabled = true;
     bool checked = false;
     std::string type = "normal"; // normal | separator | checkbox | submenu
-    std::vector<menu_item> submenu;
+    std::vector<menu_item> submenu{};
   };
 
   void set_application_menu(const std::vector<menu_item>& items);

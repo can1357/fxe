@@ -1107,7 +1107,7 @@ namespace fxe {
         return reinterpret_cast<void*>(glfwGetWaylandWindow(handle_));
       }
 #endif
-      return reinterpret_cast<void*>(static_cast<std::uintptr_t>(glfwGetX11Window(handle_)));
+      return reinterpret_cast<void*>(glfwGetX11Window(handle_));
 #endif
     }
 

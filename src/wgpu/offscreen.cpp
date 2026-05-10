@@ -180,7 +180,7 @@ namespace fxe {
         if ((tx & kFontColorFlag) != 0u)
           return primitive_effect::text_color;
         if (v.color.a < 255)
-          alpha_effect = primitive_effect::transparent;
+          alpha_effect = primitive_effect::alpha_blend;
       }
       return alpha_effect;
     }
@@ -964,7 +964,7 @@ namespace fxe {
 
       [[nodiscard]] wgpu::RenderPipeline pipeline_for_effect(primitive_effect effect) const {
         switch (effect) {
-        case primitive_effect::transparent:
+        case primitive_effect::alpha_blend:
           return transparent_pipeline_;
         case primitive_effect::text_mask:
           return text_mask_pipeline_;
@@ -1006,7 +1006,7 @@ namespace fxe {
         for (usize i = 0; i + 2 < tri.size(); i += 3) {
           const primitive_effect effect = classify_triangle(upload_buf_.vertex_buffer, &tri[i]);
           const bool composite_effect = effect == primitive_effect::framebuffer_sample ||
-                                        effect == primitive_effect::transparent;
+                                        effect == primitive_effect::alpha_blend;
           if (mode == blur_draw_mode::base && composite_effect)
             continue;
           if (mode == blur_draw_mode::composite && !composite_effect)

@@ -224,7 +224,7 @@ namespace fxe::os::crash_detail {
       struct sigaction action{};
       action.sa_sigaction = linux_signal_handler;
       sigemptyset(&action.sa_mask);
-      action.sa_flags = SA_SIGINFO | SA_RESETHAND;
+      action.sa_flags = static_cast<int>(SA_SIGINFO | SA_RESETHAND);
       return sigaction(signal_number, &action, nullptr) == 0;
     }
   } // namespace

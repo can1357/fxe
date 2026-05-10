@@ -47,19 +47,19 @@ namespace fxe::math {
   [[nodiscard]] inline std::pair<float, float> fsincos(float x) noexcept {
     return {std::sin(x), std::cos(x)};
   }
-  [[nodiscard]] inline float rcp(float x) noexcept {
+  [[nodiscard]] constexpr float rcp(float x) noexcept {
     return 1.0f / x;
   }
   [[nodiscard]] inline float fmod(float x, float y) noexcept {
     return std::fmod(x, y);
   }
-  [[nodiscard]] inline float fclamp(float x, float lo, float hi) noexcept {
+  [[nodiscard]] constexpr float fclamp(float x, float lo, float hi) noexcept {
     return std::clamp(x, lo, hi);
   }
-  [[nodiscard]] inline float fmin(float a, float b) noexcept {
+  [[nodiscard]] constexpr float fmin(float a, float b) noexcept {
     return std::min(a, b);
   }
-  [[nodiscard]] inline float fmax(float a, float b) noexcept {
+  [[nodiscard]] constexpr float fmax(float a, float b) noexcept {
     return std::max(a, b);
   }
   [[nodiscard]] inline float ftrunc(float x) noexcept {

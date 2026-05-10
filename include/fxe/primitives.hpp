@@ -82,10 +82,10 @@ namespace fxe::primitives {
     whitespace_glyphs whitespace = whitespace_glyphs::none;
     // OpenType feature settings (e.g. {"liga", 1}, {"ss01", 1}). Empty list
     // = use the font module's default features (calt + liga + kern).
-    std::vector<std::pair<std::array<char, 4>, u32>> features;
+    std::vector<std::pair<std::array<char, 4>, u32>> features{};
     // OpenType variation axes (e.g. {"wght", 600}). Empty list = leave the
     // face at its default axes.
-    std::vector<std::pair<std::array<char, 4>, float>> variations;
+    std::vector<std::pair<std::array<char, 4>, float>> variations{};
   };
 
   enum class paint_kind : u32 { solid = 0, linear = 1, radial = 2, conic = 3 };

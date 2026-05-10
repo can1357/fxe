@@ -29,7 +29,8 @@ namespace fxe {
     constexpr r8g8b8a8(u8 r_, u8 g_, u8 b_, u8 a_ = 255) : r(r_), g(g_), b(b_), a(a_) {}
     constexpr r8g8b8a8(r8g8b8 rgb, u8 a_ = 255) : r(rgb.r), g(rgb.g), b(rgb.b), a(a_) {}
     constexpr explicit r8g8b8a8(u32 rgba)
-        : r((rgba >> 24) & 0xff), g((rgba >> 16) & 0xff), b((rgba >> 8) & 0xff), a(rgba & 0xff) {}
+        : r(u8((rgba >> 24) & 0xff)), g(u8((rgba >> 16) & 0xff)), b(u8((rgba >> 8) & 0xff)),
+          a(u8(rgba & 0xff)) {}
     constexpr auto operator<=>(const r8g8b8a8&) const = default;
 
     [[nodiscard]] constexpr u32 rgba() const noexcept {

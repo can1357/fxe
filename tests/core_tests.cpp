@@ -32,8 +32,13 @@ namespace {
     }
   }
 #define CHECK(expr) check((expr), #expr, __FILE__, __LINE__)
-#define CHECK_NEAR(a, b, eps)                                                                      \
-  check(std::fabs(double(a) - double(b)) < double(eps), #a " ~= " #b, __FILE__, __LINE__)
+  template <class A, class B, class E>
+  void check_near(A a, B b, E eps, const char* expr, const char* file, int line) {
+    const double diff = static_cast<double>(a) - static_cast<double>(b);
+    const double absdiff = diff < 0.0 ? -diff : diff;
+    check(absdiff < static_cast<double>(eps), expr, file, line);
+  }
+#define CHECK_NEAR(a, b, eps) check_near((a), (b), (eps), #a " ~= " #b, __FILE__, __LINE__)
 
   // FNV-1a 64-bit over arbitrary bytes. Used to pin determinism of primitive output.
   u64 fnv1a(const void* data, usize n) noexcept {
@@ -293,7 +298,7 @@ static void test_text_and_spritesheet() {
   anim.base_texture = static_cast<texture_id>(10);
   anim.delays = {0.5f, 0.5f};
   sheet.asprites.push_back(anim);
-  texture_id animated = static_cast<texture_id>(asprite_flag | 1u);
+  texture_id animated = asprite_flag | 1u;
   CHECK(sheet.resolve_if(animated, 0.1f) == 10);
   CHECK(sheet.resolve_if(animated, 0.7f) == 11);
 }

@@ -172,7 +172,7 @@ namespace fxe::font {
           float clamped = subpixel_x;
           if (clamped >= 1.0f)
             clamped -= std::floor(clamped);
-          shift.x = static_cast<FT_Pos>(std::lround(clamped * 64.0f));
+          shift.x = std::lround(clamped * 64.0f);
         }
         FT_Set_Transform(face_, nullptr, &shift);
 

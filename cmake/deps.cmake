@@ -81,6 +81,12 @@ if(NOT TARGET spdlog::spdlog)
             GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(spdlog)
+        if(TARGET spdlog AND NOT MSVC)
+            # spdlog's bundled fmt trips -Wconversion / -Wsign-conversion under
+            # gcc; we don't own that source, so silence diagnostics on the
+            # vendor target without leaking onto the rest of the build.
+            target_compile_options(spdlog PRIVATE -w)
+        endif()
     else()
         find_package(spdlog QUIET CONFIG)
         if(NOT TARGET spdlog::spdlog)

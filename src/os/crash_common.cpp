@@ -573,8 +573,10 @@ namespace fxe::os {
       int n = std::snprintf(buf, sizeof(buf),
                             "fxe crash dump\nsignal=%d\naddress=%p\nformat=signal-text\n",
                             signal_number, address);
-      if (n > 0)
-        (void)write(fd, buf, static_cast<usize>(n));
+      if (n > 0) {
+        ssize_t written = write(fd, buf, static_cast<usize>(n));
+        (void)written;
+      }
       (void)close(fd);
     }
 #endif
