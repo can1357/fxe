@@ -17,7 +17,9 @@ import {
   mount,
   registerHitTarget,
   Text,
+  TextArea,
   TextInput,
+  View,
 } from 'fxe-ui';
 
 import { assert, assertDeepEqual, run, test } from './ts_harness.ts';
@@ -141,13 +143,72 @@ test('TextInput selection shortcuts copy and paste through the mounted window cl
   try {
     dispatchMouseDown({ type: 'mousedown', x: 1, y: 1, button: 0, modifiers: 0 });
     rerender();
-    dispatchKeyDown({ type: 'keydown', key: 262, scancode: 0, modifiers: 1 }, win);
+    listeners.get('keydown')?.({ type: 'keydown', key: 262, scancode: 0, modifiers: 1 });
     rerender();
-    dispatchKeyDown({ type: 'keydown', key: 67, scancode: 0, modifiers: 8 }, win);
+    listeners.get('keydown')?.({ type: 'keydown', key: 67, scancode: 0, modifiers: 8 });
     assertDeepEqual(clipboard, 'a');
     clipboard = 'Z';
-    dispatchKeyDown({ type: 'keydown', key: 86, scancode: 0, modifiers: 8 }, win);
+    listeners.get('keydown')?.({ type: 'keydown', key: 86, scancode: 0, modifiers: 8 });
     assertDeepEqual(changes.at(-1), 'Zbc');
+  } finally {
+    dispose();
+    clearHitTargets();
+    clearFocus();
+  }
+});
+test('TextArea preempts focus advance when Tab inserts text', () => {
+  clearHitTargets();
+  clearFocus();
+  const renderer = new CommandBuffer() as unknown as Renderer;
+  renderer.beginFrame = () => renderer.clear();
+  renderer.endFrame = () => undefined;
+  const listeners = new Map<WindowEventName, (ev: WindowEventMap[WindowEventName]) => void>();
+  const win = {
+    framebufferSize: () => [200, 140] as [number, number],
+    requestRedraw: () => undefined,
+    clipboardText: () => '',
+    setClipboardText: () => undefined,
+    on: <T extends WindowEventName>(event: T, cb: (ev: WindowEventMap[T]) => void) => {
+      listeners.set(event, cb as (ev: WindowEventMap[WindowEventName]) => void);
+      return () => listeners.delete(event);
+    },
+  } as unknown as Window;
+  const areaChanges: string[] = [];
+  const inputChanges: string[] = [];
+  const dispose = mount(
+    View({
+      style: { width: 200, height: 140 },
+      children: [
+        TextArea({
+          key: 'tab-area',
+          value: 'x',
+          style: { width: 180, height: 72 },
+          onChange: (value) => areaChanges.push(value),
+        }),
+        TextInput({
+          key: 'next-input',
+          value: 'y',
+          style: { width: 180, height: 32, marginTop: 80 },
+          onChange: (value) => inputChanges.push(value),
+        }),
+      ],
+    }),
+    win,
+    { renderer },
+  );
+  const rerender = () => listeners.get('resize')?.({ type: 'resize', width: 200, height: 140 });
+  try {
+    listeners.get('mousedown')?.({ type: 'mousedown', x: 1, y: 1, button: 0, modifiers: 0 });
+    listeners.get('mouseup')?.({ type: 'mouseup', x: 1, y: 1, button: 0, modifiers: 0 });
+    rerender();
+    let target = focusTarget();
+    assert(target?.componentType === 'TextArea', 'TextArea must be focused before Tab');
+    listeners.get('keydown')?.({ type: 'keydown', key: 258, scancode: 0, modifiers: 0 });
+    rerender();
+    assertDeepEqual(areaChanges.at(-1), '\tx');
+    assertDeepEqual(inputChanges.length, 0);
+    target = focusTarget();
+    assert(target?.componentType === 'TextArea', 'TextArea keeps focus after Tab insert');
   } finally {
     dispose();
     clearHitTargets();
@@ -190,7 +251,7 @@ test('selectable Text copies the dragged read-only selection', () => {
     dispatchMouseMove({ type: 'mousemove', x: 1000, y: 1, dx: 999, dy: 0, modifiers: 0 });
     dispatchMouseUp({ type: 'mouseup', x: 1000, y: 1, button: 0, modifiers: 0 });
     rerender();
-    dispatchKeyDown({ type: 'keydown', key: 67, scancode: 0, modifiers: 8 }, win);
+    listeners.get('keydown')?.({ type: 'keydown', key: 67, scancode: 0, modifiers: 8 });
     assertDeepEqual(clipboard, 'abc');
   } finally {
     dispose();
@@ -199,7 +260,7 @@ test('selectable Text copies the dragged read-only selection', () => {
   }
 });
 
-test('TextInput onEditCommand routes Edit menu actions to the focused input', () => {
+test('TextInput onEditCommand routes Edit menu actions to the focused input', async () => {
   clearHitTargets();
   clearFocus();
   const renderer = new CommandBuffer() as unknown as Renderer;
@@ -219,17 +280,6 @@ test('TextInput onEditCommand routes Edit menu actions to the focused input', ()
       return () => listeners.delete(event);
     },
   } as unknown as Window;
-  // Provide the global clipboard sink that the menu-driven path uses.
-  (
-    globalThis as {
-      __fxe_clipboard?: { read: () => string; write: (t: string) => void };
-    }
-  ).__fxe_clipboard = {
-    read: () => clipboard,
-    write: (t) => {
-      clipboard = t;
-    },
-  };
   const changes: string[] = [];
   const dispose = mount(
     TextInput({
@@ -255,6 +305,7 @@ test('TextInput onEditCommand routes Edit menu actions to the focused input', ()
     assertDeepEqual(clipboard, 'hello');
     clipboard = 'X';
     target?.onEditCommand?.('paste');
+    await Promise.resolve();
     rerender();
     assertDeepEqual(changes.at(-1), 'X');
     target = focusTarget();
@@ -277,7 +328,6 @@ test('TextInput onEditCommand routes Edit menu actions to the focused input', ()
     dispose();
     clearHitTargets();
     clearFocus();
-    delete (globalThis as { __fxe_clipboard?: unknown }).__fxe_clipboard;
   }
 });
 

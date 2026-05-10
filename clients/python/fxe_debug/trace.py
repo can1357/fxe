@@ -269,7 +269,7 @@ async def layout_trace_drain(page: Any, *, clear: bool = True) -> list[dict[str,
 # Snapshot shape (mirrors MemoTraceSnapshot in
 # packages/fxe-ui/src/reconciler/devtools.ts):
 #     {
-#       totals: {total, dirty, noCache, noLastProps, epoch, propsDiff, hit},
+#       totals: {total, dirty, layout, noCache, noLastProps, epoch, propsDiff, hit},
 #       byName: { "<displayName>": MemoTraceSlot, ... },
 #       propsDump: { "<displayName>": {last, next, lastKeys, nextKeys}, ... },
 #     }

@@ -1,6 +1,7 @@
 import { Renderer, type Window, type WindowDisposer } from 'fxe';
 import {
   Component,
+  consumeLayoutUnresolvedDuringRender,
   type FrameLoopDisposer,
   Layer,
   type Node,
@@ -12,6 +13,7 @@ import {
 import { type Theme, ThemeProvider } from '../theme/index.ts';
 import { installDevToolsShortcut } from './devtools_shortcut.ts';
 import {
+  attachClipboardSink,
   dispatchCompose,
   dispatchKeyDown,
   dispatchKeyPress,
@@ -65,6 +67,8 @@ let renderTargetOwner: symbol | null = null;
 
 let currentScreenSize = { width: 0, height: 0 };
 
+const MAX_LAYOUT_SETTLE_PASSES = 4;
+
 export function currentRenderTargetSize(): { width: number; height: number } {
   return { ...currentScreenSize };
 }
@@ -88,6 +92,11 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
   let rendering = false;
   let frameLoopDispose: FrameLoopDisposer | null = null;
 
+  const detachClipboardSink = attachClipboardSink({
+    onCopy: (text) => window.setClipboardText?.(text),
+    onCut: (text) => window.setClipboardText?.(text),
+    onPaste: () => window.clipboardText?.() ?? '',
+  });
   renderTargetOwner = owner;
   setCurrentRenderTargetSize(window);
   setRenderTarget(window);
@@ -122,10 +131,19 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
     rendering = true;
     let beganFrame = false;
     try {
-      clearHitTargets();
       renderer.beginFrame();
       beganFrame = true;
-      render(FrameRoot({ key: rootKey }), renderer);
+      for (let pass = 0; pass < MAX_LAYOUT_SETTLE_PASSES; ++pass) {
+        if (pass > 0) renderer.clear();
+        clearHitTargets();
+        render(FrameRoot({ key: rootKey }), renderer);
+        if (!consumeLayoutUnresolvedDuringRender()) break;
+        if (pass + 1 >= MAX_LAYOUT_SETTLE_PASSES) break;
+        // The unresolved-layout pass posted a redraw as a fallback for callers
+        // outside mount(). We are settling it before present, so consume that
+        // internal dirty bit and immediately rebuild into the same frame.
+        window.takeRedrawRequest?.();
+      }
     } finally {
       if (beganFrame) renderer.endFrame();
       rendering = false;
@@ -142,7 +160,7 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
   disposers.push(window.on('mousedown', dispatchMouseDown));
   disposers.push(window.on('mouseup', dispatchMouseUp));
   disposers.push(window.on('wheel', dispatchWheel));
-  disposers.push(window.on('keydown', (ev) => dispatchKeyDown(ev, window)));
+  disposers.push(window.on('keydown', dispatchKeyDown));
   disposers.push(window.on('keypress', dispatchKeyPress));
   disposers.push(window.on('compose', dispatchCompose));
   disposers.push(
@@ -192,6 +210,7 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
     if (!shouldRunFrameLoop && typeof window.setFrameCallback === 'function') {
       window.setFrameCallback(null);
     }
+    detachClipboardSink();
     for (const dispose of disposers.splice(0)) dispose();
     resetEventPipeline();
     clearHitTargets();

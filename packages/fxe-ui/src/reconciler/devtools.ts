@@ -50,10 +50,10 @@ export function isPaintFlashEnabled(): boolean {
 // ----------------------------------------------------------------- memo trace
 //
 // Opt-in diagnostic for memo() bail decisions. When enabled, every memoised
-// component records why it took the rebuild path (dirty / noCache / noLastProps
-// / epoch / propsDiff) or the bail path (hit), aggregated globally and per
-// displayName. The first propsDiff per name also captures a shallow dump of
-// last vs next props so callers can see exactly which key changed.
+// component records why it took the rebuild path (dirty / layout / noCache /
+// noLastProps / epoch / propsDiff) or the bail path (hit), aggregated globally
+// and per displayName. The first propsDiff per name also captures a shallow
+// dump of last vs next props so callers can see exactly which key changed.
 //
 // Cost when disabled: one nullable load + branch per memoised component per
 // render. No allocation, no globalThis pollution, no JSON cost.
@@ -61,6 +61,7 @@ export function isPaintFlashEnabled(): boolean {
 export interface MemoTraceSlot {
   total: number;
   dirty: number;
+  layout: number;
   noCache: number;
   noLastProps: number;
   epoch: number;
@@ -88,7 +89,16 @@ export interface MemoTraceSnapshot {
 }
 
 function emptyMemoSlot(): MemoTraceSlot {
-  return { total: 0, dirty: 0, noCache: 0, noLastProps: 0, epoch: 0, propsDiff: 0, hit: 0 };
+  return {
+    total: 0,
+    dirty: 0,
+    layout: 0,
+    noCache: 0,
+    noLastProps: 0,
+    epoch: 0,
+    propsDiff: 0,
+    hit: 0,
+  };
 }
 
 let memoTrace: MemoTraceState | null = null;

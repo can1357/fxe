@@ -676,6 +676,11 @@ export interface Fiber {
   lastProps: unknown;
   lastProducedNode: Node | null;
   layoutCache?: { props: unknown; values: unknown[]; layoutNode: unknown };
+  // True when a previous render captured command buffers while layoutNodeFor()
+  // still had unresolved memo children. Dirty flags can be cleared while the
+  // render stack unwinds, so memo/layer cache bails must consult this durable
+  // layout-settled bit as well.
+  hasUnresolvedLayout: boolean;
   // Subtree state.
   // Provider-only:
   providedContext: ContextImpl<unknown> | null;
@@ -896,6 +901,7 @@ function newFiber(key: string, parent: Fiber | null): Fiber {
     surface: null,
     internalLayout: null,
     internalTextStyle: null,
+    hasUnresolvedLayout: false,
   };
   const fiberId = ensureFiberDebugMetadata(fiber).id;
   registerFiberWork(fiberId, () => {
@@ -920,12 +926,23 @@ function markDirty(fiber: Fiber | null): void {
   }
 }
 
-// Walk up from `fiber`, marking it and every ancestor dirty. Exported so
-// View can break upstream memo bails when its first-frame child layout
-// returned an unresolved (zero-size) subtree: subsequent frames must
-// rebuild instead of replaying the cached command buffer that captured
-// the unresolved layout. See `requestRenderTargetRedraw` callsite in
-// `components/View.ts`.
+function markLayoutUnresolved(fiber: Fiber | null): void {
+  let f: Fiber | null = fiber;
+  while (f) {
+    g_layout_unresolved_during_render = true;
+    f.hasUnresolvedLayout = true;
+    f = f.parent;
+  }
+}
+
+// Walk up from `fiber`, marking it and every ancestor dirty and layout-unsettled.
+// The dirty bit requests traversal, while hasUnresolvedLayout survives currently
+// rendering ancestors clearing their dirty bit as the stack unwinds.
+export function markFiberAndAncestorsLayoutUnresolved(fiber: Fiber | null): void {
+  markDirty(fiber);
+  markLayoutUnresolved(fiber);
+}
+
 export function markFiberAndAncestorsDirty(fiber: Fiber | null): void {
   markDirty(fiber);
 }
@@ -1050,6 +1067,7 @@ export function runInSandboxFiber<T>(fn: () => T): T {
     providedValue: undefined,
     dirty: true,
     failed: false,
+    hasUnresolvedLayout: false,
   };
   g_ctx = {
     fiber: sandboxFiber,
@@ -1530,6 +1548,7 @@ function renderNode(
     const memoInfo = node.memo;
     const epoch = memoInfo ? atlasEpoch() : 0;
     const wasDirty = fiber.dirty;
+    const hadUnresolvedLayout = fiber.hasUnresolvedLayout;
     const nextInternalLayout = node.internalLayout ?? null;
     const nextInternalTextStyle = node.internalTextStyle ?? null;
     const internalInputsEqual =
@@ -1554,12 +1573,13 @@ function renderNode(
     // If this component's output may have changed, wrapper children below it
     // must not replay stale layer caches before changed descendant props land.
     const forceProducedTraversal =
-      wasDirty || !internalInputsEqual || !hadLastProps || !propsEqualToLast;
+      hadUnresolvedLayout || wasDirty || !internalInputsEqual || !hadLastProps || !propsEqualToLast;
     if (memoInfo) {
       const trace = memoTraceState();
       const bail =
         internalInputsEqual &&
         !wasDirty &&
+        !hadUnresolvedLayout &&
         fiber.cache !== null &&
         hadLastProps &&
         fiber.cacheAtlasEpoch === epoch &&
@@ -1571,6 +1591,7 @@ function renderNode(
           slot = {
             total: 0,
             dirty: 0,
+            layout: 0,
             noCache: 0,
             noLastProps: 0,
             epoch: 0,
@@ -1581,15 +1602,17 @@ function renderNode(
         }
         const reason: keyof typeof slot = wasDirty
           ? 'dirty'
-          : fiber.cache === null
-            ? 'noCache'
-            : !hadLastProps
-              ? 'noLastProps'
-              : fiber.cacheAtlasEpoch !== epoch
-                ? 'epoch'
-                : !propsEqualToLast
-                  ? 'propsDiff'
-                  : 'hit';
+          : hadUnresolvedLayout
+            ? 'layout'
+            : fiber.cache === null
+              ? 'noCache'
+              : !hadLastProps
+                ? 'noLastProps'
+                : fiber.cacheAtlasEpoch !== epoch
+                  ? 'epoch'
+                  : !propsEqualToLast
+                    ? 'propsDiff'
+                    : 'hit';
         trace.totals.total++;
         slot.total++;
         trace.totals[reason]++;
@@ -1624,6 +1647,7 @@ function renderNode(
       }
     }
     fiber.layoutCache = undefined; // body re-ran; any derived layout is stale
+    fiber.hasUnresolvedLayout = false;
 
     const prevCtx = g_ctx;
     const myCtx: RenderCtx = {
@@ -1728,6 +1752,7 @@ function renderNode(
     if (valueChanged) {
       for (const consumer of providerCtx._consumers) markDirty(consumer);
     }
+    fiber.hasUnresolvedLayout = false;
     ctx.contextStack.push({ ctx: providerCtx, value: node.props.value });
     try {
       renderNodeList(
@@ -1745,6 +1770,7 @@ function renderNode(
     return;
   }
   if (node.type === 'portal') {
+    fiber.hasUnresolvedLayout = false;
     renderNodeList(
       fiber,
       normalizeBoundaryChildren(node.props.children),
@@ -1757,6 +1783,7 @@ function renderNode(
     return;
   }
   if (node.type === 'error-boundary') {
+    fiber.hasUnresolvedLayout = false;
     const fresh = new CommandBuffer();
     const children = normalizeBoundaryChildren(node.props.children);
     try {
@@ -1778,6 +1805,7 @@ function renderNode(
     return;
   }
   if (node.type === 'suspense') {
+    fiber.hasUnresolvedLayout = false;
     const fresh = new CommandBuffer();
     const children = normalizeBoundaryChildren(node.props.children);
     try {
@@ -1802,6 +1830,7 @@ function renderNode(
   const cacheable =
     wantDeps !== undefined &&
     !fiber.dirty &&
+    !fiber.hasUnresolvedLayout &&
     fiber.cache !== null &&
     fiber.cacheAtlasEpoch === layerEpoch &&
     depsEqual(fiber.lastDeps, wantDeps);
@@ -1875,6 +1904,7 @@ function renderNode(
   RenderStats.recordRebuild();
   RenderStats.recordCacheMiss();
   recordFiberCacheStatus(fiber, 'miss', true);
+  fiber.hasUnresolvedLayout = false;
   const hitStart = hitTargetCount();
   const fresh = new CommandBuffer();
   renderNodeList(fiber, props.children, fresh, ctx, forceTraversal);
@@ -1930,6 +1960,13 @@ function queuePaintFlashOutline(
 // ----------------------------------------------------------------- entry
 
 let g_root: Fiber | null = null;
+let g_layout_unresolved_during_render = false;
+
+export function consumeLayoutUnresolvedDuringRender(): boolean {
+  const out = g_layout_unresolved_during_render;
+  g_layout_unresolved_during_render = false;
+  return out;
+}
 
 export interface RenderOptions {
   animate?: boolean;
@@ -1941,6 +1978,7 @@ export function render(
   target: CommandBuffer | Renderer,
   options?: RenderOptions,
 ): void {
+  g_layout_unresolved_during_render = false;
   if (!g_root) g_root = newFiber('$root', null);
   const ctx: RenderCtx = {
     fiber: g_root,

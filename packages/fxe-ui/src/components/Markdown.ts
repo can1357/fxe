@@ -403,6 +403,7 @@ const MdHeading = memo(
       6: 14,
     };
     return View({
+      __traceTag: 'md-heading',
       style: {
         gap: theme.spacing.xs,
         marginTop: level <= 2 ? theme.spacing.lg : theme.spacing.md,
@@ -425,6 +426,7 @@ const MdParagraph = memo(
   Component((props: { key?: string; node: FXEMarkdown.ParagraphNode }): Node => {
     const theme = useTheme() as MarkdownTheme;
     return View({
+      __traceTag: 'md-paragraph',
       style: { marginBottom: theme.spacing.sm },
       children: InlineRuns({ children: props.node.children }),
     });
@@ -545,6 +547,7 @@ const MdCodeBlock = memo(
     );
 
     return View({
+      __traceTag: 'md-code-block',
       style: {
         backgroundColor: theme.colors.codeBg,
         borderRadius: theme.radii.md,

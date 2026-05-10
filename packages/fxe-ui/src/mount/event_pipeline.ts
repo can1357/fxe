@@ -72,8 +72,13 @@ export interface CursorSink {
 }
 
 export interface ClipboardSink {
-  clipboardText?(): string;
-  setClipboardText?(text: string): void;
+  onCopy(text: string): void;
+  onCut(text: string): void;
+  onPaste(): string | Promise<string>;
+}
+
+export interface FocusAdvancePreempt {
+  shouldPreemptFocusAdvance(ev: KeyEvent): boolean;
 }
 
 export interface DragOutPayload {
@@ -85,6 +90,56 @@ export interface DragOutPayload {
 /** Sink that initiates an OS-level drag-out from a synthetic mouse drag. */
 export interface DragSink {
   startDrag?(payload: DragOutPayload): boolean;
+}
+let attachedClipboardSink: ClipboardSink | null = null;
+const focusAdvancePreempts = new Set<FocusAdvancePreempt>();
+
+function readAttachedClipboardText(clipboardSink: ClipboardSink | null): string {
+  if (clipboardSink === null) return '';
+  const pasted = clipboardSink.onPaste();
+  return typeof pasted === 'string' ? pasted : '';
+}
+
+function shouldPreemptFocusAdvance(ev: KeyEvent): boolean {
+  for (const preempt of focusAdvancePreempts) {
+    if (preempt.shouldPreemptFocusAdvance(ev)) return true;
+  }
+  return false;
+}
+
+export function attachClipboardSink(sink: ClipboardSink): () => void {
+  const previous = attachedClipboardSink;
+  attachedClipboardSink = sink;
+  return () => {
+    if (attachedClipboardSink === sink) attachedClipboardSink = previous;
+  };
+}
+
+export function detachClipboardSink(): void {
+  attachedClipboardSink = null;
+}
+
+export function attachFocusAdvancePreempt(preempt: FocusAdvancePreempt): () => void {
+  focusAdvancePreempts.add(preempt);
+  return () => {
+    focusAdvancePreempts.delete(preempt);
+  };
+}
+
+export function detachFocusAdvancePreempt(preempt: FocusAdvancePreempt): void {
+  focusAdvancePreempts.delete(preempt);
+}
+
+export function copyToClipboard(text: string): void {
+  attachedClipboardSink?.onCopy(text);
+}
+
+export function cutToClipboard(text: string): void {
+  attachedClipboardSink?.onCut(text);
+}
+
+export function pasteFromClipboard(): string | Promise<string> {
+  return attachedClipboardSink?.onPaste() ?? '';
 }
 
 export function dispatchMouseMove(
@@ -163,13 +218,16 @@ export function dispatchWheel(ev: WheelEvent & { x?: number; y?: number }): void
 }
 
 export function dispatchKeyDown(ev: KeyEvent, clipboardSink?: ClipboardSink): void {
-  if (ev.key === 258) focusRelative(ev.modifiers & 1 ? 'previous' : 'next');
+  const activeClipboardSink = clipboardSink ?? attachedClipboardSink;
+  if (ev.key === 258 && !shouldPreemptFocusAdvance(ev)) {
+    focusRelative(ev.modifiers & 1 ? 'previous' : 'next');
+  }
   const target = focusTarget();
-  const routed = clipboardSink
+  const routed = activeClipboardSink
     ? {
         ...ev,
-        clipboardText: () => clipboardSink.clipboardText?.(),
-        setClipboardText: (text: string) => clipboardSink.setClipboardText?.(text),
+        clipboardText: () => readAttachedClipboardText(activeClipboardSink),
+        setClipboardText: (text: string) => activeClipboardSink.onCopy(text),
       }
     : ev;
   target?.onKeyDown?.(routed);
@@ -188,4 +246,6 @@ export function resetEventPipeline(): void {
   pressed = null;
   captured = null;
   focusTrapGroup = null;
+  attachedClipboardSink = null;
+  focusAdvancePreempts.clear();
 }

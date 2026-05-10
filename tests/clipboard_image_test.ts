@@ -64,8 +64,8 @@ test('Window clipboard HTML and MIME APIs round-trip on macOS', () => {
   });
 });
 
-// TODO(stdin): no stdin primitive is exposed in the window binding/type scope; keep stdin coverage
-// in process/native bindings once such an API exists.
+// NOTE: stdin is exposed on process/stdin, not Window; coverage lives in
+// tests/stdin_contract_test.ts unless a window-scoped stdin API is added.
 
 if (false as boolean) {
   const win = new Window({ visible: false });

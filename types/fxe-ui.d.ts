@@ -988,6 +988,18 @@ declare module 'fxe-ui' {
   export function registerHitTarget(
     target: Omit<HitTarget, 'z'> & { z?: number } & Record<string, unknown>,
   ): void;
+  export interface ClipboardSink {
+    onCopy(text: string): void;
+    onCut(text: string): void;
+    onPaste(): string | Promise<string>;
+  }
+  export interface FocusAdvancePreempt {
+    shouldPreemptFocusAdvance(ev: WindowEventMap['keydown']): boolean;
+  }
+  export function attachClipboardSink(sink: ClipboardSink): () => void;
+  export function detachClipboardSink(): void;
+  export function attachFocusAdvancePreempt(preempt: FocusAdvancePreempt): () => void;
+  export function detachFocusAdvancePreempt(preempt: FocusAdvancePreempt): void;
   export function hitTest(x: number, y: number): HitTarget | null;
   export function dispatchMouseMove(
     ev: WindowEventMap['mousemove'],
@@ -999,7 +1011,7 @@ declare module 'fxe-ui' {
   export function dispatchWheel(ev: WindowEventMap['wheel'] & { x?: number; y?: number }): void;
   export function dispatchKeyDown(
     ev: WindowEventMap['keydown'],
-    clipboardSink?: Pick<Window, 'clipboardText' | 'setClipboardText'>,
+    clipboardSink?: ClipboardSink,
   ): void;
   export function dispatchKeyPress(ev: WindowEventMap['keypress']): void;
   export function resetEventPipeline(): void;

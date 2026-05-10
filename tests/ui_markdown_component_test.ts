@@ -1,13 +1,16 @@
-import { CommandBuffer } from 'fxe';
+import { CommandBuffer, type Renderer, type Window, type WindowEventName } from 'fxe';
 import {
   clearHitTargets,
   type FiberNode,
+  drainLayoutTrace,
   type HitTarget,
   hitTest,
   Markdown as MarkdownComponent,
   type MarkdownTheme,
+  mount,
   render,
   resetEventPipeline,
+  setLayoutTraceEnabled,
   snapshotFiberTree,
 } from 'fxe-ui';
 
@@ -152,6 +155,73 @@ test('Markdown code block renders highlighted block shape without throwing', () 
   const names = collectDisplayNames(snapshotFiberTree().tree);
   assert(names.includes('MdCodeBlock'), 'expected code block component in snapshot');
   assert(cb.vertexCount() > 0, 'expected code block to emit geometry');
+});
+
+test('Markdown block positions settle after lazy mount redraw', () => {
+  const renderer = new CommandBuffer() as unknown as Renderer;
+  renderer.beginFrame = () => renderer.clear();
+  renderer.endFrame = () => undefined;
+  const listeners = new Map<string, number>();
+  const frameCallback: { current: ((window: Window) => void) | null } = { current: null };
+  let redrawPending = true;
+  const win = {
+    framebufferSize: () => [420, 260] as [number, number],
+    requestRedraw: () => {
+      redrawPending = true;
+    },
+    setFrameCallback: (cb: ((window: Window) => void) | null) => {
+      frameCallback.current = cb;
+    },
+    takeRedrawRequest: () => {
+      const pending = redrawPending;
+      redrawPending = false;
+      return pending;
+    },
+    on: (event: WindowEventName) => {
+      listeners.set(event, (listeners.get(event) ?? 0) + 1);
+      return () => listeners.set(event, (listeners.get(event) ?? 1) - 1);
+    },
+  } as unknown as Window;
+
+  const root = MarkdownComponent({
+    source: '# Hello\n\nFirst paragraph.\n\n```ts\nconst a = 1;\n```',
+    style: { width: 420, padding: 16 },
+  });
+
+  setLayoutTraceEnabled(true, { limit: 1000 });
+  try {
+    const dispose = mount(root, win, { renderer });
+    try {
+      let lastEntries = drainLayoutTrace();
+      const cb = frameCallback.current;
+      assert(cb !== null, 'lazy mount should install frame callback');
+      for (let i = 0; i < 8 && redrawPending; ++i) {
+        if (win.takeRedrawRequest()) cb(win);
+        lastEntries = drainLayoutTrace();
+      }
+      assert(!redrawPending, 'markdown layout should settle redraws');
+      const reversed = [...lastEntries].reverse();
+      const heading = reversed.find((entry) => entry.tag === 'md-heading');
+      const paragraph = reversed.find((entry) => entry.tag === 'md-paragraph');
+      const code = reversed.find((entry) => entry.tag === 'md-code-block');
+      assert(heading !== undefined, 'expected heading layout trace entry');
+      assert(paragraph !== undefined, 'expected paragraph layout trace entry');
+      assert(code !== undefined, 'expected code block layout trace entry');
+      assert(
+        paragraph.rect.y > heading.rect.y,
+        'paragraph must be below heading after layout settles',
+      );
+      assert(
+        code.rect.y > paragraph.rect.y,
+        'code block must be below paragraph after layout settles',
+      );
+    } finally {
+      dispose();
+    }
+  } finally {
+    setLayoutTraceEnabled(false);
+    drainLayoutTrace();
+  }
 });
 
 await run();

@@ -1,11 +1,18 @@
 import type { CommandBuffer } from 'fxe';
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
+import {
+  attachFocusAdvancePreempt,
+  copyToClipboard,
+  cutToClipboard,
+  pasteFromClipboard,
+} from '../mount/event_pipeline.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
 import { paintText, type TextPreeditOptions } from '../paint/text_painter.ts';
 import {
   Component,
   type Node,
+  useEffect,
   useFrame,
   useId,
   useInternalLayout,
@@ -225,6 +232,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
   const secure = props.secureTextEntry === true;
   const maxLen = props.maxLength;
   const blinkMs = props.caretBlinkMs ?? 530;
+  const tabBehavior = props.tabBehavior ?? 'focus';
   // Touch the no-op forward-compat props so unused-prop lint stays quiet.
   void props.inputMode;
   void props.spellCheck;
@@ -344,22 +352,28 @@ export const TextInput = Component((props: TextInputProps): Node => {
     });
   };
 
-  // Lazy clipboard sink for right-click menu actions, since contextmenu events
-  // do not carry a KeyEvent's clipboardText/setClipboardText. The mount layer
-  // exposes `__fxe_clipboard` if available; otherwise cut/copy/paste from the
-  // edit menu are no-ops.
-  // TODO(arch): give event_pipeline a way to attach a ClipboardSink to
-  // synthetic mouse events so right-click clipboard actions don't depend on
-  // a side-channel global.
-  const clipboardSink = (): { read?: () => string; write?: (t: string) => void } | null => {
-    return (
-      (
-        globalThis as {
-          __fxe_clipboard?: { read?: () => string; write?: (t: string) => void };
-        }
-      ).__fxe_clipboard ?? null
-    );
+  const applyPastedText = (raw: string): void => {
+    let text = raw.replace(/\n/g, '');
+    if (props.onPaste) {
+      const result = props.onPaste(text);
+      if (result === null) return;
+      text = result;
+    }
+    if (text.length > 0) replaceSelection(text, 'paste');
   };
+
+  const pasteFromAttachedClipboard = async (): Promise<void> => {
+    if (readOnly) return;
+    const pasted = await Promise.resolve(pasteFromClipboard());
+    applyPastedText(pasted);
+  };
+
+  useEffect(() => {
+    if (!focused || disabled || readOnly || tabBehavior !== 'insert') return;
+    return attachFocusAdvancePreempt({
+      shouldPreemptFocusAdvance: (ev) => ev.key === KEY_TAB,
+    });
+  }, [disabled, focused, readOnly, tabBehavior]);
 
   // Caret blink + drag-edge autoscroll. Both run on the frame clock; the
   // blink fast-paths out when not applicable, and the autoscroll fast-paths
@@ -536,32 +550,23 @@ export const TextInput = Component((props: TextInputProps): Node => {
           setSelection(0, value.length);
           return;
         }
-        const sink = clipboardSink();
         if (action === 'copy') {
           if (secure) return;
           const t = selectedText();
-          if (t.length > 0) sink?.write?.(t);
+          if (t.length > 0) copyToClipboard(t);
           return;
         }
         if (action === 'cut') {
           if (secure || readOnly) return;
           const t = selectedText();
           if (t.length > 0) {
-            sink?.write?.(t);
+            cutToClipboard(t);
             replaceSelection('', 'cut');
           }
           return;
         }
         if (action === 'paste') {
-          if (readOnly) return;
-          let t = sink?.read?.() ?? '';
-          t = t.replace(/\n/g, '');
-          if (props.onPaste) {
-            const r = props.onPaste(t);
-            if (r === null) return;
-            t = r;
-          }
-          if (t.length > 0) replaceSelection(t, 'paste');
+          void pasteFromAttachedClipboard();
           return;
         }
       });
@@ -574,32 +579,23 @@ export const TextInput = Component((props: TextInputProps): Node => {
         setSelection(0, value.length);
         return;
       }
-      const sink = clipboardSink();
       if (action === 'copy') {
         if (secure) return;
         const t = selectedText();
-        if (t.length > 0) sink?.write?.(t);
+        if (t.length > 0) copyToClipboard(t);
         return;
       }
       if (action === 'cut') {
         if (secure || readOnly) return;
         const t = selectedText();
         if (t.length > 0) {
-          sink?.write?.(t);
+          cutToClipboard(t);
           replaceSelection('', 'cut');
         }
         return;
       }
       if (action === 'paste') {
-        if (readOnly) return;
-        let t = sink?.read?.() ?? '';
-        t = t.replace(/\n/g, '');
-        if (props.onPaste) {
-          const r = props.onPaste(t);
-          if (r === null) return;
-          t = r;
-        }
-        if (t.length > 0) replaceSelection(t, 'paste');
+        void pasteFromAttachedClipboard();
       }
     },
     onKeyPress: (ev) => {
@@ -643,7 +639,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
       if (primary && isLetter(key, KEY_C)) {
         if (!secure) {
           const t = selectedText();
-          if (t.length > 0) keyEvent.setClipboardText?.(t);
+          if (t.length > 0) copyToClipboard(t);
         }
         return;
       }
@@ -652,7 +648,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
         if (readOnly || secure) return;
         const t = selectedText();
         if (t.length > 0) {
-          keyEvent.setClipboardText?.(t);
+          cutToClipboard(t);
           replaceSelection('', 'cut');
         }
         return;
@@ -660,14 +656,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
       // Primary+V paste.
       if (primary && isLetter(key, KEY_V)) {
         if (readOnly) return;
-        let t = keyEvent.clipboardText?.() ?? '';
-        t = t.replace(/\n/g, '');
-        if (props.onPaste) {
-          const r = props.onPaste(t);
-          if (r === null) return;
-          t = r;
-        }
-        if (t.length > 0) replaceSelection(t, 'paste');
+        applyPastedText(keyEvent.clipboardText?.() ?? '');
         return;
       }
       // Primary+Z undo (Shift = redo).
@@ -738,12 +727,7 @@ export const TextInput = Component((props: TextInputProps): Node => {
         return;
       }
 
-      if (key === KEY_TAB && props.tabBehavior === 'insert' && !readOnly) {
-        // NOTE: event_pipeline.dispatchKeyDown advances focus before this
-        // handler runs, so the focused TextInput already lost focus by the
-        // time we receive Tab. Inserting here is correct only for inputs that
-        // re-focus afterwards; full support requires a phase hook in
-        // event_pipeline. TODO(P3): add focus-advance phase preempt.
+      if (key === KEY_TAB && tabBehavior === 'insert' && !readOnly) {
         replaceSelection('\t', 'type');
         return;
       }

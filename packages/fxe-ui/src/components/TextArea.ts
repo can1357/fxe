@@ -9,11 +9,18 @@
 import type { CommandBuffer } from 'fxe';
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
+import {
+  attachFocusAdvancePreempt,
+  copyToClipboard,
+  cutToClipboard,
+  pasteFromClipboard,
+} from '../mount/event_pipeline.ts';
 import { registerHitTarget } from '../mount/hit_test.ts';
 import { paintText, type TextPreeditOptions } from '../paint/text_painter.ts';
 import {
   Component,
   type Node,
+  useEffect,
   useFrame,
   useId,
   useInternalLayout,
@@ -359,15 +366,28 @@ export const TextArea = Component((props: TextAreaProps): Node => {
     });
   };
 
-  const clipboardSink = (): { read?: () => string; write?: (t: string) => void } | null => {
-    return (
-      (
-        globalThis as {
-          __fxe_clipboard?: { read?: () => string; write?: (t: string) => void };
-        }
-      ).__fxe_clipboard ?? null
-    );
+  const applyPastedText = (raw: string): void => {
+    let text = raw;
+    if (props.onPaste) {
+      const result = props.onPaste(text);
+      if (result === null) return;
+      text = result;
+    }
+    if (text.length > 0) replaceSelection(text, 'paste');
   };
+
+  const pasteFromAttachedClipboard = async (): Promise<void> => {
+    if (readOnly) return;
+    const pasted = await Promise.resolve(pasteFromClipboard());
+    applyPastedText(pasted);
+  };
+
+  useEffect(() => {
+    if (!focused || disabled || readOnly || tabBehavior !== 'insert') return;
+    return attachFocusAdvancePreempt({
+      shouldPreemptFocusAdvance: (ev) => ev.key === KEY_TAB,
+    });
+  }, [disabled, focused, readOnly, tabBehavior]);
 
   useFrame((dt) => {
     if (focused && !disabled && blinkMs > 0) {
@@ -529,32 +549,23 @@ export const TextArea = Component((props: TextAreaProps): Node => {
           setSelection(0, value.length);
           return;
         }
-        const sink = clipboardSink();
         if (action === 'copy') {
           if (secure) return;
           const t = selectedText();
-          if (t.length > 0) sink?.write?.(t);
+          if (t.length > 0) copyToClipboard(t);
           return;
         }
         if (action === 'cut') {
           if (secure || readOnly) return;
           const t = selectedText();
           if (t.length > 0) {
-            sink?.write?.(t);
+            cutToClipboard(t);
             replaceSelection('', 'cut');
           }
           return;
         }
         if (action === 'paste') {
-          if (readOnly) return;
-          const t = sink?.read?.() ?? '';
-          if (props.onPaste) {
-            const r = props.onPaste(t);
-            if (r === null) return;
-            if (r.length > 0) replaceSelection(r, 'paste');
-            return;
-          }
-          if (t.length > 0) replaceSelection(t, 'paste');
+          void pasteFromAttachedClipboard();
           return;
         }
       });
@@ -567,32 +578,23 @@ export const TextArea = Component((props: TextAreaProps): Node => {
         setSelection(0, value.length);
         return;
       }
-      const sink = clipboardSink();
       if (action === 'copy') {
         if (secure) return;
         const t = selectedText();
-        if (t.length > 0) sink?.write?.(t);
+        if (t.length > 0) copyToClipboard(t);
         return;
       }
       if (action === 'cut') {
         if (secure || readOnly) return;
         const t = selectedText();
         if (t.length > 0) {
-          sink?.write?.(t);
+          cutToClipboard(t);
           replaceSelection('', 'cut');
         }
         return;
       }
       if (action === 'paste') {
-        if (readOnly) return;
-        const t = sink?.read?.() ?? '';
-        if (props.onPaste) {
-          const r = props.onPaste(t);
-          if (r === null) return;
-          if (r.length > 0) replaceSelection(r, 'paste');
-          return;
-        }
-        if (t.length > 0) replaceSelection(t, 'paste');
+        void pasteFromAttachedClipboard();
       }
     },
     onKeyPress: (ev) => {
@@ -634,7 +636,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
       if (primary && isLetter(key, KEY_C)) {
         if (!secure) {
           const t = selectedText();
-          if (t.length > 0) keyEvent.setClipboardText?.(t);
+          if (t.length > 0) copyToClipboard(t);
         }
         return;
       }
@@ -642,20 +644,14 @@ export const TextArea = Component((props: TextAreaProps): Node => {
         if (readOnly || secure) return;
         const t = selectedText();
         if (t.length > 0) {
-          keyEvent.setClipboardText?.(t);
+          cutToClipboard(t);
           replaceSelection('', 'cut');
         }
         return;
       }
       if (primary && isLetter(key, KEY_V)) {
         if (readOnly) return;
-        let t = keyEvent.clipboardText?.() ?? '';
-        if (props.onPaste) {
-          const r = props.onPaste(t);
-          if (r === null) return;
-          t = r;
-        }
-        if (t.length > 0) replaceSelection(t, 'paste');
+        applyPastedText(keyEvent.clipboardText?.() ?? '');
         return;
       }
       if (primary && isLetter(key, KEY_Z)) {

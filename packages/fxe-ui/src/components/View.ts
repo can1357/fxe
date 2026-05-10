@@ -21,7 +21,7 @@ import {
   type Fiber,
   findVisibleChildFiber,
   getCurrentRenderFiber,
-  markFiberAndAncestorsDirty,
+  markFiberAndAncestorsLayoutUnresolved,
   type Node,
   Portal,
   requestRenderTargetRedraw,
@@ -607,7 +607,7 @@ export const View = Component((props: ViewProps): Node => {
     // them at zero size, so this View — and every memo'd ancestor whose
     // command buffer captured the bad layout — must rebuild on the next
     // frame instead of replaying its cache.
-    markFiberAndAncestorsDirty(viewFiber);
+    markFiberAndAncestorsLayoutUnresolved(viewFiber);
     requestRenderTargetRedraw();
   }
   const resolvedLayoutSig = useInheritedLayout

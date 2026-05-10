@@ -1,6 +1,10 @@
 export type { DevToolsShortcutHandle, DevToolsShortcutOptions } from './devtools_shortcut.ts';
 export { defaultDevToolsAccelerator, installDevToolsShortcut } from './devtools_shortcut.ts';
 export {
+  attachClipboardSink,
+  attachFocusAdvancePreempt,
+  detachClipboardSink,
+  detachFocusAdvancePreempt,
   dispatchKeyDown,
   dispatchKeyPress,
   dispatchMouseDown,
@@ -10,6 +14,7 @@ export {
   resetEventPipeline,
 } from './event_pipeline.ts';
 export { clearFocus, focusedTargetId, focusTarget } from './focus.ts';
+export type { ClipboardSink, FocusAdvancePreempt } from './event_pipeline.ts';
 export type { HitTarget, SyntheticEvent } from './hit_test.ts';
 export {
   clearHitTargets,
