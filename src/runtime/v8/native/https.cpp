@@ -707,6 +707,7 @@ namespace fxe::runtime {
       tls_options.port = url->port;
       tls_options.reject_unauthorized =
           object_bool_prop(iso, ctx, options, "rejectUnauthorized", true);
+      tls_options.session_namespace = object_string_prop(iso, ctx, options, "sessionNamespace");
       tls_options.alpn = {"http/1.1"};
       std::string err;
       auto client = fxe::net::tls_client::connect(tls_options, err);

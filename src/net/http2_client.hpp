@@ -46,6 +46,9 @@ namespace fxe::net {
                                                  const std::string& ca_pem,
                                                  bool reject_unauthorized,
                                                  const http2_settings& settings, std::string& err);
+    static std::unique_ptr<http2_client>
+    connect(const std::string& host, u16 port, const std::string& ca_pem, bool reject_unauthorized,
+            const http2_settings& settings, std::string session_namespace, std::string& err);
     virtual ~http2_client();
     virtual i32 submit(const http2_request& request) = 0;
     virtual http2_response wait(i32 stream_id, std::string& err) = 0;

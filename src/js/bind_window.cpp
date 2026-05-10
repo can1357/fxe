@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -1423,11 +1424,45 @@ namespace fxe::js {
       auto* w = unwrap_win(info.This());
       if (!w)
         return;
-      bool on = info.Length() >= 1 && info[0]->BooleanValue(iso);
+      const bool on = info.Length() >= 1 && info[0]->BooleanValue(iso);
+      fullscreen_mode mode = fullscreen_mode::borderless;
       int monitor = -1;
-      if (info.Length() >= 2 && info[1]->IsNumber())
+      if (info.Length() >= 2 && info[1]->IsObject() && !info[1]->IsNullOrUndefined()) {
+        auto options = info[1].As<Object>();
+        Local<Value> field;
+        if (options->Get(ctx, "mode"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
+          if (!field->IsString()) {
+            (void)throw_type_error(
+                iso, "setFullscreen: options.mode must be 'borderless' or 'exclusive'");
+            return;
+          }
+          auto s = field.As<String>();
+          if (s == "exclusive"_v8) {
+            mode = fullscreen_mode::exclusive;
+          } else if (s == "borderless"_v8) {
+            mode = fullscreen_mode::borderless;
+          } else {
+            (void)throw_type_error(
+                iso, "setFullscreen: options.mode must be 'borderless' or 'exclusive'");
+            return;
+          }
+        }
+        if (options->Get(ctx, "monitorIndex"_v8(iso)).ToLocal(&field) && !field->IsUndefined()) {
+          if (!field->IsNumber()) {
+            (void)throw_type_error(iso, "setFullscreen: options.monitorIndex must be a number");
+            return;
+          }
+          monitor = field->Int32Value(ctx).FromMaybe(-1);
+        }
+      } else if (info.Length() >= 2 && !info[1]->IsUndefined()) {
+        if (!info[1]->IsNumber()) {
+          (void)throw_type_error(iso,
+                                 "setFullscreen: expected monitorIndex number or options object");
+          return;
+        }
         monitor = info[1]->Int32Value(ctx).FromMaybe(-1);
-      w->set_fullscreen(on, monitor);
+      }
+      w->set_fullscreen(on, mode, monitor);
     }
     void win_is_fullscreen(const FunctionCallbackInfo<Value>& info) {
       auto* w = unwrap_win(info.This());
@@ -1497,6 +1532,39 @@ namespace fxe::js {
       if (!w)
         return;
       info.GetReturnValue().Set(w->is_raw_mouse_motion_supported());
+    }
+    void win_set_dpi_scale_override(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      if (info.Length() < 1 || info[0]->IsNullOrUndefined()) {
+        w->set_dpi_scale_override(std::nullopt);
+        info.GetReturnValue().Set(true);
+        return;
+      }
+      if (!info[0]->IsNumber()) {
+        (void)throw_type_error(iso, "setDpiScaleOverride: expected number | null | undefined");
+        return;
+      }
+      const double scale = info[0]->NumberValue(ctx).FromMaybe(0.0);
+      if (!std::isfinite(scale) || scale <= 0.0) {
+        info.GetReturnValue().Set(false);
+        return;
+      }
+      w->set_dpi_scale_override(static_cast<float>(scale));
+      info.GetReturnValue().Set(true);
+    }
+    void win_dpi_scale(const FunctionCallbackInfo<Value>& info) {
+      auto* w = unwrap_win(info.This());
+      info.GetReturnValue().Set(
+          w ? Number::New(info.GetIsolate(), static_cast<double>(w->dpi_scale()))
+            : Number::New(info.GetIsolate(), 1.0));
+    }
+    void win_has_dpi_scale_override(const FunctionCallbackInfo<Value>& info) {
+      auto* w = unwrap_win(info.This());
+      info.GetReturnValue().Set(w ? w->has_dpi_scale_override() : false);
     }
     void win_set_content_protection(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
@@ -2592,6 +2660,9 @@ namespace fxe::js {
     proto->Set(iso, "cursorPos", FunctionTemplate::New(iso, win_cursor_pos));
     proto->Set(iso, "setCursorLock", FunctionTemplate::New(iso, win_set_cursor_lock));
     proto->Set(iso, "setRawMouseMotion", FunctionTemplate::New(iso, win_set_raw_mouse_motion));
+    proto->Set(iso, "setDpiScaleOverride", FunctionTemplate::New(iso, win_set_dpi_scale_override));
+    proto->Set(iso, "dpiScale", FunctionTemplate::New(iso, win_dpi_scale));
+    proto->Set(iso, "hasDpiScaleOverride", FunctionTemplate::New(iso, win_has_dpi_scale_override));
     proto->Set(iso, "isRawMouseMotionSupported",
                FunctionTemplate::New(iso, win_is_raw_mouse_motion_supported));
     proto->Set(iso, "setContentProtection", FunctionTemplate::New(iso, win_set_content_protection));

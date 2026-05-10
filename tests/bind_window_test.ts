@@ -232,6 +232,47 @@ test('Window cursor, icon, drag region, and fullscreen methods validate safe inp
   });
 });
 
+test('Window DPI scale override methods expose logical scale without touching framebuffer size', () => {
+  withHiddenWindow((win) => {
+    assertEqual(win.hasDpiScaleOverride(), false);
+    assert(win.dpiScale() > 0, 'dpiScale should default to a positive value');
+    assertEqual(win.setDpiScaleOverride(2), true);
+    assertEqual(win.hasDpiScaleOverride(), true);
+    assertEqual(win.dpiScale(), 2);
+    for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, 0]) {
+      assertEqual(win.setDpiScaleOverride(invalid), false);
+      assertEqual(win.hasDpiScaleOverride(), true);
+      assertEqual(win.dpiScale(), 2);
+    }
+    assertEqual(win.setDpiScaleOverride(null), true);
+    assertEqual(win.hasDpiScaleOverride(), false);
+    assert(win.dpiScale() > 0, 'dpiScale should fall back to a positive value after clearing');
+    assertThrows(
+      () => win.setDpiScaleOverride('bogus' as unknown as number),
+      /number \| null \| undefined/,
+    );
+  });
+});
+
+test('Window setFullscreen accepts borderless and exclusive options forms', () => {
+  withHiddenWindow((win) => {
+    win.setFullscreen(false);
+    assertEqual(win.isFullscreen(), false);
+    win.setFullscreen(true, { mode: 'borderless' });
+    assertEqual(win.isFullscreen(), true);
+    win.setFullscreen(false);
+    assertEqual(win.isFullscreen(), false);
+    win.setFullscreen(true, { mode: 'exclusive' });
+    assertEqual(win.isFullscreen(), true);
+    win.setFullscreen(false);
+    assertEqual(win.isFullscreen(), false);
+    win.setFullscreen(true, 0);
+    assertEqual(win.isFullscreen(), true);
+    win.setFullscreen(false);
+    assertEqual(win.isFullscreen(), false);
+  });
+});
+
 test('Window state query and no-op methods are callable on hidden windows', () => {
   withHiddenWindow((win) => {
     assertEqual(typeof win.isFocused(), 'boolean');

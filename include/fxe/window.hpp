@@ -77,6 +77,11 @@ namespace fxe {
     titlebar,
     menu,
   };
+  enum class fullscreen_mode : u8 {
+    borderless,
+    exclusive,
+  };
+
   struct monitor_info {
     std::string name;
     int x = 0, y = 0;
@@ -165,6 +170,15 @@ namespace fxe {
     virtual void close() = 0;
     [[nodiscard]] virtual bool should_close() const = 0;
     [[nodiscard]] virtual math::uvec2 framebuffer_size() const = 0;
+    virtual void set_dpi_scale_override(std::optional<float> scale) {
+      (void)scale;
+    }
+    [[nodiscard]] virtual float dpi_scale() const {
+      return 1.0f;
+    }
+    [[nodiscard]] virtual bool has_dpi_scale_override() const {
+      return false;
+    }
     virtual void set_vsync(bool enabled) = 0;
     [[nodiscard]] virtual void* native_handle() const = 0;
 
@@ -296,8 +310,10 @@ namespace fxe {
     [[nodiscard]] virtual bool is_visible() const {
       return true;
     }
-    virtual void set_fullscreen(bool on, int monitor_index = -1) {
+    virtual void set_fullscreen(bool on, fullscreen_mode mode = fullscreen_mode::borderless,
+                                int monitor_index = -1) {
       (void)on;
+      (void)mode;
       (void)monitor_index;
     }
     [[nodiscard]] virtual bool is_fullscreen() const {

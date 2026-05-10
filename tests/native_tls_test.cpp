@@ -318,6 +318,38 @@ namespace {
     CHECK(result.server_received == "ping");
     CHECK(result.client_alpn == "http/1.1");
   }
+  void test_session_cache_key_isolation(const generated_certificate& cert_a,
+                                        const generated_certificate& cert_b) {
+    fxe::net::tls_options base;
+    base.host = "localhost";
+    base.port = 443;
+    base.ca_pem = cert_a.cert_pem;
+    base.alpn = {"h2", "http/1.1"};
+    base.sni = "localhost";
+    base.client_cert_pem = cert_a.cert_pem;
+    base.session_namespace = "default";
+
+    const auto key_a = fxe::net::tls_session_cache_key_for_test(base);
+    CHECK(!key_a.empty());
+    CHECK(key_a == fxe::net::tls_session_cache_key_for_test(base));
+
+    auto different_ca = base;
+    different_ca.ca_pem = cert_b.cert_pem;
+    CHECK(key_a != fxe::net::tls_session_cache_key_for_test(different_ca));
+
+    auto different_namespace = base;
+    different_namespace.session_namespace = "other";
+    CHECK(key_a != fxe::net::tls_session_cache_key_for_test(different_namespace));
+
+    auto different_sni = base;
+    different_sni.sni = "alt.localhost";
+    CHECK(key_a != fxe::net::tls_session_cache_key_for_test(different_sni));
+
+    auto different_client_cert = base;
+    different_client_cert.client_cert_pem = cert_b.cert_pem;
+    CHECK(key_a != fxe::net::tls_session_cache_key_for_test(different_client_cert));
+  }
+
 } // namespace
 
 int main() {
@@ -325,9 +357,14 @@ int main() {
   if (!cert.ok)
     std::fprintf(stderr, "certificate generation error: %s\n", cert.err.c_str());
   CHECK(cert.ok);
-  if (cert.ok) {
+  auto cert_b = make_self_signed_certificate();
+  if (!cert_b.ok)
+    std::fprintf(stderr, "second certificate generation error: %s\n", cert_b.err.c_str());
+  CHECK(cert_b.ok);
+  if (cert.ok && cert_b.ok) {
     test_verified_round_trip(cert);
     test_reject_unauthorized_false(cert);
+    test_session_cache_key_isolation(cert, cert_b);
   }
 
   std::fprintf(stderr, "native_tls_test: %d passed, %d failed\n", g_pass, g_fail);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fxe/types.hpp>
@@ -34,6 +35,9 @@ namespace fxe::net {
     std::string ca_path; // file path; takes precedence if non-empty
     bool reject_unauthorized = true;
     std::vector<std::string> alpn;
+    std::string sni;               // optional override; if empty, use host
+    std::string session_namespace; // Follow-up: plumb fetch/cookies/node-https isolation into this.
+    std::chrono::seconds session_ttl{0}; // 0 = use default (300s)
     std::string client_cert_pem;
     std::string client_cert_path; // file path; takes precedence if non-empty
     std::string client_key_pem;
@@ -44,6 +48,8 @@ namespace fxe::net {
     bool enable_session_resumption = true;
   };
 
+  // test-only: mirrors the internal TLS session cache identity derivation.
+  std::string tls_session_cache_key_for_test(const tls_options& opts);
   class tls_client {
   public:
     static std::unique_ptr<tls_client> connect(const tls_options&, std::string& err);

@@ -5,10 +5,13 @@
 #include <mbedtls/error.h>
 #include <mbedtls/net_sockets.h>
 #include <mbedtls/pk.h>
+#include <mbedtls/sha256.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/version.h>
 #include <mbedtls/x509_crt.h>
 
+#include <array>
+#include <chrono>
 #include <cstring>
 #include <fstream>
 #include <sstream>
@@ -18,7 +21,6 @@
 #include <list>
 #include <memory>
 #include <mutex>
-
 // <mbedtls/ssl.h> in the vcpkg-shipped 2.x/3.x builds exposes the RFC 6066
 // status_request extension identifier, but not a public client API to request
 // or retrieve stapled OCSP responses. Keep the gate at 0 until mbedTLS ships a
@@ -89,10 +91,24 @@ namespace fxe::net {
       return session;
     }
 
+    struct tls_session_identity {
+      std::string host;
+      u16 port = 443;
+      std::vector<std::string> alpn;
+      std::string sni;
+      std::string ca_fingerprint;
+      std::string client_cert_fingerprint;
+      bool reject_unauthorized = true;
+      std::string session_namespace;
+    };
+
     struct cached_session {
       std::string key;
       tls_session_ptr session;
+      std::chrono::steady_clock::time_point expires_at;
     };
+
+    constexpr auto k_default_session_ttl = std::chrono::seconds(300);
 
     std::mutex& session_cache_mu() {
       static std::mutex mu;
@@ -104,8 +120,81 @@ namespace fxe::net {
       return cache;
     }
 
-    std::string session_cache_key(const tls_options& opts) {
-      return opts.host + ":" + std::to_string(opts.port);
+    std::string sha256_hex(std::string_view data) {
+      std::array<unsigned char, 32> digest{};
+      const auto* bytes =
+          data.empty() ? nullptr : reinterpret_cast<const unsigned char*>(data.data());
+      (void)mbedtls_sha256(bytes, data.size(), digest.data(), 0);
+      static constexpr char k_hex[] = "0123456789abcdef";
+      std::string out;
+      out.resize(digest.size() * 2);
+      for (usize i = 0; i < digest.size(); ++i) {
+        out[i * 2] = k_hex[digest[i] >> 4];
+        out[i * 2 + 1] = k_hex[digest[i] & 0x0f];
+      }
+      return out;
+    }
+
+    std::string encode_session_key_field(char tag, std::string_view value) {
+      std::string out;
+      out.reserve(1 + 20 + 1 + value.size());
+      out.push_back(tag);
+      out += std::to_string(value.size());
+      out.push_back(':');
+      out.append(value.data(), value.size());
+      return out;
+    }
+
+    std::string encode_session_key_field(std::string_view tag, std::string_view value) {
+      std::string out;
+      out.reserve(tag.size() + 20 + 1 + value.size());
+      out.append(tag.data(), tag.size());
+      out += std::to_string(value.size());
+      out.push_back(':');
+      out.append(value.data(), value.size());
+      return out;
+    }
+
+    tls_session_identity make_session_identity(const tls_options& opts,
+                                               std::string_view effective_ca,
+                                               std::string_view effective_client_cert) {
+      tls_session_identity identity;
+      identity.host = opts.host;
+      identity.port = opts.port;
+      identity.alpn = opts.alpn;
+      identity.sni = opts.sni.empty() ? opts.host : opts.sni;
+      identity.ca_fingerprint = effective_ca.empty() ? std::string{} : sha256_hex(effective_ca);
+      identity.client_cert_fingerprint =
+          effective_client_cert.empty() ? std::string{} : sha256_hex(effective_client_cert);
+      identity.reject_unauthorized = opts.reject_unauthorized;
+      identity.session_namespace = opts.session_namespace;
+      return identity;
+    }
+
+    std::string session_cache_key(const tls_session_identity& identity) {
+      std::string alpn_joined;
+      for (usize i = 0; i < identity.alpn.size(); ++i) {
+        if (i != 0)
+          alpn_joined.push_back(',');
+        alpn_joined += identity.alpn[i];
+      }
+      std::string key;
+      key += encode_session_key_field('H', identity.host);
+      key += "|";
+      key += encode_session_key_field('P', std::to_string(identity.port));
+      key += "|";
+      key += encode_session_key_field('R', identity.reject_unauthorized ? "1" : "0");
+      key += "|";
+      key += encode_session_key_field('N', identity.session_namespace);
+      key += "|";
+      key += encode_session_key_field('S', identity.sni);
+      key += "|";
+      key += encode_session_key_field('A', alpn_joined);
+      key += "|";
+      key += encode_session_key_field("CA", identity.ca_fingerprint);
+      key += "|";
+      key += encode_session_key_field("CC", identity.client_cert_fingerprint);
+      return key;
     }
 
     void erase_cached_session_locked(const std::string& key) {
@@ -119,11 +208,18 @@ namespace fxe::net {
     }
 
     void apply_cached_session(mbedtls_ssl_context& ssl, const std::string& key) {
+      const auto now = std::chrono::steady_clock::now();
       std::lock_guard<std::mutex> lk(session_cache_mu());
       auto& cache = session_cache();
-      for (auto it = cache.begin(); it != cache.end(); ++it) {
-        if (it->key != key)
+      for (auto it = cache.begin(); it != cache.end();) {
+        if (it->expires_at <= now) {
+          it = cache.erase(it);
           continue;
+        }
+        if (it->key != key) {
+          ++it;
+          continue;
+        }
         int ret = mbedtls_ssl_set_session(&ssl, it->session.get());
         if (ret == 0) {
           cache.splice(cache.begin(), cache, it);
@@ -134,15 +230,18 @@ namespace fxe::net {
       }
     }
 
-    void store_cached_session(const mbedtls_ssl_context& ssl, const std::string& key) {
+    void store_cached_session(const mbedtls_ssl_context& ssl, const std::string& key,
+                              std::chrono::seconds ttl) {
       auto session = make_tls_session();
       if (mbedtls_ssl_get_session(&ssl, session.get()) != 0)
         return;
 
+      const auto effective_ttl = ttl.count() == 0 ? k_default_session_ttl : ttl;
       std::lock_guard<std::mutex> lk(session_cache_mu());
       auto& cache = session_cache();
       erase_cached_session_locked(key);
-      cache.push_front(cached_session{key, std::move(session)});
+      cache.push_front(cached_session{key, std::move(session),
+                                      std::chrono::steady_clock::now() + effective_ttl});
       while (cache.size() > 128)
         cache.pop_back();
     }
@@ -348,13 +447,15 @@ namespace fxe::net {
           return false;
         }
 
-        ret = mbedtls_ssl_set_hostname(&ssl_, opts.host.c_str());
+        const std::string effective_sni = opts.sni.empty() ? opts.host : opts.sni;
+        ret = mbedtls_ssl_set_hostname(&ssl_, effective_sni.c_str());
         if (ret != 0) {
           err = tls_error("mbedtls_ssl_set_hostname", ret);
           return false;
         }
 
-        const std::string cache_key = session_cache_key(opts);
+        const std::string cache_key =
+            session_cache_key(make_session_identity(opts, effective_ca, effective_client_cert));
         if (opts.enable_session_resumption)
           apply_cached_session(ssl_, cache_key);
         const std::string port = std::to_string(opts.port);
@@ -379,7 +480,7 @@ namespace fxe::net {
         }
 
         if (opts.enable_session_resumption)
-          store_cached_session(ssl_, cache_key);
+          store_cached_session(ssl_, cache_key, opts.session_ttl);
         return true;
       }
 
@@ -517,6 +618,23 @@ namespace fxe::net {
 
   bool tls_client::supports_ocsp_stapling() noexcept {
     return FXE_TLS_OCSP_STAPLING_SUPPORTED != 0;
+  }
+
+  std::string tls_session_cache_key_for_test(const tls_options& opts) {
+    std::string err;
+    std::string effective_ca = opts.ca_pem;
+    if (!opts.ca_path.empty()) {
+      effective_ca = read_file_to_string(opts.ca_path, err);
+      if (!err.empty())
+        return {};
+    }
+    std::string effective_client_cert = opts.client_cert_pem;
+    if (!opts.client_cert_path.empty()) {
+      effective_client_cert = read_file_to_string(opts.client_cert_path, err);
+      if (!err.empty())
+        return {};
+    }
+    return session_cache_key(make_session_identity(opts, effective_ca, effective_client_cert));
   }
 
   std::unique_ptr<tls_client> tls_client::connect(const tls_options& opts, std::string& err) {

@@ -526,8 +526,35 @@ declare namespace FXE {
     isMinimized(): boolean;
     isMaximized(): boolean;
     isVisible(): boolean;
+    /**
+     * Enter or leave fullscreen. The default mode is `'borderless'`, which applies a
+     * software-managed borderless fullscreen without changing the monitor video mode.
+     */
     setFullscreen(enabled: boolean, monitorIndex?: number): void;
+    setFullscreen(
+      enabled: boolean,
+      options: { mode?: 'borderless' | 'exclusive'; monitorIndex?: number },
+    ): void;
     isFullscreen(): boolean;
+    /**
+     * Set a software-only logical DPI scale override for this window. Framebuffer
+     * dimensions and native monitor scaling are unaffected.
+     *
+     * Pass `null` to clear the override and resume the OS-derived content scale.
+     * Returns `true` when the override was applied or cleared, `false` for invalid
+     * numeric values.
+     */
+    setDpiScaleOverride(scale: number | null): boolean;
+    /**
+     * Read the software-only logical DPI scale for this window. Framebuffer
+     * dimensions are unaffected.
+     */
+    dpiScale(): number;
+    /**
+     * Whether a software-only logical DPI scale override is currently active.
+     * Framebuffer dimensions are unaffected.
+     */
+    hasDpiScaleOverride(): boolean;
     setCursor(kind: CursorKind): void;
     setCursorVisible(visible: boolean): void;
     setCursorPos(x: number, y: number): void;

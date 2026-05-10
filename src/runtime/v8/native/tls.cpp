@@ -170,6 +170,8 @@ namespace fxe::runtime {
       out.ca_pem = string_option(iso, ctx, options, "ca");
       out.reject_unauthorized = bool_option(iso, ctx, options, "rejectUnauthorized", true);
       out.alpn = string_list_option(iso, ctx, options, "ALPNProtocols");
+      out.sni = string_option(iso, ctx, options, "servername");
+      out.session_namespace = string_option(iso, ctx, options, "sessionNamespace");
       return out;
     }
 

@@ -1,6 +1,7 @@
 #include "../os/os.hpp"
 #include <array>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1062,6 +1063,25 @@ namespace fxe {
       glfwGetFramebufferSize(handle_, &w, &h);
       return {w, h};
     }
+    void set_dpi_scale_override(std::optional<float> scale) override {
+      if (scale && std::isfinite(*scale) && *scale > 0.0f) {
+        dpi_scale_override_ = *scale;
+      } else {
+        dpi_scale_override_.reset();
+      }
+    }
+    [[nodiscard]] float dpi_scale() const override {
+      if (dpi_scale_override_)
+        return *dpi_scale_override_;
+      float scale_x = 1.0f;
+      float scale_y = 1.0f;
+      glfwGetWindowContentScale(handle_, &scale_x, &scale_y);
+      const float scale = scale_x > scale_y ? scale_x : scale_y;
+      return std::isfinite(scale) && scale > 0.0f ? scale : 1.0f;
+    }
+    [[nodiscard]] bool has_dpi_scale_override() const override {
+      return dpi_scale_override_.has_value();
+    }
     void set_vsync(bool enabled) override {
 #if defined(__APPLE__) && FXE_HAS_WGPU
       if (metal_layer_) {
@@ -1412,13 +1432,20 @@ namespace fxe {
     bool is_visible() const override {
       return glfwGetWindowAttrib(handle_, GLFW_VISIBLE) != 0;
     }
-    void set_fullscreen(bool on, int monitor_index = -1) override {
-      if (on == fullscreen_)
+    void set_fullscreen(bool on, fullscreen_mode mode = fullscreen_mode::borderless,
+                        int monitor_index = -1) override {
+      if (!on && !fullscreen_)
         return;
+      if (on && fullscreen_) {
+        if (mode == fullscreen_mode_ && monitor_index == fullscreen_monitor_index_)
+          return;
+        set_fullscreen(false);
+      }
       if (on) {
-        // Save windowed rect.
         glfwGetWindowPos(handle_, &saved_x_, &saved_y_);
         glfwGetWindowSize(handle_, &saved_w_, &saved_h_);
+        saved_decorated_ = glfwGetWindowAttrib(handle_, GLFW_DECORATED) == GLFW_TRUE;
+        saved_floating_ = glfwGetWindowAttrib(handle_, GLFW_FLOATING) == GLFW_TRUE;
         int count = 0;
         GLFWmonitor** mons = glfwGetMonitors(&count);
         GLFWmonitor* m = nullptr;
@@ -1428,22 +1455,53 @@ namespace fxe {
           m = glfwGetPrimaryMonitor();
         if (!m)
           return;
-        const GLFWvidmode* mode = glfwGetVideoMode(m);
-        if (!mode)
+        const GLFWvidmode* video_mode = glfwGetVideoMode(m);
+        if (!video_mode)
           return;
-        glfwSetWindowMonitor(handle_, m, 0, 0, mode->width, mode->height, mode->refreshRate);
-        fullscreen_ = true;
-      } else {
-        int x = saved_x_, y = saved_y_, w = saved_w_, h = saved_h_;
-        if (w <= 0 || h <= 0) {
-          w = 1280;
-          h = 720;
-          x = 100;
-          y = 100;
+        fullscreen_mode_ = mode;
+        fullscreen_monitor_index_ = monitor_index;
+        if (mode == fullscreen_mode::exclusive) {
+          glfwSetWindowMonitor(handle_, m, 0, 0, video_mode->width, video_mode->height,
+                               video_mode->refreshRate);
+        } else {
+          int x = 0;
+          int y = 0;
+          int work_width = 0;
+          int work_height = 0;
+          glfwGetMonitorWorkarea(m, &x, &y, &work_width, &work_height);
+          (void)work_width;
+          (void)work_height;
+          glfwSetWindowMonitor(handle_, nullptr, x, y, video_mode->width, video_mode->height, 0);
+          glfwSetWindowAttrib(handle_, GLFW_DECORATED, GLFW_FALSE);
+          glfwSetWindowAttrib(handle_, GLFW_FLOATING, GLFW_TRUE);
+#if defined(__APPLE__)
+          fxe_macos_set_movable_by_background((__bridge void*)glfwGetCocoaWindow(handle_), true);
+#endif
         }
-        glfwSetWindowMonitor(handle_, nullptr, x, y, w, h, 0);
-        fullscreen_ = false;
+        fullscreen_ = true;
+        return;
       }
+      int x = saved_x_;
+      int y = saved_y_;
+      int w = saved_w_;
+      int h = saved_h_;
+      if (w <= 0 || h <= 0) {
+        w = 1280;
+        h = 720;
+        x = 100;
+        y = 100;
+      }
+      glfwSetWindowMonitor(handle_, nullptr, x, y, w, h, 0);
+      glfwSetWindowAttrib(handle_, GLFW_DECORATED, saved_decorated_ ? GLFW_TRUE : GLFW_FALSE);
+      glfwSetWindowAttrib(handle_, GLFW_FLOATING, saved_floating_ ? GLFW_TRUE : GLFW_FALSE);
+#if defined(__APPLE__)
+      fxe_macos_set_movable_by_background((__bridge void*)glfwGetCocoaWindow(handle_),
+                                          !saved_decorated_);
+#endif
+      decorated_ = saved_decorated_;
+      fullscreen_ = false;
+      fullscreen_mode_ = fullscreen_mode::borderless;
+      fullscreen_monitor_index_ = -1;
     }
     bool is_fullscreen() const override {
       return fullscreen_;
@@ -2685,7 +2743,12 @@ namespace fxe {
     std::optional<math::ivec2> min_size_limit_;
     std::optional<math::ivec2> max_size_limit_;
     int saved_x_ = 100, saved_y_ = 100, saved_w_ = 1280, saved_h_ = 720;
+    std::optional<float> dpi_scale_override_;
     bool fullscreen_ = false;
+    fullscreen_mode fullscreen_mode_ = fullscreen_mode::borderless;
+    int fullscreen_monitor_index_ = -1;
+    bool saved_decorated_ = true;
+    bool saved_floating_ = false;
     bool content_protection_ = false;
     std::atomic<int> mods_{0};
     double last_cursor_x_ = 0.0, last_cursor_y_ = 0.0;
@@ -2758,6 +2821,19 @@ namespace fxe {
     math::uvec2 framebuffer_size() const override {
       return size_;
     }
+    void set_dpi_scale_override(std::optional<float> scale) override {
+      if (scale && std::isfinite(*scale) && *scale > 0.0f) {
+        dpi_scale_override_ = *scale;
+      } else {
+        dpi_scale_override_.reset();
+      }
+    }
+    [[nodiscard]] float dpi_scale() const override {
+      return dpi_scale_override_.value_or(1.0f);
+    }
+    [[nodiscard]] bool has_dpi_scale_override() const override {
+      return dpi_scale_override_.has_value();
+    }
     void set_vsync(bool) override {}
     void* native_handle() const override {
       return nullptr;
@@ -2766,6 +2842,7 @@ namespace fxe {
   private:
     math::uvec2 size_{};
     bool closed_ = false;
+    std::optional<float> dpi_scale_override_;
     std::atomic<bool> redraw_requested_{true};
   };
 

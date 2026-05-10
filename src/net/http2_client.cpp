@@ -496,19 +496,19 @@ namespace fxe::net {
 
   std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
                                                       std::string& err) {
-    return connect(host, port, std::string{}, true, http2_settings{}, err);
+    return connect(host, port, std::string{}, true, http2_settings{}, std::string{}, err);
   }
 
   std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
                                                       const http2_settings& settings,
                                                       std::string& err) {
-    return connect(host, port, std::string{}, true, settings, err);
+    return connect(host, port, std::string{}, true, settings, std::string{}, err);
   }
 
   std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
                                                       const std::string& ca_pem,
                                                       bool reject_unauthorized, std::string& err) {
-    return connect(host, port, ca_pem, reject_unauthorized, http2_settings{}, err);
+    return connect(host, port, ca_pem, reject_unauthorized, http2_settings{}, std::string{}, err);
   }
 
   std::unique_ptr<http2_client> http2_client::connect(const std::string& host, u16 port,
@@ -516,12 +516,20 @@ namespace fxe::net {
                                                       bool reject_unauthorized,
                                                       const http2_settings& settings,
                                                       std::string& err) {
+    return connect(host, port, ca_pem, reject_unauthorized, settings, std::string{}, err);
+  }
+
+  std::unique_ptr<http2_client>
+  http2_client::connect(const std::string& host, u16 port, const std::string& ca_pem,
+                        bool reject_unauthorized, const http2_settings& settings,
+                        std::string session_namespace, std::string& err) {
     tls_options options;
     options.host = host;
     options.port = port;
     options.ca_pem = ca_pem;
     options.reject_unauthorized = reject_unauthorized;
     options.alpn = {"h2"};
+    options.session_namespace = std::move(session_namespace);
     auto tls = tls_client::connect(options, err);
     if (!tls)
       return nullptr;

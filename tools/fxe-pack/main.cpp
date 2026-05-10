@@ -28,6 +28,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "bundle.hpp"
@@ -284,8 +285,43 @@ namespace {
     return "CN=" + a.name;
   }
 
+  int run_command(const std::string& command) {
+    return std::system(command.c_str());
+  }
+
+  // ~3 min total grace; tune by editing schedule.
+  void staple_with_retry_or_die(const fs::path& target, const char* label) {
+#if defined(__APPLE__)
+    constexpr int sleep_schedule[] = {0, 5, 15, 30, 60, 60};
+    constexpr int attempt_count =
+        static_cast<int>(sizeof(sleep_schedule) / sizeof(sleep_schedule[0]));
+    for (int attempt = 0; attempt < attempt_count; ++attempt) {
+      if (sleep_schedule[attempt] > 0)
+        std::this_thread::sleep_for(std::chrono::seconds(sleep_schedule[attempt]));
+      std::cerr << "fxe-pack: stapler attempt " << (attempt + 1) << "/" << attempt_count << " for "
+                << label << "\n";
+      std::ostringstream staple_cmd;
+      staple_cmd << "xcrun stapler staple " << shell_quote(target);
+      int rc = run_command(staple_cmd.str());
+      if (rc == 0)
+        return;
+      if (attempt + 1 == attempt_count)
+        break;
+      std::cerr << "fxe-pack: stapler attempt " << (attempt + 1) << "/" << attempt_count
+                << " failed (rc=" << rc << "); sleeping " << sleep_schedule[attempt + 1]
+                << "s before retry\n";
+    }
+    die(std::string(label) +
+        " stapling failed after 6 attempts; the notary ticket may not have propagated yet — "
+        "re-run after a delay");
+#else
+    (void)target;
+    (void)label;
+#endif
+  }
+
   void run_command_or_die(const std::string& command, const std::string& action) {
-    int rc = std::system(command.c_str());
+    int rc = run_command(command);
     if (rc != 0)
       die(action + " failed with exit code " + std::to_string(rc));
   }
@@ -864,9 +900,7 @@ namespace {
     run_command_or_die(submit_cmd.str(), "notarization");
     fs::remove(zip);
 
-    std::ostringstream staple_cmd;
-    staple_cmd << "xcrun stapler staple " << shell_quote(app);
-    run_command_or_die(staple_cmd.str(), "notarization stapling");
+    staple_with_retry_or_die(app, "notarization");
 #else
     (void)a;
     (void)app;
@@ -984,9 +1018,7 @@ namespace {
                << shell_quote(fs::path(a.notarize_profile)) << " --wait";
     run_command_or_die(submit_cmd.str(), "DMG notarization");
 
-    std::ostringstream staple_cmd;
-    staple_cmd << "xcrun stapler staple " << shell_quote(dmg);
-    run_command_or_die(staple_cmd.str(), "DMG notarization stapling");
+    staple_with_retry_or_die(dmg, "DMG notarization");
 #else
     (void)a;
     (void)dmg;
