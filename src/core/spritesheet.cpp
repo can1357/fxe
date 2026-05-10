@@ -9,6 +9,7 @@
 // stb_image / stb_image_resize remain in use for image decode/resize.
 // stb_truetype is gone.
 
+#include <fxe/log.hpp>
 #include <fxe/spritesheet.hpp>
 #include <fxe/system_fonts.hpp>
 #include <fxe/types.hpp>
@@ -256,8 +257,7 @@ namespace fxe {
       try {
         static std::once_flag once;
         std::call_once(once, [] {
-          std::fprintf(stderr,
-                       "fxe::font: discovery + system font load failed; draw_text is a no-op\n");
+          FXE_ERROR("font.discovery", "discovery + system font load failed; draw_text is a no-op");
         });
       } catch (...) {
       }

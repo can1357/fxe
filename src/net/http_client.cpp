@@ -34,6 +34,7 @@ namespace fxe::net {
       return s;
     }
 
+#ifdef FXE_HAS_CURL
     parsed_url parse_url_for_cookies(const std::string& url) {
       parsed_url out;
       auto scheme_end = url.find("://");
@@ -61,6 +62,7 @@ namespace fxe::net {
       out.host = ascii_lower_copy(out.host);
       return out;
     }
+#endif
 
   } // namespace
 

@@ -1,7 +1,13 @@
 import type { CommandBuffer } from 'fxe';
 import { layout } from '../layout/index.ts';
 import type { LayoutNode, LayoutResult } from '../layout/types.ts';
-import { type BoundaryChild, Draw, Layer, type Node } from '../reconciler/fiber.ts';
+import {
+  type BoundaryChild,
+  Draw,
+  Layer,
+  type Node,
+  rebuildChildren,
+} from '../reconciler/fiber.ts';
 import { flattenStyle, splitStyle } from '../style/resolve.ts';
 import type { Style, StyleValue, TextStyle } from '../style/types.ts';
 
@@ -11,9 +17,13 @@ export interface UIBaseProps {
   children?: BoundaryChild;
 }
 
+function isBoundaryChildArray(child: BoundaryChild): child is readonly BoundaryChild[] {
+  return Array.isArray(child);
+}
+
 export function normalizeChildren(child: BoundaryChild): Node[] {
   if (child === null || child === undefined || typeof child === 'boolean') return [];
-  if (Array.isArray(child)) return child.flatMap((entry) => normalizeChildren(entry));
+  if (isBoundaryChildArray(child)) return child.flatMap((entry) => normalizeChildren(entry));
   return [child];
 }
 
@@ -43,24 +53,12 @@ export function attachInternalLayout(
   textStyle?: TextStyle,
 ): Node {
   if (node.type === 'component') {
-    return {
-      ...node,
-      internalLayout: layoutResult,
-      internalTextStyle: textStyle,
-    };
+    return { ...node, internalLayout: layoutResult, internalTextStyle: textStyle };
   }
   if (node.type === 'layer') {
     if (node.props.children.length !== 1) return node;
     const attached = attachInternalLayout(node.props.children[0], layoutResult, textStyle);
-    return attached === node.props.children[0]
-      ? node
-      : {
-          ...node,
-          props: {
-            ...node.props,
-            children: [attached],
-          },
-        };
+    return attached === node.props.children[0] ? node : rebuildChildren(node, [attached]);
   }
   if (
     node.type === 'provider' ||
@@ -71,15 +69,7 @@ export function attachInternalLayout(
     const children = normalizeChildren(node.props.children);
     if (children.length !== 1) return node;
     const attached = attachInternalLayout(children[0], layoutResult, textStyle);
-    return attached === children[0]
-      ? node
-      : {
-          ...node,
-          props: {
-            ...node.props,
-            children: [attached],
-          },
-        };
+    return attached === children[0] ? node : rebuildChildren(node, [attached]);
   }
   return node;
 }

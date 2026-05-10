@@ -8,6 +8,7 @@
 #include "bind_performance.hpp"
 #include <chrono>
 #include <cstdio>
+#include <fxe/log.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_literals.hpp>
 #include <limits>
@@ -84,10 +85,8 @@ namespace fxe::js {
         auto it = s.entries.find(name);
         if (it == s.entries.end() || !it->second.open) {
           if (s.unmatched_end_warned.insert(name).second) {
-            std::fprintf(
-                stderr, "[fxe] performance.timeline.endMark('%s') ignored: no matching beginMark\n",
-                name.c_str());
-            std::fflush(stderr);
+            FXE_WARN("js.performance",
+                     "performance.timeline.endMark('{}') ignored: no matching beginMark", name);
           }
           return;
         }

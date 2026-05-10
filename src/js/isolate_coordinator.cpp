@@ -1,11 +1,11 @@
 #include "isolate_coordinator.hpp"
 
+#include <fxe/log.hpp>
 #include <fxe/v8_host.hpp>
 
 #include <cstdio>
 #include <exception>
 #include <vector>
-
 namespace {
   thread_local uint64_t g_current_runtime_id = 0;
 }
@@ -43,8 +43,8 @@ namespace fxe::js {
         }
       }
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe: failed to start window isolate runtime %llu: %s\n",
-                   static_cast<unsigned long long>(state->id), e.what());
+      FXE_ERROR("js.isolate", "failed to start window isolate runtime {}: {}",
+                static_cast<unsigned long long>(state->id), e.what());
       {
         std::lock_guard lock(state->mu);
         state->started = true;
@@ -53,8 +53,8 @@ namespace fxe::js {
       }
       state->cv.notify_all();
     } catch (...) {
-      std::fprintf(stderr, "fxe: failed to start window isolate runtime %llu\n",
-                   static_cast<unsigned long long>(state->id));
+      FXE_ERROR("js.isolate", "failed to start window isolate runtime {}",
+                static_cast<unsigned long long>(state->id));
       {
         std::lock_guard lock(state->mu);
         state->started = true;
@@ -95,14 +95,14 @@ namespace fxe::js {
     try {
       raw->thread = std::thread([raw] { runtime_thread_main(raw); });
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "fxe: failed to spawn window isolate thread %llu: %s\n",
-                   static_cast<unsigned long long>(raw->id), e.what());
+      FXE_ERROR("js.isolate", "failed to spawn window isolate thread {}: {}",
+                static_cast<unsigned long long>(raw->id), e.what());
       std::lock_guard lock(runtimes_mu_);
       runtimes_.erase(raw->id);
       return 0;
     } catch (...) {
-      std::fprintf(stderr, "fxe: failed to spawn window isolate thread %llu\n",
-                   static_cast<unsigned long long>(raw->id));
+      FXE_ERROR("js.isolate", "failed to spawn window isolate thread {}",
+                static_cast<unsigned long long>(raw->id));
       std::lock_guard lock(runtimes_mu_);
       runtimes_.erase(raw->id);
       return 0;

@@ -12,7 +12,13 @@
 //   - Edit-keystroke invalidation tracks `doc.revision()`, not span
 //     objects; unchanged frames re-use the cached Layer paint output.
 
-import { type Color, type CommandBuffer, Primitives } from 'fxe';
+import {
+  type Color,
+  type CommandBuffer,
+  type MouseButtonEvent,
+  Primitives,
+  type TextDocument,
+} from 'fxe';
 import { recordLayout } from '../debug/layout_trace.ts';
 import { registerHitTarget, type SyntheticEvent } from '../mount/hit_test.ts';
 import {

@@ -15,6 +15,7 @@
 #include "../runtime/v8/native/vm.hpp"
 #include "../runtime/v8/node_compat.hpp"
 #include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
 #include <fxe/types.hpp>
 #include <fxe/typescript.hpp>
 #include <fxe/v8_host.hpp>

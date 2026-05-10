@@ -1,5 +1,6 @@
 #include "bind_process.hpp"
 #include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 
@@ -910,8 +911,8 @@ namespace fxe::js {
         if (tc.HasCaught()) {
           String::Utf8Value u(iso, tc.Exception());
           if (*u)
-            std::fprintf(stderr, "process listener for '%.*s' threw: %s\n",
-                         static_cast<int>(event.size()), event.data(), *u);
+            FXE_ERROR("js.process", "process listener for '{}' threw: {}",
+                      std::string_view(event.data(), event.size()), *u);
           tc.Reset();
         }
       }

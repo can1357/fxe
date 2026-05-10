@@ -83,9 +83,13 @@ const paintKeys = new Set<keyof PaintStyle>([
   'pointerEvents',
 ]);
 
+function isStyleValueArray(value: StyleValue): value is readonly StyleValue[] {
+  return Array.isArray(value);
+}
+
 export function flattenStyle(value: StyleValue): Style {
   if (!value) return {};
-  if (Array.isArray(value)) return Object.assign({}, ...value.map(flattenStyle));
+  if (isStyleValueArray(value)) return Object.assign({}, ...value.map(flattenStyle));
   return value;
 }
 

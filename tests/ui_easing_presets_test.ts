@@ -1,4 +1,4 @@
-import { Easings, cubicBezier, springPreset } from 'fxe-ui';
+import { cubicBezier, Easings, springPreset } from 'fxe-ui';
 import { assert, assertEqual, assertThrows, run, test } from './ts_harness.ts';
 
 test('cubicBezier materialStandard preserves endpoints and stays monotonic', () => {

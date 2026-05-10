@@ -22,13 +22,14 @@
 #include "bind_sqlite.hpp"
 #include "weak_holder.hpp"
 
-#include <fxe/js_bindings.hpp>
-#include <fxe/v8_helpers.hpp>
-#include <fxe/v8_literals.hpp>
-
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
+#include <fxe/types.hpp>
+#include <fxe/v8_helpers.hpp>
+#include <fxe/v8_literals.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -160,12 +161,10 @@ namespace fxe::js {
           joined += ", ";
         joined += key;
       }
-      std::fprintf(
-          stderr,
-          "[fxe] sqlite: ignored unknown non-strict bind key(s): %s "
-          "(Bun-compatible; opt in with globalThis.__FXE_SQLITE_WARN_UNKNOWN_KEYS = true)\n",
-          joined.c_str());
-      std::fflush(stderr);
+      FXE_WARN("js.sqlite",
+               "ignored unknown non-strict bind key(s): {} (Bun-compatible; opt in with "
+               "globalThis.__FXE_SQLITE_WARN_UNKNOWN_KEYS = true)",
+               joined);
     }
 
     db_holder* unwrap_db(Local<Object> obj) {

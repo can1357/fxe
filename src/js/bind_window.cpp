@@ -6,12 +6,6 @@
 
 #include "../runtime/capabilities.hpp"
 #include "../runtime/v8/fxe_native.hpp"
-#include <fxe/js_bindings.hpp>
-#include <fxe/types.hpp>
-#include <fxe/v8_host.hpp>
-#include <fxe/v8_literals.hpp>
-#include <fxe/window.hpp>
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -22,6 +16,12 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
+#include <fxe/types.hpp>
+#include <fxe/v8_host.hpp>
+#include <fxe/v8_literals.hpp>
+#include <fxe/window.hpp>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -783,9 +783,7 @@ namespace fxe::js {
           if (!fn->Call(ctx, ctx->Global(), 1, argv).ToLocal(&result)) {
             if (tc.HasCaught()) {
               auto exc = utf8(iso, tc.Exception());
-              std::fprintf(stderr, "[fxe] uncaught in window handler (%s): %s\n", name,
-                           exc.c_str());
-              std::fflush(stderr);
+              FXE_ERROR("js.window", "uncaught in window handler ({}): {}", name, exc);
               tc.Reset();
             }
           }
@@ -893,8 +891,9 @@ namespace fxe::js {
       if (isolate_mode == "own") {
         auto rid = isolate_coordinator::get().spawn_window_runtime();
         if (rid == 0) {
-          std::fprintf(stderr, "fxe: WindowOptions.isolate='own' failed to start a dedicated "
-                               "runtime; falling back to 'shared'.\n");
+          FXE_WARN("js.window.isolate",
+                   "WindowOptions.isolate='own' failed to start a dedicated runtime; falling "
+                   "back to 'shared'.");
           isolate_mode = "shared";
         } else {
           h->isolate_runtime_id = rid;
@@ -902,22 +901,23 @@ namespace fxe::js {
           // smoke signal that the child isolate is alive and can accept work.
           if (!isolate_coordinator::get().post_task(rid, [rid, preload] {
                 if (preload.empty()) {
-                  std::fprintf(stderr,
-                               "fxe: window isolate %llu ready; main-thread window marshaling is "
-                               "still pending.\n",
-                               static_cast<unsigned long long>(rid));
+                  FXE_INFO("js.window.isolate",
+                           "window isolate {} ready; main-thread window marshaling is still "
+                           "pending.",
+                           static_cast<unsigned long long>(rid));
                 } else {
-                  std::fprintf(stderr,
-                               "fxe: window isolate %llu ready; deferred preload '%s' until "
-                               "cross-thread window marshaling lands.\n",
-                               static_cast<unsigned long long>(rid), preload.c_str());
+                  FXE_INFO("js.window.isolate",
+                           "window isolate {} ready; deferred preload '{}' until cross-thread "
+                           "window marshaling lands.",
+                           static_cast<unsigned long long>(rid), preload);
                 }
               })) {
             (void)isolate_coordinator::get().stop_runtime(rid);
             h->isolate_runtime_id = 0;
             isolate_mode = "shared";
-            std::fprintf(stderr, "fxe: WindowOptions.isolate='own' could not queue startup work; "
-                                 "falling back to 'shared'.\n");
+            FXE_WARN("js.window.isolate",
+                     "WindowOptions.isolate='own' could not queue startup work; falling back to "
+                     "'shared'.");
           }
         }
       }
@@ -2215,8 +2215,7 @@ namespace fxe::js {
         if (!cb->Call(ctx, ctx->Global(), 1, argv).ToLocal(&result)) {
           if (tc.HasCaught()) {
             auto exc = utf8(iso, tc.Exception());
-            std::fprintf(stderr, "[fxe] uncaught in onFrame: %s\n", exc.c_str());
-            std::fflush(stderr);
+            FXE_ERROR("js.window", "uncaught in onFrame: {}", exc);
             tc.Reset();
           }
           return false;

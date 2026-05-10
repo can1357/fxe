@@ -6,9 +6,11 @@ export interface DevtoolsFiberNode {
   displayName: string | null;
   key: string;
   props: string;
+  propsSummary: string;
   dirty: boolean;
   lastRebuildFrame: number;
   cacheHit: DevtoolsFiberCacheHit;
+  cacheHitMiss: 'hit' | 'miss' | null;
   deps: unknown[][];
   children: DevtoolsFiberNode[];
 }

@@ -684,7 +684,7 @@ QENLXORjrGTuwyCiCmAv0pnteiiPCTjMWKe1kGUQ49whBUPkRItJ7CazX5zooEzu
   }
 } // namespace
 
-int main(int argc, char** argv) {
+int main(int, char** argv) {
   fxe::js::initialize(argv[0], FXE_V8_ICUDTL_PATH);
   {
     fxe::js::host host;

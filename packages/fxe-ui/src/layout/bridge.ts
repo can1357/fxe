@@ -5,14 +5,6 @@
 import type { TaggedMeasureFn } from './measure.ts';
 import type { Constraint, LayoutNode, LayoutResult, LayoutStyle, Length } from './types.ts';
 
-const NativeLayout = (
-  globalThis as { Layout?: { solve: (root: unknown, constraint?: Constraint) => LayoutResult } }
-).Layout;
-
-if (NativeLayout === undefined) {
-  throw new Error('fxe-ui: native Layout binding not available — link fxe_layout into fxe_js');
-}
-
 export function resolveLength(v: Length | undefined, parent: number | undefined, auto = 0): number {
   if (v === undefined || v === 'auto') return auto;
   if (typeof v === 'number') return v;
@@ -23,14 +15,10 @@ export function resolveLength(v: Length | undefined, parent: number | undefined,
   throw new TypeError(`unsupported length: ${String(v)}`);
 }
 
-interface MeasureDescriptor {
-  kind: 'text' | 'image' | 'js';
-  text?: string;
-  fontSize?: number;
-  width?: number;
-  height?: number;
-  fn?: (c: Constraint) => { width: number; height: number };
-}
+type MeasureDescriptor =
+  | { kind: 'text'; text: string; fontSize: number }
+  | { kind: 'image'; width: number; height: number }
+  | { kind: 'js'; fn: (c: Constraint) => { width: number; height: number } };
 
 interface NodeDescriptor {
   style?: LayoutStyle;
@@ -80,7 +68,7 @@ function buildDescriptor(node: LayoutNode): NodeDescriptor {
 
 export function solveLayout(root: LayoutNode, available: Constraint = {}): LayoutResult {
   const desc = buildDescriptor(root);
-  return NativeLayout.solve(desc, available);
+  return Layout.solve(desc, available);
 }
 
 export { solveLayout as layout };

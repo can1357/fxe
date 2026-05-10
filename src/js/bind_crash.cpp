@@ -1,6 +1,7 @@
 #include "bind_crash.hpp"
 
 #include <fxe/crash.hpp>
+#include <fxe/log.hpp>
 
 #include <atomic>
 #include <cstdio>
@@ -134,7 +135,7 @@ namespace fxe::js {
       if (g_auto_self_test_ran.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         auto result = fxe::os::crash_self_test();
         if (!result.ok) {
-          std::fprintf(stderr, "[fxe] crash self-test failed: %s\n", result.error.c_str());
+          FXE_ERROR("crash.selftest", "crash self-test failed: {}", result.error);
           std::exit(1);
         }
       }

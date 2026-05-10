@@ -154,8 +154,8 @@ function paintBorderSide(
   const color = sideColor(paint, side);
   // Dashed/dotted rounded borders require arc decomposition that lands in P3a.
   const effectiveStyle = rounded && style !== 'solid' ? 'solid' : style;
-  if (effectiveStyle === 'solid') {
-    fillSolidBorderSide(cb, side, x, y, w, h, width, color);
+  if (effectiveStyle === 'solid' || effectiveStyle === 'none') {
+    if (effectiveStyle === 'solid') fillSolidBorderSide(cb, side, x, y, w, h, width, color);
   } else {
     fillSegmentedBorderSide(cb, side, x, y, w, h, width, color, effectiveStyle);
   }

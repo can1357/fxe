@@ -1373,6 +1373,10 @@ declare module 'fxe' {
   export type WindowMessageEvent = FXE.WindowMessageEvent;
   export type ComposeEvent = FXE.ComposeEvent;
   export type MouseButtonEvent = FXE.MouseButtonEvent;
+  export type KeyEvent = FXE.KeyEvent;
+  export type KeypressEvent = FXE.KeypressEvent;
+  export type MouseMoveEvent = FXE.MouseMoveEvent;
+  export type WheelEvent = FXE.WheelEvent;
   export type DragEnterEvent = FXE.DragEnterEvent;
   export type DragOverEvent = FXE.DragOverEvent;
   export type DragLeaveEvent = FXE.DragLeaveEvent;

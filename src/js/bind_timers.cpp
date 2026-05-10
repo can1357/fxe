@@ -1,5 +1,6 @@
 #include "bind_timers.hpp"
 #include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 
@@ -386,9 +387,9 @@ namespace fxe::js {
       static bool warned = false;
       if (!warned) {
         warned = true;
-        std::fprintf(stderr, "[fxe] timer fired before the window subsystem was ready; "
-                             "wake_event_loop was a no-op\n");
-        std::fflush(stderr);
+        FXE_WARN("js.timers",
+                 "timer fired before the window subsystem was ready; wake_event_loop was a "
+                 "no-op");
       }
     }
   }

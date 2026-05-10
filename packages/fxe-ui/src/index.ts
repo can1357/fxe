@@ -9,6 +9,7 @@ export * from './mount/index.ts';
 export * from './reconciler/devtools.ts';
 export * from './reconciler/external_store.ts';
 export * from './reconciler/fiber.ts';
+export * from './reconciler/frame_profile.ts';
 export * from './reconciler/scheduler.ts';
 export * from './reconciler/signals.ts';
 export * from './reconciler/store_helpers.ts';

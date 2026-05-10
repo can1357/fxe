@@ -284,30 +284,6 @@ namespace fxe::js {
       return false;
     }
 
-    bool read_string_vector(Isolate* iso, Local<Context> ctx, Local<Value> value,
-                            std::vector<std::string>& out, const char* label) {
-      if (value.IsEmpty() || value->IsUndefined())
-        return true;
-      if (!value->IsArray()) {
-        iso->ThrowException(
-            Exception::TypeError(s8(iso, std::string(label) + " must be an array")));
-        return false;
-      }
-      auto arr = value.As<Array>();
-      out.clear();
-      out.reserve(arr->Length());
-      for (u32 i = 0; i < arr->Length(); ++i) {
-        Local<Value> item;
-        if (!arr->Get(ctx, i).ToLocal(&item) || !item->IsString()) {
-          iso->ThrowException(
-              Exception::TypeError(s8(iso, std::string(label) + " entries must be strings")));
-          return false;
-        }
-        out.push_back(to_str(iso, item));
-      }
-      return true;
-    }
-
     Local<Value> private_get_or_null(Isolate* iso, Local<Context> ctx, Local<Object> obj,
                                      const char* key) {
       Local<Value> value;

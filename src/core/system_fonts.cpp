@@ -1,3 +1,4 @@
+#include <fxe/log.hpp>
 #include <fxe/system_fonts.hpp>
 #include <fxe/types.hpp>
 
@@ -5,7 +6,6 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
-
 namespace {
   struct font_attempt {
     std::filesystem::path path;
@@ -23,15 +23,18 @@ namespace {
       return;
     g_logged = true;
 
-    std::fprintf(stderr, "fxe: failed to load a system font; attempted paths:\n");
     if (attempts.empty()) {
-      std::fprintf(stderr, "  (no candidates)\n");
+      FXE_ERROR("font.discovery", "failed to load a system font; (no candidates)");
       return;
     }
+    std::string detail;
     for (const auto& attempt : attempts) {
-      const std::string path = attempt.path.string();
-      std::fprintf(stderr, "  %s: %s\n", path.c_str(), attempt.reason.c_str());
+      detail += "\n  ";
+      detail += attempt.path.string();
+      detail += ": ";
+      detail += attempt.reason;
     }
+    FXE_ERROR("font.discovery", "failed to load a system font; attempted paths:{}", detail);
   }
 } // namespace
 namespace fxe {

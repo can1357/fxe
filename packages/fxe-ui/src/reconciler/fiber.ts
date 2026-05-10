@@ -16,10 +16,10 @@
 // Hooks store state in per-fiber slots indexed by call order. Reordering or
 // changing the slot count between renders throws — same rules-of-hooks as
 // React.
+// TODO: split into commit.ts / reconcile.ts / cache_invalidation.ts (see TODO.md T1)
 
 import type { Mat4, Vec4, Window, WindowDisposer, WindowEventMap, WindowEventName } from 'fxe';
-import { CommandBuffer, OffscreenRenderer, Primitives, Renderer } from 'fxe';
-import { tickAnimatedFrames } from '../animated/timing.ts';
+import { CommandBuffer, Primitives, Renderer } from 'fxe';
 import type { LayoutResult } from '../layout/types.ts';
 import {
   captureHitTargetsSince,
@@ -34,6 +34,8 @@ import {
   isPaintFlashEnabled,
   memoTraceState,
 } from './devtools.ts';
+import type { FrameLoopOptions } from './frame_loop.ts';
+import { ensureRenderFrameLoop, g_frame_callbacks, getTickFrameCounter } from './frame_loop.ts';
 import {
   getCurrentSchedulerLane,
   installSchedulerHookApi,
@@ -41,7 +43,6 @@ import {
   registerFiberWork,
   scheduleCallback,
   scheduleWork,
-  tickSchedulerFrame,
   unregisterFiberWork,
 } from './scheduler.ts';
 import {
@@ -49,6 +50,21 @@ import {
   endFiberSignalTracking,
   unregisterFiberSignalSubscriptions,
 } from './signals.ts';
+
+export type { FrameLoopDisposer, FrameLoopOptions } from './frame_loop.ts';
+export { startFrameLoop, tickFrame } from './frame_loop.ts';
+export { setRenderTarget } from './render_target.ts';
+
+import { getRenderTarget } from './render_target.ts';
+import {
+  atlasEpoch,
+  bakeFiberSurface,
+  releaseSurface,
+  SURFACE_BAKE_HITS,
+  SURFACE_CACHE_DISABLED,
+  SURFACE_MIN_VERTS,
+  type SurfaceCacheEntry,
+} from './surface_cache.ts';
 
 // `RenderStats` is a host-installed global. The bumpers are no-ops if the
 // host hasn't installed install_render_stats_global() yet (we degrade to a
@@ -152,171 +168,6 @@ export function Layer(props: LayerProps): Node {
 
 export function Draw(fn: (cb: CommandBuffer) => void, deps?: ReadonlyArray<unknown>): Node {
   return { type: 'draw', props: { fn, deps } };
-}
-
-// ----------------------------------------------------- Surface caching
-//
-// When a Layer's cache survives unchanged for SURFACE_BAKE_HITS frames AND
-// its rasterized vertex count clears SURFACE_MIN_VERTS, we transparently
-// bake the cached subtree into an offscreen GPU texture and replace future
-// cache replays with a single drawTextureQuad. This collapses N vertex
-// uploads + N glyph samples per frame into 4 verts + one bilinear sample.
-//
-// Slot count is capped at 4 (matches the WGSL `user_tex_*` bindings).
-// Beyond 4 stable expensive subtrees we simply skip baking the rest;
-// already-baked surfaces continue to replay normally.
-const SURFACE_BAKE_HITS = 4;
-const SURFACE_MIN_VERTS = 200;
-const SURFACE_SLOT_CAP = 4;
-const SURFACE_PAD = 1;
-
-// Disable surface caching when FXE_DISABLE_SURFACE_CACHE=1 (benchmark unbaked
-// path or work around cache bugs without rebuilding).
-const SURFACE_CACHE_DISABLED = process.env.FXE_DISABLE_SURFACE_CACHE === '1';
-
-// Glyph atlas UV-layout epoch. Bumped only when atlas growth/repack can make
-// previously-emitted glyph UVs stale; pure append-only glyph uploads keep the
-// same epoch so memo/layer caches do not thrash while new text arrives.
-// `Primitives.atlasEpoch` is a tiny native hop returning a Number, safe to
-// call once per cached fiber per frame.
-function atlasEpoch(): number {
-  return Primitives.atlasEpoch();
-}
-
-interface SurfaceCacheEntry {
-  off: OffscreenRenderer;
-  slot: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  renderer: Renderer;
-  bakedEpoch: number;
-  // Atlas generation observed at bake time. The bake itself produced the
-  // offscreen pixels under that atlas layout, so the offscreen texture
-  // contents are stable; we only need to invalidate when the *upstream*
-  // command buffer that fed the bake has been re-cached against a newer
-  // atlas (which forces a fresh bake anyway via cache rebuild). The field
-  // is here for symmetry with cacheAtlasEpoch + future cross-frame
-  // checking; the surface fast path itself does not gate on it.
-  atlasEpoch: number;
-}
-
-interface RendererSurfaceState {
-  free: number[];
-  // Live slot → OffscreenRenderer bindings on this renderer, mirrored on
-  // every `bindRendererUserTexture` call. Surface-cache bakes copy these
-  // into the new offscreen before queueing the cached buffer so cached
-  // `drawTextureQuad(slot=k, …)` references baked into a parent surface
-  // sample the actual nested-surface texture instead of the offscreen's
-  // placeholder atlas (which would otherwise leak garbage into the parent
-  // bake — the bug surfaceCache had before this state was tracked).
-  bound: (OffscreenRenderer | null)[];
-}
-const kRendererSurfaceState = Symbol('fxe-ui.rendererSurfaceState');
-
-function rendererSurfaceState(r: Renderer): RendererSurfaceState {
-  let s = Reflect.get(r, kRendererSurfaceState) as RendererSurfaceState | undefined;
-  if (!s) {
-    s = {
-      free: [0, 1, 2, 3].slice(0, SURFACE_SLOT_CAP),
-      bound: new Array(SURFACE_SLOT_CAP).fill(null),
-    };
-    Reflect.set(r, kRendererSurfaceState, s);
-  }
-  return s;
-}
-
-function allocSurfaceSlot(r: Renderer): number | null {
-  const s = rendererSurfaceState(r);
-  return s.free.length > 0 ? (s.free.shift() as number) : null;
-}
-
-function freeSurfaceSlot(r: Renderer, slot: number): void {
-  const s = rendererSurfaceState(r);
-  if (!s.free.includes(slot)) s.free.push(slot);
-}
-
-// Single chokepoint for `Renderer.bindUserTexture` so the reconciler's
-// view of which slot holds which OffscreenRenderer stays in sync with
-// what the GPU actually has bound. `bakeFiberSurface` reads back this
-// table to mirror the parent's bindings into the new offscreen before
-// queueing the cached subtree.
-function bindRendererUserTexture(
-  r: Renderer,
-  slot: number,
-  source: OffscreenRenderer | null,
-): void {
-  r.bindUserTexture(slot, source);
-  const s = rendererSurfaceState(r);
-  if (slot >= 0 && slot < s.bound.length) s.bound[slot] = source;
-}
-
-function translateMat(tx: number, ty: number): Float32Array {
-  const m = new Float32Array(16);
-  m[0] = 1;
-  m[5] = 1;
-  m[10] = 1;
-  m[15] = 1;
-  m[12] = tx;
-  m[13] = ty;
-  return m;
-}
-
-function bakeFiberSurface(cache: CommandBuffer, renderer: Renderer): SurfaceCacheEntry | null {
-  const bb = cache.bounds();
-  if (!bb || bb.width <= 0 || bb.height <= 0) return null;
-  const slot = allocSurfaceSlot(renderer);
-  if (slot === null) return null;
-  const pad = SURFACE_PAD;
-  const w = Math.max(1, Math.ceil(bb.width + pad * 2));
-  const h = Math.max(1, Math.ceil(bb.height + pad * 2));
-  let off: OffscreenRenderer;
-  try {
-    off = new OffscreenRenderer({
-      width: w,
-      height: h,
-      parent: renderer,
-    });
-  } catch (_e) {
-    freeSurfaceSlot(renderer, slot);
-    return null;
-  }
-  off.beginFrame();
-  off.setClearColor(0, 0, 0, 0);
-  // Mirror the parent renderer's currently-bound user textures into the
-  // offscreen so any cached `drawTextureQuad(slot=k, …)` baked into this
-  // subtree (i.e. nested surface-cached layers) samples the same view the
-  // parent would have at draw time. Without this, slots fall back to the
-  // offscreen's atlas placeholder and nested bakes turn into garbage.
-  const parentState = rendererSurfaceState(renderer);
-  for (let i = 0; i < parentState.bound.length; i++) {
-    const src = parentState.bound[i];
-    if (src !== null && src !== off) off.bindUserTexture(i, src);
-  }
-  off.queue(cache, translateMat(-bb.x + pad, -bb.y + pad));
-  off.endFrame();
-  bindRendererUserTexture(renderer, slot, off);
-  return {
-    off,
-    slot,
-    x: bb.x - pad,
-    y: bb.y - pad,
-    width: w,
-    height: h,
-    renderer,
-    bakedEpoch: cache.__fxe_epoch,
-    atlasEpoch: atlasEpoch(),
-  };
-}
-
-function releaseSurface(entry: SurfaceCacheEntry): void {
-  try {
-    bindRendererUserTexture(entry.renderer, entry.slot, null);
-  } catch (_e) {
-    /* renderer may already be torn down */
-  }
-  freeSurfaceSlot(entry.renderer, entry.slot);
 }
 
 // ----------------------------------------------------------- component meta
@@ -491,6 +342,16 @@ function singleBoundaryNode(child: BoundaryChild): Node {
   const children = normalizeBoundaryChildren(child);
   return children.length === 1 ? children[0] : Layer({ children });
 }
+// Rebuild a Node variant with a new children array. Generic over T so the
+// discriminant survives the spread (TS would otherwise widen `props` to the
+// union of every variant and break the type-tag/props pairing).
+export function rebuildChildren<T extends Extract<Node, { props: { children?: unknown } }>>(
+  node: T,
+  children: Node[],
+): T {
+  return { ...node, props: { ...node.props, children } } as T;
+}
+
 function attachInternalToProduced(
   produced: Node,
   layout: LayoutResult | undefined,
@@ -510,7 +371,7 @@ function attachInternalToProduced(
     const attached = attachInternalToProduced(produced.props.children[0], layout, text);
     return attached === produced.props.children[0]
       ? produced
-      : { ...produced, props: { ...produced.props, children: [attached] } };
+      : rebuildChildren(produced, [attached]);
   }
 
   if (
@@ -522,9 +383,7 @@ function attachInternalToProduced(
     const children = normalizeBoundaryChildren(produced.props.children);
     if (children.length !== 1) return produced;
     const attached = attachInternalToProduced(children[0], layout, text);
-    return attached === children[0]
-      ? produced
-      : { ...produced, props: { ...produced.props, children: [attached] } };
+    return attached === children[0] ? produced : rebuildChildren(produced, [attached]);
   }
 
   return produced;
@@ -614,17 +473,6 @@ interface FrameSlot {
   kind: 'frame';
   fn: (dtMs: number) => void;
 }
-
-export type FrameLoopDisposer = () => void;
-
-export interface FrameLoopOptions {
-  requestAnimationFrame?: (fn: (timeMs: number) => void) => unknown;
-  cancelAnimationFrame?: (id: unknown) => void;
-}
-
-type FxeUiFrameLoopBridgeGlobal = typeof globalThis & {
-  __fxeUiEnsureFrameLoop?: () => FrameLoopDisposer;
-};
 
 interface EventSlot {
   kind: 'event';
@@ -749,7 +597,6 @@ type ReconcilerDebugGlobal = typeof globalThis & {
 };
 
 let g_next_fiber_debug_id = 1;
-let g_tick_frame_counter = 0;
 const kFiberDebugMetadata = Symbol('fxe-ui.fiberDebugMetadata');
 
 function summarizeDebugValue(value: unknown): unknown {
@@ -856,7 +703,7 @@ function recordFiberCacheStatus(
   metadata.cacheHitMiss = cacheHitMiss;
   metadata.cacheHit = cacheHitMiss === null ? null : cacheHitMiss === 'hit';
   metadata.dirty = fiber.dirty;
-  if (rebuilt) metadata.lastRebuildFrame = g_tick_frame_counter;
+  if (rebuilt) metadata.lastRebuildFrame = getTickFrameCounter();
 }
 
 function beginFiberHookDebugDeps(fiber: Fiber): void {
@@ -1335,14 +1182,6 @@ export function useEvent<K extends WindowEventName>(
   }
 }
 
-// ---------------------------------------------------- render-target wiring
-
-let g_render_target: Window | null = null;
-
-export function setRenderTarget(win: Window | null): void {
-  g_render_target = win;
-}
-
 // ---------------------------------------------------- reconciliation walker
 
 function childKey(node: Node, slotIndex: number): string {
@@ -1517,7 +1356,7 @@ function asThenable(value: unknown): Thenable | null {
 }
 
 export function requestRenderTargetRedraw(): void {
-  const win = g_render_target;
+  const win = getRenderTarget();
   if (win) win.requestRedraw();
 }
 
@@ -2076,60 +1915,4 @@ export function render(
   g_frame_callbacks.length = 0;
   for (const { fn } of ctx.frameCallbacks) g_frame_callbacks.push(fn);
   if (options?.animate === true) ensureRenderFrameLoop(options.frameLoop);
-}
-
-const g_frame_callbacks: Array<(dtMs: number) => void> = [];
-
-let g_render_frame_loop_dispose: FrameLoopDisposer | null = null;
-
-function ensureRenderFrameLoop(options?: FrameLoopOptions): FrameLoopDisposer {
-  if (!g_render_frame_loop_dispose) g_render_frame_loop_dispose = startFrameLoop(options);
-  return g_render_frame_loop_dispose;
-}
-
-(globalThis as FxeUiFrameLoopBridgeGlobal).__fxeUiEnsureFrameLoop = () => ensureRenderFrameLoop();
-
-export function startFrameLoop(options: FrameLoopOptions = {}): FrameLoopDisposer {
-  const globals = globalThis as {
-    requestAnimationFrame?: (fn: (timeMs: number) => void) => unknown;
-    cancelAnimationFrame?: (id: unknown) => void;
-  };
-  const requestFrame = options.requestAnimationFrame ?? globals.requestAnimationFrame;
-  if (typeof requestFrame !== 'function') {
-    throw new Error('startFrameLoop() requires requestAnimationFrame');
-  }
-  const cancelFrame = options.cancelAnimationFrame ?? globals.cancelAnimationFrame;
-
-  let disposed = false;
-  let handle: unknown;
-  let previousTimeMs: number | null = null;
-  const step = (timeMs: number): void => {
-    if (disposed) return;
-    const dtMs = previousTimeMs === null ? 0 : Math.max(0, timeMs - previousTimeMs);
-    previousTimeMs = timeMs;
-    tickFrame(dtMs);
-    if (!disposed) handle = requestFrame(step);
-  };
-
-  handle = requestFrame(step);
-  const dispose = (): void => {
-    if (disposed) return;
-    disposed = true;
-    if (typeof cancelFrame === 'function') cancelFrame(handle);
-    if (g_render_frame_loop_dispose === dispose) g_render_frame_loop_dispose = null;
-  };
-  return dispose;
-}
-
-export function tickFrame(dtMs: number): void {
-  ++g_tick_frame_counter;
-  tickSchedulerFrame(dtMs);
-  tickAnimatedFrames(dtMs);
-  for (const fn of g_frame_callbacks) {
-    try {
-      fn(dtMs);
-    } catch (e) {
-      console.error(`useFrame threw: ${e}`);
-    }
-  }
 }

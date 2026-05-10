@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fxe/command_buffer.hpp>
 #include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
 #include <fxe/print_pdf.hpp>
 #include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
@@ -93,7 +94,7 @@ namespace fxe::js {
       std::string err;
       const bool ok = emit_pdf(std::filesystem::path(utf8(iso, info[0])), pages, &err);
       if (!ok && !err.empty())
-        std::fprintf(stderr, "Print.toPdf failed: %s\n", err.c_str());
+        FXE_ERROR("js.print", "Print.toPdf failed: {}", err);
       info.GetReturnValue().Set(Boolean::New(iso, ok));
     }
   } // namespace

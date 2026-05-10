@@ -25,9 +25,9 @@ export interface HitTarget {
   cursor?: CursorKind;
   onHoverIn?: (ev: SyntheticEvent) => void;
   onHoverOut?: (ev: SyntheticEvent) => void;
-  onPressIn?: (ev: SyntheticEvent) => void;
-  onPressOut?: (ev: SyntheticEvent) => void;
-  onPress?: (ev: SyntheticEvent) => void;
+  onPressIn?: (ev: SyntheticEvent<MouseButtonEvent>) => void;
+  onPressOut?: (ev: SyntheticEvent<MouseButtonEvent>) => void;
+  onPress?: (ev: SyntheticEvent<MouseButtonEvent>) => void;
   onContextMenu?: (ev: SyntheticEvent<MouseButtonEvent>) => void;
   onDrag?: (ev: SyntheticEvent) => void;
   onWheel?: (ev: SyntheticEvent & { dx: number; dy: number }) => void;

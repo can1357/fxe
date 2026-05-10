@@ -420,7 +420,7 @@ function layoutNodeFor(
       ) {
         const cachedNode = cachedLayout.layoutNode as LayoutNode;
         if (cachedNode._sig !== undefined) return cachedNode;
-        parentFiber.layoutCache = undefined;
+        if (parentFiber !== null) parentFiber.layoutCache = undefined;
       }
       let produced: Node | null = null;
       // Primary cache: previous render stored produced JSX on the child
