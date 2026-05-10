@@ -181,6 +181,15 @@ namespace fxe::os {
       return std::filesystem::path(dir) / "uploaded.json";
     }
 
+    std::string maybe_scrub_annotation_value(const crash_options& opts, std::string_view key,
+                                             std::string_view value) {
+      if (std::find(opts.scrub_annotation_keys.begin(), opts.scrub_annotation_keys.end(), key) !=
+          opts.scrub_annotation_keys.end()) {
+        return "[redacted]";
+      }
+      return std::string(value);
+    }
+
     std::vector<std::string> read_uploaded_sidecar() {
       auto sidecar = uploaded_sidecar_path();
       if (!sidecar)
@@ -513,6 +522,9 @@ namespace fxe::os {
 
     bool write_dump_text(const char* extension, std::string_view text) {
       return write_dump_bytes(extension, text.data(), text.size());
+    }
+    std::string scrub_annotation_value(std::string_view key, std::string_view value) {
+      return maybe_scrub_annotation_value(current_options(), key, value);
     }
 
     bool upload_last_dump_if_requested(const std::string& path) {

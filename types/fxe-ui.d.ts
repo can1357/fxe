@@ -875,6 +875,19 @@ declare module 'fxe-ui' {
     scrollY?: number;
     onClickPosition?: (line: number, col: number, ev: unknown) => void;
   }
+  export interface MinimapProps {
+    key?: string;
+    doc: FXE.TextDocument;
+    width?: number;
+    scale?: number;
+    lineHeight: number;
+    scrollOffset: number;
+    viewportHeight: number;
+    onScrollRequest?: (offset: number) => void;
+    getLineDecorations?: LineDecorationFn;
+    style?: StyleValue;
+    testID?: string;
+  }
   export interface GutterMark {
     color: number;
     size?: number;
@@ -892,6 +905,39 @@ declare module 'fxe-ui' {
     focusedLine?: number;
     getMark?: GutterMarkFn;
   }
+  export interface OutlineEntry {
+    line: number;
+    depth: number;
+    label?: string;
+  }
+  export interface OutlineProvider {
+    getStickyEntries(
+      doc: FXE.TextDocument,
+      topVisibleLine: number,
+      maxDepth: number,
+    ): OutlineEntry[];
+    revision?(doc: FXE.TextDocument): number;
+  }
+  export interface StickyScrollProps {
+    key?: string;
+    doc: FXE.TextDocument;
+    scrollOffset: number;
+    lineHeight: number;
+    width: number;
+    outline: OutlineProvider;
+    maxDepth?: number;
+    getLineSpans?: (line: number) => readonly LineSpan[];
+    textColor?: number;
+    backgroundColor?: number;
+    borderColor?: number;
+    style?: Style;
+    testID?: string;
+  }
+  export function createIndentOutlineProvider(opts?: { tabWidth?: number }): OutlineProvider;
+  export function createTreeSitterOutlineProvider(
+    cb?: (doc: FXE.TextDocument, topVisibleLine: number, maxDepth: number) => OutlineEntry[],
+  ): OutlineProvider;
+
   export interface BracketContextProvider {
     isStringOrComment?(off: number): boolean;
   }
@@ -968,6 +1014,8 @@ declare module 'fxe-ui' {
   export function EditableArea(props: EditableAreaProps): Node;
   export function FindReplaceBar(props: FindReplaceBarProps): Node;
   export const Markdown: (props: MarkdownProps) => Node;
+  export function Minimap(props: MinimapProps): Node;
+  export function StickyScroll(props: StickyScrollProps): Node;
   export function usePressableState(): PressableState;
   export function useHover(): boolean;
   export function useFocus(): boolean;

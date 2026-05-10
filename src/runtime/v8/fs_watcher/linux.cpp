@@ -1,5 +1,6 @@
 #include "runtime/v8/fs_watcher.hpp"
 
+#include <fxe/log.hpp>
 #include <fxe/types.hpp>
 #include <utility>
 
@@ -9,7 +10,6 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <filesystem>
@@ -197,11 +197,9 @@ namespace fxe::runtime {
         bool expected = false;
         if (!watch_limit_logged_.compare_exchange_strong(expected, true))
           return;
-        std::fprintf(stderr,
-                     "fxe: inotify fs watcher reached recursive watch limit (%zu); "
-                     "watching stopped. %.*s\n",
-                     max_recursive_watches, static_cast<int>(inotify_limit_hint.size()),
-                     inotify_limit_hint.data());
+        FXE_WARN("runtime.fs_watch",
+                 "inotify fs watcher reached recursive watch limit ({}); watching stopped. {}",
+                 max_recursive_watches, inotify_limit_hint);
       }
 
       bool at_watch_limit(const fs::path& path) {
@@ -304,7 +302,22 @@ namespace fxe::runtime {
           add_existing_descendants(event_path);
       }
 
+      void emit_overflow_event() {
+        // inotify(7): IN_Q_OVERFLOW is delivered with wd == -1 to report that the
+        // kernel queue overflowed and one or more events were dropped. Emit a
+        // sentinel so callers can resynchronize from requested_path_.
+        // Coverage gap: no Linux-only fs_watcher native test harness exists yet.
+        FXE_WARN("runtime.fs_watch", "inotify queue overflowed for {}",
+                 requested_path_.generic_string());
+        if (!closed_.load())
+          cb_(fs_watch_event{requested_path_.generic_string(), fs_watch_event::kind::overflow});
+      }
       void handle_event(const inotify_event& event) {
+        if (event.wd == -1 && (event.mask & IN_Q_OVERFLOW) != 0) {
+          emit_overflow_event();
+          return;
+        }
+
         const auto event_path = event_path_for(event);
         if (!event_path) {
           if ((event.mask & IN_IGNORED) != 0)
@@ -319,9 +332,8 @@ namespace fxe::runtime {
 
         maybe_add_recursive_directory(event, *event_path);
 
-        if (!closed_.load() && should_deliver(*event_path, event)) {
+        if (!closed_.load() && should_deliver(*event_path, event))
           cb_(fs_watch_event{event_path->generic_string(), classify_event(event.mask)});
-        }
 
         if ((event.mask & (IN_DELETE_SELF | IN_MOVE_SELF)) != 0)
           remove_watch_mapping(event.wd);
@@ -341,7 +353,12 @@ namespace fxe::runtime {
 
           for (char* cursor = buffer.data(); cursor < buffer.data() + n;) {
             const auto* event = reinterpret_cast<const inotify_event*>(cursor);
-            handle_event(*event);
+            if (event->wd < 0 && (event->mask & IN_Q_OVERFLOW) == 0) {
+              FXE_TRACE("runtime.fs_watch", "skipping inotify event with wd={} mask=0x{:x}",
+                        event->wd, event->mask);
+            } else {
+              handle_event(*event);
+            }
             cursor += sizeof(inotify_event) + event->len;
           }
         }

@@ -14,6 +14,9 @@ namespace fxe::os {
     std::string submit_url; // empty = no upload
     std::string crash_dir;  // empty = userData/Crashes
     bool upload_to_server = false;
+    bool include_full_memory_dump = false;
+    bool include_stack_memory = true;
+    std::vector<std::string> scrub_annotation_keys;
   };
 
   struct crash_self_test_result {
@@ -38,6 +41,9 @@ namespace fxe::os {
     bool write_dump_bytes(const char* extension, const void* data, usize size);
     bool write_dump_text(const char* extension, std::string_view text);
     bool upload_last_dump_if_requested(const std::string& path);
+    // No platform crash writer emits string annotations today. Future emitters MUST pass
+    // every key/value pair through this helper before writing sidecars or upload payloads.
+    std::string scrub_annotation_value(std::string_view key, std::string_view value);
     std::vector<std::string> list_dump_paths();
 
 #ifndef _WIN32

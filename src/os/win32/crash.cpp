@@ -115,8 +115,13 @@ namespace fxe::os::crash_detail {
       exception_info.ThreadId = GetCurrentThreadId();
       exception_info.ExceptionPointers = exception_pointers;
       exception_info.ClientPointers = FALSE;
-      MINIDUMP_TYPE dump_type = static_cast<MINIDUMP_TYPE>(
-          MiniDumpWithFullMemory | MiniDumpWithThreadInfo | MiniDumpWithUnloadedModules);
+      crash_options opts = current_options();
+      MINIDUMP_TYPE dump_type = static_cast<MINIDUMP_TYPE>(MiniDumpNormal | MiniDumpWithThreadInfo |
+                                                           MiniDumpWithUnloadedModules);
+      if (opts.include_full_memory_dump) {
+        dump_type =
+            static_cast<MINIDUMP_TYPE>(dump_type | MiniDumpWithFullMemory | MiniDumpWithDataSegs);
+      }
       BOOL ok = MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), file, dump_type,
                                   exception_pointers ? &exception_info : nullptr, nullptr, nullptr);
       (void)CloseHandle(file);

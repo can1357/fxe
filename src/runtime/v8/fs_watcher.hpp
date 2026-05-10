@@ -7,7 +7,7 @@
 namespace fxe::runtime {
 
   struct fs_watch_event {
-    enum class kind { changed, renamed, deleted, created };
+    enum class kind { changed, renamed, deleted, created, overflow };
 
     std::string path;
     kind k = kind::changed;

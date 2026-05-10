@@ -690,14 +690,22 @@ declare namespace FXE {
     fps?: number;
   }
 
+  interface CrashReporterStartOptions {
+    productName: string;
+    productVersion?: string;
+    submitURL?: string;
+    crashDir?: string;
+    uploadToServer?: boolean;
+    /** Include process heap/data segments in Win32 minidumps. Off by default. */
+    includeFullMemoryDump?: boolean;
+    /** Include stack-byte snapshots in text/lite crash dumps. Defaults to true. */
+    includeStackMemory?: boolean;
+    /** Redact matching annotation values to the literal "[redacted]" before emission. */
+    scrubAnnotationKeys?: ReadonlyArray<string>;
+  }
+
   interface CrashReporter {
-    start(options: {
-      productName: string;
-      productVersion?: string;
-      submitURL?: string;
-      crashDir?: string;
-      uploadToServer?: boolean;
-    }): boolean;
+    start(options: CrashReporterStartOptions): boolean;
     listDumps(): string[];
     getLastDumpPath(): string | null;
     selfTest(): boolean;
@@ -2125,13 +2133,7 @@ declare const Font: FontNamespace;
 
 // === os begin ===
 interface CrashReporter {
-  start(options: {
-    productName: string;
-    productVersion?: string;
-    submitURL?: string;
-    crashDir?: string;
-    uploadToServer?: boolean;
-  }): boolean;
+  start(options: FXE.CrashReporterStartOptions): boolean;
   listDumps(): string[];
   getLastDumpPath(): string | null;
 }

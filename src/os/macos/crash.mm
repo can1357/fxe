@@ -71,6 +71,7 @@ namespace {
   }
 
   void append_thread_state(std::ostringstream& out, thread_t thread) {
+    bool include_stack_memory = fxe::os::crash_detail::current_options().include_stack_memory;
 #if defined(__aarch64__)
     arm_thread_state64_t state{};
     mach_msg_type_number_t count = ARM_THREAD_STATE64_COUNT;
@@ -105,7 +106,7 @@ namespace {
       vm_size_t copied = 0;
       kr = vm_read_overwrite(mach_task_self(), sp, sizeof(stack), reinterpret_cast<vm_address_t>(stack),
                              &copied);
-      if (kr == KERN_SUCCESS && copied > 0) {
+      if (include_stack_memory && kr == KERN_SUCCESS && copied > 0) {
         out << "stack-bytes=" << copied << "\n";
         out.write(stack, static_cast<std::streamsize>(copied));
         out << "\n";
@@ -145,7 +146,7 @@ namespace {
       vm_size_t copied = 0;
       kr = vm_read_overwrite(mach_task_self(), sp, sizeof(stack), reinterpret_cast<vm_address_t>(stack),
                              &copied);
-      if (kr == KERN_SUCCESS && copied > 0) {
+      if (include_stack_memory && kr == KERN_SUCCESS && copied > 0) {
         out << "stack-bytes=" << copied << "\n";
         out.write(stack, static_cast<std::streamsize>(copied));
         out << "\n";

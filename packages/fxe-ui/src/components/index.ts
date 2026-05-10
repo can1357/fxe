@@ -16,8 +16,17 @@ export type {
   LineViewportProps,
 } from './LineViewport.ts';
 export { LineViewport } from './LineViewport.ts';
+export type { StickyScrollProps } from './StickyScroll.ts';
+export { StickyScroll } from './StickyScroll.ts';
+export type { OutlineEntry, OutlineProvider } from './sticky_scroll_outline.ts';
+export {
+  createIndentOutlineProvider,
+  createTreeSitterOutlineProvider,
+} from './sticky_scroll_outline.ts';
 export type { MarkdownProps, MarkdownTheme, SyntaxPalette } from './Markdown.ts';
 export { Markdown } from './Markdown.ts';
+export type { MinimapProps } from './Minimap.ts';
+export { Minimap } from './Minimap.ts';
 export type { PressableProps, PressableState } from './Pressable.ts';
 export { Pressable, useFocus, useHover, usePressableState } from './Pressable.ts';
 export type { ScrollViewProps } from './ScrollView.ts';

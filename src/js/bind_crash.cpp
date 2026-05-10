@@ -63,6 +63,22 @@ namespace fxe::js {
       opts.submit_url = get_optional_string(iso, ctx, opts_obj, "submitURL");
       opts.crash_dir = get_optional_string(iso, ctx, opts_obj, "crashDir");
       opts.upload_to_server = get_optional_bool(iso, ctx, opts_obj, "uploadToServer", false);
+      opts.include_full_memory_dump =
+          get_optional_bool(iso, ctx, opts_obj, "includeFullMemoryDump", false);
+      opts.include_stack_memory = get_optional_bool(iso, ctx, opts_obj, "includeStackMemory", true);
+      Local<Value> scrub_keys;
+      if (opts_obj->Get(ctx, "scrubAnnotationKeys"_v8(iso)).ToLocal(&scrub_keys) &&
+          scrub_keys->IsArray()) {
+        auto array = scrub_keys.As<Array>();
+        u32 length = array->Length();
+        opts.scrub_annotation_keys.reserve(length);
+        for (u32 i = 0; i < length; ++i) {
+          Local<Value> entry;
+          if (!array->Get(ctx, i).ToLocal(&entry) || !entry->IsString())
+            continue;
+          opts.scrub_annotation_keys.push_back(to_str(iso, entry));
+        }
+      }
 
       info.GetReturnValue().Set(Boolean::New(iso, fxe::os::crash_start(opts)));
     }

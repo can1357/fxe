@@ -250,6 +250,7 @@ const DIRECT_LAYOUT_COMPONENTS = new Set([
   'Gutter',
   'Image',
   'LineViewport',
+  'Minimap',
   'Pressable',
   'ScrollView',
   'Text',

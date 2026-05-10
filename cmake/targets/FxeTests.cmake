@@ -138,6 +138,7 @@ if(FXE_BUILD_TESTS)
     # C++ tests.
     # ---------------------------------------------------------------------
     fxe_add_cpp_test(fxe_core_tests tests/core_tests.cpp fxe_core)
+    fxe_add_cpp_test(fxe_crash_options_tests tests/crash_options_test.cpp fxe_os)
     fxe_add_cpp_test(fxe_font_tests tests/font_module_test.cpp fxe_font)
     fxe_add_cpp_test(fxe_font_render_tests tests/font_render_test.cpp fxe_font)
     fxe_add_cpp_test(fxe_uv_loop_tests tests/uv_loop_test.cpp fxe_runtime)
@@ -332,6 +333,8 @@ if(FXE_BUILD_TESTS)
         fxe_add_v8_ts_test(fxe_ui_box_shadow_blur_test tests/ui_box_shadow_blur_test.tsx)
         fxe_add_v8_ts_test(fxe_bind_fxe_net_test tests/bind_fxe_net_test.ts)
         fxe_add_v8_ts_test(fxe_bind_fxe_os_test tests/bind_fxe_os_test.ts)
+        fxe_add_v8_ts_test(fxe_ui_sticky_scroll_test tests/ui_sticky_scroll_test.ts)
+        fxe_add_v8_ts_test(fxe_ui_minimap_test tests/ui_minimap_test.ts)
         file(
             GLOB _v8_ts_test_scripts
             RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -341,7 +344,7 @@ if(FXE_BUILD_TESTS)
         list(
             FILTER _v8_ts_test_scripts
             EXCLUDE
-            REGEX "bind_fxe_(net|os)_test\\.ts$"
+            REGEX "bind_fxe_(net|os)_test\\.ts$|ui_minimap_test\\.ts$|ui_sticky_scroll_test\\.ts$"
         )
         if(NOT FXE_ENABLE_NATIVE_TLS_HTTP2)
             # node_compat_http2_test.ts requires the native HTTP/2 stack.

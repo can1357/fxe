@@ -2285,7 +2285,16 @@ namespace fxe::js {
     }
 
     const char* watch_event_name(fxe::runtime::fs_watch_event::kind kind) {
-      return kind == fxe::runtime::fs_watch_event::kind::changed ? "change" : "rename";
+      switch (kind) {
+      case fxe::runtime::fs_watch_event::kind::renamed:
+      case fxe::runtime::fs_watch_event::kind::created:
+      case fxe::runtime::fs_watch_event::kind::deleted:
+        return "rename";
+      case fxe::runtime::fs_watch_event::kind::changed:
+      case fxe::runtime::fs_watch_event::kind::overflow:
+      default:
+        return "change";
+      }
     }
 
     fs_watch_state* fs_watch_state_from(Local<Object> self) {
