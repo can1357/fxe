@@ -920,6 +920,16 @@ function markDirty(fiber: Fiber | null): void {
   }
 }
 
+// Walk up from `fiber`, marking it and every ancestor dirty. Exported so
+// View can break upstream memo bails when its first-frame child layout
+// returned an unresolved (zero-size) subtree: subsequent frames must
+// rebuild instead of replaying the cached command buffer that captured
+// the unresolved layout. See `requestRenderTargetRedraw` callsite in
+// `components/View.ts`.
+export function markFiberAndAncestorsDirty(fiber: Fiber | null): void {
+  markDirty(fiber);
+}
+
 function scheduleFiberUpdate(fiber: Fiber): void {
   const lane = getCurrentSchedulerLane();
   if (lane === 'transition') {

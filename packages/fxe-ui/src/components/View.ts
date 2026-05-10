@@ -23,6 +23,7 @@ import {
   getCurrentRenderFiber,
   type Node,
   Portal,
+  markFiberAndAncestorsDirty,
   requestRenderTargetRedraw,
   shallowEqualProps,
   useId,
@@ -600,7 +601,15 @@ export const View = Component((props: ViewProps): Node => {
         childLayoutComplete = markLayoutCompleteness(computed, rootLayoutNode);
         return computed;
       })();
-  if (!useInheritedLayout && !childLayoutComplete) requestRenderTargetRedraw();
+  if (!useInheritedLayout && !childLayoutComplete) {
+    // First-frame children with unresolved memo'd layout returned `{}` from
+    // layoutNodeFor (the produced subtree wasn't rendered yet). Yoga packed
+    // them at zero size, so this View — and every memo'd ancestor whose
+    // command buffer captured the bad layout — must rebuild on the next
+    // frame instead of replaying its cache.
+    markFiberAndAncestorsDirty(viewFiber);
+    requestRenderTargetRedraw();
+  }
   const resolvedLayoutSig = useInheritedLayout
     ? `I|${layoutResultSig(childTree)}`
     : `L|${childLayoutSig}|${layoutResultSig(childTree)}`;
