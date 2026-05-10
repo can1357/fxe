@@ -67,7 +67,7 @@ let renderTargetOwner: symbol | null = null;
 
 let currentScreenSize = { width: 0, height: 0 };
 
-const MAX_LAYOUT_SETTLE_PASSES = 4;
+const MAX_LAYOUT_SETTLE_PASSES = 16;
 
 export function currentRenderTargetSize(): { width: number; height: number } {
   return { ...currentScreenSize };
