@@ -2,9 +2,9 @@
 
 // Platform-agnostic OS shims used by the JS host bindings (App, shell, dialog,
 // notification, menu, tray, globalShortcut). Implementations live under
-// src/os/<platform>/. macOS is the primary host; Win32 and Linux ship as
-// stubs that return `false` / empty / runtime errors and are tagged with
-// TODO markers for future work.
+// src/os/<platform>/. macOS is the baseline backend; Win32 and Linux implement
+// the shared APIs they can support natively and report unsupported capabilities
+// via `false`, empty optionals/strings, or documented no-op behavior.
 
 #include <cstdint>
 #include <functional>
