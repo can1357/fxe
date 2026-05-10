@@ -10,6 +10,7 @@ namespace fxe {
   enum class animated_image_format {
     gif,
     apng,
+    webp,
     lottie,
   };
 

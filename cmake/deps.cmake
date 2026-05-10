@@ -64,6 +64,14 @@ if(ZLIB_FOUND)
     target_link_libraries(fxe_deps INTERFACE ZLIB::ZLIB)
 endif()
 
+# Image codecs for fxe_image: animated GIF (giflib), animated PNG
+# (libpng built with the APNG patch), and animated WebP (libwebp +
+# libwebpdemux). All come from vcpkg in manifest mode; system installs
+# of libpng without the APNG patch are not supported.
+find_package(PNG REQUIRED)
+find_package(GIF REQUIRED)
+find_package(WebP CONFIG REQUIRED)
+
 # spdlog — fast structured logger. Used by `fxe::log` (include/fxe/log.hpp)
 # for category-gated logging across the engine. Always fetched (vs. relying
 # on system spdlog) so the bundled-fmt build is consistent across machines

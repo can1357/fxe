@@ -1,6 +1,6 @@
 import type { VibrancyCapabilities, WindowOptions } from 'fxe';
 import { Window } from 'fxe';
-import { assert, assertEqual, run, test } from './ts_harness.ts';
+import { assertEqual, run, test } from './ts_harness.ts';
 
 const hiddenWindowOptions: WindowOptions = {
   title: 'bind-window-vibrancy-capabilities-test',

@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 import { assert, assertEqual, test } from './ts_harness.ts';
 
@@ -8,6 +8,8 @@ const GIF_BASE64 =
   'R0lGODlhAgACAIEAAP8AAAAAAAAAAAAAACH/C05FVFNDQVBFMi4wAwEAAAAh+QQICgAAACwAAAAAAgACAAAIBgABCAQQEAAh+QQIDAAAACwAAAAAAgACAIEA/wAAAAAAAAAAAAAIBgABCAQQEAA7';
 const APNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACGFjVEwAAAACAAAAAPONk3AAAAAaZmNUTAAAAAAAAAACAAAAAgAAAAAAAAAAAAEACgAA6FTcAAAAABVJREFUeJxj/M/A8J+BgYGBCUSAMAAfFwICAkezFAAAABpmY1RMAAAAAQAAAAIAAAACAAAAAAAAAAAAAwAZAAAXh3idAAAAGWZkQVQAAAACeJxjZPjP8J+BgYGBCUSAMAAeGAICRb04jgAAAABJRU5ErkJggg==';
+const WEBP_BASE64 =
+  'UklGRoQAAABXRUJQVlA4WAoAAAACAAAAAQAAAQAAQU5JTQYAAAD/////AABBTk1GKAAAAAAAAAAAAAEAAAEAAGQAAAJWUDhMDwAAAC8BQAAABxD9j/4HIqL/AQBBTk1GKAAAAAAAAAAAAAEAAAEAAHgAAABWUDhMDwAAAC8BQAAAB9D/iP4HIqL/AQA=';
 const LOTTIE_JSON = JSON.stringify({ v: '5.7.0', fr: 60, ip: 0, op: 1, w: 2, h: 2, layers: [] });
 
 type DisposableImageHandle = ImageHandle & { dispose(): void };
@@ -88,6 +90,36 @@ test('Image.loadAnimated decodes 2-frame APNGs', async () => {
         pixelSignature(first) !== pixelSignature(second),
         'APNG frames should differ by sampled pixel',
       );
+    } finally {
+      first.dispose();
+      second.dispose();
+    }
+
+    animated.dispose();
+  } finally {
+    rmSync(dirname(path), { recursive: true, force: true });
+  }
+});
+
+test('Image.loadAnimated decodes 2-frame animated WebPs', async () => {
+  const path = writeFixture('two-frame.webp', Buffer.from(WEBP_BASE64, 'base64'));
+  try {
+    const animated = (await Image.loadAnimated(path)) as DisposableAnimatedImageHandle;
+    assertEqual(animated.frameCount, 2);
+    assertEqual(animated.durationMs, 220);
+    assertEqual(animated.frames.length, 2);
+    assertFrameImage(animated.frames[0], 100, 2);
+    assertFrameImage(animated.frames[1], 120, 2);
+
+    const first = animated.frame(0) as DisposableImageHandle;
+    const second = animated.frame(animated.frames[0].delayMs) as DisposableImageHandle;
+    try {
+      assertEqual(first.width(), 2);
+      assertEqual(first.height(), 2);
+      assertEqual(second.width(), 2);
+      assertEqual(second.height(), 2);
+      assertEqual(pixelSignature(first), '255,0,0,255');
+      assertEqual(pixelSignature(second), '0,255,0,255');
     } finally {
       first.dispose();
       second.dispose();

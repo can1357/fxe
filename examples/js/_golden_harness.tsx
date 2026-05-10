@@ -5,12 +5,12 @@ import {
   Button,
   defaultTheme,
   mount,
+  type Node,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  type Node,
   View,
 } from 'fxe-ui';
 
