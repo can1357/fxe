@@ -48,6 +48,19 @@ if(FXE_BUILD_TESTS)
                     ENVIRONMENT
                         "FXE_PACK=$<TARGET_FILE:fxe-pack>;FXE_RUN=$<TARGET_FILE:fxe_run>"
             )
+        add_executable(
+            fxe_pack_entitlements_tests
+            tests/fxe_pack_entitlements_test.cpp
+        )
+        target_compile_features(
+            fxe_pack_entitlements_tests
+            PRIVATE cxx_std_20
+        )
+        add_dependencies(fxe_pack_entitlements_tests fxe-pack)
+        add_test(
+            NAME fxe_pack_entitlements_tests
+            COMMAND fxe_pack_entitlements_tests
+        )
         endif()
         if(NOT WIN32)
             add_test(

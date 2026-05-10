@@ -111,13 +111,13 @@ if(FXE_FETCH_DEPS)
     )
     FetchContent_MakeAvailable(stb)
     if(stb_SOURCE_DIR)
-        target_include_directories(fxe_deps INTERFACE ${stb_SOURCE_DIR})
+        target_include_directories(fxe_deps SYSTEM INTERFACE ${stb_SOURCE_DIR})
         set(_FXE_STB_WIRED ON)
     endif()
 else()
     find_path(STB_INCLUDE_DIR stb_image.h)
     if(STB_INCLUDE_DIR)
-        target_include_directories(fxe_deps INTERFACE ${STB_INCLUDE_DIR})
+        target_include_directories(fxe_deps SYSTEM INTERFACE ${STB_INCLUDE_DIR})
         set(_FXE_STB_WIRED ON)
     else()
         message(
@@ -372,3 +372,37 @@ message(
     STATUS
     "fxe font backend: ${FXE_FONT_BACKEND} (raster=${FXE_FONT_RASTERIZER} shape=${FXE_FONT_SHAPER} discover=${FXE_FONT_DISCOVERY})"
 )
+
+# Treat third-party dep headers as system headers so their warnings
+# (e.g. -Wold-style-cast in stb, -Wsign-conversion in md4c, etc.) do
+# not surface in our build. Only affects targets we don't own.
+function(_fxe_mark_system_include tgt)
+    if(NOT TARGET ${tgt})
+        return()
+    endif()
+    get_target_property(_aliased ${tgt} ALIASED_TARGET)
+    if(_aliased)
+        set(tgt ${_aliased})
+    endif()
+    get_target_property(_type ${tgt} TYPE)
+    if(_type STREQUAL "INTERFACE_LIBRARY")
+        get_target_property(_inc ${tgt} INTERFACE_INCLUDE_DIRECTORIES)
+    else()
+        get_target_property(_inc ${tgt} INTERFACE_INCLUDE_DIRECTORIES)
+    endif()
+    if(_inc)
+        set_target_properties(${tgt} PROPERTIES
+            INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_inc}")
+    endif()
+endfunction()
+
+foreach(_dep
+    glm::glm glm
+    glfw
+    nlohmann_json::nlohmann_json nlohmann_json
+    spdlog::spdlog spdlog
+    md4c::md4c md4c md4c::md4c_html
+    yoga::yogacore yogacore
+)
+    _fxe_mark_system_include(${_dep})
+endforeach()

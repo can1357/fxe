@@ -7,12 +7,18 @@
 //            [--signing-policy unsigned-dev|signed-release|signed-and-notarized|verify-only]
 //            [--identity <codesign-id>] [--notarize-profile <profile>]
 //            [--webauthn-rp-id <rp_id>...] [--webauthn-mode production|developer]
-//            [--cert <path-or-subject>] [--installer dmg|msi|msix|appimage|none]
+//            [--entitlement <key>...]
+//            [--cert <path-or-subject>] [--installer dmg|pkg|msi|msix|appimage|none]
 //            [--dmg|--msi|--msix|--appimage DEPRECATED aliases for --installer]
 //            [--update-url <url>] [--public-key <key>] [--channel stable|beta|alpha]
 //            [--version <semver> REQUIRED for installer output]
 //            [--manufacturer <name>|--publisher <name> REQUIRED for installer output]
 //            [--compress zstd|none]
+//
+// Entitlements:
+//   --entitlement <key> may be repeated. Accepted keys: camera, microphone,
+//   network-client, network-server, apple-events, jit, unsigned-memory,
+//   dyld-env-vars, disable-library-validation, files-user-selected-rw, app-sandbox.
 
 // Signing policies:
 //   unsigned-dev (default): build without signing; emits a NOTE about unsigned output.
@@ -42,15 +48,15 @@
 #include <vector>
 
 #include "bundle.hpp"
+#include "cli_detail.hpp"
 #include <fxe/types.hpp>
 
 namespace fs = std::filesystem;
 
 namespace {
 
+  using fxe_pack::cli_detail::InstallerFormat;
   enum class Compression { None, Zstd };
-
-  enum class InstallerFormat { None, Dmg, Msi, Msix, AppImage };
 
   enum class SigningPolicy { UnsignedDev, SignedRelease, SignedAndNotarized, VerifyOnly };
   struct PackageMetadata {
@@ -71,6 +77,7 @@ namespace {
     std::string notarize_profile;
     std::vector<std::string> webauthn_rp_ids;
     std::string webauthn_mode;
+    std::vector<std::string> entitlements;
     std::string cert;
     SigningPolicy signing_policy = SigningPolicy::UnsignedDev;
     bool signing_policy_explicit = false;
@@ -238,6 +245,9 @@ namespace {
   bool is_macos_dmg_output(const Args& a) {
     return a.platform == "macos" && fs::path(a.out).extension() == ".dmg";
   }
+  bool is_macos_pkg_output(const Args& a) {
+    return a.platform == "macos" && fs::path(a.out).extension() == ".pkg";
+  }
 
   bool is_windows_msi_output(const Args& a) {
     return a.platform == "win" && fs::path(a.out).extension() == ".msi";
@@ -248,37 +258,6 @@ namespace {
   }
   bool is_linux_appimage_output(const Args& a) {
     return a.platform == "linux" && fs::path(a.out).extension() == ".AppImage";
-  }
-
-  std::string installer_value(InstallerFormat installer) {
-    switch (installer) {
-    case InstallerFormat::None:
-      return "none";
-    case InstallerFormat::Dmg:
-      return "dmg";
-    case InstallerFormat::Msi:
-      return "msi";
-    case InstallerFormat::Msix:
-      return "msix";
-    case InstallerFormat::AppImage:
-      return "appimage";
-    }
-    die("unknown installer format");
-  }
-
-  InstallerFormat parse_installer_value(std::string_view value) {
-    if (value == "none")
-      return InstallerFormat::None;
-    if (value == "dmg")
-      return InstallerFormat::Dmg;
-    if (value == "msi")
-      return InstallerFormat::Msi;
-    if (value == "msix")
-      return InstallerFormat::Msix;
-    if (value == "appimage")
-      return InstallerFormat::AppImage;
-    die("unknown --installer value: " + std::string(value) +
-        " (expected dmg, msi, msix, appimage, or none)");
   }
 
   std::string signing_policy_value(SigningPolicy policy) {
@@ -344,6 +323,24 @@ namespace {
         out.push_back(c);
         break;
       }
+    }
+    return out;
+  }
+  std::string render_entitlement_keys(const Args& a) {
+    std::vector<std::string> rendered_keys;
+    std::string out;
+    for (const auto& shorthand : a.entitlements) {
+      std::string full_key = fxe_pack::cli_detail::map_entitlement_shorthand(shorthand);
+      if (full_key.empty())
+        die("unknown --entitlement value: " + shorthand +
+            " (expected camera, microphone, network-client, network-server, apple-events, jit, "
+            "unsigned-memory, dyld-env-vars, disable-library-validation, "
+            "files-user-selected-rw, or app-sandbox)");
+      if (std::find(rendered_keys.begin(), rendered_keys.end(), full_key) != rendered_keys.end())
+        continue;
+      rendered_keys.push_back(full_key);
+      out += "  <key>" + xml_escape(full_key) + "</key>\n";
+      out += "  <true/>\n";
     }
     return out;
   }
@@ -467,10 +464,16 @@ namespace {
         a.package.manufacturer = need("--manufacturer/--publisher");
       else if (s == "--installer") {
         const std::string value = need("--installer");
-        const InstallerFormat installer = parse_installer_value(value);
+        InstallerFormat installer = InstallerFormat::None;
+        try {
+          installer = fxe_pack::cli_detail::parse_installer_value(value);
+        } catch (const std::invalid_argument&) {
+          die("unknown --installer value: " + value +
+              " (expected dmg, pkg, msi, msix, appimage, or none)");
+        }
         if (a.installer != InstallerFormat::None && a.installer != installer) {
           die("conflicting installer selection: --installer " + value +
-              " conflicts with --installer " + installer_value(a.installer));
+              " conflicts with --installer " + fxe_pack::cli_detail::installer_value(a.installer));
         }
         a.installer = installer;
         a.installer_explicit = true;
@@ -481,12 +484,21 @@ namespace {
                                                             : InstallerFormat::Msix;
         if (a.installer != InstallerFormat::None && a.installer != installer) {
           die("conflicting installer selection: " + std::string(s) +
-              " conflicts with --installer " + installer_value(a.installer));
+              " conflicts with --installer " + fxe_pack::cli_detail::installer_value(a.installer));
         }
         std::cerr << "fxe-pack: " << s << " is deprecated; use --installer "
-                  << installer_value(installer) << "\n";
+                  << fxe_pack::cli_detail::installer_value(installer) << "\n";
         a.installer = installer;
         a.installer_explicit = true;
+      } else if (s == "--entitlement") {
+        std::string entitlement = need("--entitlement");
+        if (fxe_pack::cli_detail::map_entitlement_shorthand(entitlement).empty()) {
+          die("unknown --entitlement value: " + entitlement +
+              " (expected camera, microphone, network-client, network-server, apple-events, jit, "
+              "unsigned-memory, dyld-env-vars, disable-library-validation, "
+              "files-user-selected-rw, or app-sandbox)");
+        }
+        a.entitlements.push_back(std::move(entitlement));
       } else if (s == "--compress") {
         std::string value = need("--compress");
         if (value == "none")
@@ -504,8 +516,9 @@ namespace {
             << "                [--identity CODESIGN_ID] [--notarize-profile PROFILE]\n"
             << "                [--webauthn-rp-id RP_ID ...] [--webauthn-mode "
                "production|developer]\n"
+            << "                [--entitlement KEY ...]\n"
             << "                [--cert PATH_OR_SUBJECT] [--installer "
-               "dmg|msi|msix|appimage|none]\n"
+               "dmg|pkg|msi|msix|appimage|none]\n"
             << "                [--dmg|--msi|--msix|--appimage DEPRECATED]\n"
             << "                [--update-url URL] [--public-key KEY] [--channel "
                "stable|beta|alpha]\n"
@@ -516,6 +529,9 @@ namespace {
             << "\nExamples:\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.app --platform macos\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.dmg --platform macos\n"
+            << "  fxe-pack examples/js/react_demo.ts --out MyApp.pkg --platform macos "
+               "--installer "
+               "pkg\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.exe --platform win\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.msi --platform win\n"
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.msix --platform win --cert "
@@ -523,6 +539,11 @@ namespace {
             << "  fxe-pack examples/js/react_demo.ts --out MyApp.AppImage --platform linux "
                "--installer appimage\n"
             << "  fxe-pack examples/js/react_demo.ts --out my-app.tar.gz --platform linux\n"
+            << "\nEntitlements:\n"
+            << "  --entitlement KEY may be repeated. Accepted keys: camera, microphone,\n"
+            << "    network-client, network-server, apple-events, jit, unsigned-memory,\n"
+            << "    dyld-env-vars, disable-library-validation, files-user-selected-rw,\n"
+            << "    app-sandbox.\n"
             << "\nSigning policies:\n"
             << "  unsigned-dev (default): build without signing; emits a NOTE.\n"
             << "  signed-release: sign + verify release artifacts; requires --identity on "
@@ -549,6 +570,8 @@ namespace {
       die("--webauthn-rp-id requires --platform macos");
     if (!a.webauthn_mode.empty() && a.platform != "macos")
       die("--webauthn-mode requires --platform macos");
+    if (!a.entitlements.empty() && a.platform != "macos")
+      die("--entitlement requires --platform macos");
     if (!a.signing_policy_explicit) {
       if (!a.identity.empty() && !a.notarize_profile.empty()) {
         a.signing_policy = SigningPolicy::SignedAndNotarized;
@@ -568,6 +591,8 @@ namespace {
     }
     if (a.installer == InstallerFormat::Dmg && a.platform != "macos")
       die("--installer dmg requires --platform macos");
+    if (a.installer == InstallerFormat::Pkg && a.platform != "macos")
+      die("--installer pkg requires --platform macos");
     if (a.installer == InstallerFormat::Msi && a.platform != "win")
       die("--installer msi requires --platform win");
     if (a.installer == InstallerFormat::Msix && a.platform != "win")
@@ -582,6 +607,8 @@ namespace {
       die(".app output requires --platform macos");
     if (fs::path(a.out).extension() == ".dmg" && a.platform != "macos")
       die(".dmg output requires --platform macos");
+    if (fs::path(a.out).extension() == ".pkg" && a.platform != "macos")
+      die(".pkg output requires --platform macos");
     if (fs::path(a.out).extension() == ".exe" && a.platform != "win")
       die(".exe output requires --platform win");
     if (fs::path(a.out).extension() == ".msi" && a.platform != "win")
@@ -593,6 +620,8 @@ namespace {
     if (!a.installer_explicit && a.installer == InstallerFormat::None) {
       if (is_macos_dmg_output(a))
         a.installer = InstallerFormat::Dmg;
+      else if (is_macos_pkg_output(a))
+        a.installer = InstallerFormat::Pkg;
       else if (is_windows_msi_output(a))
         a.installer = InstallerFormat::Msi;
       else if (is_windows_msix_output(a))
@@ -620,10 +649,11 @@ namespace {
          a.signing_policy == SigningPolicy::SignedAndNotarized ||
          a.signing_policy == SigningPolicy::VerifyOnly) &&
         a.platform == "macos" && !is_macos_app_output(a) && !is_macos_dmg_output(a) &&
-        a.installer != InstallerFormat::Dmg) {
+        !is_macos_pkg_output(a) && a.installer != InstallerFormat::Dmg &&
+        a.installer != InstallerFormat::Pkg) {
       die("--signing-policy " + signing_policy_value(a.signing_policy) +
-          " requires macOS .app or .dmg output (use --out <name>.app, <name>.dmg, or --installer "
-          "dmg)");
+          " requires macOS .app, .dmg, or .pkg output (use --out <name>.app, <name>.dmg, "
+          "<name>.pkg, or --installer dmg/pkg)");
     }
     if (a.signing_policy == SigningPolicy::SignedRelease) {
       if (a.platform == "macos") {
@@ -700,6 +730,21 @@ namespace {
 #else
       if (!tool_exists("hdiutil"))
         die(".dmg output requires hdiutil, which was not found in PATH");
+#endif
+    }
+    if (a.installer == InstallerFormat::Pkg || is_macos_pkg_output(a)) {
+#if !defined(__APPLE__)
+      die(".pkg output requires hdiutil-class macOS tooling (pkgbuild/productbuild) and can only "
+          "be built on macOS hosts");
+#else
+      if (!tool_exists("pkgbuild"))
+        die(".pkg output requires pkgbuild, which was not found in PATH");
+      if (!tool_exists("productbuild"))
+        die(".pkg output requires productbuild, which was not found in PATH");
+      if (policy_signs(a.signing_policy) && !tool_exists("productsign"))
+        die(".pkg signing requires productsign, which was not found in PATH");
+      if (a.signing_policy == SigningPolicy::VerifyOnly && !tool_exists("pkgutil"))
+        die(".pkg signature verification requires pkgutil, which was not found in PATH");
 #endif
     }
     if (a.installer == InstallerFormat::Msi || is_windows_msi_output(a)) {
@@ -931,7 +976,7 @@ namespace {
     plist = subst(plist, "FXE_APP_VERSION", a.package.version);
     spit(app / "Contents" / "Info.plist", plist);
 
-    if (!a.webauthn_rp_ids.empty()) {
+    if (!a.webauthn_rp_ids.empty() || !a.entitlements.empty()) {
       std::string domains;
       for (const auto& rp_id : a.webauthn_rp_ids) {
         domains += "    <string>webcredentials:" + xml_escape(rp_id);
@@ -939,10 +984,9 @@ namespace {
           domains += "?mode=developer";
         domains += "</string>\n";
       }
-      if (!domains.empty())
-        domains.pop_back();
       std::string ent = subst(load_template_or(tmpl_dir, "entitlements.plist.in", ""),
                               "FXE_WEBAUTHN_ASSOCIATED_DOMAINS", domains);
+      ent = subst(ent, "FXE_ENTITLEMENT_KEYS", render_entitlement_keys(a));
       spit(app / "Contents" / "entitlements.plist", ent);
     }
 
@@ -1040,6 +1084,7 @@ namespace {
   }
 
   void verify_codesign_or_die(const fs::path& signed_target, const char* label);
+  void verify_pkg_signature_or_die(const fs::path& signed_target, const char* label);
 
   void verify_signtool_or_die(const fs::path& signed_target, const char* label);
   void sign_macos_app_or_die(const Args& a, const fs::path& app) {
@@ -1053,7 +1098,7 @@ namespace {
     cmd << "codesign --force --deep --timestamp --options runtime --sign "
         << shell_quote(fs::path(a.identity));
     fs::path entitlements = app / "Contents" / "entitlements.plist";
-    if (!a.webauthn_rp_ids.empty() && fs::exists(entitlements))
+    if (fs::exists(entitlements))
       cmd << " --entitlements " << shell_quote(entitlements);
     cmd << " " << shell_quote(app);
     run_command_or_die(cmd.str(), "codesign");
@@ -1224,6 +1269,106 @@ namespace {
 #else
     (void)a;
     (void)dmg;
+#endif
+  }
+  void verify_pkg_signature_or_die(const fs::path& signed_target, const char* label) {
+#if defined(__APPLE__)
+    std::ostringstream cmd;
+    cmd << "pkgutil --check-signature " << shell_quote(signed_target);
+    run_command_or_die(cmd.str(), std::string("pkg signature verify (") + label + ")");
+#else
+    (void)signed_target;
+    (void)label;
+#endif
+  }
+
+  void sign_macos_pkg_or_die(const Args& a, const fs::path& unsigned_pkg, const fs::path& out) {
+    if (a.signing_policy == SigningPolicy::UnsignedDev) {
+      move_one(unsigned_pkg, out);
+      return;
+    }
+    if (a.signing_policy == SigningPolicy::VerifyOnly) {
+      move_one(unsigned_pkg, out);
+      verify_pkg_signature_or_die(out, "pkg");
+      return;
+    }
+    fs::path signed_pkg = out;
+    signed_pkg += ".signed";
+    std::ostringstream cmd;
+    cmd << "productsign --sign " << shell_quote(fs::path(a.identity)) << " "
+        << shell_quote(unsigned_pkg) << " " << shell_quote(signed_pkg);
+    run_command_or_die(cmd.str(), "PKG productsign");
+    fs::remove(out);
+    move_one(signed_pkg, out);
+    fs::remove(unsigned_pkg);
+    verify_pkg_signature_or_die(out, "pkg");
+  }
+
+  void notarize_macos_pkg_or_die(const Args& a, const fs::path& pkg) {
+    if (a.signing_policy != SigningPolicy::SignedAndNotarized)
+      return;
+#if defined(__APPLE__)
+    std::ostringstream submit_cmd;
+    submit_cmd << "xcrun notarytool submit " << shell_quote(pkg) << " --keychain-profile "
+               << shell_quote(fs::path(a.notarize_profile)) << " --wait";
+    run_command_or_die(submit_cmd.str(), "PKG notarization");
+    staple_with_retry_or_die(pkg, "PKG notarization");
+#else
+    (void)a;
+    (void)pkg;
+#endif
+  }
+
+  fs::path create_pkg_from_app(const Args& a, const fs::path& app, const fs::path& out) {
+#if defined(__APPLE__)
+    fs::path component_pkg = fs::temp_directory_path() / (a.name + ".component.pkg");
+    fs::path unsigned_pkg = fs::temp_directory_path() / (a.name + ".unsigned.pkg");
+    fs::remove(component_pkg);
+    fs::remove(unsigned_pkg);
+    fs::create_directories(out.parent_path());
+    fs::remove(out);
+    std::ostringstream pkgbuild_cmd;
+    pkgbuild_cmd << "pkgbuild --component " << shell_quote(app)
+                 << " --install-location /Applications " << shell_quote(component_pkg);
+    run_command_or_die(pkgbuild_cmd.str(), "pkgbuild packaging");
+    std::ostringstream productbuild_cmd;
+    productbuild_cmd << "productbuild --package " << shell_quote(component_pkg) << " "
+                     << shell_quote(unsigned_pkg);
+    run_command_or_die(productbuild_cmd.str(), "productbuild packaging");
+    // Distribution-XML customization can layer on top of this single-component flow later.
+    sign_macos_pkg_or_die(a, unsigned_pkg, out);
+    notarize_macos_pkg_or_die(a, out);
+    fs::remove(component_pkg);
+    return out;
+#else
+    (void)a;
+    (void)app;
+    (void)out;
+    die(".pkg output requires hdiutil-class macOS tooling (pkgbuild/productbuild) and can only "
+        "be built on macOS hosts");
+#endif
+  }
+
+  fs::path build_macos_pkg(const Args& a, const fs::path& staged_bin, const fs::path& out,
+                           const fs::path& tmpl_dir, const fs::path& fxe_run_dir) {
+#if defined(__APPLE__)
+    fs::path app = fs::temp_directory_path() / (a.name + ".app");
+    wrap_macos_app(a, staged_bin, app, tmpl_dir, fxe_run_dir);
+    if (a.signing_policy != SigningPolicy::VerifyOnly) {
+      sign_macos_app_or_die(a, app);
+      notarize_macos_app_or_die(a, app);
+    }
+    fs::path pkg = create_pkg_from_app(a, app, out);
+    fs::remove_all(app);
+    return pkg;
+#else
+    (void)a;
+    (void)staged_bin;
+    (void)out;
+    (void)tmpl_dir;
+    (void)fxe_run_dir;
+    die(".pkg output requires hdiutil-class macOS tooling (pkgbuild/productbuild) and can only "
+        "be built on macOS hosts");
 #endif
   }
 
@@ -1516,7 +1661,7 @@ namespace {
 int main(int argc, char** argv) {
   Args a = parse(argc, argv);
   if (produces_installer(a) && a.package.version.empty())
-    die("--version is required when producing an installer (.dmg/.msi/.msix/.appimage)");
+    die("--version is required when producing an installer (.dmg/.pkg/.msi/.msix/.appimage)");
   if (produces_installer(a) && a.package.manufacturer.empty())
     die("--manufacturer/--publisher is required when producing an installer");
   if (!produces_installer(a) && a.package.version.empty())
@@ -1576,11 +1721,29 @@ int main(int argc, char** argv) {
                                                            : path_with_extension(final_out, ".dmg");
     extra_artifacts.emplace_back("macOS DMG disk image",
                                  create_dmg_from_app(a, final_out, dmg_out));
+  } else if (a.platform == "macos" && a.installer == InstallerFormat::Pkg) {
+    fs::path app_out = requested_out;
+    if (app_out.extension() == ".pkg")
+      app_out.replace_extension(".app");
+    else
+      app_out = path_with_extension(app_out, ".app");
+    final_out = wrap_macos_app(a, staged_bin, app_out, tmpl_dir, fxe_run.parent_path());
+    artifact_kind = "macOS .app bundle";
+    if (a.signing_policy != SigningPolicy::VerifyOnly) {
+      sign_macos_app_or_die(a, final_out);
+      notarize_macos_app_or_die(a, final_out);
+    }
+    fs::path pkg_out = requested_out.extension() == ".pkg" ? requested_out
+                                                           : path_with_extension(final_out, ".pkg");
+    extra_artifacts.emplace_back("macOS PKG installer", create_pkg_from_app(a, final_out, pkg_out));
   } else if (a.platform == "macos" && requested_out.extension() == ".app") {
     final_out = wrap_macos_app(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
     artifact_kind = "macOS .app bundle";
     sign_macos_app_or_die(a, final_out);
     notarize_macos_app_or_die(a, final_out);
+  } else if (a.platform == "macos" && requested_out.extension() == ".pkg") {
+    final_out = build_macos_pkg(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
+    artifact_kind = "macOS PKG installer";
   } else if (a.platform == "macos" && requested_out.extension() == ".dmg") {
     final_out = wrap_macos_dmg(a, staged_bin, requested_out, tmpl_dir, fxe_run.parent_path());
     artifact_kind = "macOS DMG disk image";

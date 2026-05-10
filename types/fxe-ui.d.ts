@@ -871,6 +871,9 @@ declare module 'fxe-ui' {
     focusedLine?: number;
     getMark?: GutterMarkFn;
   }
+  export interface BracketContextProvider {
+    isStringOrComment?(off: number): boolean;
+  }
   export interface EditableAreaProps extends AccessibilityProps {
     key?: string;
     style?: StyleValue;
@@ -890,6 +893,9 @@ declare module 'fxe-ui' {
     showWhitespace?: boolean;
     textColor?: number;
     getLineDecorations?: LineDecorationFn;
+    bracketProvider?: BracketContextProvider;
+    indentLines?: boolean;
+    indentUnit?: 'tab' | number;
     onCursorChange?: (line: number, col: number) => void;
     scrollY?: number;
     onScrollChange?: (scrollY: number) => void;

@@ -5,6 +5,7 @@ import {
   applyEditsAtRanges,
   expandLines,
   expandToWord,
+  indentSelection,
 } from '../packages/fxe-ui/src/components/editable_area_logic.ts';
 import { assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 
@@ -81,6 +82,28 @@ test('expandLines selects whole lines for each range', () => {
   assertDeepEqual(nextSel.ranges, [
     { anchor: 0, focus: 4 },
     { anchor: 8, focus: 14 },
+  ]);
+});
+
+test('indentSelection emits ascending edits for multi-range line selections', () => {
+  const doc = new TextDocument('aa\nbb\ncc\n');
+  const sel = new MultiRangeSelection([
+    { anchor: 0, focus: 5 },
+    { anchor: 6, focus: 8 },
+  ]);
+
+  const { edits, nextSel } = indentSelection(doc, sel, 2);
+  assertDeepEqual(edits, [
+    { start: 0, removed: 0, inserted: '  ' },
+    { start: 3, removed: 0, inserted: '  ' },
+    { start: 6, removed: 0, inserted: '  ' },
+  ]);
+
+  doc.applyBatch(edits);
+  assertEqual(doc.text(), '  aa\n  bb\n  cc\n');
+  assertDeepEqual(nextSel.ranges, [
+    { anchor: 2, focus: 9 },
+    { anchor: 12, focus: 14 },
   ]);
 });
 

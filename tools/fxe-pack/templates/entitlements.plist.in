@@ -6,5 +6,6 @@
   <array>
 @FXE_WEBAUTHN_ASSOCIATED_DOMAINS@
   </array>
+@FXE_ENTITLEMENT_KEYS@
 </dict>
 </plist>

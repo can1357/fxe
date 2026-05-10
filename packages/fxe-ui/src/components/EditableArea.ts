@@ -20,9 +20,22 @@ import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { isPrimaryModifier, MOD_ALT, MOD_SHIFT } from '../text/edit_model.ts';
 import { rectFromStyle } from './common.ts';
-import { addNextOccurrence, applyEditsAtRanges, expandLines } from './editable_area_logic.ts';
+import {
+  addNextOccurrence,
+  applyEditsAtRanges,
+  autocloseTyped,
+  expandLines,
+  findMatchingBracket,
+  indentSelection,
+  inferIndent,
+  outdentSelection,
+  type BracketContextProvider,
+} from './editable_area_logic.ts';
 import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
 
+export type { BracketContextProvider } from './editable_area_logic.ts';
+
+const KEY_BACKSLASH = 92;
 const KEY_ESCAPE = 256;
 const KEY_ENTER = 257;
 const KEY_TAB = 258;
@@ -64,6 +77,12 @@ export interface EditableAreaProps {
   textColor?: number;
   /** Decoration provider forwarded to the underlying LineViewport. */
   getLineDecorations?: LineDecorationFn;
+  /** Return syntax context for bracket autoclose/match suppression. */
+  bracketProvider?: BracketContextProvider;
+  /** Always indent full lines on Tab, even for collapsed cursors. */
+  indentLines?: boolean;
+  /** Preferred indentation unit for Tab / Shift-Tab. */
+  indentUnit?: 'tab' | number;
   /** Called whenever the cursor moves, even without an edit. */
   onCursorChange?: (line: number, col: number) => void;
   /** Y scroll offset (logical pixels). */
@@ -86,6 +105,7 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
 
   const [sel, setSel] = useState(() => MultiRangeSelection.cursor(0));
   const wantedCol = useRef<number>(-1);
+  const indentInference = useRef<{ revision: number; unit: 'tab' | number } | null>(null);
   const tabString = props.tabString ?? '  ';
 
   const doc = props.document;
@@ -161,6 +181,16 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     commitSelection(nextSel, -1);
   };
 
+  const resolvedIndentUnit = (): 'tab' | number => {
+    if (props.indentUnit !== undefined) return props.indentUnit;
+    const revision = doc.revision();
+    const cached = indentInference.current;
+    if (!cached || cached.revision !== revision) {
+      indentInference.current = { revision, unit: inferIndent(doc).unit };
+    }
+    return indentInference.current.unit;
+  };
+
   const onKeyDown = (raw: unknown): void => {
     const ev = raw as KeyEvent;
     const mod = ev.modifiers ?? 0;
@@ -174,6 +204,23 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     }
     if (primary && ev.key === KEY_Y) {
       redo();
+      return;
+    }
+    if (primary && shift && ev.key === KEY_BACKSLASH) {
+      const primaryOffset = findBracketOffset(doc, sel.primaryRange().focus);
+      if (primaryOffset < 0) return;
+      const match = findMatchingBracket(doc, primaryOffset, props.bracketProvider);
+      if (!match) return;
+      const target = primaryOffset === match.open ? match.close : match.open;
+      commitSelection(
+        sel.with(
+          sel.ranges.map((range, index) =>
+            index === sel.primary ? { anchor: target, focus: target } : range,
+          ),
+          sel.primary,
+        ),
+        -1,
+      );
       return;
     }
     if (primary && ev.key === KEY_D) {
@@ -215,9 +262,27 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
         applySelectionEdit('\n', 'newline');
         if (props.history?.breakCoalescing) props.history.breakCoalescing();
         return;
-      case KEY_TAB:
-        applySelectionEdit(tabString, 'indent');
+      case KEY_TAB: {
+        const unit = resolvedIndentUnit();
+        if (shift) {
+          const { edits, nextSel } = outdentSelection(doc, sel, unit);
+          if (edits.length === 0) return;
+          dispatch(edits, { origin: 'outdent' });
+          commitSelection(nextSel, -1);
+          return;
+        }
+        const shouldIndentLines =
+          props.indentLines === true || sel.ranges.some((range) => range.anchor !== range.focus);
+        if (!shouldIndentLines) {
+          applySelectionEdit(tabString, 'indent');
+          return;
+        }
+        const { edits, nextSel } = indentSelection(doc, sel, unit);
+        if (edits.length === 0) return;
+        dispatch(edits, { origin: 'indent' });
+        commitSelection(nextSel, -1);
         return;
+      }
       case KEY_ESCAPE:
         commitSelection(sel.collapseToPrimary(), -1);
         return;
@@ -238,10 +303,19 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     if (inserted === '\n' || inserted === '\r') {
       return;
     }
+    const autoclose = autocloseTyped(doc, sel, inserted, props.bracketProvider);
+    if (autoclose.handled) {
+      if (autoclose.edits.length > 0) {
+        dispatch(autoclose.edits, { origin: 'type' });
+      }
+      commitSelection(autoclose.nextSel, -1);
+      return;
+    }
     applySelectionEdit(inserted, 'type');
   };
 
   useEffect(() => {
+    indentInference.current = null;
     const subId = doc.subscribe(() => {
       setSel((current) => current.with(current.ranges, current.primary));
     });
@@ -272,6 +346,7 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
       ? props.getLineDecorations(line)
       : null;
     const lineRange = doc.lineRange(line);
+    // TODO(F6): paint highlight at matching bracket once bracket decorations exist.
     let selectionRects = userDecorations?.selectionRects ?? null;
     forEachRange(sel, (range) => {
       if (range.end <= lineRange.start || range.start > lineRange.end) return;
@@ -334,4 +409,24 @@ function mergeRects(a: Float32Array, b: Float32Array): Float32Array {
   out.set(a, 0);
   out.set(b, a.length);
   return out;
+}
+
+function findBracketOffset(doc: TextDocument, focus: number): number {
+  if (focus < doc.length() && isBracketChar(doc.slice(focus, focus + 1))) return focus;
+  if (focus > 0 && isBracketChar(doc.slice(focus - 1, focus))) return focus - 1;
+  return -1;
+}
+
+function isBracketChar(ch: string): boolean {
+  return (
+    ch === '(' ||
+    ch === ')' ||
+    ch === '[' ||
+    ch === ']' ||
+    ch === '{' ||
+    ch === '}' ||
+    ch === '"' ||
+    ch === "'" ||
+    ch === '`'
+  );
 }
