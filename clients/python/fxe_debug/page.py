@@ -544,6 +544,7 @@ class Page:
 
         return await _impl(self, clear=clear)
 
+
     async def memo_trace_enable(self) -> None:
         from .trace import memo_trace_enable as _impl
 
@@ -563,3 +564,39 @@ class Page:
         from .trace import memo_trace_snapshot as _impl
 
         return await _impl(self)
+
+    async def frame_trace_enable(self, *, ring_size: int = 240) -> None:
+        from .trace import frame_trace_enable as _impl
+
+        await _impl(self, ring_size=ring_size)
+
+    async def frame_trace_disable(self) -> None:
+        from .trace import frame_trace_disable as _impl
+
+        await _impl(self)
+
+    async def frame_trace_drain(self, *, clear: bool = True) -> list[dict[str, Any]]:
+        from .trace import frame_trace_drain as _impl
+
+        return await _impl(self, clear=clear)
+
+    async def frame_trace_snapshot(self) -> list[dict[str, Any]]:
+        from .trace import frame_trace_snapshot as _impl
+
+        return await _impl(self)
+
+    async def frame_trace_record(
+        self,
+        duration_ms: float,
+        *,
+        ring_size: int = 240,
+        max_frame_ms: float | None = None,
+    ) -> dict[str, Any]:
+        from .trace import frame_trace_record as _impl
+
+        return await _impl(
+            self,
+            duration_ms=duration_ms,
+            ring_size=ring_size,
+            max_frame_ms=max_frame_ms,
+        )

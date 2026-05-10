@@ -2,6 +2,7 @@
 import { Pressable, Text, useEffect, useState, View } from 'fxe-ui';
 import { type CdpClient, connectCdp } from './cdp_client.ts';
 import { ConsolePanel } from './panels/Console.tsx';
+import { FramePanel } from './panels/Frame.tsx';
 import { HeapPanel } from './panels/Heap.tsx';
 import { LayoutPanel } from './panels/Layout.tsx';
 import { NetworkPanel } from './panels/Network.tsx';
@@ -9,7 +10,15 @@ import { PerformancePanel } from './panels/Performance.tsx';
 import { ReconcilerPanel } from './panels/Reconciler.tsx';
 import { SourcePanel } from './panels/Source.tsx';
 
-type TabId = 'console' | 'reconciler' | 'performance' | 'heap' | 'network' | 'layout' | 'source';
+type TabId =
+  | 'console'
+  | 'reconciler'
+  | 'performance'
+  | 'heap'
+  | 'network'
+  | 'layout'
+  | 'frame'
+  | 'source';
 
 const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
   { id: 'console', label: 'Console' },
@@ -18,6 +27,7 @@ const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
   { id: 'heap', label: 'Heap' },
   { id: 'network', label: 'Network' },
   { id: 'layout', label: 'Layout' },
+  { id: 'frame', label: 'Frame' },
   { id: 'source', label: 'Source' },
 ];
 
@@ -98,6 +108,7 @@ export function Shell({ url }: { url: string }) {
         {tab === 'heap' ? <HeapPanel cdp={cdp} /> : null}
         {tab === 'network' ? <NetworkPanel cdp={cdp} /> : null}
         {tab === 'layout' ? <LayoutPanel cdp={cdp} /> : null}
+        {tab === 'frame' ? <FramePanel cdp={cdp} /> : null}
         {tab === 'source' ? <SourcePanel cdp={cdp} /> : null}
       </View>
     </View>

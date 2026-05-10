@@ -41,6 +41,7 @@ Example
 from __future__ import annotations
 
 import json
+import asyncio
 from typing import Any, Literal
 
 # JS bootstrap: defines the tracing primitives once per isolate. Idempotent —
@@ -308,3 +309,73 @@ async def memo_trace_snapshot(page: Any) -> dict[str, Any] | None:
     if not isinstance(out, dict):
         raise RuntimeError(f"memo_trace_snapshot: unexpected response: {out!r}")
     return out
+
+# ---------------------------------------------------------------------------
+# Frame trace — consumes the per-frame ring buffer exposed by fxe-ui.
+# ---------------------------------------------------------------------------
+_FRAME_GUARD = (
+    "if (typeof globalThis.__fxeFrameProfile !== 'object' || globalThis.__fxeFrameProfile === null) {"
+    "  throw new Error('frame profile unavailable; this app has not imported fxe-ui');"
+    "} "
+)
+
+
+async def frame_trace_enable(page: Any, *, ring_size: int = 240) -> None:
+    """Enable per-frame profiling and clear the ring."""
+    await page.evaluate(
+        _FRAME_GUARD + f"globalThis.__fxeFrameProfile.enable({{ ringSize: {int(ring_size)} }}); true"
+    )
+
+
+async def frame_trace_disable(page: Any) -> None:
+    """Disable per-frame profiling."""
+    await page.evaluate(_FRAME_GUARD + "globalThis.__fxeFrameProfile.disable(); true")
+
+
+async def frame_trace_drain(page: Any, *, clear: bool = True) -> list[dict[str, Any]]:
+    """Read frame samples; clear the ring by default."""
+    out = await page.evaluate(
+        _FRAME_GUARD
+        + (
+            "globalThis.__fxeFrameProfile.drain()"
+            if clear
+            else "globalThis.__fxeFrameProfile.snapshot()"
+        )
+    )
+    if not isinstance(out, list):
+        raise RuntimeError(f"frame_trace_drain: unexpected response: {out!r}")
+    return out
+
+
+async def frame_trace_snapshot(page: Any) -> list[dict[str, Any]]:
+    """Return frame samples without clearing the ring."""
+    return await frame_trace_drain(page, clear=False)
+
+
+async def frame_trace_record(
+    page: Any,
+    duration_ms: float,
+    *,
+    ring_size: int = 240,
+    max_frame_ms: float | None = None,
+) -> dict[str, Any]:
+    """Record frame samples for a fixed duration and summarise them."""
+    await frame_trace_enable(page, ring_size=ring_size)
+    try:
+        await asyncio.sleep(duration_ms / 1000.0)
+        samples = await frame_trace_drain(page)
+    finally:
+        await frame_trace_disable(page)
+    total_ms = sum(sample["totalMs"] for sample in samples)
+    max_ms = max((sample["totalMs"] for sample in samples), default=0.0)
+    result = {
+        "samples": samples,
+        "avgMs": total_ms / len(samples) if samples else 0.0,
+        "maxMs": max_ms,
+        "count": len(samples),
+    }
+    if max_frame_ms is not None and max_ms > max_frame_ms:
+        raise AssertionError(
+            f"frame budget exceeded: max={max_ms:.2f}ms > {max_frame_ms}ms over {len(samples)} samples"
+        )
+    return result
