@@ -152,6 +152,19 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
     }),
   );
 
+  const hasNativeLazyCallback =
+    !shouldRunFrameLoop && typeof window.setFrameCallback === 'function';
+  if (hasNativeLazyCallback) {
+    // Lazy mode: drive frames on demand from real redraw requests. Clear the
+    // constructor's initial dirty bit before the synchronous startup frame so
+    // a redraw requested during that frame (for example after unresolved
+    // first-pass layout) remains pending for App.run / Window.run to consume.
+    window.setFrameCallback(frame);
+    if (typeof window.takeRedrawRequest === 'function') {
+      window.takeRedrawRequest();
+    }
+  }
+
   frame();
   if (shouldRunFrameLoop) {
     try {
@@ -159,21 +172,8 @@ export function mount(root: Node, window: Window, opts: MountOptions = {}): () =
     } catch {
       frameLoopDispose = null;
     }
-  } else {
-    // Lazy mode: drive frames on demand from real redraw requests. setState
-    // / signals call window.requestRedraw() via requestRenderTargetRedraw;
-    // the OS event loop (App.run / Window.run) consumes that flag and
-    // invokes the per-window onFrame we register here. The initial synchronous
-    // frame above already painted the tree, so clear the window's constructor
-    // dirty bit instead of scheduling a duplicate startup frame.
-    if (typeof window.setFrameCallback === 'function') {
-      window.setFrameCallback(frame);
-      if (typeof window.takeRedrawRequest === 'function') {
-        window.takeRedrawRequest();
-      }
-    } else {
-      window.requestRedraw();
-    }
+  } else if (!hasNativeLazyCallback) {
+    window.requestRedraw();
   }
   const devToolsHandle =
     opts.devTools === false
