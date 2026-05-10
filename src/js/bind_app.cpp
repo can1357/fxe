@@ -7,6 +7,7 @@
 #include "../net/http_client.hpp"
 #include "../os/a11y.hpp"
 #include "../os/os.hpp"
+#include "../runtime/bundle_loader.hpp"
 #include "../runtime/updater.hpp"
 #include "fxe/single_instance.hpp"
 #include <fxe/js_bindings.hpp>
@@ -1615,6 +1616,13 @@ namespace fxe::js {
 
     void auto_rollback_unready_update_once() {
       static std::once_flag once;
+      // Auto-rollback is only meaningful for bundled (packaged) apps that
+      // ship through the updater. In a non-bundled dev/test run the updates
+      // root may hold a stale first-launch.flag with no history behind it,
+      // which would otherwise emit a spurious "no previous update version
+      // is available" warning at every startup.
+      if (!fxe::runtime::bundle_mounted())
+        return;
       std::call_once(once, [] {
         std::string rolled_from;
         std::string error;
