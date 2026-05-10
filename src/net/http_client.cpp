@@ -28,7 +28,7 @@ namespace fxe::net {
       std::string path = "/";
     };
 
-    std::string ascii_lower_copy(std::string s) {
+    [[maybe_unused]] std::string ascii_lower_copy(std::string s) {
       for (char& c : s)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       return s;
@@ -67,7 +67,11 @@ namespace fxe::net {
   } // namespace
 
   void multipart_form::add_field(std::string name, std::string value) {
-    parts_.push_back(part{.name = std::move(name), .value = std::move(value), .file = false});
+    part p;
+    p.name = std::move(name);
+    p.value = std::move(value);
+    p.file = false;
+    parts_.push_back(std::move(p));
   }
 
   void multipart_form::add_file(std::string name, std::string filename, std::string content_type,

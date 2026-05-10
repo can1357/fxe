@@ -231,7 +231,7 @@ namespace fxe::debug::cdp_ws {
     std::string out;
     out.reserve(payload.size() + 14);
     out.push_back(static_cast<char>(0x80u | (opcode & 0x0fu)));
-    u64 len = static_cast<u64>(payload.size());
+    u64 len = payload.size();
     u8 mask_bit = mask ? 0x80u : 0u;
     if (len <= 125u) {
       out.push_back(static_cast<char>(mask_bit | static_cast<u8>(len)));
@@ -310,7 +310,7 @@ namespace fxe::debug::cdp_ws {
       error = "WebSocket frame exceeds 16777216-byte limit";
       return false;
     }
-    if (len > static_cast<u64>(buffer.size() - pos))
+    if (len > buffer.size() - pos)
       return false;
     if (opcode >= 0x8u) {
       if (!fin) {

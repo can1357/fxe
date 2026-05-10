@@ -377,7 +377,7 @@ namespace fxe::net {
     std::vector<u8> input = data;
     input.insert(input.end(), {0x00, 0x00, 0xff, 0xff});
     z_stream& stream = deflate_->inflater;
-    stream.next_in = reinterpret_cast<Bytef*>(input.data());
+    stream.next_in = input.data();
     stream.avail_in = static_cast<uInt>(input.size());
     out.clear();
     u8 buf[8192];
@@ -868,10 +868,12 @@ namespace fxe::net {
             return;
           }
         }
-        if (plen > static_cast<u64>(std::numeric_limits<usize>::max())) {
-          send_close_frame(1009, "Message Too Big");
-          emit_local_close(1009, "Message Too Big");
-          return;
+        if constexpr (sizeof(usize) < sizeof(u64)) {
+          if (plen > std::numeric_limits<usize>::max()) {
+            send_close_frame(1009, "Message Too Big");
+            emit_local_close(1009, "Message Too Big");
+            return;
+          }
         }
         std::vector<u8> payload;
         if (plen > 0) {

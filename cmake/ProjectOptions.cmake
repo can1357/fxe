@@ -69,9 +69,9 @@ if(FXE_ENABLE_WARNINGS)
         -Wdouble-promotion
         -Wformat=2
         -Wcast-align
-        -Wnon-virtual-dtor
-        -Wold-style-cast
-        -Woverloaded-virtual
+        $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>
+        $<$<COMPILE_LANGUAGE:CXX>:-Woverloaded-virtual>
         -Wnull-dereference
         -Wimplicit-fallthrough
         -Wunreachable-code
@@ -87,14 +87,14 @@ if(FXE_ENABLE_WARNINGS)
         -Wdouble-promotion
         -Wformat=2
         -Wcast-align
-        -Wnon-virtual-dtor
-        -Wold-style-cast
-        -Woverloaded-virtual
+        $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
+        $<$<COMPILE_LANGUAGE:CXX>:-Wold-style-cast>
+        $<$<COMPILE_LANGUAGE:CXX>:-Woverloaded-virtual>
         -Wnull-dereference
         -Wduplicated-cond
         -Wduplicated-branches
         -Wlogical-op
-        -Wuseless-cast
+        $<$<COMPILE_LANGUAGE:CXX>:-Wuseless-cast>
         -Wimplicit-fallthrough=5
     )
     set(_fxe_msvc_warnings

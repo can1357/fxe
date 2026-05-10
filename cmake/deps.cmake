@@ -195,6 +195,12 @@ if(NOT TARGET md4c::md4c AND NOT TARGET md4c)
             GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(md4c)
+        if(TARGET md4c)
+            target_include_directories(md4c PUBLIC $<BUILD_INTERFACE:${md4c_SOURCE_DIR}/src>)
+            if(NOT MSVC)
+                target_compile_options(md4c PRIVATE -w)
+            endif()
+        endif()
         if(DEFINED BUILD_SHARED_LIBS_SAVED)
             set(BUILD_SHARED_LIBS
                 ${BUILD_SHARED_LIBS_SAVED}

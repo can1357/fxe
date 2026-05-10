@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -107,23 +108,30 @@ namespace fxe::net {
     }
 
     bool parse_int64(std::string_view value, i64& out) {
-      try {
-        usize consumed = 0;
-        auto parsed = std::stoll(std::string(trim_copy(value)), &consumed, 10);
-        if (consumed == trim_copy(value).size()) {
-          out = parsed;
-          return true;
-        }
-      } catch (...) {
-      }
-      return false;
+      auto is_ws = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
+      while (!value.empty() && is_ws(value.front()))
+        value.remove_prefix(1);
+      while (!value.empty() && is_ws(value.back()))
+        value.remove_suffix(1);
+      if (value.empty())
+        return false;
+      const char* first = value.data();
+      const char* last = first + value.size();
+      if (*first == '+')
+        ++first;
+      i64 parsed = 0;
+      auto [ptr, ec] = std::from_chars(first, last, parsed);
+      if (ec != std::errc{} || ptr != last)
+        return false;
+      out = parsed;
+      return true;
     }
 
     i64 portable_timegm(std::tm* tm) {
 #if defined(_WIN32)
       return static_cast<i64>(_mkgmtime(tm));
 #else
-      return static_cast<i64>(timegm(tm));
+      return timegm(tm);
 #endif
     }
 

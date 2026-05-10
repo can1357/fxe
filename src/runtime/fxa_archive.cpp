@@ -11,6 +11,7 @@
 #include <fstream>
 #include <ios>
 #include <iterator>
+#include <mutex>
 #include <optional>
 #include <sodium.h>
 #include <span>
@@ -544,7 +545,7 @@ namespace fxe::runtime::fxa_archive {
       return std::nullopt;
     if (compression_ == "zstd") {
       const auto begin = static_cast<usize>(it->second.offset);
-      const auto end = static_cast<usize>(it->second.offset + it->second.size);
+      const auto end = it->second.offset + it->second.size;
       return std::string(reinterpret_cast<const char*>(decompressed_payload_.data() + begin),
                          end - begin);
     }
