@@ -359,12 +359,39 @@ declare namespace FXE {
     button: number;
     modifiers: number;
   }
+  type ScrollPhase =
+    | 'none'
+    | 'began'
+    | 'changed'
+    | 'ended'
+    | 'momentum_began'
+    | 'momentum_changed'
+    | 'momentum_ended';
   interface WheelEvent {
     type: 'wheel';
     dx: number;
     dy: number;
     modifiers: number;
+    phase: ScrollPhase;
+    precision: boolean;
   }
+  interface GesturePinchEvent {
+    type: 'pinch';
+    phase: ScrollPhase;
+    magnification: number;
+  }
+  interface GestureRotateEvent {
+    type: 'rotate';
+    phase: ScrollPhase;
+    rotation: number;
+  }
+  interface GestureSwipeEvent {
+    type: 'swipe';
+    phase: ScrollPhase;
+    dx: number;
+    dy: number;
+  }
+  type GestureEvent = GesturePinchEvent | GestureRotateEvent | GestureSwipeEvent;
   interface ResizeEvent {
     type: 'resize';
     width: number;
@@ -424,6 +451,7 @@ declare namespace FXE {
     mousedown: MouseButtonEvent;
     mouseup: MouseButtonEvent;
     wheel: WheelEvent;
+    gesture: GestureEvent;
     cursorenter: SimpleWindowEvent<'cursorenter'>;
     cursorleave: SimpleWindowEvent<'cursorleave'>;
     resize: ResizeEvent;
@@ -453,6 +481,7 @@ declare namespace FXE {
     /** 0 for the shared/main isolate, otherwise the dedicated runtime id. */
     readonly isolateId: number;
     static exit(): void;
+    static supportsNativeGestures(): boolean;
 
     poll(): void;
     close(): void;

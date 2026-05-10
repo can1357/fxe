@@ -147,6 +147,7 @@ if(FXE_BUILD_TESTS)
     fxe_add_cpp_test(fxe_cbor_canonical_tests tests/cbor_canonical_test.cpp fxe_runtime)
     fxe_add_cpp_test(fxe_fxa_archive_tests tests/fxa_archive_test.cpp fxe_runtime)
     fxe_add_cpp_test(fxe_markdown_parse_tests tests/markdown_parse_test.cpp fxe_markdown)
+    fxe_add_cpp_test(fxe_window_input_event_tests tests/window_input_event_test.cpp fxe_window)
     if(TARGET fxe_webauthn)
         fxe_add_cpp_test(
             fxe_webauthn_auth_data_tests

@@ -107,6 +107,13 @@ namespace fxe {
       mouse_button_down,
       mouse_button_up,
       mouse_wheel,
+      gesture_pinch_begin,
+      gesture_pinch_change,
+      gesture_pinch_end,
+      gesture_rotate_begin,
+      gesture_rotate_change,
+      gesture_rotate_end,
+      gesture_swipe,
       key_down,
       key_up,
       key_char,
@@ -129,11 +136,26 @@ namespace fxe {
       message,
       compose,
     };
+    enum class scroll_phase_t : u8 {
+      none,
+      began,
+      changed,
+      ended,
+      momentum_began,
+      momentum_changed,
+      momentum_ended,
+    };
     kind_t kind = kind_t::mouse_move;
     double x = 0.0;
     double y = 0.0;
     double dx = 0.0;
     double dy = 0.0;
+    float magnification = 0.0f;
+    float rotation_radians = 0.0f;
+    int swipe_dx = 0;
+    int swipe_dy = 0;
+    scroll_phase_t scroll_phase = scroll_phase_t::none;
+    bool precision = false;
     int button = 0; // 0=left, 1=right, 2=middle
     int key = 0;    // GLFW key code (or ASCII for letters)
     int scancode = 0;
@@ -450,6 +472,7 @@ namespace fxe {
     std::vector<input_event> injected_events_;
   };
   std::unique_ptr<window> create_window(const window_desc& desc = {});
+  bool fxe_supports_native_gestures();
 
 #if FXE_HAS_WGPU
 } // namespace fxe

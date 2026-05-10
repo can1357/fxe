@@ -1,4 +1,5 @@
 #include "../os/os.hpp"
+#include "glfw_window_platform_hooks.hpp"
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -945,6 +946,9 @@ namespace fxe {
                                              static_cast<glfw_window*>(owner)->push_drag_event(
                                                  kind, x, y, paths);
                                            });
+        install_macos_gesture_hooks(
+            wrap_view_ ? wrap_view_ : (__bridge void*)[glfwGetCocoaWindow(handle_) contentView],
+            this);
         if (!pending_drag_rects_.empty()) {
           fxe_macos_set_drag_rects(wrap_view_, pending_drag_rects_);
           pending_drag_rects_.clear();
@@ -957,6 +961,7 @@ namespace fxe {
             hwnd, this, [](void* owner, const char* p, int c, const char* k) {
               static_cast<glfw_window*>(owner)->push_compose_event(p, c, k);
             });
+        install_win32_pointer_hooks(hwnd, this);
       }
       install_win32_drop_target();
 #elif defined(__linux__) && FXE_OS_DBUS
@@ -1041,6 +1046,9 @@ namespace fxe {
       std::vector<input_event> out;
       out.swap(injected_events_);
       return out;
+    }
+    void inject_gesture_event(input_event ev) {
+      push_event(std::move(ev));
     }
     void close() override {
       glfwSetWindowShouldClose(handle_, GLFW_TRUE);
@@ -2685,6 +2693,8 @@ namespace fxe {
         ev.dy = yoff;
         ev.x = self->last_cursor_x_;
         ev.y = self->last_cursor_y_;
+        ev.scroll_phase = input_event::scroll_phase_t::none;
+        ev.precision = false;
         self->push_event(ev);
       });
       glfwSetKeyCallback(handle_, [](GLFWwindow* w, int key, int scancode, int action, int mods) {
@@ -2839,6 +2849,15 @@ namespace fxe {
     std::atomic<bool> redraw_requested_{true};
   };
 
+  void glfw_window_inject_gesture_event(window* w, input_event ev) {
+    if (!w)
+      return;
+    if (auto* gw = dynamic_cast<glfw_window*>(w))
+      gw->inject_gesture_event(std::move(ev));
+    else
+      w->inject(ev);
+  }
+
 #endif
 
   std::unique_ptr<window> create_window(const window_desc& desc) {
@@ -2846,6 +2865,13 @@ namespace fxe {
     return std::make_unique<glfw_window>(desc);
 #else
     return std::make_unique<stub_window>(desc);
+#endif
+  }
+  bool fxe_supports_native_gestures() {
+#if defined(__APPLE__) || defined(_WIN32)
+    return true;
+#else
+    return false;
 #endif
   }
 

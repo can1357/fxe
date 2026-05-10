@@ -1134,6 +1134,7 @@ declare module 'fxe-ui' {
     cursor?: CursorKind;
   }
   export function clearHitTargets(): void;
+  export function hitTargets(): readonly HitTarget[];
   export function registerHitTarget(
     target: Omit<HitTarget, 'z'> & { z?: number } & Record<string, unknown>,
   ): void;

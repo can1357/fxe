@@ -593,6 +593,14 @@ namespace fxe::js {
         return "mouseup";
       case K::mouse_wheel:
         return "wheel";
+      case K::gesture_pinch_begin:
+      case K::gesture_pinch_change:
+      case K::gesture_pinch_end:
+      case K::gesture_rotate_begin:
+      case K::gesture_rotate_change:
+      case K::gesture_rotate_end:
+      case K::gesture_swipe:
+        return "gesture";
       case K::key_down:
         return "keydown";
       case K::key_up:
@@ -641,16 +649,37 @@ namespace fxe::js {
 
     bool is_known_event(std::string_view name) {
       static constexpr std::string_view names[] = {
-          "keydown",   "keyup",     "keypress", "message",     "mousemove",
-          "mousedown", "mouseup",   "wheel",    "cursorenter", "cursorleave",
-          "resize",    "move",      "scale",    "focus",       "blur",
-          "minimize",  "restore",   "maximize", "unmaximize",  "close",
-          "drop",      "dragenter", "dragover", "dragleave",   "compose",
+          "keydown",   "keyup",      "keypress", "message",     "mousemove",   "mousedown",
+          "mouseup",   "wheel",      "gesture",  "cursorenter", "cursorleave", "resize",
+          "move",      "scale",      "focus",    "blur",        "minimize",    "restore",
+          "maximize",  "unmaximize", "close",    "drop",        "dragenter",   "dragover",
+          "dragleave", "compose",
       };
       for (auto n : names)
         if (n == name)
           return true;
       return false;
+    }
+
+    const char* scroll_phase_name(input_event::scroll_phase_t phase) {
+      using P = input_event::scroll_phase_t;
+      switch (phase) {
+      case P::none:
+        return "none";
+      case P::began:
+        return "began";
+      case P::changed:
+        return "changed";
+      case P::ended:
+        return "ended";
+      case P::momentum_began:
+        return "momentum_began";
+      case P::momentum_changed:
+        return "momentum_changed";
+      case P::momentum_ended:
+        return "momentum_ended";
+      }
+      return "none";
     }
 
     // ---- payload builder ----------------------------------------------------
@@ -694,6 +723,28 @@ namespace fxe::js {
         set("dx"_v8(iso), Number::New(iso, ev.dx));
         set("dy"_v8(iso), Number::New(iso, ev.dy));
         set("modifiers"_v8(iso), Integer::New(iso, ev.modifiers));
+        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
+        set("precision"_v8(iso), Boolean::New(iso, ev.precision));
+        break;
+      case K::gesture_pinch_begin:
+      case K::gesture_pinch_change:
+      case K::gesture_pinch_end:
+        set("type"_v8(iso), "pinch"_v8(iso));
+        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
+        set("magnification"_v8(iso), Number::New(iso, static_cast<double>(ev.magnification)));
+        break;
+      case K::gesture_rotate_begin:
+      case K::gesture_rotate_change:
+      case K::gesture_rotate_end:
+        set("type"_v8(iso), "rotate"_v8(iso));
+        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
+        set("rotation"_v8(iso), Number::New(iso, static_cast<double>(ev.rotation_radians)));
+        break;
+      case K::gesture_swipe:
+        set("type"_v8(iso), "swipe"_v8(iso));
+        set("phase"_v8(iso), str(iso, scroll_phase_name(ev.scroll_phase)));
+        set("dx"_v8(iso), Integer::New(iso, ev.swipe_dx));
+        set("dy"_v8(iso), Integer::New(iso, ev.swipe_dy));
         break;
       case K::window_resize:
         set("width"_v8(iso), Integer::New(iso, ev.width));
@@ -2126,6 +2177,9 @@ namespace fxe::js {
       if (w)
         w->close();
     }
+    void win_supports_native_gestures(const FunctionCallbackInfo<Value>& info) {
+      info.GetReturnValue().Set(fxe_supports_native_gestures());
+    }
 
     // Re-entrancy guard for `drive_redraw_now`. Refresh callbacks can fire
     // while we are already inside the run loop's render pass; we must not
@@ -2687,6 +2741,8 @@ namespace fxe::js {
 
     // Static method: Window.exit()
     tpl->Set(iso, "exit", FunctionTemplate::New(iso, win_exit));
+    tpl->Set(iso, "supportsNativeGestures",
+             FunctionTemplate::New(iso, win_supports_native_gestures));
 
     global->Set(iso, "Window", tpl);
     win_tpl_table()[iso].Reset(iso, tpl);

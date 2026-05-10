@@ -15,16 +15,23 @@ else()
 endif()
 
 if(APPLE)
+    target_sources(fxe_window PRIVATE src/window/glfw_window_macos_gestures.mm)
     set_source_files_properties(
         src/window/glfw_window.cpp
         PROPERTIES
             COMPILE_FLAGS
                 "-x objective-c++ -fobjc-arc -Wno-old-style-cast -Wno-gnu-conditional-omitted-operand"
     )
+    set_source_files_properties(
+        src/window/glfw_window_macos_gestures.mm
+        PROPERTIES
+            COMPILE_FLAGS
+                "-fobjc-arc -Wno-old-style-cast -Wno-gnu-conditional-omitted-operand"
+    )
 endif()
 
 if(WIN32)
-    target_sources(fxe_window PRIVATE src/window/ime_win32.cpp)
+    target_sources(fxe_window PRIVATE src/window/ime_win32.cpp src/window/glfw_window_win32_pointer.cpp)
     target_link_libraries(fxe_window PRIVATE imm32)
 endif()
 if(UNIX AND NOT APPLE AND FXE_OS_DBUS)
