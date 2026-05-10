@@ -185,8 +185,8 @@ export class ClientHttp2Stream extends Emitter {
         this.closed = true;
         this.emit('error', abortError(this._options.signal));
         this._emitCloseOnce();
-        // TODO(F5 verify): readResult polling can outlive an aborted stream and leave the native
-        // read thread join pending until session teardown finishes.
+        // Keep polling after abort so readResult can observe native cancel completion,
+        // join the worker thread, and erase the native read handle without delivering a response.
         defer(() => { try { n.cancel(this.session._handle, this._streamId); } catch {} });
       };
       if (this._options.signal?.addEventListener) {

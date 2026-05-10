@@ -1,6 +1,6 @@
 import http2Default, { connect, constants, createSecureServer } from 'node:http2';
 
-import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
+import { assert, assertDeepEqual, assertEqual, delay, run, test } from './ts_harness.ts';
 
 const CERT_PEM = `-----BEGIN CERTIFICATE-----
 MIIDJTCCAg2gAwIBAgIULWllllk5MThgFlNnEn673iafmOcwDQYJKoZIhvcNAQEL
@@ -189,28 +189,45 @@ test('node:http2 aborts a native request via AbortSignal', async () => {
   assert(address && typeof address.port === 'number' && address.port > 0);
 
   const session = nativeConnect(`https://127.0.0.1:${address.port}`, { ca: CERT_PEM });
-  const controller = new AbortController();
-  const stream = session.request(
-    {
-      [constants.HTTP2_HEADER_METHOD]: 'GET',
-      [constants.HTTP2_HEADER_PATH]: '/large',
-    },
-    { signal: controller.signal },
-  );
-
-  const { promise, resolve, reject } = Promise.withResolvers<void>();
-  stream.on('response', () => reject(new Error('request should abort before response')));
-  stream.on('error', (error: unknown) => {
-    const abort = error as { name?: string; code?: string };
-    assert(abort?.name === 'AbortError' || abort?.code === 'ABORT_ERR');
-    resolve();
-  });
-  stream.end();
-  await Promise.resolve();
-  controller.abort();
-  await promise;
-  session.close();
-  server.close();
+  try {
+    const controller = new AbortController();
+    const stream = session.request(
+      {
+        [constants.HTTP2_HEADER_METHOD]: 'GET',
+        [constants.HTTP2_HEADER_PATH]: '/large',
+      },
+      { signal: controller.signal },
+    );
+    const events: string[] = [];
+    const { promise, resolve, reject } = Promise.withResolvers<void>();
+    let sawAbortError = false;
+    stream.on('response', () => reject(new Error('request should abort before response')));
+    stream.on('data', () => reject(new Error('request should not deliver body after abort')));
+    stream.on('end', () => reject(new Error('request should not end successfully after abort')));
+    stream.on('error', (error: unknown) => {
+      const abort = error as { name?: string; code?: string };
+      assert(abort?.name === 'AbortError' || abort?.code === 'ABORT_ERR');
+      sawAbortError = true;
+      events.push('error');
+    });
+    stream.on('close', () => {
+      if (!sawAbortError) {
+        reject(new Error('request closed before abort error surfaced'));
+        return;
+      }
+      events.push('close');
+      resolve();
+    });
+    stream.end();
+    await Promise.resolve();
+    controller.abort();
+    await promise;
+    await delay(250);
+    assertDeepEqual(events, ['error', 'close']);
+  } finally {
+    session.close();
+    server.close();
+  }
 });
 
 await run();
