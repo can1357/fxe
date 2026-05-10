@@ -387,11 +387,13 @@ namespace fxe::net {
             int rv = 0;
             bool stop = false;
             {
-              std::lock_guard<std::mutex> session_lock(session_mutex_);
+              std::unique_lock<std::mutex> session_lock(session_mutex_);
               if (!session_)
                 break;
+              current_session_lock_ = &session_lock;
               process_pending_tasks_locked();
               rv = nghttp2_session_recv(session_);
+              current_session_lock_ = nullptr;
               if (rv == NGHTTP2_ERR_EOF) {
                 stop = true;
               } else if (rv < 0 && rv != NGHTTP2_ERR_WOULDBLOCK) {
@@ -601,8 +603,24 @@ namespace fxe::net {
               [this](i32 window_size, std::string& err) {
                 return set_stream_window(current_stream_id_, window_size, err);
               });
+          // While waiting for the application handler to produce a response we
+          // must (a) release the outer session_mutex_ so other threads can
+          // call submit_push_promise / set_stream_window / cancel_stream, and
+          // (b) periodically drain pending_tasks_ so those out-of-thread
+          // submissions actually reach nghttp2 (otherwise the app handler
+          // blocks on a future that this thread is supposed to satisfy).
           std::unique_lock<std::mutex> lock(slot->mutex);
-          slot->cv.wait(lock, [&] { return slot->ready || slot->closed || owner_.is_closed(); });
+          auto* outer = current_session_lock_;
+          while (!slot->ready && !slot->closed && !owner_.is_closed()) {
+            if (outer && outer->owns_lock()) {
+              process_pending_tasks_locked();
+              (void)flush_locked();
+              outer->unlock();
+            }
+            slot->cv.wait_for(lock, std::chrono::milliseconds(5));
+            if (outer && !outer->owns_lock())
+              outer->lock();
+          }
           if (!slot->ready)
             return false;
           auto response = slot->response;
@@ -777,6 +795,7 @@ namespace fxe::net {
         std::map<i32, http2_incoming_request> requests_;
         std::map<i32, body_state> response_bodies_;
         i32 current_stream_id_ = 0;
+        std::unique_lock<std::mutex>* current_session_lock_ = nullptr;
       };
 
       std::shared_ptr<response_slot> remove_slot_by_request_locked(u64 request_id) {
