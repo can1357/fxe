@@ -1,9 +1,9 @@
-import { CommandBuffer, Primitives, type Mat4, type Paint } from 'fxe';
+import { CommandBuffer, type Mat4, type Paint, Primitives } from 'fxe';
 import { Component, Draw, type Node, useInternalLayout, useMemo } from '../reconciler/fiber.ts';
 import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { rectFromStyle } from './common.ts';
-import { type IconName, ICON_PATHS, type IconPathCommand } from './icons.ts';
+import { ICON_PATHS, type IconName, type IconPathCommand } from './icons.ts';
 import { View, type ViewProps } from './View.ts';
 
 const DEFAULT_COLOR = 0x111827ff;

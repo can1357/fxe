@@ -32,6 +32,31 @@ target_link_libraries(fxe_font PUBLIC fxe_deps)
 target_link_libraries(fxe_font PUBLIC fxe_log)
 target_compile_features(fxe_font PUBLIC cxx_std_20)
 
+# Embed JetBrainsMono Nerd Font Mono (SIL OFL-1.1, vendored under
+# assets/fonts/) so apps get Nerd Font icon coverage without bundling
+# a separate file. Generated at configure time via scripts/embed_binary.py.
+set(_fxe_nerd_font_input
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/JetBrainsMonoNerdFontMono-Regular.ttf"
+)
+set(_fxe_nerd_font_output
+    "${CMAKE_CURRENT_BINARY_DIR}/generated/fxe/jetbrains_nerd_font.cpp"
+)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_custom_command(
+    OUTPUT "${_fxe_nerd_font_output}"
+    COMMAND
+        ${Python3_EXECUTABLE}
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/embed_binary.py"
+        --input "${_fxe_nerd_font_input}"
+        --output "${_fxe_nerd_font_output}"
+        --namespace "fxe::font::embedded"
+        --variable "jetbrains_nerd_font_ttf"
+    DEPENDS "${_fxe_nerd_font_input}" "${CMAKE_CURRENT_SOURCE_DIR}/scripts/embed_binary.py"
+    COMMENT "Embedding JetBrainsMono Nerd Font Mono"
+    VERBATIM
+)
+target_sources(fxe_font PRIVATE "${_fxe_nerd_font_output}")
+
 if(FXE_FONT_HAS_FREETYPE)
     file(
         GLOB _fxe_font_freetype

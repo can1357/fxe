@@ -1,8 +1,8 @@
 import { CommandBuffer, type Renderer, type Window, type WindowEventName } from 'fxe';
-import { mount } from '../packages/fxe-ui/src/mount/index.ts';
 import { Icon } from '../packages/fxe-ui/src/components/Icon.ts';
 import { ICON_PATHS, type IconName } from '../packages/fxe-ui/src/components/icons.ts';
 import { View } from '../packages/fxe-ui/src/components/View.ts';
+import { mount } from '../packages/fxe-ui/src/mount/index.ts';
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 
 test('fxe_ui_icon_test', () => {

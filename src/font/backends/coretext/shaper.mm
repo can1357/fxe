@@ -7,6 +7,7 @@
 // uses Apple's pre-OpenType feature selectors internally but accepts
 // modern OpenType-style dicts too via the AAT bridge layer.
 
+#include <fxe/font/embedded_nerd.hpp>
 #include <fxe/font/face.hpp>
 #include <fxe/font/shaper.hpp>
 
@@ -14,6 +15,7 @@
 #import <CoreText/CoreText.h>
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <string_view>
@@ -25,6 +27,14 @@ namespace fxe::font {
 
     class CoreTextShaper final : public Shaper {
     public:
+      CoreTextShaper() = default;
+      ~CoreTextShaper() override {
+        for (auto& [_, ref] : cascaded_by_face_id_) {
+          if (ref) CFRelease(ref);
+        }
+        if (nerd_descriptor_) CFRelease(nerd_descriptor_);
+      }
+
       [[nodiscard]] std::vector<ShapeRun> shape(Face& face, std::string_view utf8,
                                                 const ShapeOptions& opts) override {
         std::vector<ShapeRun> out;
@@ -55,9 +65,15 @@ namespace fxe::font {
 
         // Build attributes: just the font for the simple case. Feature flags
         // are encoded as an array of dicts with `kCTFontOpenTypeFeatureTag`/`-Value`.
+        // Swap the bare CTFontRef for a copy that carries our embedded
+        // Nerd Font in its cascade list. The CTLine cascade walks this
+        // list for any codepoint the primary doesn't cover, so PUA glyphs
+        // (powerline, devicons, font-awesome, …) render in the embedded
+        // face at the same size with zero JS-side wiring.
+        CTFontRef cascaded = build_cascaded(ct);
         CFMutableDictionaryRef attrs = CFDictionaryCreateMutable(
             nullptr, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-        CFDictionarySetValue(attrs, kCTFontAttributeName, ct);
+        CFDictionarySetValue(attrs, kCTFontAttributeName, cascaded);
 
         // Build a feature-settings array if we have any.
         std::vector<Feature> feats =
@@ -113,14 +129,18 @@ namespace fxe::font {
           // looks up glyphs against the right Face — otherwise the glyph_id
           // we hand out belongs to the substitute font but the cache renders
           // it through the original face, producing missing/garbled output.
-          CTFontRef run_ct = ct;
+          CTFontRef run_ct = cascaded;
           if (CFDictionaryRef run_attrs = CTRunGetAttributes(run); run_attrs) {
             if (auto* maybe_font = CFDictionaryGetValue(run_attrs, kCTFontAttributeName)) {
               run_ct = static_cast<CTFontRef>(maybe_font);
             }
           }
           Face* run_face = &face;
-          if (run_ct != ct) {
+          // Compare against the cascaded primary, not the bare `ct`: when
+          // we baked the Nerd Font cascade into `cascaded`, the primary
+          // text run reports `cascaded` here. Treating that as a
+          // substitution would mint a duplicate Face for the primary.
+          if (run_ct != cascaded) {
             run_face = resolve_substitute_face(run_ct);
             if (!run_face) run_face = &face; // best-effort fallback
           }
@@ -221,7 +241,91 @@ namespace fxe::font {
         return raw;
       }
 
+      // Returns a CTFontRef wrapping `base` with our embedded Nerd Font
+      // appended to the cascade list. Cached per-base by face id so we
+      // pay the descriptor-clone cost once per (font, size) tuple. The
+      // returned font is owned by the cache; callers do NOT release it.
+      CTFontRef build_cascaded(CTFontRef base) {
+        if (!base) return base;
+        const uintptr_t key = reinterpret_cast<uintptr_t>(base);
+        if (auto it = cascaded_by_face_id_.find(key); it != cascaded_by_face_id_.end())
+          return it->second;
+
+        CTFontDescriptorRef nerd_desc = ensure_nerd_descriptor();
+        if (!nerd_desc) {
+          cascaded_by_face_id_.emplace(key, base);
+          return base; // no descriptor → no cascade, just hand back original
+        }
+
+        const void* cascade_items[] = {nerd_desc};
+        CFArrayRef cascade =
+            CFArrayCreate(nullptr, cascade_items, 1, &kCFTypeArrayCallBacks);
+        if (!cascade) {
+          cascaded_by_face_id_.emplace(key, base);
+          return base;
+        }
+
+        const void* keys[] = {kCTFontCascadeListAttribute};
+        const void* vals[] = {cascade};
+        CFDictionaryRef attrs = CFDictionaryCreate(
+            nullptr, keys, vals, 1, &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+        CFRelease(cascade);
+        if (!attrs) {
+          cascaded_by_face_id_.emplace(key, base);
+          return base;
+        }
+
+        CTFontDescriptorRef base_desc = CTFontCopyFontDescriptor(base);
+        CTFontDescriptorRef new_desc =
+            base_desc ? CTFontDescriptorCreateCopyWithAttributes(base_desc, attrs) : nullptr;
+        if (base_desc) CFRelease(base_desc);
+        CFRelease(attrs);
+        if (!new_desc) {
+          cascaded_by_face_id_.emplace(key, base);
+          return base;
+        }
+
+        CTFontRef wrapped =
+            CTFontCreateWithFontDescriptor(new_desc, CTFontGetSize(base), nullptr);
+        CFRelease(new_desc);
+        if (!wrapped) {
+          cascaded_by_face_id_.emplace(key, base);
+          return base;
+        }
+
+        cascaded_by_face_id_.emplace(key, wrapped);
+        return wrapped;
+      }
+
+      // Lazily creates a CTFontDescriptor for the embedded Nerd Font.
+      // CTFontManagerCreateFontDescriptorsFromData makes the font usable
+      // without installing it into the user/system font dirs; the
+      // descriptor stays valid for the lifetime of the shaper.
+      CTFontDescriptorRef ensure_nerd_descriptor() {
+        std::call_once(nerd_descriptor_once_, [this]() {
+          const auto bytes = embedded_nerd_font_bytes();
+          if (bytes.empty()) return;
+          CFDataRef data = CFDataCreate(nullptr, bytes.data(),
+                                        static_cast<CFIndex>(bytes.size()));
+          if (!data) return;
+          CFArrayRef descs = CTFontManagerCreateFontDescriptorsFromData(data);
+          CFRelease(data);
+          if (!descs) return;
+          if (CFArrayGetCount(descs) > 0) {
+            nerd_descriptor_ =
+                static_cast<CTFontDescriptorRef>(CFArrayGetValueAtIndex(descs, 0));
+            CFRetain(nerd_descriptor_);
+          }
+          CFRelease(descs);
+        });
+        return nerd_descriptor_;
+      }
+
       std::unordered_map<std::string, std::unique_ptr<Face>> substitute_faces_;
+      std::unordered_map<uintptr_t, CTFontRef> cascaded_by_face_id_;
+      std::once_flag nerd_descriptor_once_;
+      CTFontDescriptorRef nerd_descriptor_ = nullptr;
 
     };
 

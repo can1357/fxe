@@ -3,7 +3,7 @@ import {
   dispatchKeyDown,
   resetEventPipeline,
 } from '../packages/fxe-ui/src/mount/event_pipeline.ts';
-import { clearFocus, focusTarget, focusedTargetId } from '../packages/fxe-ui/src/mount/focus.ts';
+import { clearFocus, focusedTargetId, focusTarget } from '../packages/fxe-ui/src/mount/focus.ts';
 import { clearHitTargets, registerHitTarget } from '../packages/fxe-ui/src/mount/hit_test.ts';
 
 import { assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
