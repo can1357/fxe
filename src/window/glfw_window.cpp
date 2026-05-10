@@ -43,6 +43,7 @@
 #include <shellapi.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <winternl.h>
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "ole32.lib")
@@ -957,6 +958,10 @@ namespace fxe {
 #elif defined(_WIN32)
       {
         HWND hwnd = glfwGetWin32Window(handle_);
+        const auto build = win32_build_number();
+        FXE_INFO("window.vibrancy", "win32 build={} backdrop={} mica={} acrylic={}", build,
+                 win32_supports_systembackdrop(), win32_supports_mica(), win32_supports_acrylic());
+
         fxe::os::install_win32_ime_bridge(
             hwnd, this, [](void* owner, const char* p, int c, const char* k) {
               static_cast<glfw_window*>(owner)->push_compose_event(p, c, k);
@@ -1299,6 +1304,13 @@ namespace fxe {
 #elif defined(_WIN32)
       if (!handle_)
         return false;
+      const bool enabled = !vibrancy_kind_.empty();
+      const auto caps = get_vibrancy_capabilities();
+      if (enabled && !caps.supported) {
+        warn_once(warned_win32_vibrancy_,
+                  "fxe.window: Win32 vibrancy is unavailable on this Windows version");
+        return false;
+      }
       apply_win32_vibrancy(vibrancy_kind_.empty() ? nullptr : vibrancy_kind_.c_str());
       return true;
 #else
@@ -1321,14 +1333,50 @@ namespace fxe {
 #elif defined(_WIN32)
       if (!handle_)
         return false;
+      if (enabled && !get_vibrancy_capabilities().blur_behind) {
+        warn_once(warned_win32_blur_, "fxe.window: DwmEnableBlurBehindWindow is unavailable");
+        return false;
+      }
       apply_win32_blur_behind(enabled);
       return true;
+#elif defined(__linux__)
+      return apply_linux_blur_behind(enabled);
 #else
       if (enabled) {
         warn_once(warned_unsupported_blur_behind_,
                   "fxe.window: setBlurBehind is unsupported on this GLFW backend");
       }
       return false;
+#endif
+    }
+    [[nodiscard]] vibrancy_capabilities get_vibrancy_capabilities() const override {
+#if defined(__APPLE__)
+      return {
+          .supported = true,
+          .mica = false,
+          .acrylic = false,
+          .tabbed = true,
+          .blur_behind = true,
+          .dark_mode = true,
+          .system_accent = true,
+      };
+#elif defined(_WIN32)
+      const DWORD build = win32_build_number();
+      const bool blur_behind = win32_supports_blur_behind();
+      const bool acrylic = win32_supports_acrylic();
+      const bool mica = win32_supports_mica();
+      const bool tabbed = win32_supports_systembackdrop();
+      return {
+          .supported = blur_behind || acrylic || mica || tabbed,
+          .mica = mica,
+          .acrylic = acrylic,
+          .tabbed = tabbed,
+          .blur_behind = blur_behind,
+          .dark_mode = build >= 17763,
+          .system_accent = build >= 10240,
+      };
+#else
+      return {};
 #endif
     }
     [[nodiscard]] bool is_transparent() const override {
@@ -1634,7 +1682,13 @@ namespace fxe {
     }
 
   private:
-#if defined(_WIN32)
+#if defined(__linux__)
+    bool apply_linux_blur_behind(bool enabled) {
+      if (enabled && handle_)
+        FXE_DEBUG("window.blur", "linux blur-behind delegated to renderer self-blur");
+      return handle_ != nullptr;
+    }
+#elif defined(_WIN32)
     enum class fxe_win32_accent_state : int {
       disabled = 0,
       enable_gradient = 1,
@@ -1659,6 +1713,42 @@ namespace fxe {
 
     using fxe_set_window_composition_attribute =
         BOOL(WINAPI*)(HWND, fxe_win32_window_composition_attribute_data*);
+
+    using fxe_rtl_get_version = LONG(WINAPI*)(PRTL_OSVERSIONINFOW);
+
+    static DWORD win32_build_number() {
+      static const DWORD build = [] {
+        HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        if (!ntdll)
+          return DWORD{0};
+        auto rtl_get_version =
+            reinterpret_cast<fxe_rtl_get_version>(GetProcAddress(ntdll, "RtlGetVersion"));
+        if (!rtl_get_version)
+          return DWORD{0};
+        RTL_OSVERSIONINFOW version{};
+        version.dwOSVersionInfoSize = sizeof(version);
+        if (rtl_get_version(&version) != 0)
+          return DWORD{0};
+        return version.dwBuildNumber;
+      }();
+      return build;
+    }
+
+    static bool win32_supports_systembackdrop() {
+      return win32_build_number() >= 22621;
+    }
+
+    static bool win32_supports_mica() {
+      return win32_build_number() >= 22000;
+    }
+
+    static bool win32_supports_acrylic() {
+      return win32_build_number() >= 17134;
+    }
+
+    static bool win32_supports_blur_behind() {
+      return win32_build_number() >= 6000;
+    }
 
     static DWORD win32_backdrop_type_for_kind(const char* kind) {
       if (!kind || kind[0] == '\0')
@@ -1856,6 +1946,12 @@ namespace fxe {
       HWND hwnd = glfwGetWin32Window(handle_);
       if (!hwnd)
         return;
+      if (!win32_supports_blur_behind()) {
+        if (enabled) {
+          warn_once(warned_win32_blur_, "fxe.window: DwmEnableBlurBehindWindow is unavailable");
+        }
+        return;
+      }
 
       RECT client{};
       HRGN region = nullptr;
@@ -1886,12 +1982,17 @@ namespace fxe {
                   "fallback when available");
       }
 
-      BOOL dark = TRUE;
-      (void)DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+      const auto caps = get_vibrancy_capabilities();
+      if (caps.dark_mode) {
+        BOOL dark = TRUE;
+        (void)DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+      }
 
       bool applied = false;
-      if (!transparent_) {
+      if (!transparent_ && caps.tabbed) {
         DWORD backdrop = win32_backdrop_type_for_kind(kind);
+        FXE_DEBUG("window.vibrancy", "win32 vibrancy backend=systembackdrop kind={} backdrop={}",
+                  kind ? kind : "none", backdrop);
         HRESULT hr =
             DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &backdrop, sizeof(backdrop));
         applied = SUCCEEDED(hr);
@@ -1902,9 +2003,16 @@ namespace fxe {
         return;
       }
 
-      if (win32_set_accent_policy(hwnd, kind))
-        return;
+      const bool wants_acrylic = enabled && std::strcmp(kind, "menu") == 0;
+      const bool can_use_accent = !enabled || (wants_acrylic ? caps.acrylic : caps.blur_behind);
+      if (can_use_accent) {
+        FXE_DEBUG("window.vibrancy", "win32 vibrancy backend=accent kind={}", kind ? kind : "none");
+        if (win32_set_accent_policy(hwnd, kind))
+          return;
+      }
 
+      FXE_DEBUG("window.vibrancy", "win32 vibrancy backend=unavailable kind={}",
+                kind ? kind : "none");
       if (enabled) {
         warn_once(warned_win32_vibrancy_,
                   "fxe.window: Win32 vibrancy is unavailable on this Windows version");

@@ -16,6 +16,7 @@
 #include <fxe/window.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <unordered_map>
 #include <v8.h>
@@ -153,6 +154,19 @@ namespace fxe::js {
         return;
       bool b = info.Length() >= 1 && info[0]->BooleanValue(iso);
       r->set_bloom_enabled(b);
+    }
+
+    void rend_set_self_backdrop_blur(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto* r = unwrap_rend(info.This());
+      if (!r)
+        return;
+      auto ctx = iso->GetCurrentContext();
+      const bool enabled = info.Length() >= 1 && info[0]->BooleanValue(iso);
+      const double radius = info.Length() >= 2 ? info[1]->NumberValue(ctx).FromMaybe(24.0) : 24.0;
+      r->set_self_backdrop_blur(
+          enabled, std::isfinite(radius) && radius > 0.0 ? static_cast<float>(radius) : 24.0f);
     }
     // bindUserTexture(slot, source)
     //
@@ -601,6 +615,7 @@ namespace fxe::js {
     proto->Set(iso, "endFrame", FunctionTemplate::New(iso, rend_end_frame));
     proto->Set(iso, "setMultisample", FunctionTemplate::New(iso, rend_set_multisample));
     proto->Set(iso, "setBloom", FunctionTemplate::New(iso, rend_set_bloom));
+    proto->Set(iso, "setSelfBackdropBlur", FunctionTemplate::New(iso, rend_set_self_backdrop_blur));
     proto->Set(iso, "setClearColor", FunctionTemplate::New(iso, rend_set_clear_color));
     proto->Set(iso, "screen", FunctionTemplate::New(iso, rend_screen));
     proto->Set(iso, "bindUserTexture", FunctionTemplate::New(iso, rend_bind_user_texture));

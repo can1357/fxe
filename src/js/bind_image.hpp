@@ -7,15 +7,12 @@
 
 #include <memory>
 #include <v8.h>
+#include <vector>
 
 namespace fxe::js {
-  // Type tag stored in internal field 1 of an ImageHandle JS object.
-  inline constexpr u32 TAG_IMAGE = 0x494D4147u; // 'IMAG'
+  inline constexpr u32 TAG_IMAGE = 0x494D4147u;          // 'IMAG'
+  inline constexpr u32 TAG_ANIMATED_IMAGE = 0x414e494du; // 'ANIM'
 
-  // Holder backing a JS ImageHandle. The pixels live behind a shared_ptr so
-  // multiple JS handles (and the bytes() Uint8Array view) can share storage
-  // without double-free hazards. dispose() resets `tex` to release the JS-side
-  // reference; remaining shared_ptr holders keep the pixels alive.
   struct image_holder : weak_holder<image_holder> {
     std::shared_ptr<fxe::texture_data> tex;
     fxe::texture_id texture = fxe::null_texture;
@@ -23,12 +20,18 @@ namespace fxe::js {
     void on_finalize(v8::Isolate*);
   };
 
-  // Install the `Image` global namespace + ImageHandle constructor template
-  // on `global`. Idempotent per isolate.
+  struct animated_image_holder : weak_holder<animated_image_holder> {
+    std::vector<std::shared_ptr<fxe::texture_data>> frames;
+    std::vector<fxe::texture_id> textures;
+    std::vector<u32> delays_ms;
+    u32 duration_ms = 0;
+
+    void on_finalize(v8::Isolate*);
+  };
+
   void install_image_global(v8::Isolate*, v8::Local<v8::ObjectTemplate> global);
 
-  // Recover an image_holder* from a JS ImageHandle. Returns nullptr if the
-  // value is not an ImageHandle or has been disposed.
   image_holder* unwrap_image(v8::Local<v8::Value>);
+  animated_image_holder* unwrap_animated_image(v8::Local<v8::Value>);
   [[nodiscard]] texture_id ensure_image_texture_id(image_holder* h);
 } // namespace fxe::js

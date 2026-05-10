@@ -143,6 +143,17 @@ namespace fxe {
       return clear_color_set_;
     }
 
+    void set_self_backdrop_blur(bool enabled, float radius_px) noexcept {
+      self_backdrop_blur_enabled_ = enabled;
+      self_backdrop_blur_radius_px_ = radius_px > 0.0f ? radius_px : 0.0f;
+    }
+    [[nodiscard]] bool self_backdrop_blur_enabled() const noexcept {
+      return self_backdrop_blur_enabled_;
+    }
+    [[nodiscard]] float self_backdrop_blur_radius_px() const noexcept {
+      return self_backdrop_blur_radius_px_;
+    }
+
     // Geometry helpers — preserve original GFW semantics.
     [[nodiscard]] math::vec2 get_screen() const noexcept {
       return viewport_.size;
@@ -264,6 +275,8 @@ namespace fxe {
     bool bloom_enabled_ = true;
     math::vec4 clear_color_{0.04f, 0.05f, 0.07f, 1.0f};
     bool clear_color_set_ = false;
+    bool self_backdrop_blur_enabled_ = false;
+    float self_backdrop_blur_radius_px_ = 0.0f;
     viewport_desc viewport_{};
     math::vec2 v2s_scale_{};
     math::vec2 s2v_scale_{};

@@ -1628,6 +1628,44 @@ namespace fxe::js {
           float(num(ctx, info[8])), float(num(ctx, info[9])), float(num(ctx, info[10])),
           float(num(ctx, info[11])), float(num(ctx, info[12])), float(num(ctx, info[13])));
     }
+    void p_innerShadowRect(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      primitives::draw_inner_shadow_rect_rounded(
+          *cb, float(num(ctx, info[1])), float(num(ctx, info[2])), float(num(ctx, info[3])),
+          float(num(ctx, info[4])), primitives::optional_list<float, 4>{0},
+          float(num(ctx, info[5])), decode_color(iso, ctx, info[6]), float(num(ctx, info[7])),
+          float(num(ctx, info[8])), float(num(ctx, info[9])), float(num(ctx, info[10])),
+          float(num(ctx, info[11])), float(num(ctx, info[12])));
+    }
+
+    void p_innerShadowRectRounded(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      auto* cb = get_cb(info);
+      if (!cb)
+        return;
+      primitives::optional_list<float, 4> rnd{0};
+      if (info.Length() >= 7 && info[6]->IsFloat32Array()) {
+        auto a = info[6].As<Float32Array>();
+        float t[4]{};
+        a->CopyContents(t, std::min<usize>(sizeof(t), a->ByteLength()));
+        rnd[0] = t[0];
+        rnd[1] = t[1];
+        rnd[2] = t[2];
+        rnd[3] = t[3];
+      }
+      primitives::draw_inner_shadow_rect_rounded(
+          *cb, float(num(ctx, info[1])), float(num(ctx, info[2])), float(num(ctx, info[3])),
+          float(num(ctx, info[4])), rnd, float(num(ctx, info[5])), decode_color(iso, ctx, info[7]),
+          float(num(ctx, info[8])), float(num(ctx, info[9])), float(num(ctx, info[10])),
+          float(num(ctx, info[11])), float(num(ctx, info[12])), float(num(ctx, info[13])));
+    }
     void p_blurQuad(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
@@ -1795,6 +1833,8 @@ namespace fxe::js {
     P("strokePath", p_strokePath);
     P("drawShadowRect", p_drawShadowRect);
     P("drawShadowRectRounded", p_drawShadowRectRounded);
+    P("innerShadowRect", p_innerShadowRect);
+    P("innerShadowRectRounded", p_innerShadowRectRounded);
     P("blurRect", p_blurRect);
     P("blurQuad", p_blurQuad);
     P("drawSprite", p_drawSprite);

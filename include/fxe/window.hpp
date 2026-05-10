@@ -77,6 +77,16 @@ namespace fxe {
     titlebar,
     menu,
   };
+  struct vibrancy_capabilities {
+    bool supported = false;
+    bool mica = false;
+    bool acrylic = false;
+    bool tabbed = false;
+    bool blur_behind = false;
+    bool dark_mode = false;
+    bool system_accent = false;
+  };
+
   enum class fullscreen_mode : u8 {
     borderless,
     exclusive,
@@ -297,6 +307,9 @@ namespace fxe {
     virtual bool set_blur_behind(bool enabled) {
       (void)enabled;
       return false;
+    }
+    [[nodiscard]] virtual vibrancy_capabilities get_vibrancy_capabilities() const {
+      return {};
     }
     // Tell the OS compositor to exclude this window from screen capture and screen
     // recording. macOS maps to NSWindowSharingNone; Windows to

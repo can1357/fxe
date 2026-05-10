@@ -34,6 +34,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -52,6 +53,15 @@ namespace fxe {
 
     // 1 MiB initial dynamic vertex / index buffer; grown on demand.
     constexpr u64 kInitialDynamicBytes = 1u << 20;
+
+    constexpr float kBlurKernelRadiusPx = 3.25f;
+
+    [[nodiscard]] u32 blur_pass_count_for_radius(float radius_px) noexcept {
+      if (!(radius_px > 0.0f))
+        return 0;
+      const float passes = std::ceil(radius_px / kBlurKernelRadiusPx);
+      return std::max<u32>(1u, static_cast<u32>(passes));
+    }
 
     // ---------------------------------------------------------------------
     // Synchronous helpers: pump the Future-based async API to completion.
@@ -465,41 +475,81 @@ namespace fxe {
 
         const bool blur_ready = blur_capture_texture_ && blur_capture_view_ && blur_ping_texture_ &&
                                 blur_ping_view_ && blur_pong_texture_ && blur_pong_view_;
-        if (has_blur && !blur_ready && !blur_texture_failure_logged_) {
+        const bool self_blur_active = self_backdrop_blur_active();
+        const u32 self_blur_passes = blur_pass_count_for_radius(self_backdrop_blur_radius_px());
+        if ((has_blur || self_blur_active) && !blur_ready && !blur_texture_failure_logged_) {
           FXE_WARN("wgpu.renderer",
                    "blur intermediate texture allocation failed; falling back to unblurred base");
           blur_texture_failure_logged_ = true;
         }
 
+        auto run_blur_chain = [&](const wgpu::TextureView& src_view, u32 pass_count,
+                                  const char* vlabel, const char* hlabel) -> wgpu::TextureView {
+          wgpu::TextureView cur = src_view;
+          for (u32 i = 0; i < pass_count; ++i) {
+            encode_post_process_pass(vblur_pipeline_, cur, blur_ping_view_, vlabel);
+            encode_post_process_pass(hblur_pipeline_, blur_ping_view_, blur_pong_view_, hlabel);
+            cur = blur_pong_view_;
+          }
+          return cur;
+        };
+        auto encode_fullscreen_sample_pass = [&](const wgpu::TextureView& src_view,
+                                                 wgpu::LoadOp load_op, const char* label) {
+          wgpu::RenderPassColorAttachment color{};
+          color.view = color_target_view_ ? color_target_view_ : view;
+          if (multisample_count_ > 1)
+            color.resolveTarget = capture_resolve_view_;
+          color.loadOp = load_op;
+          color.storeOp = wgpu::StoreOp::Store;
+          auto cv = clear_color();
+          color.clearValue = {static_cast<double>(cv.x), static_cast<double>(cv.y),
+                              static_cast<double>(cv.z), static_cast<double>(cv.w)};
+          color.depthSlice = wgpu::kDepthSliceUndefined;
+          wgpu::RenderPassDescriptor pass_desc{};
+          pass_desc.label = label;
+          pass_desc.colorAttachmentCount = 1;
+          pass_desc.colorAttachments = &color;
+          wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&pass_desc);
+          pass.SetPipeline(sample_fullscreen_pipeline_);
+          pass.SetBindGroup(0, create_bind_group(ubo_, label, src_view));
+          pass.Draw(3, 1, 0, 0);
+          pass.End();
+        };
+
+        const bool can_self_blur = self_blur_active && self_blur_passes > 0 && blur_ready &&
+                                   self_blur_history_valid_ && self_blur_history_view_;
+        if (can_self_blur) {
+          const wgpu::TextureView blurred_history =
+              run_blur_chain(self_blur_history_view_, self_blur_passes, "fxe-self-vblur-pass",
+                             "fxe-self-hblur-pass");
+          encode_fullscreen_sample_pass(blurred_history, wgpu::LoadOp::Clear,
+                                        "fxe-self-sample-pass");
+        }
+
         if (has_blur && blur_ready) {
-          encode_draw_pass(wgpu::LoadOp::Clear, wgpu::LoadOp::Clear, blur_draw_mode::base);
+          encode_draw_pass(can_self_blur ? wgpu::LoadOp::Load : wgpu::LoadOp::Clear,
+                           wgpu::LoadOp::Clear, blur_draw_mode::base);
           capture_frame_for_blur(encoder, surf_tex.texture);
-          encode_post_process_pass(vblur_pipeline_, blur_capture_view_, blur_ping_view_,
-                                   "fxe-vblur-pass");
-          encode_post_process_pass(hblur_pipeline_, blur_ping_view_, blur_pong_view_,
-                                   "fxe-hblur-pass");
+          const wgpu::TextureView blurred_frame =
+              run_blur_chain(blur_capture_view_, 1, "fxe-vblur-pass", "fxe-hblur-pass");
           encode_draw_pass(wgpu::LoadOp::Load, wgpu::LoadOp::Load, blur_draw_mode::composite,
-                           blur_pong_view_);
+                           blurred_frame);
         } else {
-          const blur_draw_mode mode = has_blur ? blur_draw_mode::base : blur_draw_mode::all;
-          encode_draw_pass(wgpu::LoadOp::Clear, wgpu::LoadOp::Clear, mode);
+          encode_draw_pass(can_self_blur ? wgpu::LoadOp::Load : wgpu::LoadOp::Clear,
+                           wgpu::LoadOp::Clear,
+                           has_blur ? blur_draw_mode::base : blur_draw_mode::all);
+        }
+
+        if (self_blur_history_texture_) {
+          copy_full_frame_texture(encoder, current_frame_texture(surf_tex.texture),
+                                  self_blur_history_texture_);
+          self_blur_history_valid_ = true;
         }
 
         // When MSAA is on we resolved into capture_resolve_texture_; blit it
         // into the surface so the user actually sees their frame.
         if (multisample_count_ > 1 && capture_resolve_texture_) {
-          wgpu::TexelCopyTextureInfo blit_src{};
-          blit_src.texture = capture_resolve_texture_;
-          blit_src.mipLevel = 0;
-          blit_src.origin = {0, 0, 0};
-          blit_src.aspect = wgpu::TextureAspect::All;
-          wgpu::TexelCopyTextureInfo blit_dst{};
-          blit_dst.texture = surf_tex.texture;
-          blit_dst.mipLevel = 0;
-          blit_dst.origin = {0, 0, 0};
-          blit_dst.aspect = wgpu::TextureAspect::All;
-          wgpu::Extent3D blit_extent{fb_w_, fb_h_, 1};
-          encoder.CopyTextureToTexture(&blit_src, &blit_dst, &blit_extent);
+          copy_full_frame_texture(encoder, capture_resolve_texture_, surf_tex.texture);
         }
 
         // Capture path: encode CopyTextureToBuffer into the SAME command
@@ -932,6 +982,10 @@ namespace fxe {
         key.topology = wgpu::PrimitiveTopology::TriangleList;
         key.depth_format = wgpu::TextureFormat::Undefined;
         key.blend = blend_mode::none;
+        key.sample_count = multisample_count_;
+        key.fs_entry = "ps_sample";
+        sample_fullscreen_pipeline_ =
+            pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
         key.sample_count = 1;
         key.fs_entry = "ps_vblur";
         vblur_pipeline_ = pipeline_cache_.acquire(key, device_, pipeline_layout_, shader_);
@@ -1308,9 +1362,12 @@ namespace fxe {
         blur_capture_view_ = {};
         blur_ping_view_ = {};
         blur_pong_view_ = {};
+        self_blur_history_view_ = {};
         destroy_texture(blur_capture_texture_);
         destroy_texture(blur_ping_texture_);
         destroy_texture(blur_pong_texture_);
+        destroy_texture(self_blur_history_texture_);
+        self_blur_history_valid_ = false;
         wgpu::TextureDescriptor blur_desc{};
         blur_desc.dimension = wgpu::TextureDimension::e2D;
         blur_desc.size = {w, h, 1};
@@ -1328,6 +1385,9 @@ namespace fxe {
         blur_desc.label = "fxe-blur-pong";
         blur_pong_texture_ = device_.CreateTexture(&blur_desc);
         blur_pong_view_ = blur_pong_texture_.CreateView();
+        blur_desc.label = "fxe-self-blur-history";
+        self_blur_history_texture_ = device_.CreateTexture(&blur_desc);
+        self_blur_history_view_ = self_blur_history_texture_.CreateView();
         if (bgl_) {
           bind_group_ = create_bind_group(ubo_, "fxe-bg");
           for (auto& draw : queued_dev_draws_)
@@ -1521,22 +1581,38 @@ namespace fxe {
                                                  : wgpu::PresentMode::Undefined;
       }
 
-      void capture_frame_for_blur(wgpu::CommandEncoder& encoder,
-                                  const wgpu::Texture& surface_texture) {
-        if (!blur_capture_texture_)
+      [[nodiscard]] bool self_backdrop_blur_active() const {
+        return self_backdrop_blur_enabled() && win_.is_transparent();
+      }
+
+      void copy_full_frame_texture(wgpu::CommandEncoder& encoder, const wgpu::Texture& src_texture,
+                                   const wgpu::Texture& dst_texture) {
+        if (!src_texture || !dst_texture || fb_w_ == 0 || fb_h_ == 0)
           return;
         wgpu::TexelCopyTextureInfo src{};
-        src.texture = (multisample_count_ > 1) ? capture_resolve_texture_ : surface_texture;
+        src.texture = src_texture;
         src.mipLevel = 0;
         src.origin = {0, 0, 0};
         src.aspect = wgpu::TextureAspect::All;
         wgpu::TexelCopyTextureInfo dst{};
-        dst.texture = blur_capture_texture_;
+        dst.texture = dst_texture;
         dst.mipLevel = 0;
         dst.origin = {0, 0, 0};
         dst.aspect = wgpu::TextureAspect::All;
         wgpu::Extent3D extent{fb_w_, fb_h_, 1};
         encoder.CopyTextureToTexture(&src, &dst, &extent);
+      }
+
+      [[nodiscard]] const wgpu::Texture&
+      current_frame_texture(const wgpu::Texture& surface_texture) const {
+        return (multisample_count_ > 1) ? capture_resolve_texture_ : surface_texture;
+      }
+      void capture_frame_for_blur(wgpu::CommandEncoder& encoder,
+                                  const wgpu::Texture& surface_texture) {
+        if (!blur_capture_texture_)
+          return;
+        copy_full_frame_texture(encoder, current_frame_texture(surface_texture),
+                                blur_capture_texture_);
       }
 
       window& win_;
@@ -1586,6 +1662,7 @@ namespace fxe {
       wgpu::RenderPipeline text_mask_pipeline_;
       wgpu::RenderPipeline text_color_pipeline_;
       wgpu::RenderPipeline sample_pipeline_;
+      wgpu::RenderPipeline sample_fullscreen_pipeline_;
       wgpu::RenderPipeline vblur_pipeline_;
       wgpu::RenderPipeline hblur_pipeline_;
       wgpu::RenderPipeline lum_filter_pipeline_;
@@ -1602,6 +1679,9 @@ namespace fxe {
       wgpu::TextureView blur_ping_view_;
       wgpu::Texture blur_pong_texture_;
       wgpu::TextureView blur_pong_view_;
+      wgpu::Texture self_blur_history_texture_;
+      wgpu::TextureView self_blur_history_view_;
+      bool self_blur_history_valid_ = false;
       bool blur_texture_failure_logged_ = false;
       wgpu::Texture atlas_texture_;
       wgpu::TextureView atlas_view_;

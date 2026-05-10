@@ -1182,7 +1182,32 @@ namespace fxe::primitives {
                    line_join join, line_cap cap, float depth) {
     stroke_path(r, path, paint_value::solid(color), line_width, join, cap, depth);
   }
+  namespace {
+    [[nodiscard]] optional_list<float, 4> offset_corner_radii(const optional_list<float, 4>& rnd,
+                                                              float delta) noexcept {
+      optional_list<float, 4> radii = rnd;
+      for (usize i = 0; i < radii.size(); ++i)
+        radii[i] = math::fmax(0.0f, radii[i] + delta);
+      return radii;
+    }
 
+    [[nodiscard]] color_list<4> blur_mask_color_list(const color_list<4>& color) noexcept {
+      color_list<4> mask = color;
+      for (auto& sample : mask)
+        sample.a = sample.a == 0 ? 0 : 255;
+      return mask;
+    }
+    void emit_blur_composite_quads(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3,
+                                   math::vec4 p4, const color_list<4>& color, float dispersion,
+                                   math::vec2 screen_size);
+    void emit_blur_composite_rounded(command_sink& r, const math::mat4x4& transform,
+                                     const optional_list<float, 4>& rnd, const color_list<4>& color,
+                                     float dispersion, math::vec2 screen_size);
+  } // namespace
+
+  // Verified against src/wgpu/shaders/main.wgsl: the runtime blur pass is already a
+  // separable Gaussian (vertical + horizontal). The only change here is feeding that
+  // existing path with the right source geometry for rect and rounded-rect shadows.
   void draw_shadow_rect(command_sink& r, float x, float y, float w, float h, float depth,
                         r8g8b8a8 color, float blur, float spread, float offset_x, float offset_y,
                         float screen_w, float screen_h) {
@@ -1203,20 +1228,57 @@ namespace fxe::primitives {
                                 const optional_list<float, 4>& rnd, float depth, r8g8b8a8 color,
                                 float blur, float spread, float offset_x, float offset_y,
                                 float screen_w, float screen_h) {
-    if (blur > 0.0f) {
-      draw_shadow_rect(r, x, y, w, h, depth, color, blur, spread, offset_x, offset_y, screen_w,
-                       screen_h);
-      return;
-    }
     const float sx = x + offset_x - spread;
     const float sy = y + offset_y - spread;
     const float sw = math::fmax(0.0f, w + spread * 2.0f);
     const float sh = math::fmax(0.0f, h + spread * 2.0f);
-    optional_list<float, 4> radii = rnd;
-    for (usize i = 0; i < radii.size(); ++i)
-      radii[i] = math::fmax(0.0f, radii[i] + spread);
+    if (sw <= 0.0f || sh <= 0.0f)
+      return;
+    const optional_list<float, 4> radii = offset_corner_radii(rnd, spread);
+    if (blur > 0.0f && screen_w > 0.0f && screen_h > 0.0f) {
+      const color_list<4> color_list{color, color, color, color};
+      fill_rect_rounded(r, make_screen_transform({sx, sy}, {sw, sh}, depth), radii, 0.0f,
+                        blur_mask_color_list(color_list));
+      emit_blur_composite_quads(
+          r, apply_no_w(make_screen_transform({sx, sy}, {sw, sh}, depth), {0.0f, 0.0f, 0.0f, 0.0f}),
+          apply_no_w(make_screen_transform({sx, sy}, {sw, sh}, depth), {1.0f, 0.0f, 0.0f, 0.0f}),
+          apply_no_w(make_screen_transform({sx, sy}, {sw, sh}, depth), {0.0f, 1.0f, 0.0f, 0.0f}),
+          apply_no_w(make_screen_transform({sx, sy}, {sw, sh}, depth), {1.0f, 1.0f, 0.0f, 0.0f}),
+          color_list, blur, {screen_w, screen_h});
+      return;
+    }
     fill_rect_rounded(r, make_screen_transform({sx, sy}, {sw, sh}, depth), radii, 0.0f,
                       color_list<4>{color, color, color, color});
+  }
+
+  void draw_inner_shadow_rect_rounded(command_sink& r, float x, float y, float w, float h,
+                                      const optional_list<float, 4>& rnd, float depth,
+                                      r8g8b8a8 color, float blur, float spread, float offset_x,
+                                      float offset_y, float screen_w, float screen_h) {
+    if (w <= 0.0f || h <= 0.0f || color.a == 0)
+      return;
+    const math::mat4x4 outer = make_screen_transform({x, y}, {w, h}, depth);
+    const optional_list<float, 4> outer_radii = offset_corner_radii(rnd, 0.0f);
+    const float ix = x + spread + offset_x;
+    const float iy = y + spread + offset_y;
+    const float iw = math::fmax(0.0f, w - spread * 2.0f);
+    const float ih = math::fmax(0.0f, h - spread * 2.0f);
+    const optional_list<float, 4> inner_radii = offset_corner_radii(rnd, -spread);
+    const float source_thickness = std::max(
+        1.0f, std::min({iw, ih, std::fabs(spread) * 2.0f + math::fmax(blur, 0.0f) * 2.0f}));
+    if (iw <= 0.0f || ih <= 0.0f) {
+      fill_rect_rounded(r, outer, outer_radii, 0.0f, color_list<4>{color, color, color, color});
+      return;
+    }
+    if (blur > 0.0f && screen_w > 0.0f && screen_h > 0.0f) {
+      const color_list<4> color_list{color, color, color, color};
+      draw_rect_rounded(r, make_screen_transform({ix, iy}, {iw, ih}, depth), inner_radii, 0.0f,
+                        blur_mask_color_list(color_list), source_thickness);
+      emit_blur_composite_rounded(r, outer, outer_radii, color_list, blur, {screen_w, screen_h});
+      return;
+    }
+    draw_rect_rounded(r, make_screen_transform({ix, iy}, {iw, ih}, depth), inner_radii, 0.0f,
+                      color_list<4>{color, color, color, color}, source_thickness);
   }
 
   // ---------------------------------------------------------------------------
@@ -1800,64 +1862,92 @@ namespace fxe::primitives {
   }
 
   // ---------------------------------------------------------------------------
-  // Blur — emit the 5x5 Gaussian sample pattern used by the original engine.
-  // Samples are tagged with framebuffer_texture_id; GPU backends interpret that
-  // reserved texture id as the captured/current frame, while CPU-only tests can
-  // still inspect the exact vertex/index output deterministically.
-  void blur_quad(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
-                 const color_list<4>& color, float dispersion, math::vec2 screen_size) {
-    auto [vt, id] = r.allocate(4 * 26, 6 * 26, vertex_topology::triangle);
-
-    // First quad: capture-only base colours used as the blur source mask.
-    const r8g8b8a8 base[4] = {
-        r8g8b8a8{color[0].r, color[0].g, color[0].b, static_cast<u8>(color[0].a == 0 ? 0 : 255)},
-        r8g8b8a8{color[1].r, color[1].g, color[1].b, static_cast<u8>(color[1].a == 0 ? 0 : 255)},
-        r8g8b8a8{color[2].r, color[2].g, color[2].b, static_cast<u8>(color[2].a == 0 ? 0 : 255)},
-        r8g8b8a8{color[3].r, color[3].g, color[3].b, static_cast<u8>(color[3].a == 0 ? 0 : 255)},
-    };
-    vt[0] = make_vertex4(p1, {}, null_texture, base[0]);
-    vt[1] = make_vertex4(p2, {}, null_texture, base[1]);
-    vt[2] = make_vertex4(p3, {}, null_texture, base[2]);
-    vt[3] = make_vertex4(p4, {}, null_texture, base[3]);
-
-    auto cvt = [](u8 a) {
-      const u32 x = 255u - a;
+  // Blur — emit the Gaussian sample mask used by the CPU command buffer path.
+  // WGPU already runs the captured framebuffer through a separable Gaussian blur
+  // shader (see src/wgpu/shaders/main.wgsl); these helpers only define the mask
+  // geometry and the framebuffer-sample taps consumed by that pass.
+  namespace {
+    [[nodiscard]] inline float blur_alpha_scale(u8 alpha) noexcept {
+      const u32 x = 255u - alpha;
       return float(x * x) / 255.0f;
-    };
-    const float ca[4] = {cvt(color[0].a), cvt(color[1].a), cvt(color[2].a), cvt(color[3].a)};
+    }
 
-    const math::vec2 ires{
-        (screen_size.x > 0.0f ? dispersion / screen_size.x : 0.0f),
-        (screen_size.y > 0.0f ? dispersion / screen_size.y : 0.0f),
-    };
-
-    usize cursor = 4;
-    for (int x = -2; x <= +2; ++x) {
-      for (int y = -2; y <= +2; ++y) {
-        const float w = kBlurKernel[std::abs(x)][std::abs(y)];
-        const math::vec2 uv{float(x) * ires.x, float(y) * ires.y};
-        // Sentinel contract: tx == framebuffer_texture_id means the renderer
-        // treats this quad as a captured-frame sample in the composite pass.
-        const texture_id tex = framebuffer_texture_id;
-        const u8 a0 = u8(math::fclamp(ca[0] * w, 0.0f, 255.0f));
-        const u8 a1 = u8(math::fclamp(ca[1] * w, 0.0f, 255.0f));
-        const u8 a2 = u8(math::fclamp(ca[2] * w, 0.0f, 255.0f));
-        const u8 a3 = u8(math::fclamp(ca[3] * w, 0.0f, 255.0f));
-        vt[cursor++] = make_vertex4(p1, uv, tex, r8g8b8a8{255, 255, 255, a0});
-        vt[cursor++] = make_vertex4(p2, uv, tex, r8g8b8a8{255, 255, 255, a1});
-        vt[cursor++] = make_vertex4(p3, uv, tex, r8g8b8a8{255, 255, 255, a2});
-        vt[cursor++] = make_vertex4(p4, uv, tex, r8g8b8a8{255, 255, 255, a3});
+    void emit_blur_composite_quads(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3,
+                                   math::vec4 p4, const color_list<4>& color, float dispersion,
+                                   math::vec2 screen_size) {
+      auto [vt, id] = r.allocate(4 * 25, 6 * 25, vertex_topology::triangle);
+      const float ca[4] = {blur_alpha_scale(color[0].a), blur_alpha_scale(color[1].a),
+                           blur_alpha_scale(color[2].a), blur_alpha_scale(color[3].a)};
+      const math::vec2 ires{
+          (screen_size.x > 0.0f ? dispersion / screen_size.x : 0.0f),
+          (screen_size.y > 0.0f ? dispersion / screen_size.y : 0.0f),
+      };
+      usize cursor = 0;
+      for (int x = -2; x <= +2; ++x) {
+        for (int y = -2; y <= +2; ++y) {
+          const float w = kBlurKernel[std::abs(x)][std::abs(y)];
+          const math::vec2 uv{float(x) * ires.x, float(y) * ires.y};
+          const u8 a0 = u8(math::fclamp(ca[0] * w, 0.0f, 255.0f));
+          const u8 a1 = u8(math::fclamp(ca[1] * w, 0.0f, 255.0f));
+          const u8 a2 = u8(math::fclamp(ca[2] * w, 0.0f, 255.0f));
+          const u8 a3 = u8(math::fclamp(ca[3] * w, 0.0f, 255.0f));
+          vt[cursor++] = make_vertex4(p1, uv, framebuffer_texture_id, r8g8b8a8{255, 255, 255, a0});
+          vt[cursor++] = make_vertex4(p2, uv, framebuffer_texture_id, r8g8b8a8{255, 255, 255, a1});
+          vt[cursor++] = make_vertex4(p3, uv, framebuffer_texture_id, r8g8b8a8{255, 255, 255, a2});
+          vt[cursor++] = make_vertex4(p4, uv, framebuffer_texture_id, r8g8b8a8{255, 255, 255, a3});
+        }
+      }
+      for (int q = 0; q != 25; ++q) {
+        id[q * 6 + 0] += u32(q * 4 + 0);
+        id[q * 6 + 1] += u32(q * 4 + 1);
+        id[q * 6 + 2] += u32(q * 4 + 2);
+        id[q * 6 + 3] += u32(q * 4 + 1);
+        id[q * 6 + 4] += u32(q * 4 + 2);
+        id[q * 6 + 5] += u32(q * 4 + 3);
       }
     }
 
-    for (int q = 0; q != 26; ++q) {
-      id[q * 6 + 0] += u32(q * 4 + 0);
-      id[q * 6 + 1] += u32(q * 4 + 1);
-      id[q * 6 + 2] += u32(q * 4 + 2);
-      id[q * 6 + 3] += u32(q * 4 + 1);
-      id[q * 6 + 4] += u32(q * 4 + 2);
-      id[q * 6 + 5] += u32(q * 4 + 3);
+    void emit_blur_composite_rounded(command_sink& r, const math::mat4x4& transform,
+                                     const optional_list<float, 4>& rnd, const color_list<4>& color,
+                                     float dispersion, math::vec2 screen_size) {
+      const float ca[4] = {blur_alpha_scale(color[0].a), blur_alpha_scale(color[1].a),
+                           blur_alpha_scale(color[2].a), blur_alpha_scale(color[3].a)};
+      const math::vec2 ires{
+          (screen_size.x > 0.0f ? dispersion / screen_size.x : 0.0f),
+          (screen_size.y > 0.0f ? dispersion / screen_size.y : 0.0f),
+      };
+      for (int x = -2; x <= +2; ++x) {
+        for (int y = -2; y <= +2; ++y) {
+          const float w = kBlurKernel[std::abs(x)][std::abs(y)];
+          const math::vec2 uv{float(x) * ires.x, float(y) * ires.y};
+          const u8 a0 = u8(math::fclamp(ca[0] * w, 0.0f, 255.0f));
+          const u8 a1 = u8(math::fclamp(ca[1] * w, 0.0f, 255.0f));
+          const u8 a2 = u8(math::fclamp(ca[2] * w, 0.0f, 255.0f));
+          const u8 a3 = u8(math::fclamp(ca[3] * w, 0.0f, 255.0f));
+          fill_rect_rounded(r, transform, rnd, 0.0f,
+                            color_list<4>{r8g8b8a8{255, 255, 255, a0}, r8g8b8a8{255, 255, 255, a1},
+                                          r8g8b8a8{255, 255, 255, a2}, r8g8b8a8{255, 255, 255, a3}},
+                            texture_info{framebuffer_texture_id, uv, uv});
+        }
+      }
     }
+  } // namespace
+
+  void blur_quad(command_sink& r, math::vec4 p1, math::vec4 p2, math::vec4 p3, math::vec4 p4,
+                 const color_list<4>& color, float dispersion, math::vec2 screen_size) {
+    auto [vt, id] = r.allocate(4, 6, vertex_topology::triangle);
+    const color_list<4> mask = blur_mask_color_list(color);
+    vt[0] = make_vertex4(p1, {}, null_texture, mask[0]);
+    vt[1] = make_vertex4(p2, {}, null_texture, mask[1]);
+    vt[2] = make_vertex4(p3, {}, null_texture, mask[2]);
+    vt[3] = make_vertex4(p4, {}, null_texture, mask[3]);
+    id[0] += 0;
+    id[1] += 1;
+    id[2] += 2;
+    id[3] += 1;
+    id[4] += 2;
+    id[5] += 3;
+    emit_blur_composite_quads(r, p1, p2, p3, p4, color, dispersion, screen_size);
   }
 
   void blur_rect(command_sink& r, const math::mat4x4& transform, float shift,

@@ -729,12 +729,65 @@ declare module 'fxe-ui' {
   export function untrack<T>(fn: () => T): T;
   export function batch<T>(fn: () => T): T;
 
+  export type ElevationToken = {
+    offsetY: number;
+    blur: number;
+    spread: number;
+    color: Color;
+  };
   export interface Theme {
-    colors: Record<string, Color>;
-    spacing: Record<string, number>;
-    radii: Record<string, number>;
-    fontSizes: Record<string, number>;
+    colors: {
+      background: Color;
+      surface: Color;
+      surfaceElevated: Color;
+      surfaceTranslucent: Color;
+      primary: Color;
+      primaryText: Color;
+      text: Color;
+      mutedText: Color;
+      border: Color;
+      accent: Color;
+      accentMuted: Color;
+      focusRing: Color;
+      disabled: Color;
+      disabledText: Color;
+      success: Color;
+      warning: Color;
+      danger: Color;
+    };
+    spacing: { xs: number; sm: number; md: number; lg: number; xl: number };
+    radii: { sm: number; md: number; lg: number; pill: number };
+    fontSizes: { sm: number; md: number; lg: number; xl: number };
+    typography: {
+      fontFamily: string;
+      monoFamily: string;
+      lineHeights: { sm: number; md: number; lg: number; xl: number };
+    };
+    elevation: {
+      none: ElevationToken;
+      sm: ElevationToken;
+      md: ElevationToken;
+      lg: ElevationToken;
+    };
+    motion: {
+      durationFast: number;
+      durationStandard: number;
+      durationSlow: number;
+      easingStandard: [number, number, number, number];
+    };
+    chrome: {
+      titleBarHeight: number;
+      trafficLightGutter: number;
+      useSystemAccent: boolean;
+      backdrop: 'none' | 'mica' | 'acrylic' | 'vibrancy';
+    };
   }
+  export const lightTheme: Theme;
+  export const darkTheme: Theme;
+  export const macosLightTheme: Theme;
+  export const macosDarkTheme: Theme;
+  export const win11LightTheme: Theme;
+  export const win11DarkTheme: Theme;
   export const defaultTheme: Theme;
   export function ThemeProvider(props: {
     value?: Theme;
@@ -1134,6 +1187,11 @@ declare module 'fxe-ui' {
   export interface MountOptions {
     renderer?: Renderer;
     theme?: Theme;
+    /**
+     * Sets the native window backdrop color before the first mount render when
+     * the platform exposes a window background API.
+     */
+    backgroundColor?: number;
     /**
      * When `false`, mount runs a continuous requestAnimationFrame loop that
      * re-renders every tick — necessary for animated/realtime apps that

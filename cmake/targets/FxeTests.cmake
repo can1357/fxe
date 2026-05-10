@@ -138,6 +138,7 @@ if(FXE_BUILD_TESTS)
     # C++ tests.
     # ---------------------------------------------------------------------
     fxe_add_cpp_test(fxe_core_tests tests/core_tests.cpp fxe_core)
+    fxe_add_cpp_test(fxe_core_shadow_tests tests/core_shadow_test.cpp fxe_core)
     fxe_add_cpp_test(fxe_crash_options_tests tests/crash_options_test.cpp fxe_os)
     fxe_add_cpp_test(fxe_font_tests tests/font_module_test.cpp fxe_font)
     fxe_add_cpp_test(fxe_font_render_tests tests/font_render_test.cpp fxe_font)

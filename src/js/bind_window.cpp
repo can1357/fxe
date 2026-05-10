@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fxe/js_bindings.hpp>
 #include <fxe/log.hpp>
+#include <fxe/renderer.hpp>
 #include <fxe/types.hpp>
 #include <fxe/v8_host.hpp>
 #include <fxe/v8_literals.hpp>
@@ -1375,6 +1376,26 @@ namespace fxe::js {
         throw_native_error(iso, err);
       }
     }
+    void win_vibrancy_capabilities(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* w = unwrap_win(info.This());
+      if (!w) {
+        info.GetReturnValue().Set(Object::New(iso));
+        return;
+      }
+      const auto caps = w->get_vibrancy_capabilities();
+      auto out = Object::New(iso);
+      (void)out->Set(ctx, "supported"_v8(iso), Boolean::New(iso, caps.supported));
+      (void)out->Set(ctx, "mica"_v8(iso), Boolean::New(iso, caps.mica));
+      (void)out->Set(ctx, "acrylic"_v8(iso), Boolean::New(iso, caps.acrylic));
+      (void)out->Set(ctx, "tabbed"_v8(iso), Boolean::New(iso, caps.tabbed));
+      (void)out->Set(ctx, "blurBehind"_v8(iso), Boolean::New(iso, caps.blur_behind));
+      (void)out->Set(ctx, "darkMode"_v8(iso), Boolean::New(iso, caps.dark_mode));
+      (void)out->Set(ctx, "systemAccent"_v8(iso), Boolean::New(iso, caps.system_accent));
+      info.GetReturnValue().Set(out);
+    }
+
     void win_set_blur_behind(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* w = unwrap_win(info.This());
@@ -1382,9 +1403,36 @@ namespace fxe::js {
         info.GetReturnValue().Set(false);
         return;
       }
+      auto ctx = iso->GetCurrentContext();
+      bool enabled = false;
+      float radius = 24.0f;
+      if (info.Length() >= 1 && info[0]->IsObject() && !info[0]->IsNullOrUndefined()) {
+        auto opts = info[0].As<Object>();
+        Local<Value> field;
+        if (opts->Get(ctx, "enabled"_v8(iso)).ToLocal(&field) && !field->IsUndefined())
+          enabled = field->BooleanValue(iso);
+        if (opts->Get(ctx, "radius"_v8(iso)).ToLocal(&field) && field->IsNumber()) {
+          const double v = field->NumberValue(ctx).FromMaybe(24.0);
+          if (std::isfinite(v) && v > 0.0)
+            radius = static_cast<float>(v);
+        }
+      } else {
+        enabled = info.Length() >= 1 && info[0]->BooleanValue(iso);
+      }
+#if !defined(__linux__)
+      (void)radius;
+#endif
       try {
-        info.GetReturnValue().Set(
-            w->set_blur_behind(info.Length() >= 1 && info[0]->BooleanValue(iso)));
+#if defined(__linux__)
+        if (auto* host = host_for_isolate(iso)) {
+          if (auto* r = host->renderer_for(w)) {
+            r->set_self_backdrop_blur(enabled, radius);
+            if (enabled)
+              FXE_INFO("window.blur", "linux self-backdrop-blur enabled radius={}", radius);
+          }
+        }
+#endif
+        info.GetReturnValue().Set(w->set_blur_behind(enabled));
       } catch (const std::exception& err) {
         throw_native_error(iso, err);
       }
@@ -2692,6 +2740,7 @@ namespace fxe::js {
     proto->Set(iso, "setWindowControlsOverlay",
                FunctionTemplate::New(iso, win_set_window_controls_overlay));
     proto->Set(iso, "setVibrancy", FunctionTemplate::New(iso, win_set_vibrancy));
+    proto->Set(iso, "vibrancyCapabilities", FunctionTemplate::New(iso, win_vibrancy_capabilities));
     proto->Set(iso, "setBlurBehind", FunctionTemplate::New(iso, win_set_blur_behind));
     proto->Set(iso, "setVisible", FunctionTemplate::New(iso, win_set_visible));
     proto->Set(iso, "setIcon", FunctionTemplate::New(iso, win_set_icon));

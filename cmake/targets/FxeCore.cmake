@@ -3,7 +3,7 @@ include(cmake/shaders.cmake)
 file(GLOB _fxe_core_sources CONFIGURE_DEPENDS src/core/*.cpp)
 add_library(fxe_core STATIC ${_fxe_core_sources})
 add_library(fxe::core ALIAS fxe_core)
-target_include_directories(fxe_core PUBLIC include)
+target_include_directories(fxe_core PUBLIC include PRIVATE third_party)
 target_link_libraries(fxe_core PUBLIC fxe_deps)
 target_compile_features(fxe_core PUBLIC cxx_std_20)
 

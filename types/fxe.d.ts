@@ -181,6 +181,7 @@ declare namespace FXE {
     setClearColor(rgba: Vec4): void;
     setMultisample(count: number): void;
     setBloom(enabled: boolean): void;
+    setSelfBackdropBlur(enabled: boolean, radius?: number): void;
     screen(): [number, number];
     worldToScreen(position: Vec3): [number, number, number, number];
     viewport(): Viewport;
@@ -330,6 +331,15 @@ declare namespace FXE {
 
   type TitleBarStyle = 'default' | 'hidden' | 'hiddenInset' | 'customButtons';
   type VibrancyKind = 'sidebar' | 'titlebar' | 'menu';
+  interface VibrancyCapabilities {
+    supported: boolean;
+    mica: boolean;
+    acrylic: boolean;
+    tabbed: boolean;
+    blurBehind: boolean;
+    darkMode: boolean;
+    systemAccent: boolean;
+  }
 
   interface KeyEvent {
     type: 'keydown' | 'keyup';
@@ -541,7 +551,9 @@ declare namespace FXE {
     setTrafficLightPosition(x: number, y: number): boolean;
     setWindowControlsOverlay(enabled: boolean): boolean;
     setVibrancy(kind: VibrancyKind | null): boolean;
-    setBlurBehind(enabled: boolean): boolean;
+    vibrancyCapabilities(): VibrancyCapabilities;
+
+    setBlurBehind(enabled: boolean | { enabled: boolean; radius?: number }): boolean;
     isTransparent(): boolean;
     setVisible(visible: boolean): void;
     setIcon(rgba: Uint8Array | Uint8ClampedArray, width: number, height: number): boolean;
@@ -1189,6 +1201,37 @@ declare namespace FXE {
       screenWidth: number,
       screenHeight: number,
     ): void;
+    innerShadowRect(
+      cb: CommandBuffer | Renderer,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      depth: number,
+      color: Color,
+      blur: number,
+      spread: number,
+      offsetX: number,
+      offsetY: number,
+      screenWidth: number,
+      screenHeight: number,
+    ): void;
+    innerShadowRectRounded(
+      cb: CommandBuffer | Renderer,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      depth: number,
+      radii: Float32Array,
+      color: Color,
+      blur: number,
+      spread: number,
+      offsetX: number,
+      offsetY: number,
+      screenWidth: number,
+      screenHeight: number,
+    ): void;
     calcText(text: string, pointSize?: number): [number, number];
     wrapTextNative(
       text: string,
@@ -1414,6 +1457,7 @@ declare module 'fxe' {
   export type CursorKind = FXE.CursorKind;
   export type TitleBarStyle = FXE.TitleBarStyle;
   export type VibrancyKind = FXE.VibrancyKind;
+  export type VibrancyCapabilities = FXE.VibrancyCapabilities;
   export type WindowEventMap = FXE.WindowEventMap;
   export type WindowMessageEvent = FXE.WindowMessageEvent;
   export type ComposeEvent = FXE.ComposeEvent;
@@ -2075,15 +2119,39 @@ declare module 'fxe' {
     dispose(): void;
     textureId(): number;
   }
+  export interface AnimatedImageFrame {
+    delayMs: number;
+    image: ImageHandle;
+  }
+  export interface AnimatedImageHandle {
+    readonly frameCount: number;
+    readonly durationMs: number;
+    readonly frames: readonly AnimatedImageFrame[];
+    frame(t: number): ImageHandle;
+    dispose(): void;
+  }
   export interface ImageNamespace {
     load(path: string): ImageHandle;
     loadAsync(path: string): Promise<ImageHandle>;
+    loadAnimated(path: string): Promise<AnimatedImageHandle>;
+    loadLottie(path: string): Promise<AnimatedImageHandle>;
     decode(bytes: Uint8Array): Promise<ImageHandle>;
     fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
+    setCacheBudget(bytes: number): void;
+    cacheStats(): ImageCacheStats;
+    cacheClear(): void;
+    cacheEvict(src: string): number;
     /** Optional mipmap-generation hint; binding may expose any of these names. */
     generateMipmaps?(image: ImageHandle): void;
     generateMips?(image: ImageHandle): void;
     hintGenerateMipmaps?(image: ImageHandle): void;
+  }
+  export interface ImageCacheStats {
+    count: number;
+    bytes: number;
+    budget: number;
+    hits: number;
+    misses: number;
   }
   export const Image: ImageNamespace;
   export interface SpriteResolved {
@@ -2140,11 +2208,35 @@ interface ImageHandle {
   dispose(): void;
   textureId(): number;
 }
+interface AnimatedImageFrame {
+  delayMs: number;
+  image: ImageHandle;
+}
+interface AnimatedImageHandle {
+  readonly frameCount: number;
+  readonly durationMs: number;
+  readonly frames: readonly AnimatedImageFrame[];
+  frame(t: number): ImageHandle;
+  dispose(): void;
+}
+interface ImageCacheStats {
+  count: number;
+  bytes: number;
+  budget: number;
+  hits: number;
+  misses: number;
+}
 interface ImageNamespace {
   load(path: string): ImageHandle;
   loadAsync(path: string): Promise<ImageHandle>;
+  loadAnimated(path: string): Promise<AnimatedImageHandle>;
+  loadLottie(path: string): Promise<AnimatedImageHandle>;
   decode(bytes: Uint8Array): Promise<ImageHandle>;
   fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
+  setCacheBudget(bytes: number): void;
+  cacheStats(): ImageCacheStats;
+  cacheClear(): void;
+  cacheEvict(src: string): number;
   generateMipmaps?(image: ImageHandle): void;
   generateMips?(image: ImageHandle): void;
   hintGenerateMipmaps?(image: ImageHandle): void;

@@ -57,6 +57,11 @@ test('Renderer constructs for an invisible Window and exposes command-buffer met
     assertEqual(typeof renderer.setMultisample, 'function', 'setMultisample is installed');
     assertEqual(typeof renderer.setBloom, 'function', 'setBloom is installed');
     assertEqual(typeof renderer.setClearColor, 'function', 'setClearColor is installed');
+    assertEqual(
+      typeof renderer.setSelfBackdropBlur,
+      'function',
+      'setSelfBackdropBlur is installed',
+    );
     assertEqual(typeof renderer.screen, 'function', 'screen is installed');
     assertEqual(typeof renderer.viewport, 'function', 'viewport is installed');
     assertEqual(typeof renderer.worldToScreen, 'function', 'worldToScreen is installed');
@@ -80,6 +85,8 @@ test('Renderer settings APIs accept documented inputs', () => {
     renderer.setMultisample(4);
     renderer.setBloom(false);
     renderer.setBloom(true);
+    renderer.setSelfBackdropBlur(false);
+    renderer.setSelfBackdropBlur(true, 18);
     renderer.setClearColor(0.1, 0.2, 0.3);
     renderer.setClearColor(0.4, 0.5, 0.6, 0.7);
     renderer.setClearColor([0.8, 0.7, 0.6, 0.5]);

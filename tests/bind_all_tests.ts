@@ -15,6 +15,7 @@ import './bind_fetch_test.ts';
 import './bind_url_test.ts';
 import './bind_websocket_test.ts';
 import './bind_image_test.ts';
+import './bind_image_animated_test.ts';
 import './bind_spritesheet_test.ts';
 import './bind_font_test.ts';
 import './bind_audio_test.ts';

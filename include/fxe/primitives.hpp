@@ -258,6 +258,10 @@ namespace fxe::primitives {
                                 const optional_list<float, 4>& rnd, float depth, r8g8b8a8 color,
                                 float blur, float spread, float offset_x, float offset_y,
                                 float screen_w, float screen_h);
+  void draw_inner_shadow_rect_rounded(command_sink& r, float x, float y, float w, float h,
+                                      const optional_list<float, 4>& rnd, float depth,
+                                      r8g8b8a8 color, float blur, float spread, float offset_x,
+                                      float offset_y, float screen_w, float screen_h);
 
   // ---------------------------------------------------------------------------
   // Text. Uses spritesheet glyph map populated by init_default_fonts(spritesheet&).

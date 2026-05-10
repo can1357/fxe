@@ -11,6 +11,8 @@
 import { App, Window } from 'fxe';
 import {
   Button,
+  darkTheme as baseDarkTheme,
+  lightTheme as baseLightTheme,
   Markdown,
   type MarkdownTheme,
   mount,
@@ -32,14 +34,25 @@ const baseRadii = { sm: 4, md: 8, lg: 14, pill: 999 };
 const baseSizes = { sm: 12, md: 15, lg: 18, xl: 24 };
 
 const darkTheme: MarkdownTheme = {
+  ...baseDarkTheme,
   colors: {
+    ...baseDarkTheme.colors,
     background: 0x0b0f17ff,
     surface: 0x131826ff,
+    surfaceElevated: 0x1c2233ff,
+    surfaceTranslucent: 0x131826dd,
     primary: 0x6aa3ffff,
     primaryText: 0xffffffff,
     text: 0xe6ebf5ff,
     mutedText: 0x9aa3b8ff,
     border: 0x2a3145ff,
+    accent: 0x6aa3ffff,
+    accentMuted: 0x24304fff,
+    focusRing: 0x8dc0ffff,
+    disabled: 0x1a2030ff,
+    disabledText: 0x7f899fff,
+    success: 0x4fd1a3ff,
+    warning: 0xf6c177ff,
     danger: 0xff6b81ff,
     code: 0xf6c177ff,
     codeBg: 0x1c2233ff,
@@ -67,14 +80,25 @@ const darkTheme: MarkdownTheme = {
 };
 
 const lightTheme: MarkdownTheme = {
+  ...baseLightTheme,
   colors: {
+    ...baseLightTheme.colors,
     background: 0xfafbfcff,
     surface: 0xffffffff,
+    surfaceElevated: 0xffffffff,
+    surfaceTranslucent: 0xfafbfcdd,
     primary: 0x0b66ffff,
     primaryText: 0xffffffff,
     text: 0x1d2433ff,
     mutedText: 0x57606aff,
     border: 0xd0d7deff,
+    accent: 0x0b66ffff,
+    accentMuted: 0xd9e8ffff,
+    focusRing: 0x80b0ffff,
+    disabled: 0xe9edf2ff,
+    disabledText: 0x8b949eff,
+    success: 0x116329ff,
+    warning: 0x953800ff,
     danger: 0xcf222eff,
     code: 0xb12a8eff,
     codeBg: 0xf3f4f6ff,
@@ -102,14 +126,25 @@ const lightTheme: MarkdownTheme = {
 };
 
 const solarizedTheme: MarkdownTheme = {
+  ...baseDarkTheme,
   colors: {
+    ...baseDarkTheme.colors,
     background: 0x002b36ff,
     surface: 0x073642ff,
+    surfaceElevated: 0x0a4a59ff,
+    surfaceTranslucent: 0x073642dd,
     primary: 0x268bd2ff,
     primaryText: 0xfdf6e3ff,
     text: 0xeee8d5ff,
     mutedText: 0x93a1a1ff,
     border: 0x0f4655ff,
+    accent: 0x268bd2ff,
+    accentMuted: 0x0f4655ff,
+    focusRing: 0x2aa198ff,
+    disabled: 0x083640ff,
+    disabledText: 0x7d9494ff,
+    success: 0x859900ff,
+    warning: 0xb58900ff,
     danger: 0xdc322fff,
     code: 0xb58900ff,
     codeBg: 0x073642ff,
