@@ -18,6 +18,10 @@ export type {
 export { LineViewport } from './LineViewport.ts';
 export type { MarkdownProps, MarkdownTheme, SyntaxPalette } from './Markdown.ts';
 export { Markdown } from './Markdown.ts';
+export type { IconProps } from './Icon.ts';
+export { Icon } from './Icon.ts';
+export type { IconName, IconPathCommand } from './icons.ts';
+
 export type { MinimapProps } from './Minimap.ts';
 export { Minimap } from './Minimap.ts';
 export type { PressableProps, PressableState } from './Pressable.ts';

@@ -5,6 +5,7 @@ import { ConsolePanel } from './panels/Console.tsx';
 import { FramePanel } from './panels/Frame.tsx';
 import { HeapPanel } from './panels/Heap.tsx';
 import { LayoutPanel } from './panels/Layout.tsx';
+import { MemoPanel } from './panels/Memo.tsx';
 import { NetworkPanel } from './panels/Network.tsx';
 import { PerformancePanel } from './panels/Performance.tsx';
 import { ReconcilerPanel } from './panels/Reconciler.tsx';
@@ -18,6 +19,7 @@ type TabId =
   | 'network'
   | 'layout'
   | 'frame'
+  | 'memo'
   | 'source';
 
 const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
@@ -28,6 +30,7 @@ const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
   { id: 'network', label: 'Network' },
   { id: 'layout', label: 'Layout' },
   { id: 'frame', label: 'Frame' },
+  { id: 'memo', label: 'Memo' },
   { id: 'source', label: 'Source' },
 ];
 
@@ -109,6 +112,7 @@ export function Shell({ url }: { url: string }) {
         {tab === 'network' ? <NetworkPanel cdp={cdp} /> : null}
         {tab === 'layout' ? <LayoutPanel cdp={cdp} /> : null}
         {tab === 'frame' ? <FramePanel cdp={cdp} /> : null}
+        {tab === 'memo' ? <MemoPanel cdp={cdp} /> : null}
         {tab === 'source' ? <SourcePanel cdp={cdp} /> : null}
       </View>
     </View>

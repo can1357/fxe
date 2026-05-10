@@ -30,6 +30,8 @@ import './bind_performance_test.ts';
 import './bind_render_stats_test.ts';
 import './bind_sqlite_test.ts';
 import './bind_storage_test.ts';
+import './ui_text_input_tab_behavior_test.ts';
+import './ui_icon_test.ts';
 // === bind test imports end ===
 
 await run();
