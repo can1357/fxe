@@ -784,6 +784,27 @@ declare module 'fxe-ui' {
     autoCorrect?: boolean;
   }
 
+  export interface FindReplaceBarProps {
+    document: FXE.TextDocument;
+    initialQuery?: string;
+    initialReplacement?: string;
+    caseSensitive?: boolean;
+    useRegex?: boolean;
+    regexFlags?: string;
+    searchDeadlineMs?: number;
+    searchMaxMatches?: number;
+    showReplace?: boolean;
+    onActiveMatchChange?: (
+      range: { start: number; end: number; index: number; total: number } | null,
+    ) => void;
+    onReplaced?: (count: number) => void;
+    onClose?: () => void;
+    dispatch?: (
+      edits: Array<{ start: number; removed: number; inserted: string }>,
+      opts?: { origin?: string },
+    ) => void;
+    style?: StyleValue;
+  }
   export interface TextAreaProps extends Omit<TextInputProps, 'tabBehavior'>, AccessibilityProps {
     /** Suggested visible row count for sizing. Default 4. */
     numberOfLines?: number;
@@ -945,6 +966,7 @@ declare module 'fxe-ui' {
   export function LineViewport(props: LineViewportProps): Node;
   export function Gutter(props: GutterProps): Node;
   export function EditableArea(props: EditableAreaProps): Node;
+  export function FindReplaceBar(props: FindReplaceBarProps): Node;
   export const Markdown: (props: MarkdownProps) => Node;
   export function usePressableState(): PressableState;
   export function useHover(): boolean;

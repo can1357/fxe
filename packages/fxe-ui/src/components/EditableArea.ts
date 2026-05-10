@@ -31,6 +31,7 @@ import {
   inferIndent,
   outdentSelection,
 } from './editable_area_logic.ts';
+import { blockSelectionFromAnchorFocus } from './editable_area_block_select.ts';
 import { type LineDecorationFn, type LineDecorations, LineViewport } from './LineViewport.ts';
 
 export type { BracketContextProvider } from './editable_area_logic.ts';
@@ -106,6 +107,12 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
   const [sel, setSel] = useState(() => MultiRangeSelection.cursor(0));
   const wantedCol = useRef<number>(-1);
   const indentInference = useRef<{ revision: number; unit: 'tab' | number } | null>(null);
+  const dragRef = useRef<{
+    anchor: { line: number; col: number };
+    mode: 'block' | 'normal';
+  } | null>(null);
+  const altClickBaseSelRef = useRef<MultiRangeSelection | null>(null);
+  const blockDragMovedRef = useRef(false);
   const tabString = props.tabString ?? '  ';
 
   const doc = props.document;
@@ -367,6 +374,64 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     };
   };
 
+  const onLinePress = (line: number, col: number, ev: SyntheticEvent): void => {
+    const mouse = ev as SyntheticEvent<MouseButtonEvent>;
+    const off = doc.lineColToOffset(line, col);
+    if ((mouse.nativeEvent.modifiers & MOD_ALT) !== 0) {
+      dragRef.current = { anchor: { line, col }, mode: 'block' };
+      altClickBaseSelRef.current = sel;
+      blockDragMovedRef.current = false;
+      commitSelection(
+        blockSelectionFromAnchorFocus(doc, {
+          anchor: { line, col },
+          focus: { line, col },
+        }),
+        col,
+      );
+      return;
+    }
+    dragRef.current = { anchor: { line, col }, mode: 'normal' };
+    altClickBaseSelRef.current = null;
+    blockDragMovedRef.current = false;
+    commitSelection(MultiRangeSelection.cursor(off), col);
+  };
+
+  const onLineDrag = (line: number, col: number): void => {
+    const drag = dragRef.current;
+    if (!drag || drag.mode !== 'block') return;
+    if (line === drag.anchor.line && col === drag.anchor.col) return;
+    blockDragMovedRef.current = true;
+    commitSelection(
+      blockSelectionFromAnchorFocus(doc, {
+        anchor: drag.anchor,
+        focus: { line, col },
+      }),
+      col,
+    );
+  };
+
+  const onLinePressUp = (line: number, col: number): void => {
+    const drag = dragRef.current;
+    const altClickBaseSel = altClickBaseSelRef.current;
+    const moved = blockDragMovedRef.current;
+    dragRef.current = null;
+    altClickBaseSelRef.current = null;
+    blockDragMovedRef.current = false;
+    if (!drag || drag.mode !== 'block') return;
+    if (!moved) {
+      const off = doc.lineColToOffset(line, col);
+      commitSelection((altClickBaseSel ?? sel).add({ anchor: off, focus: off }), col);
+      return;
+    }
+    commitSelection(
+      blockSelectionFromAnchorFocus(doc, {
+        anchor: drag.anchor,
+        focus: { line, col },
+      }),
+      col,
+    );
+  };
+
   return LineViewport({
     style: props.style,
     document: doc,
@@ -376,18 +441,15 @@ export const EditableArea = Component((props: EditableAreaProps): Node => {
     showWhitespace: props.showWhitespace,
     textColor: props.textColor,
     scrollY: props.scrollY,
-    onClickPosition: (line, col, ev) => {
-      const off = doc.lineColToOffset(line, col);
-      const mouse = ev as SyntheticEvent<MouseButtonEvent>;
-      const nextSel =
-        (mouse.nativeEvent.modifiers & MOD_ALT) !== 0
-          ? sel.add({ anchor: off, focus: off })
-          : MultiRangeSelection.cursor(off);
-      commitSelection(nextSel, col);
+    onClickPosition: onLinePress,
+    onDragPosition: (line, col) => {
+      onLineDrag(line, col);
+    },
+    onPressUp: (line, col) => {
+      onLinePressUp(line, col);
     },
   });
 }, 'EditableArea');
-
 function orderedRange(range: Range): { start: number; end: number } {
   return range.anchor <= range.focus
     ? { start: range.anchor, end: range.focus }

@@ -1,24 +1,32 @@
 #include "bundle_loader.hpp"
 
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <mutex>
 
-#include "../../tools/fxe-pack/bundle.hpp"
+#include <fxe/log.hpp>
+
+#include "fxa_archive.hpp"
 
 namespace fxe::runtime {
 
   namespace {
 
     std::once_flag g_once;
-    std::unique_ptr<fxe::bundle::Bundle> g_bundle;
+    std::unique_ptr<fxe::runtime::fxa_archive::Bundle> g_bundle;
     std::string g_entry;
+    bool g_signature_verified = false;
 
     std::string normalize(std::string_view name) {
       std::string s(name);
       if (s.size() >= 2 && s[0] == '.' && s[1] == '/')
         s.erase(0, 2);
       return s;
+    }
+    bool allow_unsigned_override() {
+      const char* value = std::getenv("FXE_BUNDLE_ALLOW_UNSIGNED");
+      return value && std::string_view(value) == "1";
     }
 
   } // namespace
@@ -36,9 +44,25 @@ namespace fxe::runtime {
         if (!ec && !abs.empty())
           p = abs;
       }
-      auto b = std::make_unique<fxe::bundle::Bundle>(p.string());
+      auto b = std::make_unique<fxe::runtime::fxa_archive::Bundle>(p.string());
       if (!b->valid())
         return;
+      const bool allow_override = allow_unsigned_override();
+      const bool needs_override = !b->signed_archive() || !b->signature_verified();
+      const bool allow_unsigned =
+#ifdef NDEBUG
+          allow_override;
+#else
+          !b->signed_archive() || allow_override;
+#endif
+      if (needs_override && !allow_unsigned)
+        return;
+      if (needs_override && allow_override) {
+        FXE_WARN("runtime.bundle",
+                 "allowing bundle load without a verified archive signature because "
+                 "FXE_BUNDLE_ALLOW_UNSIGNED=1");
+      }
+      g_signature_verified = b->signature_verified();
       // Look up entry pointer: prefer "__entry__" sentinel if present, else "main".
       if (auto e = b->read("__entry__")) {
         g_entry = *e;
@@ -55,6 +79,9 @@ namespace fxe::runtime {
 
   bool bundle_mounted() {
     return g_bundle != nullptr;
+  }
+  bool bundle_signature_verified() {
+    return g_signature_verified;
   }
 
   std::string bundle_entry() {

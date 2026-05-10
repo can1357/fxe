@@ -10,13 +10,13 @@ if(FXE_BUILD_PACKAGER AND NOT TARGET fxe-pack)
     add_executable(
         fxe-pack
         "${_fxe_pack_dir}/main.cpp"
-        "${_fxe_pack_dir}/bundle.cpp"
     )
     target_compile_features(fxe-pack PRIVATE cxx_std_20)
     target_include_directories(
         fxe-pack
         PRIVATE "${_fxe_pack_dir}" "${CMAKE_SOURCE_DIR}/include"
     )
+    target_link_libraries(fxe-pack PRIVATE fxe_runtime)
     if(APPLE)
         target_link_libraries(fxe-pack PRIVATE "-framework CoreFoundation")
     endif()

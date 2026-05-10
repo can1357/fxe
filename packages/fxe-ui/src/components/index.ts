@@ -2,6 +2,8 @@ export type { ButtonProps } from './Button.ts';
 export { Button } from './Button.ts';
 export type { EditableAreaProps } from './EditableArea.ts';
 export { EditableArea } from './EditableArea.ts';
+export type { FindReplaceBarProps } from './FindReplaceBar.ts';
+export { FindReplaceBar } from './FindReplaceBar.ts';
 export type { GutterMark, GutterMarkFn, GutterProps } from './Gutter.ts';
 export { Gutter } from './Gutter.ts';
 export type { ImageProps } from './Image.ts';

@@ -82,6 +82,10 @@ export interface LineViewportProps {
   scrollY?: number;
   /** Invoked on a viewport click with the resolved {line, col}. */
   onClickPosition?: (line: number, col: number, ev: SyntheticEvent) => void;
+  /** Invoked on mouse-move while the primary button stays held over this viewport. */
+  onDragPosition?: (line: number, col: number, ev: SyntheticEvent) => void;
+  /** Invoked when the primary-button press that began in this viewport ends. */
+  onPressUp?: (line: number, col: number, ev: SyntheticEvent<MouseButtonEvent>) => void;
 }
 
 const DEFAULT_OVERSCAN = 4;
@@ -163,8 +167,19 @@ export const LineViewport = Component((props: LineViewportProps): Node => {
         props.onClickPosition(pos.line, pos.col, ev);
       }
     },
+    onDrag: (ev: SyntheticEvent) => {
+      if (!props.onDragPosition) return;
+      const pos = indexFromPoint(ev.x, ev.y);
+      props.onDragPosition(pos.line, pos.col, ev);
+    },
+    onPressOut: (ev: SyntheticEvent<MouseButtonEvent>) => {
+      const native = ev.nativeEvent as { button?: number };
+      if (native.button !== 0 && native.button !== undefined) return;
+      if (!props.onPressUp) return;
+      const pos = indexFromPoint(ev.x, ev.y);
+      props.onPressUp(pos.line, pos.col, ev);
+    },
   });
-
   const doc = props.document;
   const getLineDecorations = props.getLineDecorations;
   const tabSize = props.tabSize ?? 0;

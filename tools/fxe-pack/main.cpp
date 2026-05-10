@@ -14,8 +14,8 @@
 //            [--flatpak-app-id <reverse.dns.id>] [--entitlement <key>...]
 //            [--cert <path-or-subject>] [--installer dmg|pkg|msi|msix|appimage|snap|flatpak|none]
 //            [--dmg|--msi|--msix|--appimage DEPRECATED aliases for --installer]
-//            [--update-url <url>] [--public-key <key>] [--channel stable|beta|alpha]
-//            [--version <semver> REQUIRED for installer output]
+//            [--update-url <url>] [--public-key <key>] [--bundle-secret-key <path>]
+//            [--channel stable|beta|alpha] [--version <semver> REQUIRED for installer output]
 //            [--manufacturer <name>|--publisher <name> REQUIRED for installer output]
 //            [--compress zstd|none]
 //
@@ -51,11 +51,12 @@
 #include <thread>
 #include <vector>
 
-#include "bundle.hpp"
 #include "cli_detail.hpp"
+#include "runtime/fxa_archive.hpp"
 #include <fxe/types.hpp>
 
 namespace fs = std::filesystem;
+namespace fxa = fxe::runtime::fxa_archive;
 
 namespace {
 
@@ -83,6 +84,7 @@ namespace {
     std::string linux_signer_key;
     std::string linux_signer_identity;
     std::string linux_signer_passphrase_file;
+    std::string bundle_secret_key;
     std::vector<std::string> webauthn_rp_ids;
     std::string flatpak_app_id;
     std::string webauthn_mode;
@@ -598,6 +600,8 @@ namespace {
         a.package.update_url = need("--update-url");
       else if (s == "--public-key")
         a.package.public_key = need("--public-key");
+      else if (s == "--bundle-secret-key")
+        a.bundle_secret_key = need("--bundle-secret-key");
       else if (s == "--channel") {
         a.package.channel = need("--channel");
         if (a.package.channel != "stable" && a.package.channel != "beta" &&
@@ -711,8 +715,8 @@ namespace {
             << "                [--cert PATH_OR_SUBJECT] [--installer "
                "dmg|pkg|msi|msix|appimage|snap|flatpak|none]\n"
             << "                [--dmg|--msi|--msix|--appimage DEPRECATED]\n"
-            << "                [--update-url URL] [--public-key KEY] [--channel "
-               "stable|beta|alpha]\n"
+            << "                [--update-url URL] [--public-key KEY] [--bundle-secret-key PATH]\n"
+            << "                [--channel stable|beta|alpha]\n"
             << "                [--version SEMVER REQUIRED for installer output]\n"
             << "                [--manufacturer NAME|--publisher NAME REQUIRED for installer "
                "output]\n"
@@ -1015,9 +1019,6 @@ namespace {
       if (!tool_exists("flatpak"))
         die("--installer flatpak requires flatpak on PATH");
     }
-    if (a.compress == Compression::Zstd && !tool_exists("zstd")) {
-      die("--compress zstd requires the zstd command, which was not found in PATH");
-    }
   }
 
   fs::path locate_fxe_run(const fs::path& self_dir) {
@@ -1068,6 +1069,32 @@ namespace {
     if (!f)
       die("cannot read " + p.string());
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+  }
+  std::string base64_encode_bytes(std::string_view bytes) {
+    static constexpr char k_table[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve(((bytes.size() + 2) / 3) * 4);
+    for (usize i = 0; i < bytes.size(); i += 3) {
+      const u32 a = static_cast<unsigned char>(bytes[i]);
+      const u32 b = i + 1 < bytes.size() ? static_cast<unsigned char>(bytes[i + 1]) : 0;
+      const u32 c = i + 2 < bytes.size() ? static_cast<unsigned char>(bytes[i + 2]) : 0;
+      const u32 word = (a << 16) | (b << 8) | c;
+      out.push_back(k_table[(word >> 18) & 0x3f]);
+      out.push_back(k_table[(word >> 12) & 0x3f]);
+      out.push_back(i + 1 < bytes.size() ? k_table[(word >> 6) & 0x3f] : '=');
+      out.push_back(i + 2 < bytes.size() ? k_table[word & 0x3f] : '=');
+    }
+    return out;
+  }
+
+  std::string load_bundle_secret_key_b64(std::string_view value) {
+    if (value.starts_with(":b64:"))
+      return std::string(value.substr(5));
+    const std::string raw = slurp(fs::path(value));
+    if (raw.size() != 64)
+      die("--bundle-secret-key must point to a 64-byte Ed25519 secret key");
+    return base64_encode_bytes(raw);
   }
 
   void spit(const fs::path& p, std::string_view body) {
@@ -1628,20 +1655,6 @@ namespace {
     move_one(staged_bin, out);
     make_executable(out);
     return out;
-  }
-
-  void maybe_zstd_compress(const Args& a, const fs::path& out) {
-    if (a.compress != Compression::Zstd)
-      return;
-    if (fs::is_directory(out))
-      die("--compress zstd cannot compress directory output; choose file output or --compress "
-          "none");
-    fs::path zst = out;
-    zst += ".zst";
-    std::ostringstream cmd;
-    cmd << "zstd -f -q " << shell_quote(out) << " -o " << shell_quote(zst);
-    run_command_or_die(cmd.str(), "zstd compression");
-    std::cout << "fxe-pack: compressed " << zst.string() << "\n";
   }
 
   void verify_codesign_or_die(const fs::path& signed_target, const char* label);
@@ -2246,7 +2259,7 @@ int main(int argc, char** argv) {
 
   Files files = collect(a);
   std::string err;
-  fxe::bundle::ManifestMetadata manifest;
+  fxa::ManifestMetadata manifest;
   manifest.app_name = a.name;
   manifest.version = a.package.version;
   manifest.entry = files.entry_archive;
@@ -2255,10 +2268,18 @@ int main(int argc, char** argv) {
   manifest.update_url = a.package.update_url;
   manifest.public_key = a.package.public_key;
   manifest.channel = a.package.channel;
+  if (!a.bundle_secret_key.empty())
+    manifest.signer_secret_key_b64 = load_bundle_secret_key_b64(a.bundle_secret_key);
+  manifest.signer_public_key_b64 = a.package.public_key;
+  fxa::PackOptions pack_opts;
+  pack_opts.compress = a.compress == Compression::Zstd;
+  pack_opts.sign = !a.package.public_key.empty() && !manifest.signer_secret_key_b64.empty();
+  pack_opts.secret_key_b64 = manifest.signer_secret_key_b64;
+  pack_opts.public_key_b64 = manifest.signer_public_key_b64;
 
-  if (!fxe::bundle::pack_files(staged_bin.string(),
-                               std::vector<std::pair<std::string, std::string>>(files.v), &manifest,
-                               &err)) {
+  if (!fxa::pack_files(staged_bin.string(),
+                       std::vector<std::pair<std::string, std::string>>(files.v), manifest,
+                       pack_opts, &err)) {
     die("bundle pack failed: " + err);
   }
 
@@ -2364,7 +2385,6 @@ int main(int argc, char** argv) {
       sign_linux_artifact_or_die(a, final_out);
   }
 
-  maybe_zstd_compress(a, final_out);
   fs::remove_all(stage);
 
   std::cout << "fxe-pack: built " << artifact_kind << ": " << final_out.string() << " for "

@@ -15,6 +15,7 @@
     "nlohmann-json",
     "libuv",
     "libsodium",
+    "zstd",
     "mbedtls",
     "nghttp2",
     "freetype",

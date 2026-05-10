@@ -144,6 +144,7 @@ if(FXE_BUILD_TESTS)
     fxe_add_cpp_test(fxe_update_manifest_v2_tests tests/update_manifest_v2_test.cpp fxe_runtime fxe_os)
     fxe_add_cpp_test(fxe_updater_feed_parsers_tests tests/updater_feed_parsers_test.cpp fxe_runtime fxe_os)
     fxe_add_cpp_test(fxe_cbor_canonical_tests tests/cbor_canonical_test.cpp fxe_runtime)
+    fxe_add_cpp_test(fxe_fxa_archive_tests tests/fxa_archive_test.cpp fxe_runtime)
     fxe_add_cpp_test(fxe_markdown_parse_tests tests/markdown_parse_test.cpp fxe_markdown)
     if(TARGET fxe_webauthn)
         fxe_add_cpp_test(
@@ -244,6 +245,22 @@ if(FXE_BUILD_TESTS)
                 src/net/tls_server.cpp
                 src/runtime/v8/native/https_transport.cpp
         )
+        fxe_add_cpp_test(
+            fxe_native_http_network_events_tests
+            tests/native_http_network_events_test.cpp
+            fxe_js
+            MbedTLS::mbedtls
+            MbedTLS::mbedx509
+            MbedTLS::mbedcrypto
+        )
+        target_include_directories(fxe_native_http_network_events_tests PRIVATE src include)
+        target_compile_definitions(
+            fxe_native_http_network_events_tests
+            PRIVATE
+                FXE_HAS_NATIVE_TLS_HTTP2_DEPS=1
+                FXE_V8_ICUDTL_PATH="${_v8_icudtl_dat}"
+        )
+        target_compile_features(fxe_native_http_network_events_tests PRIVATE cxx_std_20)
         fxe_add_cpp_test(
             fxe_ws_deflate_tests
             tests/ws_deflate_test.cpp

@@ -1,6 +1,7 @@
 #include "runtime/v8/native/https.hpp"
 #include "runtime/v8/native/https_transport.hpp"
 
+#include "debug/dispatch.hpp"
 #include "net/tls_client.hpp"
 #include "net/tls_server.hpp"
 
@@ -190,6 +191,24 @@ namespace fxe::runtime {
           headers[key] = text;
       }
       return headers;
+    }
+
+    std::vector<std::pair<std::string, std::string>>
+    headers_to_pairs(const std::map<std::string, std::string>& headers) {
+      std::vector<std::pair<std::string, std::string>> out;
+      out.reserve(headers.size());
+      for (const auto& [key, value] : headers)
+        out.emplace_back(key, value);
+      return out;
+    }
+
+    std::string header_value(const std::vector<std::pair<std::string, std::string>>& headers,
+                             std::string_view lower_name) {
+      for (const auto& [key, value] : headers) {
+        if (lower_ascii(key) == lower_name)
+          return value;
+      }
+      return {};
     }
 
     std::string bytes_from_value(Isolate* iso, Local<Context> ctx, Local<Value> value) {
@@ -733,9 +752,18 @@ namespace fxe::runtime {
       auto headers_value = get_prop(iso, ctx, options, "headers");
       auto headers = headers_value ? headers_from_value(iso, ctx, *headers_value)
                                    : std::map<std::string, std::string>{};
+      auto debug_request_headers = headers_to_pairs(headers);
       for (auto& [key, value] : headers)
         request.headers.emplace_back(std::move(key), std::move(value));
       request.body = bytes_from_value(iso, ctx, info[2]);
+      const std::string request_url = request.url;
+
+      const std::string debug_request_id = fxe::debug::network::fresh_request_id();
+      fxe::debug::network::emit_request_will_be_sent(
+          debug_request_id, request.url, request.method, debug_request_headers,
+          request.body.empty() ? std::optional<std::string_view>{}
+                               : std::optional<std::string_view>{request.body},
+          "XHR");
 
       native_https_request_options native_options;
       native_options.reject_unauthorized =
@@ -744,9 +772,18 @@ namespace fxe::runtime {
       auto response =
           perform_native_https_request(std::move(request), nullptr, std::move(native_options));
       if (!response.error.empty()) {
+        const bool canceled = response.last_error == fxe::net::http_error::abort;
+        fxe::debug::network::emit_loading_failed(debug_request_id, "XHR", response.error, canceled);
         throw_error(iso, response.error);
         return;
       }
+
+      const i64 encoded_length = static_cast<i64>(response.body.size());
+      fxe::debug::network::emit_response_received(
+          debug_request_id, response.final_url.empty() ? request_url : response.final_url,
+          static_cast<int>(response.status), response.status_text, response.headers,
+          header_value(response.headers, "content-type"), "XHR", encoded_length);
+      fxe::debug::network::emit_loading_finished(debug_request_id, encoded_length);
 
       std::map<std::string, std::string> response_headers;
       for (const auto& [key, value] : response.headers)

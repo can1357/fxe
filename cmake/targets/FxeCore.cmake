@@ -15,6 +15,9 @@ add_library(fxe::log ALIAS fxe_log)
 target_include_directories(fxe_log PUBLIC include)
 target_link_libraries(fxe_log PUBLIC fxe_deps)
 target_compile_features(fxe_log PUBLIC cxx_std_20)
+if(TARGET fxe_runtime)
+    target_link_libraries(fxe_runtime PUBLIC fxe_log)
+endif()
 
 # fxe_font — FreeType/CoreText face/atlas/shaper module. Always-on sources
 # live at src/font/*.cpp; per-backend impls live in

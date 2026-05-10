@@ -1,7 +1,9 @@
 #include "runtime/v8/native/http2.hpp"
 
+#include "debug/dispatch.hpp"
 #include "net/http2_client.hpp"
 #include "net/http2_server.hpp"
+#include <cctype>
 
 #include <cstdint>
 #include <cstring>
@@ -166,6 +168,58 @@ namespace fxe::runtime {
       set(ctx, obj, key, Boolean::New(Isolate::GetCurrent(), value));
     }
 
+    std::string lower_ascii(std::string value) {
+      for (char& ch : value)
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+      return value;
+    }
+
+    std::string header_value(const std::vector<std::pair<std::string, std::string>>& headers,
+                             std::string_view lower_name) {
+      for (const auto& [name, value] : headers) {
+        if (lower_ascii(name) == lower_name)
+          return value;
+      }
+      return {};
+    }
+
+    std::vector<std::pair<std::string, std::string>>
+    headers_from_object(Isolate* iso, Local<Context> ctx, Local<Object> obj,
+                        std::initializer_list<std::string_view> skip_keys) {
+      std::vector<std::pair<std::string, std::string>> out;
+      auto names = obj->GetOwnPropertyNames(ctx).ToLocalChecked();
+      for (u32 i = 0; i < names->Length(); ++i) {
+        auto key_value = names->Get(ctx, i).ToLocalChecked();
+        auto key = string_arg(iso, key_value);
+        bool skip = false;
+        for (std::string_view skip_key : skip_keys) {
+          if (key == skip_key) {
+            skip = true;
+            break;
+          }
+        }
+        if (skip)
+          continue;
+        auto value = obj->Get(ctx, key_value).ToLocalChecked();
+        out.emplace_back(std::move(key), string_arg(iso, value));
+      }
+      return out;
+    }
+
+    std::string build_request_url(std::string_view authority, std::string_view path) {
+      std::string out = "https://";
+      out.append(authority.empty() ? "127.0.0.1" : authority);
+      if (path.empty() || path.front() != '/')
+        out.push_back('/');
+      out.append(path.empty() ? "/" : path);
+      return out;
+    }
+
+    struct debug_request_entry {
+      std::string request_id;
+      std::string url;
+    };
+
     struct authority_parts {
       std::string host;
       u16 port = 443;
@@ -203,7 +257,10 @@ namespace fxe::runtime {
 
     struct client_entry {
       std::mutex mutex;
+      std::mutex debug_mutex;
       std::unique_ptr<fxe::net::http2_client> client;
+      std::string authority;
+      std::map<i32, debug_request_entry> debug_requests;
     };
 
     struct server_entry {
@@ -283,6 +340,8 @@ namespace fxe::runtime {
       }
       auto entry = std::make_shared<client_entry>();
       entry->client = std::move(client);
+      entry->authority =
+          parsed->host + (parsed->port == 443 ? std::string{} : ":" + std::to_string(parsed->port));
       int handle = 0;
       {
         std::lock_guard<std::mutex> lock(registry_mutex);
@@ -310,23 +369,36 @@ namespace fxe::runtime {
       request.path = string_prop(iso, ctx, headers, ":path", "/");
       request.body = bytes_value(iso, ctx, get_prop(iso, ctx, headers, "__body"));
       request.timeout_ms = int_prop(iso, ctx, headers, "__timeoutMs", 0);
-      auto names = headers->GetOwnPropertyNames(ctx).ToLocalChecked();
-      for (u32 i = 0; i < names->Length(); ++i) {
-        auto key_value = names->Get(ctx, i).ToLocalChecked();
-        auto key = string_arg(iso, key_value);
-        if (key == ":method" || key == ":path" || key == "__body" || key == "__timeoutMs")
-          continue;
-        auto value = headers->Get(ctx, key_value).ToLocalChecked();
-        request.headers.emplace_back(std::move(key), string_arg(iso, value));
-      }
+      auto debug_request_headers =
+          headers_from_object(iso, ctx, headers, {"__body", "__timeoutMs"});
+      request.headers =
+          headers_from_object(iso, ctx, headers, {":method", ":path", "__body", "__timeoutMs"});
+      const std::string authority = string_prop(iso, ctx, headers, ":authority", client->authority);
+      const std::string request_url = build_request_url(authority, request.path);
+      const std::string debug_request_id = fxe::debug::network::fresh_request_id();
+      fxe::debug::network::emit_request_will_be_sent(
+          debug_request_id, request_url, request.method, debug_request_headers,
+          request.body.empty() ? std::optional<std::string_view>{}
+                               : std::optional<std::string_view>{request.body},
+          "XHR");
       i32 stream_id = 0;
+      std::string submit_error;
       {
         std::lock_guard<std::mutex> lock(client->mutex);
         stream_id = client->client->submit(request);
+        if (stream_id < 0)
+          submit_error = client->client->last_error();
+      }
+      if (stream_id >= 0) {
+        std::lock_guard<std::mutex> lock(client->debug_mutex);
+        client->debug_requests.emplace(stream_id,
+                                       debug_request_entry{debug_request_id, request_url});
       }
       if (stream_id < 0) {
-        const auto last_error = client->client->last_error();
-        throw_error(iso, last_error.empty() ? "HTTP/2 request submission failed" : last_error);
+        const std::string error_text =
+            submit_error.empty() ? "HTTP/2 request submission failed" : submit_error;
+        fxe::debug::network::emit_loading_failed(debug_request_id, "XHR", error_text, false);
+        throw_error(iso, error_text);
         return;
       }
       info.GetReturnValue().Set(Integer::New(iso, stream_id));
@@ -369,18 +441,46 @@ namespace fxe::runtime {
       }
       const i32 stream_id = info[1]->Int32Value(ctx).FromMaybe(0);
       auto read = std::make_shared<read_entry>();
+      debug_request_entry debug_request;
+      bool have_debug_request = false;
       int handle = 0;
       {
         std::lock_guard<std::mutex> lock(registry_mutex);
         handle = next_read_handle++;
         reads[handle] = read;
       }
-      read->worker = std::thread([client, read, stream_id] {
+      {
+        std::lock_guard<std::mutex> lock(client->debug_mutex);
+        auto it = client->debug_requests.find(stream_id);
+        if (it != client->debug_requests.end()) {
+          debug_request = it->second;
+          have_debug_request = true;
+        }
+      }
+      read->worker = std::thread([client, read, stream_id, debug_request = std::move(debug_request),
+                                  have_debug_request] {
         std::string err;
         fxe::net::http2_response response;
         response = client->client->wait(stream_id, err);
         if (err.empty())
           err = client->client->last_error();
+        {
+          std::lock_guard<std::mutex> lock(client->debug_mutex);
+          client->debug_requests.erase(stream_id);
+        }
+        if (have_debug_request) {
+          if (!err.empty()) {
+            const bool canceled = err == "ABORT_ERR";
+            fxe::debug::network::emit_loading_failed(debug_request.request_id, "XHR", err,
+                                                     canceled);
+          } else {
+            const i64 encoded_length = static_cast<i64>(response.body.size());
+            fxe::debug::network::emit_response_received(
+                debug_request.request_id, debug_request.url, response.status, "", response.headers,
+                header_value(response.headers, "content-type"), "XHR", encoded_length);
+            fxe::debug::network::emit_loading_finished(debug_request.request_id, encoded_length);
+          }
+        }
         {
           std::lock_guard<std::mutex> lock(read->mutex);
           read->response = std::move(response);

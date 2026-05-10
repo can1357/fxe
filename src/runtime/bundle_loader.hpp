@@ -7,13 +7,16 @@
 
 namespace fxe::runtime {
 
-  // Inspect the host binary at `argv0` for an appended fxe bundle trailer.
+  // Inspect the host binary at `argv0` for an appended FXA archive trailer.
   // On success, mounts the bundle as the process-wide virtual filesystem root
   // and returns true. Subsequent calls are no-ops.
   bool mount_bundle_from_argv0(const char* argv0);
 
   // True iff a bundle is mounted.
   bool bundle_mounted();
+
+  // True iff the mounted bundle carried a verified archive signature.
+  bool bundle_signature_verified();
 
   // The archive name designated as the entry point. Empty if none / unmounted.
   std::string bundle_entry();

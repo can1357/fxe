@@ -15,15 +15,31 @@ if(NOT TARGET fxe_runtime)
         fxe_runtime
         STATIC
         src/runtime/bundle_loader.cpp
-        tools/fxe-pack/bundle.cpp
+        src/runtime/fxa_archive.cpp
+        src/runtime/cbor.cpp
     )
     add_library(fxe::runtime ALIAS fxe_runtime)
+    find_package(pugixml CONFIG REQUIRED)
+    find_package(zstd CONFIG QUIET)
+    target_link_libraries(fxe_runtime PRIVATE unofficial-sodium::sodium pugixml::pugixml)
+    if(TARGET zstd::libzstd_shared)
+        target_link_libraries(fxe_runtime PRIVATE zstd::libzstd_shared)
+        target_compile_definitions(fxe_runtime PRIVATE FXE_HAS_ZSTD=1)
+    elseif(TARGET zstd::libzstd_static)
+        target_link_libraries(fxe_runtime PRIVATE zstd::libzstd_static)
+        target_compile_definitions(fxe_runtime PRIVATE FXE_HAS_ZSTD=1)
+    elseif(TARGET zstd::libzstd)
+        target_link_libraries(fxe_runtime PRIVATE zstd::libzstd)
+        target_compile_definitions(fxe_runtime PRIVATE FXE_HAS_ZSTD=1)
+    else()
+        target_compile_definitions(fxe_runtime PRIVATE FXE_HAS_ZSTD=0)
+    endif()
     target_compile_features(fxe_runtime PUBLIC cxx_std_20)
     target_include_directories(
         fxe_runtime
         PUBLIC
             "${CMAKE_CURRENT_SOURCE_DIR}/src"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tools/fxe-pack"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
     )
 endif()
 
@@ -37,4 +53,5 @@ if(TARGET fxe_js)
 endif()
 
 install(FILES src/runtime/bundle_loader.hpp DESTINATION include/fxe/runtime)
+install(FILES src/runtime/fxa_archive.hpp DESTINATION include/fxe/runtime)
 install(FILES tools/fxe-pack/bundle.hpp DESTINATION include/fxe/bundle)
