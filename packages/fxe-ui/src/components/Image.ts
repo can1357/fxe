@@ -1,10 +1,4 @@
-import {
-  type CommandBuffer,
-  type ImageHandle,
-  Image as NativeImage,
-  Primitives,
-  Spritesheet,
-} from 'fxe';
+import { type CommandBuffer, type ImageHandle, Primitives } from 'fxe';
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import { AnimatedValue, type CompositeAnimation, Easings, timing } from '../animated/index.ts';
@@ -54,11 +48,18 @@ export interface ImageContentRect {
 
 type ImagePhase = 'idle' | 'loading' | 'loaded' | 'error';
 
-type ImageNamespaceWithMipHint = typeof NativeImage & {
+type ImageNamespaceWithMipHint = {
+  loadAsync(path: string): Promise<ImageHandle>;
   generateMipmaps?: (image: ImageHandle) => void;
   generateMips?: (image: ImageHandle) => void;
   hintGenerateMipmaps?: (image: ImageHandle) => void;
 };
+
+type SpritesheetLike = {
+  add(image: ImageHandle, rect?: [number, number, number, number]): number;
+};
+
+type SpritesheetConstructor = new () => SpritesheetLike;
 
 type PrimitivesWithDrawSprite = typeof Primitives & {
   drawSprite?: (
@@ -73,6 +74,9 @@ type PrimitivesWithDrawSprite = typeof Primitives & {
   ) => void;
 };
 
+const NativeImageApi = (globalThis as unknown as { Image: ImageNamespaceWithMipHint }).Image;
+const GlobalSpritesheet = (globalThis as unknown as { Spritesheet: SpritesheetConstructor })
+  .Spritesheet;
 const DEFAULT_FADE_IN_MS = 180;
 export const DEFAULT_IMAGE_PLACEHOLDER_COLOR = 0xe5e7ebff;
 const DEFAULT_TINT = 0xffffffff;
@@ -81,7 +85,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 });
-const g_imageSpritesheet = new Spritesheet();
+const g_imageSpritesheet = new GlobalSpritesheet();
 const g_imageSpriteIds = new WeakMap<ImageHandle, number>();
 
 export function resolveImagePlaceholderColor(
@@ -142,13 +146,15 @@ export function resolveImageContentRect(
 }
 
 export function hintImageMipGeneration(image: ImageHandle): boolean {
-  const api = NativeImage as ImageNamespaceWithMipHint;
-  const hint = api.generateMipmaps ?? api.generateMips ?? api.hintGenerateMipmaps;
+  const hint =
+    NativeImageApi.generateMipmaps ??
+    NativeImageApi.generateMips ??
+    NativeImageApi.hintGenerateMipmaps;
   if (typeof hint !== 'function') {
     // TODO(fxe-ui): call the image binding's stable mip-generation hint once it is exported.
     return false;
   }
-  hint.call(api, image);
+  hint.call(NativeImageApi, image);
   return true;
 }
 
@@ -295,7 +301,7 @@ export const Image = Component((props: ImageProps): Node => {
     setAsyncHandle(null);
     setError(null);
     fadeValue.setValue(0);
-    void NativeImage.loadAsync(props.source)
+    void NativeImageApi.loadAsync(props.source)
       .then((handle) => {
         if (cancelled) {
           handle.dispose();

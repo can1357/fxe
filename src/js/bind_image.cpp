@@ -236,25 +236,33 @@ namespace fxe::js {
       image_decode_after(std::move(req));
     }
 
-    void s_fromBytes(const FunctionCallbackInfo<Value>& info) {
+    void s_fromPixels(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      HandleScope hs(iso);
+      auto ctx = iso->GetCurrentContext();
+      if (info.Length() < 3 || !info[0]->IsUint8Array() || !info[1]->IsNumber() ||
+          !info[2]->IsNumber())
+        return throw_type(iso, "Image.fromPixels(rgba: Uint8Array, width: number, height: number)");
+      auto u8a = info[0].As<Uint8Array>();
+      std::vector<u8> bytes(u8a->ByteLength());
+      u8a->CopyContents(bytes.data(), bytes.size());
+      u32 w = info[1]->Uint32Value(ctx).FromMaybe(0);
+      u32 h = info[2]->Uint32Value(ctx).FromMaybe(0);
+      auto* holder = make_holder_from_raw(bytes.data(), bytes.size(), w, h);
+      if (!holder)
+        return throw_type(iso, "Image.fromPixels: byte length mismatches width*height*4");
+      info.GetReturnValue().Set(wrap_image(iso, ctx, holder));
+    }
+
+    void s_decode(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       HandleScope hs(iso);
       auto ctx = iso->GetCurrentContext();
       if (info.Length() < 1 || !info[0]->IsUint8Array())
-        return throw_type(iso, "Image.fromBytes(uint8: Uint8Array, [width, height])");
+        return throw_type(iso, "Image.decode(encoded: Uint8Array)");
       auto u8a = info[0].As<Uint8Array>();
       std::vector<u8> bytes(u8a->ByteLength());
       u8a->CopyContents(bytes.data(), bytes.size());
-      // Two-arg form: raw RGBA pixels with explicit width/height.
-      if (info.Length() >= 3 && info[1]->IsNumber() && info[2]->IsNumber()) {
-        u32 w = info[1]->Uint32Value(ctx).FromMaybe(0);
-        u32 h = info[2]->Uint32Value(ctx).FromMaybe(0);
-        auto* holder = make_holder_from_raw(bytes.data(), bytes.size(), w, h);
-        if (!holder)
-          return throw_type(iso, "Image.fromBytes: byte length mismatches width*height*4");
-        info.GetReturnValue().Set(wrap_image(iso, ctx, holder));
-        return;
-      }
 
       auto resolver = Promise::Resolver::New(ctx).ToLocalChecked();
       info.GetReturnValue().Set(resolver->GetPromise());
@@ -353,7 +361,8 @@ namespace fxe::js {
     auto ns = ObjectTemplate::New(iso);
     ns->Set(iso, "load", FunctionTemplate::New(iso, s_load));
     ns->Set(iso, "loadAsync", FunctionTemplate::New(iso, s_loadAsync));
-    ns->Set(iso, "fromBytes", FunctionTemplate::New(iso, s_fromBytes));
+    ns->Set(iso, "decode", FunctionTemplate::New(iso, s_decode));
+    ns->Set(iso, "fromPixels", FunctionTemplate::New(iso, s_fromPixels));
     global->Set(iso, "Image", ns);
 
     image_tpl_table()[iso].Reset(iso, tpl);

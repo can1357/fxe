@@ -1,7 +1,9 @@
-import { CommandBuffer, Image, Primitives, Spritesheet, VertexTopology } from 'fxe';
+import { CommandBuffer, Primitives, VertexTopology } from 'fxe';
 import { assert, assertDeepEqual, assertEqual, test } from './ts_harness.ts';
 
 const TRIANGLE = VertexTopology.Triangle;
+const ImageNS = Image;
+const SpritesheetCtor = Spritesheet;
 
 function textureIds(cb: CommandBuffer): number[] {
   const verts = cb.vertexBuffer();
@@ -12,7 +14,7 @@ function textureIds(cb: CommandBuffer): number[] {
 }
 
 test('Primitives.drawSprite emits textured quad vertices for external image handles', () => {
-  const img = Image.fromBytes(
+  const img = ImageNS.fromPixels(
     new Uint8Array([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]),
     2,
     2,
@@ -20,7 +22,7 @@ test('Primitives.drawSprite emits textured quad vertices for external image hand
   const texId = img.textureId();
   assert(texId !== 0, 'ImageHandle.textureId() should register a texture handle');
 
-  const sheet = new Spritesheet();
+  const sheet = new SpritesheetCtor();
   const spriteId = sheet.add(img);
   const resolved = sheet.resolve(spriteId);
   assertEqual(resolved.textureId, texId);

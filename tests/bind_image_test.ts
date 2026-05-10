@@ -24,35 +24,35 @@ function burnCpu(iterations = 2_000_000): number {
   return acc;
 }
 
-test('Image.fromBytes accepts raw RGBA bytes', () => {
+test('Image.fromPixels accepts raw RGBA bytes', () => {
   const rgba = new Uint8Array([
     255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 64, 255, 255, 255, 0, 12, 34, 56, 78, 90, 87, 65, 43,
   ]);
 
-  const image = Image.fromBytes(rgba, 3, 2) as DisposableImageHandle;
+  const image = Image.fromPixels(rgba, 3, 2) as DisposableImageHandle;
 
   assertEqual(image.width(), 3);
   assertEqual(image.height(), 2);
   assertDeepBytes(image.bytes(), rgba);
 
   rgba[0] = 1;
-  assertEqual(image.bytes()[0], 255, 'Image.fromBytes must copy caller-owned bytes');
+  assertEqual(image.bytes()[0], 255, 'Image.fromPixels must copy caller-owned bytes');
 
   const copied = image.bytes();
   copied[1] = 99;
   assertEqual(image.bytes()[1], 0, 'ImageHandle.bytes must return a detached copy');
 });
 
-test('Image.fromBytes rejects raw byte length mismatches', () => {
+test('Image.fromPixels rejects raw byte length mismatches', () => {
   assertThrows(() => {
-    Image.fromBytes(new Uint8Array([1, 2, 3]), 1, 1);
+    Image.fromPixels(new Uint8Array([1, 2, 3]), 1, 1);
   }, /byte length mismatches/);
 });
 
-test('Image.fromBytes decodes encoded bytes asynchronously', async () => {
+test('Image.decode decodes encoded bytes asynchronously', async () => {
   const encoded = loadFixtureBytes();
   const start = performance.now();
-  const promise = Image.fromBytes(encoded) as Promise<DisposableImageHandle>;
+  const promise = Image.decode(encoded) as Promise<DisposableImageHandle>;
   const returnedMs = performance.now() - start;
   const loopStart = performance.now();
   const checksum = burnCpu();
@@ -63,14 +63,14 @@ test('Image.fromBytes decodes encoded bytes asynchronously', async () => {
   assert(loopMs >= 0, 'tight loop timing must be observable');
   assert(
     returnedMs < 20,
-    `encoded Image.fromBytes should return before decode completes (returned in ${returnedMs.toFixed(2)}ms)`,
+    `Image.decode should return before decode completes (returned in ${returnedMs.toFixed(2)}ms)`,
   );
   assert(image.width() > 0);
   assert(image.height() > 0);
 });
 
 test('ImageHandle dispose is idempotent', () => {
-  const image = Image.fromBytes(new Uint8Array([1, 2, 3, 4]), 1, 1) as DisposableImageHandle;
+  const image = Image.fromPixels(new Uint8Array([1, 2, 3, 4]), 1, 1) as DisposableImageHandle;
 
   image.dispose();
   image.dispose();
@@ -93,11 +93,8 @@ test('Image.loadAsync rejects for a missing file', async () => {
   await assertRejects(() => Image.loadAsync(MISSING_IMAGE_PATH), /read failed/);
 });
 
-test('Image.fromBytes rejects corrupt encoded bytes', async () => {
-  await assertRejects(
-    () => Image.fromBytes(CORRUPT_IMAGE_BYTES) as Promise<ImageHandle>,
-    /load_texture:/,
-  );
+test('Image.decode rejects corrupt encoded bytes', async () => {
+  await assertRejects(() => Image.decode(CORRUPT_IMAGE_BYTES), /load_texture:/);
 });
 
 test('Image.loadAsync returns before decode finishes and parallel decodes overlap', async () => {

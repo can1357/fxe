@@ -2077,8 +2077,8 @@ declare module 'fxe' {
   export interface ImageNamespace {
     load(path: string): ImageHandle;
     loadAsync(path: string): Promise<ImageHandle>;
-    fromBytes(bytes: Uint8Array): Promise<ImageHandle>;
-    fromBytes(bytes: Uint8Array, width: number, height: number): ImageHandle;
+    decode(bytes: Uint8Array): Promise<ImageHandle>;
+    fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
   }
   export const Image: ImageNamespace;
   export interface SpriteResolved {
@@ -2138,8 +2138,8 @@ interface ImageHandle {
 interface ImageNamespace {
   load(path: string): ImageHandle;
   loadAsync(path: string): Promise<ImageHandle>;
-  fromBytes(bytes: Uint8Array): Promise<ImageHandle>;
-  fromBytes(bytes: Uint8Array, width: number, height: number): ImageHandle;
+  decode(bytes: Uint8Array): Promise<ImageHandle>;
+  fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
 }
 declare const Image: ImageNamespace;
 

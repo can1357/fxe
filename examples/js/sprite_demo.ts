@@ -18,7 +18,7 @@ interface ImageHandle {
   dispose(): void;
 }
 interface ImageNS {
-  fromBytes(bytes: Uint8Array, width?: number, height?: number): ImageHandle;
+  fromPixels(bytes: Uint8Array, width: number, height: number): ImageHandle;
   load(path: string): ImageHandle;
   loadAsync(path: string): Promise<ImageHandle>;
 }
@@ -75,7 +75,7 @@ for (let y = 0; y < H; ++y) {
   }
 }
 
-const img = g.Image.fromBytes(buf, W, H);
+const img = g.Image.fromPixels(buf, W, H);
 const sheet = new g.Spritesheet();
 const spriteId = sheet.add(img);
 const resolved = sheet.resolve(spriteId);

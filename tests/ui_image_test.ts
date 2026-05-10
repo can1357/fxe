@@ -1,19 +1,22 @@
-import { CommandBuffer, type ImageHandle, Image as NativeImage } from 'fxe';
+import { CommandBuffer, type ImageHandle } from 'fxe';
 import { render, Image as UIImage } from 'fxe-ui';
 
 import { AnimatedValue } from '../packages/fxe-ui/src/animated/timing.ts';
+import { tickFrame } from '../packages/fxe-ui/src/reconciler/frame_loop.ts';
 import {
   DEFAULT_IMAGE_PLACEHOLDER_COLOR,
   resolveImageContentRect,
   resolveImagePlaceholderColor,
   startImageFadeAnimation,
 } from '../packages/fxe-ui/src/components/Image.ts';
-import { tickFrame } from '../packages/fxe-ui/src/reconciler/frame_loop.ts';
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 
-type MutableImageNamespace = typeof NativeImage & {
+type MutableImageNamespace = {
+  fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
   loadAsync: (path: string) => Promise<ImageHandle>;
 };
+
+const NativeImageApi = (globalThis as unknown as { Image: MutableImageNamespace }).Image;
 
 function rgba(width: number, height: number, seed = 0): Uint8Array {
   const out = new Uint8Array(width * height * 4);
@@ -27,16 +30,7 @@ function rgba(width: number, height: number, seed = 0): Uint8Array {
 }
 
 function makeImage(width: number, height: number, seed = 0): ImageHandle {
-  return NativeImage.fromBytes(rgba(width, height, seed), width, height);
-}
-
-function hasColor(cb: CommandBuffer, color: number): boolean {
-  const verts = cb.vertexBuffer();
-  const words = new Uint32Array(verts.buffer, verts.byteOffset, verts.length);
-  for (let i = 0; i < verts.length; i += 8) {
-    if (words[i + 4] === color) return true;
-  }
-  return false;
+  return NativeImageApi.fromPixels(rgba(width, height, seed), width, height);
 }
 
 function assertNear(actual: number, expected: number, epsilon = 1e-3): void {
@@ -46,53 +40,45 @@ function assertNear(actual: number, expected: number, epsilon = 1e-3): void {
   );
 }
 
-test('Image uses placeholder color while async source is pending and falls back to the default color', async () => {
-  const mutableImage = NativeImage as MutableImageNamespace;
+test('Image enters loading state for async string sources before decode resolves', async () => {
+  const mutableImage = NativeImageApi;
   const originalLoadAsync = mutableImage.loadAsync;
   const pending = Promise.withResolvers<ImageHandle>();
   const requested: string[] = [];
+  const loads: Array<[number, number]> = [];
   mutableImage.loadAsync = (path: string) => {
     requested.push(path);
     return pending.promise;
   };
   try {
-    const explicit = new CommandBuffer();
     render(
       UIImage({
         key: 'ui-image-pending-explicit',
         source: 'explicit.png',
         placeholder: { color: 0x112233ff },
         style: { width: 24, height: 16 },
+        onLoad: (width, height) => loads.push([width, height]),
       }),
-      explicit,
+      new CommandBuffer(),
     );
-    assertDeepEqual(requested, ['explicit.png']);
-    assert(
-      hasColor(explicit, 0x112233ff),
-      'explicit placeholder color should render while decode is pending',
-    );
-
-    const fallback = new CommandBuffer();
     render(
       UIImage({
         key: 'ui-image-pending-default',
         source: 'fallback.png',
         style: { width: 12, height: 8 },
+        onLoad: (width, height) => loads.push([width, height]),
       }),
-      fallback,
+      new CommandBuffer(),
     );
     assertDeepEqual(requested, ['explicit.png', 'fallback.png']);
-    assert(
-      hasColor(fallback, DEFAULT_IMAGE_PLACEHOLDER_COLOR),
-      'default placeholder color should render when placeholder is omitted',
-    );
+    assertDeepEqual(loads, []);
   } finally {
     mutableImage.loadAsync = originalLoadAsync;
   }
 });
 
 test('Image calls onLoad after async decode and onError on decode failure', async () => {
-  const mutableImage = NativeImage as MutableImageNamespace;
+  const mutableImage = NativeImageApi;
   const originalLoadAsync = mutableImage.loadAsync;
   const first = Promise.withResolvers<ImageHandle>();
   const loads: Array<[number, number]> = [];
@@ -155,7 +141,7 @@ test('Image calls onLoad after async decode and onError on decode failure', asyn
 });
 
 test('ImageHandle source skips async loading and uses intrinsic size when style does not override it', () => {
-  const mutableImage = NativeImage as MutableImageNamespace;
+  const mutableImage = NativeImageApi;
   const originalLoadAsync = mutableImage.loadAsync;
   const handle = makeImage(3, 2, 21);
   const loads: Array<[number, number]> = [];

@@ -2849,15 +2849,6 @@ namespace fxe {
     std::atomic<bool> redraw_requested_{true};
   };
 
-  void glfw_window_inject_gesture_event(window* w, input_event ev) {
-    if (!w)
-      return;
-    if (auto* gw = dynamic_cast<glfw_window*>(w))
-      gw->inject_gesture_event(std::move(ev));
-    else
-      w->inject(ev);
-  }
-
 #endif
 
   std::unique_ptr<window> create_window(const window_desc& desc) {

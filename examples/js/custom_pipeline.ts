@@ -45,7 +45,7 @@ const pipeline = new Pipeline(renderer, {
   ],
 });
 
-const texture = Image.fromBytes(
+const texture = Image.fromPixels(
   new Uint8Array([255, 64, 64, 255, 64, 255, 64, 255, 64, 64, 255, 255, 255, 255, 255, 255]),
   2,
   2,

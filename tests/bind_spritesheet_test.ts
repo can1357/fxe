@@ -13,7 +13,7 @@ function rgba(width: number, height: number, seed: number): Uint8Array {
 }
 
 function image(width: number, height: number, seed = 0): ImageHandle {
-  return Image.fromBytes(rgba(width, height, seed), width, height);
+  return Image.fromPixels(rgba(width, height, seed), width, height);
 }
 
 test('Spritesheet.add resolves a full image sprite', () => {

@@ -192,7 +192,7 @@ Browse [`examples/js/`](examples/js/) — run any of them with `just ts <name>`:
 | ----------------------- | ------------------------------------------------ |
 | `hello.ts`              | Smallest renderer + primitives loop              |
 | `showcase.ts`           | Rects, text, gradients, blur                     |
-| `sprite_demo.ts`        | `Image.fromBytes`, spritesheets, `drawSprite`    |
+| `sprite_demo.ts`        | `Image.fromPixels`, spritesheets, `drawSprite`    |
 | `custom_pipeline.ts`    | Custom WGSL pipeline with vertex/uniform binding |
 | `custom_titlebar.ts`    | Frameless window with a custom title bar         |
 | `transparent_demo.ts`   | Transparent window                               |
@@ -222,7 +222,7 @@ Authoritative TypeScript declarations live in
 | `Renderer`, `OffscreenRenderer`, `CommandBuffer`  | Frame submission and offscreen targets                                                                                                                    |
 | `Primitives`                                      | `fillRect`, `drawText`, `drawSprite`, `drawPath`, gradients, blur                                                                                         |
 | `Pipeline`                                        | Custom WGSL pipelines                                                                                                                                     |
-| `Spritesheet`, `Image`                            | Atlas packing, animated sprites, `Image.fromBytes`                                                                                                        |
+| `Spritesheet`, `Image`                            | Atlas packing, animated sprites, `Image.fromPixels` / `Image.decode`                                                                                      |
 | `Font`                                            | `Font.load` / `Font.system` / `Font.builtin`, OpenType features                                                                                           |
 | `App`                                             | Lifecycle, single-instance, deep-links, recent docs, auto-update                                                                                          |
 | `Menu`, `Tray`, `Notification`, `dialog`, `shell` | Native UI integration                                                                                                                                     |
