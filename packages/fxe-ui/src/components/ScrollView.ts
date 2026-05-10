@@ -65,6 +65,17 @@ function clampOffset(offset: Offset, max: Offset): Offset {
   };
 }
 
+// Child buffers are rendered at their unscrolled coordinates; applying a
+// fractional scroll translation afterward moves already-rasterised glyph quads
+// off their pixel grid. Snap only the paint/hit-test projection — keep the
+// logical scroll offset fractional for wheel accumulation and scrollbar math.
+export function __snapScrollOffsetForPaint(offset: Offset): Offset {
+  return {
+    x: Math.round(offset.x),
+    y: Math.round(offset.y),
+  };
+}
+
 function sameOffset(a: Offset, b: Offset): boolean {
   return a.x === b.x && a.y === b.y;
 }
@@ -192,6 +203,7 @@ export const ScrollView = Component((props: ScrollViewProps): Node => {
   const content = combineSize(layoutContent, measuredContentRef.current);
   const max = maxOffset(rect, content);
   const clampedOffset = clampOffset(offset, max);
+  const paintOffset = __snapScrollOffsetForPaint(clampedOffset);
   offsetRef.current = clampedOffset;
   registerHitTarget({
     id: `scroll:${rect.x}:${rect.y}`,
@@ -239,10 +251,10 @@ export const ScrollView = Component((props: ScrollViewProps): Node => {
   const clippedContentAndScrollbar = Draw((cb) => {
     const measured = measuredContentSize(rect, props.contentStyle, childBuffer.bounds());
     measuredContentRef.current = measured;
-    clipChildHitTargets(hitTargetStart, rect, clampedOffset);
+    clipChildHitTargets(hitTargetStart, rect, paintOffset);
     const clipped = coarseClip(childBuffer, rect, {
-      x: -clampedOffset.x,
-      y: -clampedOffset.y,
+      x: -paintOffset.x,
+      y: -paintOffset.y,
     });
     if (clipped.__fxe_v_len !== 0) cb.queue(clipped);
     paintScrollbars(cb, rect, measured, clampedOffset);
