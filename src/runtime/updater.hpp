@@ -98,9 +98,10 @@ namespace fxe::runtime {
     static bool has_pending_first_launch();
 
     // Auto-rollback if the previous launch didn't mark ready. Call this once at
-    // startup. Returns the version that was rolled back FROM, or empty string if
-    // no rollback occurred. Caller should record this in history / alert the user.
-    static std::string auto_rollback_if_unready();
+    // startup. Returns false only when rollback was required but failed. On
+    // success, `rolled_from_out` is the version that was rolled back FROM, or
+    // empty when no rollback occurred.
+    static bool auto_rollback_if_unready(std::string& rolled_from_out, std::string& error_out);
 
     static bool rollback(std::string& error_out);
     static std::vector<std::string> history(std::string& error_out);

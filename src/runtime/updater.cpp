@@ -1159,31 +1159,37 @@ namespace fxe::runtime {
     return !ec && exists;
   }
 
-  std::string updater::auto_rollback_if_unready() {
+  bool updater::auto_rollback_if_unready(std::string& rolled_from_out, std::string& error_out) {
+    rolled_from_out.clear();
+    error_out.clear();
     const auto root = updates_root();
     const auto flag = pending_first_launch_flag_path(root);
     std::error_code ec;
-    if (!std::filesystem::exists(flag, ec) || ec)
-      return {};
+    const bool has_flag = std::filesystem::exists(flag, ec);
+    if (ec) {
+      error_out = "failed to inspect first-launch marker: " + ec.message();
+      return false;
+    }
+    if (!has_flag)
+      return true;
 
-    std::string rolled_from = read_first_line(flag);
-    if (rolled_from.empty()) {
+    rolled_from_out = read_first_line(flag);
+    if (rolled_from_out.empty()) {
       auto versions = read_history_file(root);
       if (!versions.empty())
-        rolled_from = versions.front();
+        rolled_from_out = versions.front();
     }
 
-    std::string error;
-    if (!rollback(error))
-      return {};
+    if (!rollback(error_out))
+      return false;
 
     (void)mark_ready();
-    if (rolled_from.empty()) {
+    if (rolled_from_out.empty()) {
       auto versions = read_history_file(root);
       if (versions.size() > 1)
-        rolled_from = versions[1];
+        rolled_from_out = versions[1];
     }
-    return rolled_from;
+    return true;
   }
   bool updater::rollback(std::string& error_out) {
     const auto root = updates_root();

@@ -10,6 +10,7 @@
 #include "../runtime/updater.hpp"
 #include "fxe/single_instance.hpp"
 #include <fxe/js_bindings.hpp>
+#include <fxe/log.hpp>
 #include <fxe/v8_helpers.hpp>
 #include <fxe/v8_literals.hpp>
 // FXE_APP_NAME and FXE_APP_VERSION may be injected by the build as quoted
@@ -1610,11 +1611,33 @@ namespace fxe::js {
         return;
       }
     }
+    constexpr int kUpdaterRollbackRestartExitCode = 75;
+
+    void auto_rollback_unready_update_once() {
+      static std::once_flag once;
+      std::call_once(once, [] {
+        std::string rolled_from;
+        std::string error;
+        if (!fxe::runtime::updater::auto_rollback_if_unready(rolled_from, error)) {
+          FXE_WARN("updater", "startup auto-rollback failed: {}",
+                   error.empty() ? "unknown error" : error);
+          return;
+        }
+        if (rolled_from.empty())
+          return;
+        FXE_INFO("updater",
+                 "startup auto-rollback restored previous version after unready launch: from={} "
+                 "restart_exit_code={}",
+                 rolled_from, kUpdaterRollbackRestartExitCode);
+        std::exit(kUpdaterRollbackRestartExitCode);
+      });
+    }
 
   } // namespace
 
   void install_app_extras_to(Isolate* iso, Local<Context> ctx, Local<Object> appObj) {
     HandleScope hs(iso);
+    auto_rollback_unready_update_once();
     auto set_fn = [&](const char* name, FunctionCallback cb) {
       auto fn = Function::New(ctx, cb).ToLocalChecked();
       (void)appObj->Set(ctx, s(iso, name), fn);
@@ -1647,7 +1670,6 @@ namespace fxe::js {
     set_fn("__fxeUpdateRolloutEligible", app_update_rollout_eligible);
     set_fn("__fxeApplyPendingUpdate", app_apply_pending_update);
     set_fn("__fxeUpdateAccessibilityTree", app_update_accessibility_tree);
-    // TODO(C1): wire updater::auto_rollback_if_unready into startup before user JS runs.
     install_app_run_frame_bridge(iso, ctx, appObj);
     auto check_for_updates = make_check_for_updates(iso, ctx);
     if (!check_for_updates.IsEmpty())
