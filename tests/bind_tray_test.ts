@@ -45,10 +45,7 @@ test('Tray mutable surface is callable and returns typed results', () => {
   }
 });
 
-if (
-  (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-    .__FXE_TYPECHECK_ONLY__ === true
-) {
+if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
   const tray = new Tray('/tmp/fxe-tray-icon.png', 'FXE tray');
   tray.setMenu([
     { id: 'open', label: 'Open', enabled: true },

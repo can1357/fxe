@@ -77,15 +77,14 @@ test('Markdown empty source produces an empty container', () => {
 });
 
 test('Markdown parse failure falls back to empty container', () => {
-  const markdownGlobal = globalThis as typeof globalThis & { Markdown: MarkdownApi };
-  const originalMarkdown = markdownGlobal.Markdown;
+  const originalMarkdown = globalThis.Markdown;
   const throwingMarkdown: MarkdownApi = {
     ...originalMarkdown,
     parse(): FXEMarkdown.DocumentNode {
       throw new Error('boom');
     },
   };
-  markdownGlobal.Markdown = throwingMarkdown;
+  globalThis.Markdown = throwingMarkdown;
   try {
     const cb = new CommandBuffer();
     render(MarkdownComponent({ source: '# broken', style: { width: 200, height: 100 } }), cb);
@@ -93,7 +92,7 @@ test('Markdown parse failure falls back to empty container', () => {
     assert(names.includes('Markdown'), 'expected Markdown component in snapshot');
     assert(!names.includes('MdHeading'), 'parse failure should not render markdown blocks');
   } finally {
-    markdownGlobal.Markdown = originalMarkdown;
+    globalThis.Markdown = originalMarkdown;
   }
 });
 

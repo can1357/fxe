@@ -242,7 +242,7 @@ export function useFetch<T>(url: string, init?: RequestInit): FetchResult<T> {
 }
 
 function websocketConnectingState(): number {
-  return typeof WebSocket === 'function' ? WebSocket.CONNECTING : 0;
+  return WebSocket.CONNECTING;
 }
 
 function createWebSocketStore(url: string): Store<WebSocketStore> {

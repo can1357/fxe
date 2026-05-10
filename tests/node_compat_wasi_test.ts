@@ -4,9 +4,7 @@ import { assert, assertEqual, assertThrows, run, test } from './ts_harness.ts';
 
 const decoder = new TextDecoder();
 
-type WasmMemory = {
-  buffer: ArrayBufferLike;
-};
+type WasmMemory = WebAssembly.Memory;
 
 type WasmInstance = {
   exports: {
@@ -16,20 +14,11 @@ type WasmInstance = {
   };
 };
 
-const WasmMemory = (() => {
-  const api = (
-    globalThis as typeof globalThis & {
-      WebAssembly?: {
-        Memory: new (descriptor: { initial: number }) => WasmMemory;
-      };
-    }
-  ).WebAssembly;
-  assert(
-    api && typeof api.Memory === 'function',
-    'expected WebAssembly.Memory support in test runtime',
-  );
-  return api.Memory;
-})();
+assert(
+  typeof WebAssembly !== 'undefined' && typeof WebAssembly.Memory === 'function',
+  'expected WebAssembly.Memory support in test runtime',
+);
+const Memory = WebAssembly.Memory;
 function makeInstance(
   memory: WasmMemory,
   hooks: { _start?: () => void; _initialize?: () => void } = {},
@@ -63,7 +52,7 @@ test('node:wasi constructs and exposes syscall closures', () => {
 test('node:wasi args/env/clock/random syscalls operate on wasm memory', () => {
   const wasi = new WASI({ args: ['demo'], env: { FOO: 'bar' } });
   const imports = wasi.getImportObject().wasi_snapshot_preview1;
-  const memory = new WasmMemory({ initial: 1 });
+  const memory = new Memory({ initial: 1 });
   wasi.initialize(makeInstance(memory));
 
   const view = new DataView(memory.buffer);
@@ -109,7 +98,7 @@ test('node:wasi args/env/clock/random syscalls operate on wasm memory', () => {
 test('node:wasi start records proc_exit code and fd_write writes lengths', () => {
   const wasi = new WASI();
   const imports = wasi.getImportObject().wasi_snapshot_preview1;
-  const memory = new WasmMemory({ initial: 1 });
+  const memory = new Memory({ initial: 1 });
   wasi.initialize(makeInstance(memory));
   const view = new DataView(memory.buffer);
   const bytes = new Uint8Array(memory.buffer);

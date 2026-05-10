@@ -17,19 +17,13 @@ let activeFlushLane: SchedulerLane | null = null;
 let transitionIdleCallbacks: ScheduledCallback[] = [];
 
 function nowMs(): number {
-  const perf = (globalThis as { performance?: { now?: () => number } }).performance;
-  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+  return performance.now();
 }
 
 function queueSyncFlush(): void {
   if (syncFlushQueued) return;
   syncFlushQueued = true;
-  const globals = globalThis as { queueMicrotask?: (fn: () => void) => void };
-  if (typeof globals.queueMicrotask === 'function') {
-    globals.queueMicrotask(flushSync);
-  } else {
-    Promise.resolve().then(flushSync);
-  }
+  queueMicrotask(flushSync);
 }
 
 function runCallback(callback: ScheduledCallback, lane: SchedulerLane): void {

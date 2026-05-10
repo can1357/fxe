@@ -19,10 +19,6 @@ export interface FrameLoopOptions {
   cancelAnimationFrame?: (id: unknown) => void;
 }
 
-type FxeUiFrameLoopBridgeGlobal = typeof globalThis & {
-  __fxeUiEnsureFrameLoop?: () => FrameLoopDisposer;
-};
-
 export const g_frame_callbacks: Array<(dtMs: number) => void> = [];
 
 let g_tick_frame_counter = 0;
@@ -41,19 +37,13 @@ export function ensureRenderFrameLoop(options?: FrameLoopOptions): FrameLoopDisp
   return g_render_frame_loop_dispose;
 }
 
-(globalThis as FxeUiFrameLoopBridgeGlobal).__fxeUiEnsureFrameLoop = () => ensureRenderFrameLoop();
+globalThis.__fxeUiEnsureFrameLoop = () => ensureRenderFrameLoop();
 
 export function startFrameLoop(options: FrameLoopOptions = {}): FrameLoopDisposer {
-  const globals = globalThis as {
-    requestAnimationFrame?: (fn: (timeMs: number) => void) => unknown;
-    cancelAnimationFrame?: (id: unknown) => void;
-    performance?: { now?: () => number };
-  };
-  const requestFrame = options.requestAnimationFrame ?? globals.requestAnimationFrame;
+  const requestFrame = options.requestAnimationFrame ?? globalThis.requestAnimationFrame;
   if (typeof requestFrame !== 'function')
     throw new Error('startFrameLoop() requires requestAnimationFrame');
-  const cancelFrame = options.cancelAnimationFrame ?? globals.cancelAnimationFrame;
-
+  const cancelFrame = options.cancelAnimationFrame ?? globalThis.cancelAnimationFrame;
   let disposed = false;
   let handle: unknown;
   let previousTimeMs: number | null = null;
@@ -69,7 +59,7 @@ export function startFrameLoop(options: FrameLoopOptions = {}): FrameLoopDispose
   const dispose = (): void => {
     if (disposed) return;
     disposed = true;
-    if (typeof cancelFrame === 'function') cancelFrame(handle);
+    if (typeof cancelFrame === 'function') cancelFrame(handle as number);
     if (g_render_frame_loop_dispose === dispose) g_render_frame_loop_dispose = null;
   };
   return dispose;
@@ -78,8 +68,7 @@ export function startFrameLoop(options: FrameLoopOptions = {}): FrameLoopDispose
 export function tickFrame(dtMs: number): void {
   bumpTickFrameCounter();
   const sample = frameProfileBeginFrame(dtMs);
-  const perfNow = (globalThis as { performance?: { now?: () => number } }).performance?.now;
-  const t0 = sample ? (typeof perfNow === 'function' ? perfNow() : Date.now()) : 0;
+  const t0 = sample ? performance.now() : 0;
   frameProfilePhase(sample, 'reconcile', () => {
     tickSchedulerFrame(dtMs);
   });
@@ -95,6 +84,5 @@ export function tickFrame(dtMs: number): void {
       }
     }
   });
-  if (sample)
-    frameProfileCommitFrame(sample, (typeof perfNow === 'function' ? perfNow() : Date.now()) - t0);
+  if (sample) frameProfileCommitFrame(sample, performance.now() - t0);
 }

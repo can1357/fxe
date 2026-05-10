@@ -11,44 +11,19 @@ export interface DevToolsShortcutHandle {
   accelerator: string;
 }
 
-type RuntimeGlobals = typeof globalThis & {
-  App?: {
-    openDevTools(window?: Window): Window | null;
-  };
-  console?: {
-    error?: (...args: unknown[]) => void;
-  };
-  globalShortcut?: {
-    register(accelerator: string, fn: () => void): boolean;
-    unregister(accelerator: string): void;
-  };
-  process?: {
-    env?: Record<string, string | undefined>;
-    platform?: string;
-  };
-};
-
-function runtimeGlobals(): RuntimeGlobals {
-  return globalThis as RuntimeGlobals;
-}
-
-function hasDebugPort(globals: RuntimeGlobals): boolean {
-  const port = globals.process?.env?.FXE_DEBUG_PORT;
+function hasDebugPort(): boolean {
+  const port = process.env.FXE_DEBUG_PORT;
   return typeof port === 'string' && port.length > 0;
 }
 
 export function defaultDevToolsAccelerator(): string {
-  return runtimeGlobals().process?.platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I';
+  return process.platform === 'darwin' ? 'Cmd+Alt+I' : 'Ctrl+Shift+I';
 }
 
 export function installDevToolsShortcut(
   opts: DevToolsShortcutOptions = {},
 ): DevToolsShortcutHandle | null {
-  const globals = runtimeGlobals();
-  const shortcuts = globals.globalShortcut;
-  if (!shortcuts || !hasDebugPort(globals)) {
-    return null;
-  }
+  if (!hasDebugPort()) return null;
 
   const accelerator = opts.accelerator ?? defaultDevToolsAccelerator();
   let registered = false;
@@ -61,18 +36,18 @@ export function installDevToolsShortcut(
       disposed = true;
       if (!registered) return;
       registered = false;
-      shortcuts.unregister(accelerator);
+      globalShortcut.unregister(accelerator);
     },
   };
 
-  registered = shortcuts.register(accelerator, () => {
+  registered = globalShortcut.register(accelerator, () => {
     try {
-      globals.App?.openDevTools(opts.window);
+      App.openDevTools(opts.window);
     } catch (error) {
       if (opts.onError) {
         opts.onError(error);
       } else {
-        globals.console?.error?.(error);
+        console.error(error);
       }
     }
   });

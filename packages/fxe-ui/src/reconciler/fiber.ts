@@ -437,7 +437,8 @@ interface EffectSlot {
   kind: 'effect';
   deps: ReadonlyArray<unknown> | undefined;
   cleanup: Cleanup | undefined;
-  pending: (() => undefined | Cleanup) | null;
+  // biome-ignore lint/suspicious/noConfusingVoidType: matches React EffectCallback — void allows callbacks without an explicit return.
+  pending: (() => void | Cleanup) | null;
 }
 
 interface MemoSlot<T> {
@@ -592,10 +593,6 @@ export interface FiberNode {
 
 interface FiberDebugMetadata extends FiberNode {}
 
-type ReconcilerDebugGlobal = typeof globalThis & {
-  __fxeReconcilerSnapshot?: () => { tree: FiberNode[] };
-};
-
 let g_next_fiber_debug_id = 1;
 const kFiberDebugMetadata = Symbol('fxe-ui.fiberDebugMetadata');
 
@@ -616,9 +613,7 @@ function summarizeDebugValue(value: unknown): unknown {
 let g_dev_mode_cached: boolean | undefined;
 function devMode(): boolean {
   if (g_dev_mode_cached === undefined) {
-    g_dev_mode_cached =
-      typeof globalThis !== 'undefined' &&
-      (globalThis as { __FXE_DEV?: boolean }).__FXE_DEV !== false;
+    g_dev_mode_cached = typeof globalThis !== 'undefined' && globalThis.__FXE_DEV !== false;
   }
   return g_dev_mode_cached;
 }
@@ -757,7 +752,7 @@ export function reconcilerSnapshot(): { tree: FiberNode[] } {
   return { tree };
 }
 
-(globalThis as ReconcilerDebugGlobal).__fxeReconcilerSnapshot = reconcilerSnapshot;
+globalThis.__fxeReconcilerSnapshot = reconcilerSnapshot;
 installFiberTreeSnapshotProvider(reconcilerSnapshot as () => { tree: DevtoolsFiberNode[] });
 
 function newFiber(key: string, parent: Fiber | null): Fiber {
@@ -1131,7 +1126,8 @@ export function useMemo<T>(fn: () => T, deps: ReadonlyArray<unknown>): T {
   return slot.value;
 }
 
-export function useEffect(fn: () => undefined | Cleanup, deps?: ReadonlyArray<unknown>): void {
+// biome-ignore lint/suspicious/noConfusingVoidType: matches React EffectCallback — void allows callbacks without an explicit return.
+export function useEffect(fn: () => void | Cleanup, deps?: ReadonlyArray<unknown>): void {
   const ctx = requireCtx('useEffect');
   const slot = nextSlot<EffectSlot>('effect', () => ({
     kind: 'effect',
@@ -1196,9 +1192,7 @@ function childKey(node: Node, slotIndex: number): string {
 }
 
 function isDevMode(): boolean {
-  return (
-    typeof globalThis !== 'undefined' && (globalThis as { __FXE_DEV?: boolean }).__FXE_DEV !== false
-  );
+  return typeof globalThis !== 'undefined' && globalThis.__FXE_DEV !== false;
 }
 
 function duplicateKeyError(key: string, parent: Fiber): Error {

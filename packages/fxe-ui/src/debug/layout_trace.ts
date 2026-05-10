@@ -33,14 +33,11 @@ interface State {
   limit: number;
 }
 
-const KEY = '__fxeLayoutTrace';
-
 function state(): State {
-  const g = globalThis as Record<string, unknown>;
-  let s = g[KEY] as State | undefined;
+  let s = globalThis.__fxeLayoutTrace;
   if (!s) {
     s = { enabled: false, buffer: [], limit: 1000 };
-    g[KEY] = s;
+    globalThis.__fxeLayoutTrace = s;
   }
   return s;
 }

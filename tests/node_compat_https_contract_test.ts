@@ -11,10 +11,6 @@ type EventSource = {
   on(name: string, fn: (...args: unknown[]) => void): unknown;
 };
 
-type MutableGlobal = typeof globalThis & {
-  fetch: typeof fetch;
-};
-
 const originalFetch = globalThis.fetch;
 
 function collectBody(source: EventSource): Promise<string> {
@@ -39,7 +35,7 @@ test('node:https exposes Agent and performs callback response flow over fetch', 
   assert(httpsDefault.globalAgent instanceof Agent, 'https.globalAgent should use the Agent shim');
   let requestedUrl = '';
   let requestedMethod = '';
-  (globalThis as MutableGlobal).fetch = async (url: string | URL | Request, init?: RequestInit) => {
+  globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
     requestedUrl = String(url);
     requestedMethod = String(init?.method);
     return new Response('ok-body', {
@@ -99,5 +95,5 @@ test('node:tls exposes secure context and asynchronous unavailable connect error
 try {
   await run();
 } finally {
-  (globalThis as MutableGlobal).fetch = originalFetch;
+  globalThis.fetch = originalFetch;
 }

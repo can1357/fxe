@@ -20,15 +20,6 @@ export interface DevtoolsFiberTreeSnapshot {
 }
 
 type SnapshotProvider = () => DevtoolsFiberTreeSnapshot;
-type FxeDevtoolsGlobal = typeof globalThis & {
-  __fxe_devtools?: {
-    fiberTree: () => DevtoolsFiberTreeSnapshot;
-    setPaintFlash: (enabled: boolean) => void;
-    setMemoTrace: (enabled: boolean) => void;
-    memoTraceSnapshot: () => MemoTraceSnapshot | null;
-    resetMemoTrace: () => void;
-  };
-};
 
 let paintFlash = false;
 let snapshotProvider: SnapshotProvider = () => ({ tree: [] });
@@ -136,9 +127,8 @@ export function memoTraceSnapshot(): MemoTraceSnapshot | null {
   return { totals: { ...memoTrace.totals }, byName, propsDump };
 }
 
-const globals = globalThis as FxeDevtoolsGlobal;
-globals.__fxe_devtools = {
-  ...(globals.__fxe_devtools ?? {}),
+globalThis.__fxe_devtools = {
+  ...(globalThis.__fxe_devtools ?? {}),
   fiberTree: snapshotFiberTree,
   setPaintFlash,
   setMemoTrace,

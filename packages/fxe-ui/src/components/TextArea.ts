@@ -313,7 +313,7 @@ export const TextArea = Component((props: TextAreaProps): Node => {
   };
 
   const wrapMaxForHit = (): number | undefined => {
-    if (!softWrap) return undefined;
+    if (!softWrap) return;
     return rect.width > 0 ? rect.width : undefined;
   };
 

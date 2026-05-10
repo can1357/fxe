@@ -2,10 +2,7 @@ import { assertEqual, test } from './ts_harness.ts';
 
 const obscureAccelerator = 'Ctrl+Alt+Shift+F12';
 
-if (
-  (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-    .__FXE_TYPECHECK_ONLY__ === true
-) {
+if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
   const registered: boolean = globalShortcut.register(obscureAccelerator, () => {
     // Type-only callback coverage; this block must never execute.
   });

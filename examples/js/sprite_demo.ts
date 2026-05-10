@@ -6,60 +6,7 @@
 // a single global atlas today). The Spritesheet/Image plumbing is real,
 // so this script doubles as a smoke test for those bindings.
 
-import { Primitives, Renderer, Window } from 'fxe';
-
-// The Image / Spritesheet / drawSprite globals ship from the C++ side but
-// are not yet declared in fxe.d.ts (this PR intentionally does not touch
-// the .d.ts). Declare the minimum surface we use here.
-interface ImageHandle {
-  width(): number;
-  height(): number;
-  bytes(): Uint8Array;
-  dispose(): void;
-}
-interface ImageNS {
-  fromPixels(bytes: Uint8Array, width: number, height: number): ImageHandle;
-  load(path: string): ImageHandle;
-  loadAsync(path: string): Promise<ImageHandle>;
-}
-interface SpritesheetInstance {
-  add(image: ImageHandle, rect?: [number, number, number, number]): number;
-  addAnimated(images: ImageHandle[], delaysMs: number[]): number;
-  resolve(
-    spriteId: number,
-    timeMs?: number,
-  ): {
-    textureId: number;
-    u0: number;
-    v0: number;
-    u1: number;
-    v1: number;
-    width: number;
-    height: number;
-  };
-  dispose(): void;
-}
-interface SpritesheetCtor {
-  new (): SpritesheetInstance;
-}
-interface PrimitivesExtras {
-  drawSprite(
-    cb: Renderer,
-    spriteId: number,
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    depth?: number,
-    tint?: number,
-  ): void;
-}
-
-const g = globalThis as unknown as {
-  Image: ImageNS;
-  Spritesheet: SpritesheetCtor;
-};
-const P = Primitives as unknown as PrimitivesExtras;
+import { Image, Primitives, Renderer, Spritesheet, Window } from 'fxe';
 
 const W = 64;
 const H = 64;
@@ -75,8 +22,8 @@ for (let y = 0; y < H; ++y) {
   }
 }
 
-const img = g.Image.fromPixels(buf, W, H);
-const sheet = new g.Spritesheet();
+const img = Image.fromPixels(buf, W, H);
+const sheet = new Spritesheet();
 const spriteId = sheet.add(img);
 const resolved = sheet.resolve(spriteId);
 console.log(
@@ -106,7 +53,7 @@ win.run(
     const x = 32 + t * (fbw - 96 - 32);
     const y = fbh / 2 - 48;
     const tint = 0xff8040ff;
-    P.drawSprite(renderer, spriteId, x, y, 96, 96, 0.1, tint);
+    Primitives.drawSprite(renderer, spriteId, x, y, 96, 96, 0.1, tint);
 
     Primitives.drawText(renderer, 16, 16, 0.0, `frame ${frame + 1} / ${FRAMES}`, 14, 0xe5e7ebff);
     renderer.endFrame();

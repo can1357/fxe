@@ -507,6 +507,52 @@ declare module 'fxe-ui' {
   export function snapshotFiberTree(): DevtoolsFiberTreeSnapshot;
   export function setPaintFlash(enabled: boolean): void;
 
+  export interface MemoTraceSlot {
+    total: number;
+    dirty: number;
+    layout: number;
+    noCache: number;
+    noLastProps: number;
+    epoch: number;
+    propsDiff: number;
+    hit: number;
+  }
+  export interface MemoTracePropsDump {
+    last: unknown;
+    next: unknown;
+    lastKeys: string[];
+    nextKeys: string[];
+  }
+  export interface MemoTraceSnapshot {
+    totals: MemoTraceSlot;
+    byName: Record<string, MemoTraceSlot>;
+    propsDump: Record<string, MemoTracePropsDump>;
+  }
+  export function setMemoTrace(enabled: boolean): void;
+  export function memoTraceSnapshot(): MemoTraceSnapshot | null;
+  export function resetMemoTrace(): void;
+
+  export interface FramePhases {
+    js: number;
+    animations: number;
+    reconcile: number;
+    frameCallbacks: number;
+  }
+  export interface FrameSample {
+    frameId: number;
+    startMs: number;
+    totalMs: number;
+    dtMs: number;
+    phases: FramePhases;
+  }
+  export interface FrameProfileApi {
+    enable(opts?: { ringSize?: number }): void;
+    disable(): void;
+    isEnabled(): boolean;
+    drain(): FrameSample[];
+    snapshot(): FrameSample[];
+  }
+
   export function Layer(props: LayerProps): Node;
   export function Draw(fn: (cb: CommandBuffer) => void, deps?: ReadonlyArray<unknown>): Node;
   export function Component<P>(
@@ -538,10 +584,8 @@ declare module 'fxe-ui' {
   export function useInternalLayout(): LayoutResult | null;
   export function useInternalTextStyle(): TextStyle | null;
   export function useMemo<T>(fn: () => T, deps: ReadonlyArray<unknown>): T;
-  export function useEffect(
-    fn: () => undefined | (() => void),
-    deps?: ReadonlyArray<unknown>,
-  ): void;
+  // biome-ignore lint/suspicious/noConfusingVoidType: matches React EffectCallback — void allows callbacks without an explicit return.
+  export function useEffect(fn: () => void | (() => void), deps?: ReadonlyArray<unknown>): void;
   export function useFrame(fn: (dtMs: number) => void): void;
   export function useEvent<K extends WindowEventName>(
     win: Window,
@@ -673,6 +717,11 @@ declare module 'fxe-ui' {
   export function scheduleWork(fiberId: number, lane?: SchedulerLane): void;
   export function flushSync(): void;
   export function schedulerFrameBudgetMs(): number;
+  export function getCurrentSchedulerLane(): SchedulerLane;
+  export function isTransitionFlushActive(): boolean;
+  export function runWithSchedulerLane<T>(lane: SchedulerLane, fn: () => T): T;
+  export function registerAnimatedFrameStep(step: (dtMs: number) => void): () => void;
+  export function tickAnimatedFrames(dtMs: number): void;
 
   export function createSignal<T>(initial: T): [() => T, (next: T | ((prev: T) => T)) => void];
   export function createMemo<T>(fn: () => T): () => T;
@@ -1303,10 +1352,41 @@ declare global {
       beginFrame(): void;
     }
   }
+  /** Reconciler/devtools surface installed by `fxe-ui/reconciler/devtools.ts`. */
   var __fxe_devtools:
     | {
         fiberTree: () => import('fxe-ui').DevtoolsFiberTreeSnapshot;
         setPaintFlash: (enabled: boolean) => void;
+        setMemoTrace: (enabled: boolean) => void;
+        memoTraceSnapshot: () => import('fxe-ui').MemoTraceSnapshot | null;
+        resetMemoTrace: () => void;
+      }
+    | undefined;
+
+  /** Dev-mode toggle read once on first reconciler render. Default `true`. */
+  var __FXE_DEV: boolean | undefined;
+
+  /** Bridge installed by `fxe-ui/reconciler/frame_loop.ts` so the host can
+   *  re-arm the render loop on HMR / animated drivers without importing JS. */
+  var __fxeUiEnsureFrameLoop: (() => () => void) | undefined;
+
+  /** Reconciler fiber-tree dump installed alongside `__fxe_devtools.fiberTree`. */
+  var __fxeReconcilerSnapshot: (() => { tree: import('fxe-ui').DevtoolsFiberNode[] }) | undefined;
+
+  /** Frame profiler API installed by `fxe-ui/reconciler/frame_profile.ts`. */
+  var __fxeFrameProfile: import('fxe-ui').FrameProfileApi | undefined;
+
+  /** Layout-trace ring buffer installed by `fxe-ui/debug/layout_trace.ts`. */
+  var __fxeLayoutTrace:
+    | { enabled: boolean; buffer: import('fxe-ui').LayoutTraceEntry[]; limit: number }
+    | undefined;
+
+  /** Accessibility-tree bridge installed by `fxe-ui/a11y/bridge.ts`. */
+  var __fxeA11y:
+    | {
+        snapshot: import('fxe-ui').AccessibilityTreeSnapshot | null;
+        revision: number;
+        subscribers: Set<(snapshot: import('fxe-ui').AccessibilityTreeSnapshot) => void>;
       }
     | undefined;
 }

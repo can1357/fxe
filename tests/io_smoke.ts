@@ -2,10 +2,7 @@
 // gated behind `if (false)` so tsc --noEmit exercises the typings without the
 // runner touching the filesystem.
 
-if (
-  (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-    .__FXE_TYPECHECK_ONLY__ === true
-) {
+if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
   const utf: string = fs.readFileSync('foo.txt', 'utf8');
   const raw: Uint8Array = fs.readFileSync('foo.bin');
   fs.writeFileSync('out.bin', raw);

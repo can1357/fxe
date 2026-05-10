@@ -1,9 +1,6 @@
 import { assert, assertEqual, test } from './ts_harness.ts';
 
-if (
-  (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-    .__FXE_TYPECHECK_ONLY__ === true
-) {
+if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
   const openResult: Promise<OpenDialogResult> = dialog.showOpenDialog({
     title: 'Open file',
     defaultPath: '/tmp',

@@ -1,54 +1,18 @@
 import { assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 
-type MessageEventLike<T = unknown> = {
-  readonly type: 'message';
-  readonly data: T;
-};
-
-type MessageListener = (event: MessageEventLike) => void;
-
-type BroadcastChannelLike = {
-  readonly name: string;
-  onmessage: MessageListener | null;
-  postMessage(value: unknown): void;
-  addEventListener(type: 'message', listener: MessageListener): void;
-  removeEventListener(type: 'message', listener: MessageListener): void;
-  close(): void;
-};
-
-type MessagePortLike = {
-  onmessage: MessageListener | null;
-  postMessage(value: unknown): void;
-  addEventListener(type: 'message', listener: MessageListener): void;
-  removeEventListener(type: 'message', listener: MessageListener): void;
-  start(): void;
-  close(): void;
-};
-
-type MessageChannelLike = {
-  readonly port1: MessagePortLike;
-  readonly port2: MessagePortLike;
-};
-
-const globals = globalThis as unknown as {
-  BroadcastChannel: new (name: string) => BroadcastChannelLike;
-  MessageChannel: new () => MessageChannelLike;
-  MessagePort: new () => MessagePortLike;
-};
-
 async function flushMessages(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
 }
 
 test('BroadcastChannel asynchronously delivers to peers but not sender', async () => {
-  assertEqual(typeof globals.BroadcastChannel, 'function');
+  assertEqual(typeof BroadcastChannel, 'function');
 
-  const sender = new globals.BroadcastChannel('fxe-messaging-broadcast');
-  const peer = new globals.BroadcastChannel('fxe-messaging-broadcast');
-  const listenerPeer = new globals.BroadcastChannel('fxe-messaging-broadcast');
-  const isolated = new globals.BroadcastChannel('fxe-messaging-other');
-  const closedBeforeDispatch = new globals.BroadcastChannel('fxe-messaging-broadcast');
+  const sender = new BroadcastChannel('fxe-messaging-broadcast');
+  const peer = new BroadcastChannel('fxe-messaging-broadcast');
+  const listenerPeer = new BroadcastChannel('fxe-messaging-broadcast');
+  const isolated = new BroadcastChannel('fxe-messaging-other');
+  const closedBeforeDispatch = new BroadcastChannel('fxe-messaging-broadcast');
 
   const senderMessages: unknown[] = [];
   const peerMessages: unknown[] = [];
@@ -61,7 +25,7 @@ test('BroadcastChannel asynchronously delivers to peers but not sender', async (
   isolated.onmessage = (event) => isolatedMessages.push(event.data);
   closedBeforeDispatch.onmessage = (event) => closedMessages.push(event.data);
 
-  const listener = (event: MessageEventLike) => listenerMessages.push(event.data);
+  const listener = (event: { data: unknown }) => listenerMessages.push(event.data);
   listenerPeer.addEventListener('message', listener);
 
   sender.postMessage({ nested: { value: 7 } });
@@ -91,15 +55,15 @@ test('BroadcastChannel asynchronously delivers to peers but not sender', async (
 });
 
 test('MessageChannel delivers cloned messages and respects close', async () => {
-  assertEqual(typeof globals.MessageChannel, 'function');
-  assertEqual(typeof globals.MessagePort, 'function');
+  assertEqual(typeof MessageChannel, 'function');
+  assertEqual(typeof MessagePort, 'function');
 
-  const channel = new globals.MessageChannel();
+  const channel = new MessageChannel();
   const received: unknown[] = [];
   const listened: unknown[] = [];
 
   channel.port2.onmessage = (event) => received.push(event.data);
-  const listener = (event: MessageEventLike) => listened.push(event.data);
+  const listener = (event: { data: unknown }) => listened.push(event.data);
   channel.port2.addEventListener('message', listener);
   channel.port2.start();
 

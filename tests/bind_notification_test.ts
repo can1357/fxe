@@ -17,10 +17,7 @@ test('Notification constructor creates instances with show method', () => {
   assert(notification instanceof Notification, 'constructor should create Notification instances');
   assertEqual(typeof notification.show, 'function');
 
-  if (
-    (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-      .__FXE_TYPECHECK_ONLY__ === true
-  ) {
+  if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
     void notification.show();
   }
 });

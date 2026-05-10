@@ -5,12 +5,12 @@ type Node = FXEMarkdown.Node;
 function findFirst(root: Node, type: Node['type']): Node | undefined {
   if (root.type === type) return root;
   const children = (root as { children?: Node[] }).children;
-  if (!children) return undefined;
+  if (!children) return;
   for (const c of children) {
     const hit = findFirst(c, type);
     if (hit) return hit;
   }
-  return undefined;
+  return;
 }
 
 function textOf(n: Node): string {

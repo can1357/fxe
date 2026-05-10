@@ -205,12 +205,12 @@ export function redo(
 }
 
 export function detectPlatform(): Platform {
-  const processPlatform = (globalThis as { process?: { platform?: string } }).process?.platform;
+  const processPlatform = process.platform;
   if (processPlatform === 'darwin') return 'macos';
   if (processPlatform === 'win32') return 'win';
   if (processPlatform === 'linux') return 'linux';
 
-  const navPlatform = (globalThis as { navigator?: { platform?: string } }).navigator?.platform;
+  const navPlatform = navigator.platform;
   if (typeof navPlatform === 'string') {
     const lower = navPlatform.toLowerCase();
     if (lower.includes('mac')) return 'macos';

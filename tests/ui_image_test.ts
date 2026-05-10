@@ -2,21 +2,14 @@ import { CommandBuffer, type ImageHandle } from 'fxe';
 import { render, Image as UIImage } from 'fxe-ui';
 
 import { AnimatedValue } from '../packages/fxe-ui/src/animated/timing.ts';
-import { tickFrame } from '../packages/fxe-ui/src/reconciler/frame_loop.ts';
 import {
   DEFAULT_IMAGE_PLACEHOLDER_COLOR,
   resolveImageContentRect,
   resolveImagePlaceholderColor,
   startImageFadeAnimation,
 } from '../packages/fxe-ui/src/components/Image.ts';
+import { tickFrame } from '../packages/fxe-ui/src/reconciler/frame_loop.ts';
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
-
-type MutableImageNamespace = {
-  fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
-  loadAsync: (path: string) => Promise<ImageHandle>;
-};
-
-const NativeImageApi = (globalThis as unknown as { Image: MutableImageNamespace }).Image;
 
 function rgba(width: number, height: number, seed = 0): Uint8Array {
   const out = new Uint8Array(width * height * 4);
@@ -30,7 +23,7 @@ function rgba(width: number, height: number, seed = 0): Uint8Array {
 }
 
 function makeImage(width: number, height: number, seed = 0): ImageHandle {
-  return NativeImageApi.fromPixels(rgba(width, height, seed), width, height);
+  return Image.fromPixels(rgba(width, height, seed), width, height);
 }
 
 function assertNear(actual: number, expected: number, epsilon = 1e-3): void {
@@ -41,12 +34,11 @@ function assertNear(actual: number, expected: number, epsilon = 1e-3): void {
 }
 
 test('Image enters loading state for async string sources before decode resolves', async () => {
-  const mutableImage = NativeImageApi;
-  const originalLoadAsync = mutableImage.loadAsync;
+  const originalLoadAsync = Image.loadAsync;
   const pending = Promise.withResolvers<ImageHandle>();
   const requested: string[] = [];
   const loads: Array<[number, number]> = [];
-  mutableImage.loadAsync = (path: string) => {
+  Image.loadAsync = (path: string) => {
     requested.push(path);
     return pending.promise;
   };
@@ -73,18 +65,17 @@ test('Image enters loading state for async string sources before decode resolves
     assertDeepEqual(requested, ['explicit.png', 'fallback.png']);
     assertDeepEqual(loads, []);
   } finally {
-    mutableImage.loadAsync = originalLoadAsync;
+    Image.loadAsync = originalLoadAsync;
   }
 });
 
 test('Image calls onLoad after async decode and onError on decode failure', async () => {
-  const mutableImage = NativeImageApi;
-  const originalLoadAsync = mutableImage.loadAsync;
+  const originalLoadAsync = Image.loadAsync;
   const first = Promise.withResolvers<ImageHandle>();
   const loads: Array<[number, number]> = [];
   const errors: string[] = [];
   let calls = 0;
-  mutableImage.loadAsync = (path: string) => {
+  Image.loadAsync = (path: string) => {
     calls += 1;
     if (path === 'broken.png') return Promise.reject(new Error('decode failed'));
     return first.promise;
@@ -136,17 +127,16 @@ test('Image calls onLoad after async decode and onError on decode failure', asyn
     assertEqual(calls, 2);
     assertDeepEqual(errors, ['decode failed']);
   } finally {
-    mutableImage.loadAsync = originalLoadAsync;
+    Image.loadAsync = originalLoadAsync;
   }
 });
 
 test('ImageHandle source skips async loading and uses intrinsic size when style does not override it', () => {
-  const mutableImage = NativeImageApi;
-  const originalLoadAsync = mutableImage.loadAsync;
+  const originalLoadAsync = Image.loadAsync;
   const handle = makeImage(3, 2, 21);
   const loads: Array<[number, number]> = [];
   let loadAsyncCalls = 0;
-  mutableImage.loadAsync = async () => {
+  Image.loadAsync = async () => {
     loadAsyncCalls += 1;
     return makeImage(1, 1, 99);
   };
@@ -164,7 +154,7 @@ test('ImageHandle source skips async loading and uses intrinsic size when style 
     assertDeepEqual(loads, [[3, 2]]);
     assert(cb.vertexCount() > 0, 'direct handle path should render immediately');
   } finally {
-    mutableImage.loadAsync = originalLoadAsync;
+    Image.loadAsync = originalLoadAsync;
     handle.dispose();
   }
 });

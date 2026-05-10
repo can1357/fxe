@@ -2,10 +2,7 @@
 // never executes — a `just ts-check` run is enough to verify the public
 // surface declared in `types/fxe.d.ts` (Audio + Sound) compiles.
 
-if (
-  (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-    .__FXE_TYPECHECK_ONLY__ === true
-) {
+if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
   const s = await Audio.load('a.wav');
   s.play({ volume: 0.5 });
   s.play({ volume: 1.0, loop: true, rate: 1.25 });

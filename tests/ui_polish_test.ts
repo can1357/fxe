@@ -368,9 +368,8 @@ test('Portal redirects draw output while preserving hook ownership', () => {
 });
 
 test('duplicate keys throw in dev mode', () => {
-  const globals = globalThis as typeof globalThis & { __FXE_DEV?: boolean };
-  const previous = globals.__FXE_DEV;
-  globals.__FXE_DEV = true;
+  const previous = globalThis.__FXE_DEV;
+  globalThis.__FXE_DEV = true;
   try {
     assertThrows(() => {
       render(
@@ -382,7 +381,7 @@ test('duplicate keys throw in dev mode', () => {
       );
     }, /fxe-ui: duplicate key "l:dup" at \$root\/l:duplicate-root/);
   } finally {
-    globals.__FXE_DEV = previous;
+    globalThis.__FXE_DEV = previous;
   }
 });
 

@@ -67,15 +67,7 @@ export async function popupEditMenu(
   y: number,
   opts: EditMenuOptions = {},
 ): Promise<EditMenuAction | null> {
-  const menu = (
-    globalThis as {
-      Menu?: { popup: (items: MenuItem[], x: number, y: number) => Promise<string | null> };
-    }
-  ).Menu;
-
-  if (!menu?.popup) return null;
-
-  const id = await menu.popup(buildEditMenuItems(opts), x, y);
+  const id = await Menu.popup(buildEditMenuItems(opts), x, y);
   if (id === null || id === undefined) return null;
 
   for (const action of EDIT_ACTIONS) {
@@ -96,23 +88,6 @@ export async function popupEditMenu(
 // Windows + Linux apps that explicitly install a menu bar (none by default)
 // pick up the same routing.
 // ----------------------------------------------------------------------------
-
-type ApplicationMenu = {
-  setApplicationMenu(items: MenuItem[]): void;
-  onCommand(handler: ((id: string) => void) | null): void;
-};
-
-function applicationMenuApi(): ApplicationMenu | null {
-  const m = (
-    globalThis as {
-      Menu?: Partial<ApplicationMenu>;
-    }
-  ).Menu;
-  if (!m || typeof m.setApplicationMenu !== 'function' || typeof m.onCommand !== 'function') {
-    return null;
-  }
-  return m as ApplicationMenu;
-}
 
 /**
  * Build the standard "Edit" submenu (Undo / Redo / Cut / Copy / Paste /
@@ -175,12 +150,9 @@ export interface InstallApplicationEditMenuOptions {
 export function installApplicationEditMenu(
   opts: InstallApplicationEditMenuOptions = {},
 ): () => void {
-  const api = applicationMenuApi();
-  if (!api) return () => undefined;
-
   const extras = opts.extras ?? [];
   const items: MenuItem[] = [buildApplicationEditSubmenu(), ...extras];
-  api.setApplicationMenu(items);
+  Menu.setApplicationMenu(items);
 
   const dispatch =
     opts.dispatch ??
@@ -189,13 +161,13 @@ export function installApplicationEditMenu(
       target?.onEditCommand?.(action);
     });
 
-  api.onCommand((id) => {
+  Menu.onCommand((id) => {
     const action = editActionFromMenuId(id);
     if (action) dispatch(action);
   });
 
   return () => {
-    api.onCommand(null);
-    api.setApplicationMenu([]);
+    Menu.onCommand(null);
+    Menu.setApplicationMenu([]);
   };
 }

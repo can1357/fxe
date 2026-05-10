@@ -15,15 +15,7 @@ export interface TaggedMeasureFn {
 export function measureText(text: string, fontSize = 16): TaggedMeasureFn {
   // The function body still works as a JS fallback (the bridge prefers the
   // tag and avoids calling it).
-  const Primitives = (
-    globalThis as {
-      Primitives?: { calcText: (text: string, fontSize: number) => [number, number] };
-    }
-  ).Primitives;
   const fn: TaggedMeasureFn = () => {
-    if (Primitives === undefined) {
-      throw new Error('fxe-ui: Primitives binding not available');
-    }
     const [width, height] = Primitives.calcText(text, fontSize);
     return { width, height };
   };

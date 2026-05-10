@@ -3,18 +3,6 @@ import { defaultDevToolsAccelerator, installDevToolsShortcut, mount, Text, View 
 
 import { assert, assertDeepEqual, assertEqual, run, test } from './ts_harness.ts';
 
-type RuntimeGlobals = typeof globalThis & {
-  App?: {
-    openDevTools(window?: Window): Window | null;
-  };
-  globalShortcut?: {
-    register(accelerator: string, fn: () => void): boolean;
-    unregister(accelerator: string): void;
-    unregisterAll(): void;
-  };
-};
-
-const runtime = globalThis as RuntimeGlobals;
 const debugPortKey = 'FXE_DEBUG_PORT';
 
 function restoreDebugPort(value: string | undefined): void {
@@ -55,10 +43,10 @@ test('defaultDevToolsAccelerator matches the runtime platform', () => {
 
 test('installDevToolsShortcut returns null when FXE_DEBUG_PORT is unset', () => {
   const originalPort = process.env[debugPortKey];
-  const originalShortcut = runtime.globalShortcut;
+  const originalShortcut = globalThis.globalShortcut;
   try {
     delete process.env[debugPortKey];
-    runtime.globalShortcut = {
+    globalThis.globalShortcut = {
       register: () => {
         throw new Error('register should not run without FXE_DEBUG_PORT');
       },
@@ -68,27 +56,27 @@ test('installDevToolsShortcut returns null when FXE_DEBUG_PORT is unset', () => 
     assertEqual(installDevToolsShortcut(), null);
   } finally {
     restoreDebugPort(originalPort);
-    runtime.globalShortcut = originalShortcut;
+    globalThis.globalShortcut = originalShortcut;
   }
 });
 
 test('installDevToolsShortcut returns null when globalShortcut is unavailable', () => {
   const originalPort = process.env[debugPortKey];
-  const originalShortcut = runtime.globalShortcut;
+  const originalShortcut = globalThis.globalShortcut;
   try {
     process.env[debugPortKey] = '0';
-    runtime.globalShortcut = undefined;
+    Reflect.deleteProperty(globalThis, 'globalShortcut');
     assertEqual(installDevToolsShortcut(), null);
   } finally {
     restoreDebugPort(originalPort);
-    runtime.globalShortcut = originalShortcut;
+    globalThis.globalShortcut = originalShortcut;
   }
 });
 
 test('installDevToolsShortcut honours custom accelerators and catches App.openDevTools errors', () => {
   const originalPort = process.env[debugPortKey];
-  const originalShortcut = runtime.globalShortcut;
-  const originalApp = runtime.App;
+  const originalShortcut = globalThis.globalShortcut;
+  const originalApp = globalThis.App;
   let registeredAccelerator: string | null = null;
   const callbacks: Array<() => void> = [];
   const unregistered: string[] = [];
@@ -97,7 +85,11 @@ test('installDevToolsShortcut honours custom accelerators and catches App.openDe
 
   try {
     process.env[debugPortKey] = '0';
-    const shortcutStub: NonNullable<RuntimeGlobals['globalShortcut']> = {
+    const shortcutStub: {
+      register(accelerator: string, fn: () => void): boolean;
+      unregister(accelerator: string): void;
+      unregisterAll(): void;
+    } = {
       register(accelerator: string, fn: () => void) {
         registeredAccelerator = accelerator;
         callbacks.push(fn);
@@ -108,12 +100,12 @@ test('installDevToolsShortcut honours custom accelerators and catches App.openDe
       },
       unregisterAll: () => undefined,
     };
-    runtime.globalShortcut = shortcutStub;
-    runtime.App = {
+    globalThis.globalShortcut = shortcutStub;
+    globalThis.App = {
       openDevTools() {
         throw expectedError;
       },
-    };
+    } as unknown as typeof App;
 
     const handle = installDevToolsShortcut({
       accelerator: 'Ctrl+Alt+D',
@@ -133,19 +125,19 @@ test('installDevToolsShortcut honours custom accelerators and catches App.openDe
     assertDeepEqual(unregistered, ['Ctrl+Alt+D']);
   } finally {
     restoreDebugPort(originalPort);
-    runtime.globalShortcut = originalShortcut;
-    runtime.App = originalApp;
+    globalThis.globalShortcut = originalShortcut;
+    globalThis.App = originalApp;
   }
 });
 
 test('installDevToolsShortcut reports registration failures without throwing', () => {
   const originalPort = process.env[debugPortKey];
-  const originalShortcut = runtime.globalShortcut;
+  const originalShortcut = globalThis.globalShortcut;
   const errors: unknown[] = [];
 
   try {
     process.env[debugPortKey] = '0';
-    runtime.globalShortcut = {
+    globalThis.globalShortcut = {
       register: () => false,
       unregister: () => {
         throw new Error('dispose should be a no-op when registration fails');
@@ -168,13 +160,13 @@ test('installDevToolsShortcut reports registration failures without throwing', (
     handle.dispose();
   } finally {
     restoreDebugPort(originalPort);
-    runtime.globalShortcut = originalShortcut;
+    globalThis.globalShortcut = originalShortcut;
   }
 });
 
 test('mount auto-installs devtools shortcuts by default and supports opt-out', () => {
   const originalPort = process.env[debugPortKey];
-  const originalShortcut = runtime.globalShortcut;
+  const originalShortcut = globalThis.globalShortcut;
   const expectedAccelerator = defaultDevToolsAccelerator();
   const registerCalls: string[] = [];
   const unregisterCalls: string[] = [];
@@ -182,7 +174,7 @@ test('mount auto-installs devtools shortcuts by default and supports opt-out', (
 
   try {
     process.env[debugPortKey] = '0';
-    runtime.globalShortcut = {
+    globalThis.globalShortcut = {
       register(accelerator) {
         registerCalls.push(accelerator);
         if (activeAccelerators.has(accelerator)) {
@@ -234,7 +226,7 @@ test('mount auto-installs devtools shortcuts by default and supports opt-out', (
     assertDeepEqual(unregisterCalls, [expectedAccelerator]);
   } finally {
     restoreDebugPort(originalPort);
-    runtime.globalShortcut = originalShortcut;
+    globalThis.globalShortcut = originalShortcut;
   }
 });
 

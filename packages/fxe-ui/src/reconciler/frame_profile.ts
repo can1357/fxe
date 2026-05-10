@@ -33,13 +33,8 @@ interface FrameProfileState {
 const DEFAULT_RING_SIZE = 240;
 const kFrameProfileState = Symbol.for('fxe-ui.frameProfileState');
 
-type FrameProfileGlobal = typeof globalThis & {
-  __fxeFrameProfile?: FrameProfileApi;
-};
-
 function now(): number {
-  const perf = globalThis as { performance?: { now?: () => number } };
-  return typeof perf.performance?.now === 'function' ? perf.performance.now() : Date.now();
+  return performance.now();
 }
 
 function createState(ringSize = DEFAULT_RING_SIZE): FrameProfileState {
@@ -54,7 +49,7 @@ function createState(ringSize = DEFAULT_RING_SIZE): FrameProfileState {
 }
 
 function frameProfileState(): FrameProfileState {
-  const globalObject = globalThis as FrameProfileGlobal;
+  const globalObject = globalThis;
   let state = Reflect.get(globalObject, kFrameProfileState) as FrameProfileState | undefined;
   if (!state) {
     state = createState();
@@ -159,7 +154,7 @@ export function frameProfileCommitFrame(sample: FrameSample | null, totalMs: num
   pushSample(frameProfileState(), sample);
 }
 
-const globalObject = globalThis as FrameProfileGlobal;
+const globalObject = globalThis;
 if (!globalObject.__fxeFrameProfile) {
   Reflect.set(globalObject, '__fxeFrameProfile', frameProfileApi);
 }

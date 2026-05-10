@@ -28,7 +28,7 @@ export function useSyncExternalStore<T>(
 
   useEffect(() => {
     const state = stateRef.current;
-    if (state === null) return undefined;
+    if (state === null) return;
 
     let disposed = false;
     const rerenderIfSnapshotChanged = (): void => {

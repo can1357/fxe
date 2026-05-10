@@ -39,7 +39,7 @@ export function childText(node: Node): string | undefined {
     const children = (node.props as { children?: unknown }).children;
     if (typeof children === 'string' || typeof children === 'number') return String(children);
   }
-  return undefined;
+  return;
 }
 
 // Attach framework-internal layout / inherited-text-style state to a child

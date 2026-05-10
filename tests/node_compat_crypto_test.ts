@@ -23,11 +23,7 @@ declare const TextDecoder: { new (): { decode(input?: ArrayBuffer | ArrayBufferV
 const toHex = (bytes: Uint8Array): string =>
   Array.prototype.map.call(bytes, (b: number) => b.toString(16).padStart(2, '0')).join('');
 
-const globalCrypto = (
-  globalThis as typeof globalThis & {
-    crypto: { getRandomValues<T extends ArrayBufferView>(array: T): T };
-  }
-).crypto;
+const globalCrypto = crypto;
 
 test('randomFillSync mutates a Uint8Array', () => {
   const bytes = new Uint8Array(32);

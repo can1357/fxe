@@ -173,20 +173,16 @@ test('App.run({ animate: true }) starts the shared fxe-ui frame bridge', () => {
     ++calls;
   });
 
-  const globals = globalThis as typeof globalThis & {
-    requestAnimationFrame: (fn: (timeMs: number) => void) => number;
-    cancelAnimationFrame?: (id: unknown) => void;
-    __fxeUiEnsureFrameLoop?: () => () => void;
-  };
-  const originalRequestAnimationFrame = globals.requestAnimationFrame;
-  const originalCancelAnimationFrame = globals.cancelAnimationFrame;
+  const originalRequestAnimationFrame = globalThis.requestAnimationFrame;
+  const originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
   const scheduled: Array<(timeMs: number) => void> = [];
   const canceled: unknown[] = [];
-  globals.requestAnimationFrame = (fn: (timeMs: number) => void): number => {
+
+  globalThis.requestAnimationFrame = (fn: (timeMs: number) => void): number => {
     scheduled.push(fn);
     return scheduled.length;
   };
-  globals.cancelAnimationFrame = (id: unknown): void => {
+  globalThis.cancelAnimationFrame = (id: unknown): void => {
     canceled.push(id);
   };
 
@@ -195,10 +191,10 @@ test('App.run({ animate: true }) starts the shared fxe-ui frame bridge', () => {
     assertEqual(scheduled.length, 1);
     scheduled.shift()?.(100);
     assertEqual(calls, 1);
-    globals.__fxeUiEnsureFrameLoop?.()();
+    globalThis.__fxeUiEnsureFrameLoop?.()();
   } finally {
-    globals.requestAnimationFrame = originalRequestAnimationFrame;
-    globals.cancelAnimationFrame = originalCancelAnimationFrame;
+    globalThis.requestAnimationFrame = originalRequestAnimationFrame;
+    globalThis.cancelAnimationFrame = originalCancelAnimationFrame;
   }
 });
 

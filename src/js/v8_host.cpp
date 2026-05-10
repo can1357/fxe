@@ -2177,10 +2177,11 @@ Error.prepareStackTrace = function(err, frames) {
         // Build the synthetic `fxe` module exporting the engine globals. Each
         // entry is looked up on the global object at evaluation time so we never
         // duplicate constructor templates.
-        std::array<v8::Local<v8::String>, 9> exports{
+        std::array<v8::Local<v8::String>, 11> exports{
             "Window"_v8(isolate),     "Renderer"_v8(isolate),      "OffscreenRenderer"_v8(isolate),
             "Primitives"_v8(isolate), "CommandBuffer"_v8(isolate), "Monitors"_v8(isolate),
             "App"_v8(isolate),        "Print"_v8(isolate),         "VertexTopology"_v8(isolate),
+            "Image"_v8(isolate),      "Spritesheet"_v8(isolate),
         };
         v8::MemorySpan<const v8::Local<v8::String>> exports_span(exports.data(), exports.size());
         auto module_name = "fxe"_v8(isolate);
@@ -2190,10 +2191,12 @@ Error.prepareStackTrace = function(err, frames) {
                 v8::Local<v8::Module> mod) -> v8::MaybeLocal<v8::Value> {
               auto* iso = v8::Isolate::GetCurrent();
               auto global = ctx->Global();
-              std::array<v8::Local<v8::String>, 9> names = {
+              std::array<v8::Local<v8::String>, 11> names = {
                   "Window"_v8(iso),     "Renderer"_v8(iso),      "OffscreenRenderer"_v8(iso),
                   "Primitives"_v8(iso), "CommandBuffer"_v8(iso), "Monitors"_v8(iso),
-                  "App"_v8(iso),        "Print"_v8(iso),         "VertexTopology"_v8(iso)};
+                  "App"_v8(iso),        "Print"_v8(iso),         "VertexTopology"_v8(iso),
+                  "Image"_v8(iso),      "Spritesheet"_v8(iso),
+              };
               for (auto key : names) {
                 v8::Local<v8::Value> val;
                 if (!global->Get(ctx, key).ToLocal(&val)) {

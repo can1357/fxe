@@ -3,14 +3,6 @@ import { getA11yBridge, publishAccessibilityTree } from 'fxe-ui';
 
 import { assert, assertEqual, run, test } from './ts_harness.ts';
 
-type A11yRuntime = typeof globalThis & {
-  __fxeA11y?: {
-    snapshot: AccessibilityTreeSnapshot | null;
-    revision: number;
-    subscribers: Set<(snapshot: AccessibilityTreeSnapshot) => void>;
-  };
-};
-
 function makeSnapshot(generation: number): AccessibilityTreeSnapshot {
   const root = {
     id: `root-${generation}`,
@@ -38,8 +30,7 @@ test('a11y bridge publishes snapshots through the global cache', () => {
   assertEqual(bridgeA, bridgeB);
   bridgeA.clear();
 
-  const runtime = globalThis as A11yRuntime;
-  const initialRevision = runtime.__fxeA11y?.revision ?? 0;
+  const initialRevision = globalThis.__fxeA11y?.revision ?? 0;
   const snapshot = makeSnapshot(initialRevision + 1);
   const received: AccessibilityTreeSnapshot[] = [];
   let nestedCalls = 0;
@@ -54,8 +45,8 @@ test('a11y bridge publishes snapshots through the global cache', () => {
   publishAccessibilityTree(snapshot);
 
   assertEqual(bridgeA.latest(), snapshot);
-  assertEqual(runtime.__fxeA11y?.snapshot, snapshot);
-  assertEqual(runtime.__fxeA11y?.revision, initialRevision + 1);
+  assertEqual(globalThis.__fxeA11y?.snapshot, snapshot);
+  assertEqual(globalThis.__fxeA11y?.revision, initialRevision + 1);
   assertEqual(received.length, 1);
   assertEqual(received[0], snapshot);
   assertEqual(nestedCalls, 0);

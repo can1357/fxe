@@ -152,6 +152,22 @@ ctest --preset release --output-on-failure
   `Object.keys`, avoid a separate GC-managed table, and keep the cache on the
   key; use ordinary maps when carriers may be sealed, frozen, or
   non-extensible, or when you must not touch user-owned instances.
+- **No `globalThis as { … }` casts.** If you reach for `(globalThis as { foo:
+  T }).foo` you are working around missing types, not adding new behaviour. The
+  fix is always to declare the global in `types/fxe.d.ts` (runtime / native
+  bridge / web-platform globals: `Image`, `Spritesheet`, `Markdown`, `Menu`,
+  `process`, `navigator`, `performance`, `requestAnimationFrame`, `WebSocket`,
+  `crypto`, `__fxe_native`, `FXE_DEBUG_PORT`, `__FXE_TYPECHECK_ONLY__`, …) or in
+  the `declare global` block of `types/fxe-ui.d.ts` (UI-internal slots:
+  `__FXE_DEV`, `__fxeUiEnsureFrameLoop`, `__fxeReconcilerSnapshot`,
+  `__fxeFrameProfile`, `__fxeLayoutTrace`, `__fxeA11y`, `__fxe_devtools`).
+  Globals that tests need to reassign for mocking **must** be declared with
+  `declare var` (or the `interface X` + `declare var X: { prototype; new(...) }`
+  pattern for classes) so `globalThis.X = mock` typechecks without a cast. Do
+  not redefine the global's shape locally with a parallel `interface
+  ImageNamespaceWithMipHint` / `SpritesheetConstructor` / `MutableImageNamespace`
+  type — extend the canonical declaration once and import / reference it from
+  every consumer.
 - **Headers:** `include/fxe/*.hpp` is the only stable surface; everything in
   `src/` is internal.
 - **Dependencies:** `fxe_core` links only `glm`/`glfw`/`stb`/`fxe_font`. Do

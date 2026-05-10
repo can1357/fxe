@@ -32,7 +32,7 @@ export interface AccessibilityFiberLike {
 function normalizeValue(
   v: AccessibilityProps['accessibilityValue'],
 ): AccessibilityValue | undefined {
-  if (v === undefined) return undefined;
+  if (v === undefined) return;
   if (typeof v === 'string') return { text: v };
   if (typeof v === 'number') return { now: v };
   return { ...v };

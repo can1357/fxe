@@ -25,23 +25,17 @@ function noopDraw(): Node {
 }
 
 test('useSqliteQuery re-renders after db.run update via fallback poll', () => {
-  type IntervalFn = (fn: () => void, ms?: number) => number;
-  type ClearIntervalFn = (id: number) => void;
-  const globals = globalThis as typeof globalThis & {
-    setInterval: IntervalFn;
-    clearInterval: ClearIntervalFn;
-  };
-  const originalSetInterval = globals.setInterval;
-  const originalClearInterval = globals.clearInterval;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
   let intervalCallback: (() => void) | undefined;
   let intervalMs = 0;
   let cleared = 0;
-  globals.setInterval = (fn: () => void, ms?: number): number => {
+  globalThis.setInterval = (fn: () => void, ms?: number): number => {
     intervalCallback = fn;
     intervalMs = ms ?? 0;
     return 7;
   };
-  globals.clearInterval = (id: number): void => {
+  globalThis.clearInterval = (id: number): void => {
     cleared = id;
   };
 
@@ -75,16 +69,15 @@ test('useSqliteQuery re-renders after db.run update via fallback poll', () => {
     render(root('sqlite-store-root', [noopDraw()]), new CommandBuffer());
     db.close();
     setRenderTarget(null);
-    globals.setInterval = originalSetInterval;
-    globals.clearInterval = originalClearInterval;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
   }
 
   assertEqual(cleared, 7);
 });
 
 test('useFetch resolves data on mount and aborts on unmount', async () => {
-  const globals = globalThis as typeof globalThis & { fetch: typeof fetch };
-  const originalFetch = globals.fetch;
+  const originalFetch = globalThis.fetch;
   const first = Promise.withResolvers<Response>();
   const second = Promise.withResolvers<Response>();
   const pending = [first, second];
@@ -100,7 +93,7 @@ test('useFetch resolves data on mount and aborts on unmount', async () => {
     },
     { cookieJar: originalFetch.cookieJar },
   );
-  globals.fetch = mockFetch;
+  globalThis.fetch = mockFetch;
 
   type Payload = { ok: boolean };
   const states: Array<{ data: Payload | undefined; error: boolean; loading: boolean }> = [];
@@ -147,7 +140,7 @@ test('useFetch resolves data on mount and aborts on unmount', async () => {
   } finally {
     render(root('fetch-store-root', [noopDraw()]), new CommandBuffer());
     setRenderTarget(null);
-    globals.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
   }
 });
 
@@ -216,10 +209,9 @@ test('useWebSocket reports CONNECTING then OPEN', () => {
     }
   }
 
-  const globals = globalThis as typeof globalThis & { WebSocket: typeof WebSocket };
-  const originalWebSocket = globals.WebSocket;
+  const originalWebSocket = globalThis.WebSocket;
   const sockets: MockWebSocket[] = [];
-  globals.WebSocket = MockWebSocket as unknown as typeof WebSocket;
+  globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 
   const readyStates: number[] = [];
   const SocketProbe = Component(() => {
@@ -245,7 +237,7 @@ test('useWebSocket reports CONNECTING then OPEN', () => {
   } finally {
     render(root('websocket-store-root', [noopDraw()]), new CommandBuffer());
     setRenderTarget(null);
-    globals.WebSocket = originalWebSocket;
+    globalThis.WebSocket = originalWebSocket;
   }
 });
 

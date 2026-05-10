@@ -1,4 +1,10 @@
-import { type CommandBuffer, type ImageHandle, Primitives } from 'fxe';
+import {
+  type CommandBuffer,
+  Image as FxeImage,
+  type ImageHandle,
+  Primitives,
+  Spritesheet,
+} from 'fxe';
 import { extractA11yProps } from '../a11y/extract.ts';
 import type { AccessibilityProps } from '../a11y/types.ts';
 import { AnimatedValue, type CompositeAnimation, Easings, timing } from '../animated/index.ts';
@@ -20,7 +26,6 @@ import { splitStyle } from '../style/resolve.ts';
 import type { StyleValue } from '../style/types.ts';
 import { rectFromStyle } from './common.ts';
 import { View, type ViewProps } from './View.ts';
-
 export type ImageSource = string | ImageHandle;
 export type ImagePlaceholder = 'color' | { color: number } | ImageHandle;
 export type ImageResizeMode = 'cover' | 'contain' | 'stretch' | 'center';
@@ -48,35 +53,6 @@ export interface ImageContentRect {
 
 type ImagePhase = 'idle' | 'loading' | 'loaded' | 'error';
 
-type ImageNamespaceWithMipHint = {
-  loadAsync(path: string): Promise<ImageHandle>;
-  generateMipmaps?: (image: ImageHandle) => void;
-  generateMips?: (image: ImageHandle) => void;
-  hintGenerateMipmaps?: (image: ImageHandle) => void;
-};
-
-type SpritesheetLike = {
-  add(image: ImageHandle, rect?: [number, number, number, number]): number;
-};
-
-type SpritesheetConstructor = new () => SpritesheetLike;
-
-type PrimitivesWithDrawSprite = typeof Primitives & {
-  drawSprite?: (
-    cb: CommandBuffer,
-    spriteId: number,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    depth?: number,
-    tint?: number,
-  ) => void;
-};
-
-const NativeImageApi = (globalThis as unknown as { Image: ImageNamespaceWithMipHint }).Image;
-const GlobalSpritesheet = (globalThis as unknown as { Spritesheet: SpritesheetConstructor })
-  .Spritesheet;
 const DEFAULT_FADE_IN_MS = 180;
 export const DEFAULT_IMAGE_PLACEHOLDER_COLOR = 0xe5e7ebff;
 const DEFAULT_TINT = 0xffffffff;
@@ -85,14 +61,14 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 });
-const g_imageSpritesheet = new GlobalSpritesheet();
+const g_imageSpritesheet = new Spritesheet();
 const g_imageSpriteIds = new WeakMap<ImageHandle, number>();
 
 export function resolveImagePlaceholderColor(
   placeholder: ImagePlaceholder | undefined,
 ): number | undefined {
   if (placeholder === undefined || placeholder === 'color') return DEFAULT_IMAGE_PLACEHOLDER_COLOR;
-  if (isImageHandle(placeholder)) return undefined;
+  if (isImageHandle(placeholder)) return;
   return placeholder.color;
 }
 
@@ -146,15 +122,12 @@ export function resolveImageContentRect(
 }
 
 export function hintImageMipGeneration(image: ImageHandle): boolean {
-  const hint =
-    NativeImageApi.generateMipmaps ??
-    NativeImageApi.generateMips ??
-    NativeImageApi.hintGenerateMipmaps;
+  const hint = FxeImage.generateMipmaps ?? FxeImage.generateMips ?? FxeImage.hintGenerateMipmaps;
   if (typeof hint !== 'function') {
     // TODO(fxe-ui): call the image binding's stable mip-generation hint once it is exported.
     return false;
   }
-  hint.call(NativeImageApi, image);
+  hint.call(FxeImage, image);
   return true;
 }
 
@@ -200,25 +173,19 @@ function paintHandle(
   opacity: number,
 ): void {
   if (rect.width <= 0 || rect.height <= 0 || opacity <= 0) return;
-  const primitives = Primitives as PrimitivesWithDrawSprite;
   const color = applyOpacity(tint, opacity);
-  if (typeof primitives.drawSprite === 'function') {
-    primitives.drawSprite(
-      cb,
-      spriteIdForImage(image),
-      rect.x,
-      rect.y,
-      rect.width,
-      rect.height,
-      0,
-      color,
-    );
-    return;
-  }
-  // TODO(multi-texture): replace this rect fallback with the textured sprite path in every render context.
-  Primitives.fillRect(cb, rect.x, rect.y, rect.width, rect.height, 0, color);
+  Primitives.drawSprite(
+    cb,
+    spriteIdForImage(image),
+    rect.x,
+    rect.y,
+    rect.width,
+    rect.height,
+    0,
+    color,
+  );
+  return;
 }
-
 export const Image = Component((props: ImageProps): Node => {
   const id = useId();
   const inheritedLayout = useInternalLayout() ?? undefined;
@@ -301,7 +268,7 @@ export const Image = Component((props: ImageProps): Node => {
     setAsyncHandle(null);
     setError(null);
     fadeValue.setValue(0);
-    void NativeImageApi.loadAsync(props.source)
+    void FxeImage.loadAsync(props.source)
       .then((handle) => {
         if (cancelled) {
           handle.dispose();
@@ -325,8 +292,7 @@ export const Image = Component((props: ImageProps): Node => {
   }, [directHandle, props.source, fadeValue]);
 
   useEffect(() => {
-    if (typeof props.source !== 'string' || asyncPhase !== 'loaded' || asyncHandle === null)
-      return undefined;
+    if (typeof props.source !== 'string' || asyncPhase !== 'loaded' || asyncHandle === null) return;
     const animation = startImageFadeAnimation(fadeValue, props.fadeInMs);
     return () => {
       animation.stop();
@@ -334,18 +300,16 @@ export const Image = Component((props: ImageProps): Node => {
   }, [asyncHandle, asyncPhase, fadeValue, props.fadeInMs, props.source]);
 
   useEffect(() => {
-    if (phase !== 'loaded' || displayHandle === null) return undefined;
-    if (lastLoadedRef.current === displayHandle) return undefined;
+    if (phase !== 'loaded' || displayHandle === null) return;
+    if (lastLoadedRef.current === displayHandle) return;
     lastLoadedRef.current = displayHandle;
     props.onLoad?.(displayHandle.width(), displayHandle.height());
-    return undefined;
   }, [displayHandle, phase, props.onLoad]);
 
   useEffect(() => {
-    if (error === null || lastErrorRef.current === error) return undefined;
+    if (error === null || lastErrorRef.current === error) return;
     lastErrorRef.current = error;
     props.onError?.(error);
-    return undefined;
   }, [error, props.onError]);
 
   const drawNode = Draw(

@@ -13,30 +13,7 @@ const {
   workerData,
 } = workerThreads;
 
-const nativeWorker = (
-  globalThis as typeof globalThis & {
-    __fxe_native?: {
-      worker?: {
-        available?: boolean;
-        notImplemented?: boolean;
-        isMainThread?: boolean;
-        threadId?: number;
-        start?: WorkerNativeMethod;
-        createWorker?: WorkerNativeMethod;
-        postMessage?: WorkerNativeMethod;
-        drainMessages?: WorkerNativeMethod;
-        terminate?: WorkerNativeMethod;
-        ref?: WorkerNativeMethod;
-        unref?: WorkerNativeMethod;
-      };
-    };
-  }
-).__fxe_native?.worker;
-
-type WorkerNativeMethod = {
-  (...args: unknown[]): unknown;
-  notImplemented?: boolean;
-};
+const nativeWorker = globalThis.__fxe_native?.worker;
 
 test('node:worker_threads exposes honest main-thread shape', () => {
   assertEqual(isMainThread, true);

@@ -16,18 +16,14 @@ type BridgeState = {
 let bridge: A11yBridge | null = null;
 
 function state(): BridgeState {
-  const runtime = globalThis as typeof globalThis;
-  // @ts-expect-error global augmentation for native bridge cache
-  if (runtime.__fxeA11y === undefined) {
-    // @ts-expect-error global augmentation for native bridge cache
-    runtime.__fxeA11y = {
+  if (globalThis.__fxeA11y === undefined) {
+    globalThis.__fxeA11y = {
       snapshot: null,
       revision: 0,
       subscribers: new Set(),
     };
   }
-  // @ts-expect-error global augmentation for native bridge cache
-  return runtime.__fxeA11y;
+  return globalThis.__fxeA11y;
 }
 
 export function getA11yBridge(): A11yBridge {

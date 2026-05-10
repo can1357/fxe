@@ -13,10 +13,7 @@ const simpleApplicationMenu: MenuItem[] = [
   },
 ];
 
-if (
-  (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-    .__FXE_TYPECHECK_ONLY__ === true
-) {
+if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
   const popupSignature: (items: MenuItem[], x: number, y: number) => Promise<string | null> =
     Menu.popup;
   const setApplicationMenuSignature: (items: MenuItem[]) => void = Menu.setApplicationMenu;

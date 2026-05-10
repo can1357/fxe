@@ -20,7 +20,9 @@ import {
   Easings,
   type ExtrapolateMode,
   type InterpolationConfig,
+  registerAnimatedFrameStep,
   type TimingAnimationConfig,
+  tickAnimatedFrames,
   timing,
 } from './timing.ts';
 
@@ -38,12 +40,14 @@ export {
   Easings,
   type ExtrapolateMode,
   type InterpolationConfig,
+  registerAnimatedFrameStep,
   type SpringAnimationConfig,
   type SpringPresetName,
   spring,
   springPreset,
   springPresets,
   type TimingAnimationConfig,
+  tickAnimatedFrames,
   timing,
 };
 

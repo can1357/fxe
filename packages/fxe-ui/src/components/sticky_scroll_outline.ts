@@ -161,7 +161,7 @@ function computeDefinitionLines(
   language: string,
   definitionNames: ReadonlySet<string>,
 ): ReadonlySet<number> | null {
-  const markdown = (globalThis as { Markdown?: typeof Markdown }).Markdown;
+  const markdown = Markdown;
   if (!markdown || typeof markdown.highlight !== 'function') return null;
 
   const source = doc.text();

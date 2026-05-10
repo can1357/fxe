@@ -1377,6 +1377,7 @@ interface CredentialsContainer {
 
 interface Navigator {
   readonly credentials: CredentialsContainer;
+  readonly platform?: string;
 }
 
 declare const navigator: Navigator;
@@ -1479,7 +1480,7 @@ declare const Path: typeof FXE.Path;
 declare const TextDocument: typeof FXE.TextDocument;
 declare const Primitives: FXE.PrimitivesNamespace;
 declare const Monitors: FXE.MonitorsNamespace;
-declare const App: FXE.AppNamespace;
+declare var App: FXE.AppNamespace;
 declare const Print: typeof FXE.Print;
 declare const powerMonitor: FXE.PowerMonitor;
 
@@ -2020,14 +2021,14 @@ declare const process: {
   nextTick(fn: (...args: any[]) => void, ...args: any[]): void;
 };
 
-declare function setTimeout(fn: (...args: any[]) => void, ms?: number, ...args: any[]): number;
-declare function setInterval(fn: (...args: any[]) => void, ms?: number, ...args: any[]): number;
-declare function setImmediate(fn: (...args: any[]) => void, ...args: any[]): number;
-declare function clearTimeout(id: number): void;
-declare function clearInterval(id: number): void;
-declare function queueMicrotask(fn: () => void): void;
-declare function requestAnimationFrame(fn: (timeMs: number) => void): number;
-declare function cancelAnimationFrame(id: number): void;
+declare var setTimeout: (fn: (...args: any[]) => void, ms?: number, ...args: any[]) => number;
+declare var setInterval: (fn: (...args: any[]) => void, ms?: number, ...args: any[]) => number;
+declare var setImmediate: (fn: (...args: any[]) => void, ...args: any[]) => number;
+declare var clearTimeout: (id: number) => void;
+declare var clearInterval: (id: number) => void;
+declare var queueMicrotask: (fn: () => void) => void;
+declare var requestAnimationFrame: (fn: (timeMs: number) => void) => number;
+declare var cancelAnimationFrame: (id: number) => void;
 
 // === io end ===
 
@@ -2079,6 +2080,10 @@ declare module 'fxe' {
     loadAsync(path: string): Promise<ImageHandle>;
     decode(bytes: Uint8Array): Promise<ImageHandle>;
     fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
+    /** Optional mipmap-generation hint; binding may expose any of these names. */
+    generateMipmaps?(image: ImageHandle): void;
+    generateMips?(image: ImageHandle): void;
+    hintGenerateMipmaps?(image: ImageHandle): void;
   }
   export const Image: ImageNamespace;
   export interface SpriteResolved {
@@ -2140,6 +2145,9 @@ interface ImageNamespace {
   loadAsync(path: string): Promise<ImageHandle>;
   decode(bytes: Uint8Array): Promise<ImageHandle>;
   fromPixels(rgba: Uint8Array, width: number, height: number): ImageHandle;
+  generateMipmaps?(image: ImageHandle): void;
+  generateMips?(image: ImageHandle): void;
+  hintGenerateMipmaps?(image: ImageHandle): void;
 }
 declare const Image: ImageNamespace;
 
@@ -2491,7 +2499,7 @@ declare class Tray {
   destroy(): void;
 }
 
-declare const globalShortcut: {
+declare var globalShortcut: {
   register(accelerator: string, fn: () => void): boolean;
   unregister(accelerator: string): void;
   unregisterAll(): void;
@@ -2760,12 +2768,7 @@ interface WebSocketOptions {
   pongTimeoutMs?: number;
 }
 
-declare class WebSocket {
-  static readonly CONNECTING: 0;
-  static readonly OPEN: 1;
-  static readonly CLOSING: 2;
-  static readonly CLOSED: 3;
-  constructor(url: string, protocols?: string | string[], options?: WebSocketOptions);
+interface WebSocket {
   readonly url: string;
   readonly readyState: 0 | 1 | 2 | 3;
   readonly bufferedAmount: number;
@@ -2784,6 +2787,14 @@ declare class WebSocket {
     listener: (ev: any) => void,
   ): void;
 }
+declare var WebSocket: {
+  prototype: WebSocket;
+  new (url: string, protocols?: string | string[], options?: WebSocketOptions): WebSocket;
+  readonly CONNECTING: 0;
+  readonly OPEN: 1;
+  readonly CLOSING: 2;
+  readonly CLOSED: 3;
+};
 // === net end ===
 
 // === audio begin ===
@@ -5041,7 +5052,7 @@ declare namespace FXEMarkdown {
   }
 }
 
-declare const Markdown: {
+declare var Markdown: {
   parse(source: string, opts?: FXEMarkdown.ParseOptions): FXEMarkdown.DocumentNode;
   readonly FLAG_COLLAPSE_WHITESPACE: number;
   readonly FLAG_PERMISSIVE_ATX_HEADERS: number;
@@ -5069,3 +5080,39 @@ declare const Markdown: {
   /** Languages with a built-in highlights query. */
   highlightLanguages(): readonly string[];
 };
+
+// === fxe runtime extension globals ===
+//
+// `__fxe_native` is a non-enumerable bag of host bindings installed by the
+// V8 host (worker, http2, https, tls, dns, dgram, fs_fd, async_hooks,
+// inspector, vm, v8, zlib, hash, random, cipher, kdf, pk, spawn, os, net,
+// ipcsock, tty, hmr). Sub-keys depend on which features the build enabled,
+// so the value is shaped loosely on purpose.
+declare var __fxe_native: Record<string, any> | undefined;
+
+// Set by `fxe_run --debug=<port>` so JS can discover the debug port without
+// scraping `process.env`. May be absent in non-debug runs.
+declare var FXE_DEBUG_PORT: number | undefined;
+
+// Set by `tsc --noEmit` smoke-test wrappers so type-only branches can be
+// guarded out at runtime.
+declare var __FXE_TYPECHECK_ONLY__: boolean | undefined;
+
+// Web crypto global. Identical surface to `webcrypto` exported from `node:crypto`.
+declare var crypto: FxeCrypto;
+
+// WebAssembly global. Minimal surface used by tests; bindings install the real
+// host implementation.
+declare namespace WebAssembly {
+  interface Memory {
+    readonly buffer: ArrayBufferLike;
+  }
+  interface MemoryDescriptor {
+    initial: number;
+    maximum?: number;
+  }
+  var Memory: {
+    new (descriptor: MemoryDescriptor): Memory;
+    prototype: Memory;
+  };
+}

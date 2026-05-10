@@ -149,7 +149,7 @@ test('App.checkForUpdates reports current version as unavailable without install
 
 test('App.checkForUpdates rejects unavailable fetch', async () => {
   try {
-    delete (globalThis as { fetch?: typeof globalThis.fetch }).fetch;
+    Reflect.deleteProperty(globalThis, 'fetch');
     await assertRejects(
       () => App.checkForUpdates('https://updates.example/manifest.json'),
       /requires globalThis\.fetch/,

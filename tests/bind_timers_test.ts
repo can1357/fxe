@@ -1,9 +1,6 @@
 import { assert, assertDeepEqual, assertEqual, assertThrows, test } from './ts_harness.ts';
 
-if (
-  (globalThis as typeof globalThis & { __FXE_TYPECHECK_ONLY__?: boolean })
-    .__FXE_TYPECHECK_ONLY__ === true
-) {
+if (globalThis.__FXE_TYPECHECK_ONLY__ === true) {
   const timeoutId: number = setTimeout(
     (name: string, value: number) => {
       void name;
