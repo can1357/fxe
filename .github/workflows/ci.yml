@@ -24,6 +24,8 @@ jobs:
       - name: Lint smoke install script
         run: shellcheck scripts/smoke_install.sh
       - run: bun run ci:quick
+      - name: Python SDK tests
+        run: bun run test:py
 
   build:
     strategy:
@@ -136,16 +138,16 @@ jobs:
           CC: cl
           CXX: cl
 
-      - name: Build core tests and examples
-        run: cmake --build build --config Release --target fxe_core_tests hello_triangle hello_sprite primitives_showcase
+      - name: Build tests and example smoke targets
+        run: cmake --build build --config Release
 
-      - name: Test core and example smoke targets
+      - name: Run ctest
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then
-            xvfb-run -a ctest --test-dir build -C Release -VV --timeout 60 -R '^(fxe_core_tests|fxe_example_)'
+            xvfb-run -a ctest --test-dir build -C Release --output-on-failure --timeout 120
           else
-            ctest --test-dir build -C Release -VV --timeout 60 -R '^(fxe_core_tests|fxe_example_)'
+            ctest --test-dir build -C Release --output-on-failure --timeout 120
           fi
 
   package-smoke:
