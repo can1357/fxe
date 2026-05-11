@@ -1377,26 +1377,22 @@ namespace fxe::js {
 
     bool read_window_chrome_rect4(Isolate* iso, Local<Context> ctx, Local<Object> object,
                                   Local<String> key, const char* label, math::ivec4& out) {
+      const auto reject = [&] {
+        (void)throw_type_error(iso, std::string("setCaptionButtonLayout: ") + label +
+                                        " must be [x, y, width, height]");
+        return false;
+      };
       auto value = get_prop<Local<Value>>(ctx, object, key);
-      if (!value || !(*value)->IsArray()) {
-        (void)throw_type_error(iso, std::string("setCaptionButtonLayout: ") + label +
-                                        " must be [x, y, width, height]");
-        return false;
-      }
+      if (!value || !(*value)->IsArray())
+        return reject();
       auto rect = (*value).As<Array>();
-      if (rect->Length() != 4) {
-        (void)throw_type_error(iso, std::string("setCaptionButtonLayout: ") + label +
-                                        " must be [x, y, width, height]");
-        return false;
-      }
+      if (rect->Length() != 4)
+        return reject();
       i32 values[4]{};
       for (u32 i = 0; i < 4; ++i) {
         auto field = get_index<Local<Value>>(ctx, rect, i);
-        if (!field || !(*field)->IsNumber()) {
-          (void)throw_type_error(iso, std::string("setCaptionButtonLayout: ") + label +
-                                          " must be [x, y, width, height]");
-          return false;
-        }
+        if (!field || !(*field)->IsNumber())
+          return reject();
         values[i] = (*field)->Int32Value(ctx).FromMaybe(0);
       }
       out = {values[0], values[1], values[2], values[3]};

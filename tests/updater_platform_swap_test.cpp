@@ -137,17 +137,22 @@ int main() {
     CHECK(error.empty());
 
     const auto& argv = fxe::runtime::detail::last_platform_swap_argv();
+    const auto& script = fxe::runtime::detail::last_platform_swap_script();
     const fs::path staged_canonical = fs::weakly_canonical(staged);
     const fs::path destination_canonical = fs::weakly_canonical(destination);
     CHECK(argv.size() == 3);
     CHECK(argv.size() >= 1 && argv[0] == "cmd.exe");
     CHECK(argv.size() >= 2 && argv[1] == "/c");
-    CHECK(argv.size() >= 3 && contains(argv[2], "tasklist /FI \"PID eq %pid%\""));
-    CHECK(argv.size() >= 3 && contains(argv[2], "timeout /t 1 /nobreak >NUL"));
-    CHECK(argv.size() >= 3 && contains(argv[2], "move /Y"));
-    CHECK(argv.size() >= 3 && contains(argv[2], "start \"\""));
-    CHECK(argv.size() >= 3 && contains(argv[2], "\"" + staged_canonical.string() + "\""));
-    CHECK(argv.size() >= 3 && contains(argv[2], "\"" + destination_canonical.string() + "\""));
+    // The third argv element is the temp .cmd path; the script body lives in its own slot.
+    CHECK(argv.size() >= 3 && contains(argv[2], "fxe-updater-swap"));
+    CHECK(contains(script, ":wait"));
+    CHECK(contains(script, ":retry"));
+    CHECK(contains(script, "tasklist /FI"));
+    CHECK(contains(script, "timeout /t 1 /nobreak >NUL"));
+    CHECK(contains(script, "move /Y"));
+    CHECK(contains(script, "start \"\""));
+    CHECK(contains(script, "\"" + staged_canonical.string() + "\""));
+    CHECK(contains(script, "\"" + destination_canonical.string() + "\""));
     fxe::runtime::detail::set_platform_swap_destination_override_for_tests(std::nullopt);
   }
 

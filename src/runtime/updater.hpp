@@ -68,6 +68,9 @@ namespace fxe::runtime {
         const std::optional<std::filesystem::path>& path);
     // Internal: testing only.
     const std::vector<std::string>& last_platform_swap_argv();
+    // Internal: testing only. Returns the most recent shell/batch script body composed by
+    // `perform_platform_swap`, or empty when the platform swap did not synthesize one.
+    const std::string& last_platform_swap_script();
   } // namespace detail
 
   // Parse a Sparkle appcast RSS/XML document into update_manifest_v2 metadata. The parser

@@ -555,6 +555,12 @@ declare namespace FXE {
     setDecorated(enabled: boolean): void;
     isDecorated(): boolean;
     setTitleBarStyle(style: TitleBarStyle): void;
+    /**
+     * Claim the GTK/CSD shadow gutter so a borderless window can still receive resize/hit-test
+     * events in it. Linux/X11 only: returns `true` when the `_GTK_FRAME_EXTENTS` property was
+     * updated, `false` on Wayland (the compositor handshake is not exposed by GLFW), on
+     * non-Linux platforms, or when the X11 client library cannot be loaded.
+     */
     setGtkFrameExtents(extents: {
       left: number;
       right: number;
@@ -1050,6 +1056,15 @@ declare namespace FXE {
         showWhitespace?: boolean;
       },
     ): [number, number, number, number];
+    drawText(
+      cb: CommandBuffer | Renderer,
+      x: number,
+      y: number,
+      depth: number,
+      text: string,
+      pointSize?: number,
+      color?: Color,
+    ): [number, number, number, number];
     drawTextOnPath(
       cb: CommandBuffer | Renderer,
       path: Path,
@@ -1069,15 +1084,6 @@ declare namespace FXE {
       },
       pathOffset?: number,
       depth?: number,
-    ): [number, number, number, number];
-    drawText(
-      cb: CommandBuffer | Renderer,
-      x: number,
-      y: number,
-      depth: number,
-      text: string,
-      pointSize?: number,
-      color?: Color,
     ): [number, number, number, number];
     /**
      * Editor-grade text paint: paints N styled spans on the same baseline in

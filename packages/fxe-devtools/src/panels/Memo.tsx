@@ -32,14 +32,6 @@ interface RuntimeEvaluateResponse {
   };
 }
 
-interface MemoTraceRow {
-  name: string;
-  slot: MemoTraceSlot;
-  rebuilds: number;
-  dominantReason: string;
-  diffKeys: string[];
-}
-
 type TimerHandle = ReturnType<typeof setTimeout>;
 
 const POLL_INTERVAL_MS = 500;

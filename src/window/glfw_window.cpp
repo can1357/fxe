@@ -1239,13 +1239,19 @@ namespace fxe {
     }
     void set_title_bar_style(title_bar_style style) override {
 #if defined(__linux__) && !defined(__APPLE__)
+      // Mutter/KWin draw a soft drop shadow around CSD client-side-decorated windows. When we go
+      // borderless we have to claim that gutter via _GTK_FRAME_EXTENTS or the compositor will clip
+      // our resize/hit-test area. 28px is the GNOME default on 1x displays; JS apps can override
+      // via setGtkFrameExtents() to match their actual shadow.
+      constexpr i32 kDefaultGtkShadowExtent = 28;
       if (style == title_bar_style::default_) {
         (void)set_gtk_frame_extents(0, 0, 0, 0);
         set_decorated(true);
         return;
       }
       set_decorated(false);
-      (void)set_gtk_frame_extents(28, 28, 28, 28);
+      (void)set_gtk_frame_extents(kDefaultGtkShadowExtent, kDefaultGtkShadowExtent,
+                                  kDefaultGtkShadowExtent, kDefaultGtkShadowExtent);
 #elif defined(__APPLE__)
       const bool native_decorated = (style == title_bar_style::default_);
       set_decorated(native_decorated);

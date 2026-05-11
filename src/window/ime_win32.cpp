@@ -445,12 +445,16 @@ namespace fxe::os {
     if (previous == 0 && GetLastError() != 0)
       return;
 
-    win32_ime_bridge bridge;
+    // Insert first, then initialise TSF against the map slot so the TF text sink's `bridge`
+    // pointer references the long-lived bridge owned by `bridges`, not a dead stack frame.
+    auto [it, inserted] = bridges.try_emplace(hwnd);
+    if (!inserted)
+      return;
+    auto& bridge = it->second;
     bridge.owner = owner;
     bridge.emit = emit;
     bridge.original_wndproc = previous != 0 ? reinterpret_cast<WNDPROC>(previous) : DefWindowProcW;
     (void)init_tsf(hwnd, bridge);
-    bridges.emplace(hwnd, bridge);
   }
 } // namespace fxe::os
 #endif

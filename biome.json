@@ -19,7 +19,8 @@
       "!**/build-*",
       "!**/vendor",
       "!**/third_party",
-      "!**/vcpkg"
+      "!**/vcpkg",
+      "!packages/fxe-ui/src/components/icons.ts"
     ]
   },
   "formatter": {

@@ -532,6 +532,11 @@ namespace fxe::runtime {
       return argv;
     }
 
+    std::string& last_platform_swap_script_storage() {
+      static std::string script;
+      return script;
+    }
+
     std::string platform_swap_extension(const std::filesystem::path& path) {
       return ascii_lower(path.extension().string());
     }
@@ -1618,13 +1623,20 @@ namespace fxe::runtime {
     return last_platform_swap_argv_storage();
   }
 
+  const std::string& detail::last_platform_swap_script() {
+    return last_platform_swap_script_storage();
+  }
+
   bool updater::perform_platform_swap(const std::string& staged_path, std::string& error_out,
                                       bool dry_run) {
     error_out.clear();
     auto& argv_out = last_platform_swap_argv_storage();
+    auto& script_out = last_platform_swap_script_storage();
     argv_out.clear();
+    script_out.clear();
     const std::filesystem::path staged(staged_path);
-    switch (classify_platform_swap(staged)) {
+    const platform_swap_kind kind = classify_platform_swap(staged);
+    switch (kind) {
     case platform_swap_kind::none:
       return true;
     case platform_swap_kind::mac_app: {
@@ -1656,12 +1668,12 @@ namespace fxe::runtime {
     case platform_swap_kind::windows_msix:
     case platform_swap_kind::windows_exe: {
       const std::filesystem::path staged_final = weakly_canonical_or(staged);
-      if (classify_platform_swap(staged) == platform_swap_kind::windows_msi) {
+      if (kind == platform_swap_kind::windows_msi) {
         const std::filesystem::path log_path =
             std::filesystem::temp_directory_path() / "fxe-updater.log";
         argv_out = {"msiexec.exe", "/i",   staged_final.string(), "/qn",
                     "/norestart",  "/L*v", log_path.string()};
-      } else if (classify_platform_swap(staged) == platform_swap_kind::windows_msix) {
+      } else if (kind == platform_swap_kind::windows_msix) {
         argv_out = {"powershell.exe", "-NoProfile", "-Command",
                     "Add-AppxPackage -Path " + powershell_quote(staged_final.string())};
       } else {
@@ -1671,19 +1683,44 @@ namespace fxe::runtime {
           return false;
         }
         const std::filesystem::path dest_final = weakly_canonical_or(*destination);
-        const std::string script =
-            std::format("set pid={}& :loop& tasklist /FI \"PID eq %pid%\" | findstr %pid% >NUL && "
-                        "(timeout /t 1 /nobreak >NUL & goto loop)& move /Y {} {} & start \"\" {}",
-                        static_cast<i64>(::getpid()), windows_quote(staged_final.string()),
-                        windows_quote(dest_final.string()), windows_quote(dest_final.string()));
-        argv_out = {"cmd.exe", "/c", script};
+        // Batch labels and `goto` are only honoured inside script files; `cmd /c "... goto ..."`
+        // does not loop reliably. Materialise the script to a temp .cmd and invoke that, so the
+        // wait-for-parent and retry-on-lock loops actually run.
+        script_out = std::format("@echo off\r\n"
+                                 ":wait\r\n"
+                                 "tasklist /FI \"PID eq {0}\" 2>NUL | findstr {0} >NUL\r\n"
+                                 "if not errorlevel 1 (timeout /t 1 /nobreak >NUL & goto wait)\r\n"
+                                 ":retry\r\n"
+                                 "move /Y {1} {2}\r\n"
+                                 "if errorlevel 1 (timeout /t 1 /nobreak >NUL & goto retry)\r\n"
+                                 "start \"\" {2}\r\n",
+                                 static_cast<i64>(::getpid()), windows_quote(staged_final.string()),
+                                 windows_quote(dest_final.string()));
+        const std::filesystem::path script_path =
+            std::filesystem::temp_directory_path() / "fxe-updater-swap.cmd";
+        if (!dry_run) {
+          std::error_code remove_ec;
+          std::filesystem::remove(script_path, remove_ec);
+          std::ofstream script_file(script_path, std::ios::binary | std::ios::trunc);
+          if (!script_file) {
+            error_out = "failed to open updater swap script for writing: " + script_path.string();
+            return false;
+          }
+          script_file.write(script_out.data(), static_cast<std::streamsize>(script_out.size()));
+          script_file.close();
+          if (!script_file) {
+            error_out = "failed to write updater swap script: " + script_path.string();
+            return false;
+          }
+        }
+        argv_out = {"cmd.exe", "/c", script_path.string()};
       }
       if (dry_run)
         return true;
 #ifdef _WIN32
       return spawn_windows_argv(argv_out, error_out);
 #else
-      error_out = classify_platform_swap(staged) == platform_swap_kind::windows_exe
+      error_out = kind == platform_swap_kind::windows_exe
                       ? "platform_swap: EXE requires Windows host"
                       : "platform_swap: MSI/MSIX requires Windows host";
       return false;
