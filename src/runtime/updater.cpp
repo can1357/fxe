@@ -532,38 +532,256 @@ namespace fxe::runtime {
       return argv;
     }
 
-    bool path_looks_like_app_bundle(const std::filesystem::path& path) {
-      return path.extension() == ".app";
+    std::string platform_swap_extension(const std::filesystem::path& path) {
+      return ascii_lower(path.extension().string());
     }
 
-#ifdef __APPLE__
+    bool path_looks_like_app_bundle(const std::filesystem::path& path) {
+      return platform_swap_extension(path) == ".app";
+    }
+
+    bool path_looks_like_msi(const std::filesystem::path& path) {
+      return platform_swap_extension(path) == ".msi";
+    }
+
+    bool path_looks_like_msix(const std::filesystem::path& path) {
+      return platform_swap_extension(path) == ".msix";
+    }
+
+    bool path_looks_like_exe(const std::filesystem::path& path) {
+      return platform_swap_extension(path) == ".exe";
+    }
+
+    bool path_looks_like_appimage(const std::filesystem::path& path) {
+      return platform_swap_extension(path) == ".appimage";
+    }
+
+    enum class platform_swap_kind {
+      none,
+      mac_app,
+      windows_msi,
+      windows_msix,
+      windows_exe,
+      linux_appimage,
+    };
+
+    platform_swap_kind classify_platform_swap(const std::filesystem::path& path) {
+      if (path_looks_like_app_bundle(path))
+        return platform_swap_kind::mac_app;
+      if (path_looks_like_msi(path))
+        return platform_swap_kind::windows_msi;
+      if (path_looks_like_msix(path))
+        return platform_swap_kind::windows_msix;
+      if (path_looks_like_exe(path))
+        return platform_swap_kind::windows_exe;
+      if (path_looks_like_appimage(path))
+        return platform_swap_kind::linux_appimage;
+      return platform_swap_kind::none;
+    }
+
+    std::filesystem::path weakly_canonical_or(const std::filesystem::path& path) {
+      std::error_code ec;
+      const std::filesystem::path resolved = std::filesystem::weakly_canonical(path, ec);
+      return ec ? path : resolved;
+    }
+
     std::optional<std::filesystem::path> current_executable_path() {
+#if defined(_WIN32)
+      std::vector<wchar_t> buf(MAX_PATH);
+      for (;;) {
+        const DWORD written =
+            GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+        if (written == 0)
+          return std::nullopt;
+        if (written < static_cast<DWORD>(buf.size()))
+          return std::filesystem::path(std::wstring(buf.data(), written));
+        buf.resize(buf.size() * 2);
+      }
+#elif defined(__APPLE__)
       u32 size = 0;
       if (_NSGetExecutablePath(nullptr, &size) != -1 || size == 0)
         return std::nullopt;
       std::vector<char> buf(size);
       if (_NSGetExecutablePath(buf.data(), &size) != 0)
         return std::nullopt;
-      std::error_code ec;
-      auto resolved = std::filesystem::weakly_canonical(std::filesystem::path(buf.data()), ec);
-      if (ec)
-        return std::filesystem::path(buf.data());
-      return resolved;
+      return weakly_canonical_or(std::filesystem::path(buf.data()));
+#elif defined(__linux__)
+      std::vector<char> buf(1024);
+      for (;;) {
+        const ssize_t n = ::readlink("/proc/self/exe", buf.data(), buf.size() - 1);
+        if (n < 0)
+          return std::nullopt;
+        if (static_cast<usize>(n) < buf.size() - 1) {
+          buf[static_cast<usize>(n)] = '\0';
+          return weakly_canonical_or(std::filesystem::path(buf.data()));
+        }
+        buf.resize(buf.size() * 2);
+      }
+#else
+      return std::nullopt;
+#endif
     }
 
+#ifdef __APPLE__
     std::optional<std::filesystem::path> current_bundle_path() {
       if (auto override_path = platform_swap_destination_override(); override_path)
-        return *override_path;
+        return weakly_canonical_or(*override_path);
       auto exe = current_executable_path();
       if (!exe)
         return std::nullopt;
       for (std::filesystem::path cur = exe->parent_path(); !cur.empty(); cur = cur.parent_path()) {
         if (path_looks_like_app_bundle(cur))
-          return cur;
+          return weakly_canonical_or(cur);
         if (cur == cur.parent_path())
           break;
       }
       return std::nullopt;
+    }
+#endif
+
+    std::optional<std::filesystem::path> current_binary_path() {
+      if (auto override_path = platform_swap_destination_override(); override_path)
+        return weakly_canonical_or(*override_path);
+      auto exe = current_executable_path();
+      if (!exe)
+        return std::nullopt;
+      return weakly_canonical_or(*exe);
+    }
+
+    std::optional<std::filesystem::path> current_appimage_destination_path() {
+      if (auto override_path = platform_swap_destination_override(); override_path)
+        return weakly_canonical_or(*override_path);
+      if (const char* env_dest = std::getenv("FXE_APPIMAGE_DEST"); env_dest && *env_dest != '\0')
+        return weakly_canonical_or(std::filesystem::path(env_dest));
+      auto exe = current_executable_path();
+      if (!exe)
+        return std::nullopt;
+      return weakly_canonical_or(*exe);
+    }
+
+    std::string windows_quote(std::string_view path) {
+      std::string out = "\"";
+      out.reserve(path.size() + 2);
+      for (char c : path) {
+        if (c == '%')
+          out += "%%";
+        else
+          out.push_back(c);
+      }
+      out.push_back('"');
+      return out;
+    }
+
+    std::string powershell_quote(std::string_view path) {
+      std::string out = "'";
+      out.reserve(path.size() + 2);
+      for (char c : path) {
+        if (c == '\'')
+          out += "''";
+        else
+          out.push_back(c);
+      }
+      out.push_back('\'');
+      return out;
+    }
+
+#ifndef _WIN32
+    bool spawn_detached_posix_argv(const char* executable, std::vector<std::string>& argv_out,
+                                   std::string& error_out) {
+      std::vector<char*> argv;
+      argv.reserve(argv_out.size() + 1);
+      for (auto& arg : argv_out)
+        argv.push_back(arg.data());
+      argv.push_back(nullptr);
+      posix_spawnattr_t attr;
+      int rv = posix_spawnattr_init(&attr);
+      if (rv != 0) {
+        error_out = "posix_spawnattr_init failed: " + std::system_category().message(rv);
+        return false;
+      }
+#ifdef POSIX_SPAWN_SETSID
+      rv = posix_spawnattr_setflags(&attr, static_cast<short>(POSIX_SPAWN_SETSID));
+      if (rv != 0) {
+        posix_spawnattr_destroy(&attr);
+        error_out = "posix_spawnattr_setflags failed: " + std::system_category().message(rv);
+        return false;
+      }
+#endif
+      char* const envp[] = {nullptr};
+      [[maybe_unused]] pid_t child_pid = 0;
+      rv = posix_spawn(&child_pid, executable, nullptr, &attr, argv.data(), envp);
+      posix_spawnattr_destroy(&attr);
+      if (rv != 0) {
+        error_out = "posix_spawn failed: " + std::system_category().message(rv);
+        return false;
+      }
+      return true;
+    }
+#endif
+
+#ifdef _WIN32
+    std::wstring widen_utf8(std::string_view text) {
+      if (text.empty())
+        return {};
+      const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                                           static_cast<int>(text.size()), nullptr, 0);
+      if (size <= 0)
+        return {};
+      std::wstring out(static_cast<usize>(size), L'\0');
+      if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
+                              static_cast<int>(text.size()), out.data(), size) != size) {
+        return {};
+      }
+      return out;
+    }
+
+    std::wstring quote_windows_process_arg(const std::wstring& arg) {
+      std::wstring out = L"\"";
+      unsigned backslashes = 0;
+      for (wchar_t ch : arg) {
+        if (ch == L'\\') {
+          ++backslashes;
+          continue;
+        }
+        if (ch == L'"')
+          out.append(backslashes * 2 + 1, L'\\');
+        else if (backslashes != 0)
+          out.append(backslashes, L'\\');
+        backslashes = 0;
+        out.push_back(ch);
+      }
+      if (backslashes != 0)
+        out.append(backslashes * 2, L'\\');
+      out.push_back(L'"');
+      return out;
+    }
+
+    bool spawn_windows_argv(const std::vector<std::string>& argv_out, std::string& error_out) {
+      std::wstring command_line;
+      for (usize i = 0; i < argv_out.size(); ++i) {
+        const std::wstring wide = widen_utf8(argv_out[i]);
+        if (wide.empty() && !argv_out[i].empty()) {
+          error_out = "CreateProcessW argument encoding failed";
+          return false;
+        }
+        if (i != 0)
+          command_line.push_back(L' ');
+        command_line += quote_windows_process_arg(wide);
+      }
+      STARTUPINFOW startup{};
+      startup.cb = sizeof(startup);
+      PROCESS_INFORMATION process{};
+      const BOOL ok =
+          CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
+                         DETACHED_PROCESS | CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+      if (!ok) {
+        error_out = "CreateProcessW failed: " +
+                    std::system_category().message(static_cast<int>(GetLastError()));
+        return false;
+      }
+      CloseHandle(process.hThread);
+      CloseHandle(process.hProcess);
+      return true;
     }
 #endif
 
@@ -1405,63 +1623,97 @@ namespace fxe::runtime {
     error_out.clear();
     auto& argv_out = last_platform_swap_argv_storage();
     argv_out.clear();
-#ifdef __APPLE__
     const std::filesystem::path staged(staged_path);
-    if (!path_looks_like_app_bundle(staged))
+    switch (classify_platform_swap(staged)) {
+    case platform_swap_kind::none:
       return true;
-    auto destination = current_bundle_path();
-    if (!destination) {
-      error_out = "failed to resolve running app bundle destination for staged swap";
-      return false;
-    }
-    std::error_code ec;
-    const std::filesystem::path staged_resolved = std::filesystem::weakly_canonical(staged, ec);
-    const std::filesystem::path staged_final = ec ? staged : staged_resolved;
-    ec.clear();
-    const std::filesystem::path dest_resolved = std::filesystem::weakly_canonical(*destination, ec);
-    const std::filesystem::path dest_final = ec ? *destination : dest_resolved;
-    const std::string script = std::format("while kill -0 {} 2>/dev/null; do /bin/sleep 0.1; done; "
-                                           "/bin/mv -f {} {} && /usr/bin/open {}",
-                                           static_cast<i64>(::getpid()), shell_quote(staged_final),
-                                           shell_quote(dest_final), shell_quote(dest_final));
-    argv_out = {"/bin/sh", "-c", script};
-    if (dry_run)
-      return true;
-    std::array<char*, 4> argv = {
-        argv_out[0].data(),
-        argv_out[1].data(),
-        argv_out[2].data(),
-        nullptr,
-    };
-    posix_spawnattr_t attr;
-    int rv = posix_spawnattr_init(&attr);
-    if (rv != 0) {
-      error_out = "posix_spawnattr_init failed: " + std::system_category().message(rv);
-      return false;
-    }
-#ifdef POSIX_SPAWN_SETSID
-    rv = posix_spawnattr_setflags(&attr, static_cast<short>(POSIX_SPAWN_SETSID));
-    if (rv != 0) {
-      posix_spawnattr_destroy(&attr);
-      error_out = "posix_spawnattr_setflags failed: " + std::system_category().message(rv);
-      return false;
-    }
-#endif
-    char* const envp[] = {nullptr};
-    [[maybe_unused]] pid_t child_pid = 0;
-    rv = posix_spawn(&child_pid, "/bin/sh", nullptr, &attr, argv.data(), envp);
-    posix_spawnattr_destroy(&attr);
-    if (rv != 0) {
-      error_out = "posix_spawn failed: " + std::system_category().message(rv);
-      return false;
-    }
-    return true;
+    case platform_swap_kind::mac_app: {
+#ifdef __APPLE__
+      auto destination = current_bundle_path();
+      if (!destination) {
+        error_out = "failed to resolve running app bundle destination for staged swap";
+        return false;
+      }
+      const std::filesystem::path staged_final = weakly_canonical_or(staged);
+      const std::filesystem::path dest_final = weakly_canonical_or(*destination);
+      const std::string script =
+          std::format("while kill -0 {} 2>/dev/null; do /bin/sleep 0.1; done; /bin/mv -f {} {} && "
+                      "/usr/bin/open {}",
+                      static_cast<i64>(::getpid()), shell_quote(staged_final),
+                      shell_quote(dest_final), shell_quote(dest_final));
+      argv_out = {"/bin/sh", "-c", script};
+      if (dry_run)
+        return true;
+      return spawn_detached_posix_argv("/bin/sh", argv_out, error_out);
 #else
-    (void)staged_path;
-    (void)dry_run;
-    // Non-macOS still uses the legacy in-process marker transition; platform swap stays unchanged.
-    return true;
+      if (dry_run)
+        return true;
+      error_out = "platform_swap: .app requires macOS host";
+      return false;
 #endif
+    }
+    case platform_swap_kind::windows_msi:
+    case platform_swap_kind::windows_msix:
+    case platform_swap_kind::windows_exe: {
+      const std::filesystem::path staged_final = weakly_canonical_or(staged);
+      if (classify_platform_swap(staged) == platform_swap_kind::windows_msi) {
+        const std::filesystem::path log_path =
+            std::filesystem::temp_directory_path() / "fxe-updater.log";
+        argv_out = {"msiexec.exe", "/i",   staged_final.string(), "/qn",
+                    "/norestart",  "/L*v", log_path.string()};
+      } else if (classify_platform_swap(staged) == platform_swap_kind::windows_msix) {
+        argv_out = {"powershell.exe", "-NoProfile", "-Command",
+                    "Add-AppxPackage -Path " + powershell_quote(staged_final.string())};
+      } else {
+        auto destination = current_binary_path();
+        if (!destination) {
+          error_out = "failed to resolve running executable destination for staged swap";
+          return false;
+        }
+        const std::filesystem::path dest_final = weakly_canonical_or(*destination);
+        const std::string script =
+            std::format("set pid={}& :loop& tasklist /FI \"PID eq %pid%\" | findstr %pid% >NUL && "
+                        "(timeout /t 1 /nobreak >NUL & goto loop)& move /Y {} {} & start \"\" {}",
+                        static_cast<i64>(::getpid()), windows_quote(staged_final.string()),
+                        windows_quote(dest_final.string()), windows_quote(dest_final.string()));
+        argv_out = {"cmd.exe", "/c", script};
+      }
+      if (dry_run)
+        return true;
+#ifdef _WIN32
+      return spawn_windows_argv(argv_out, error_out);
+#else
+      error_out = classify_platform_swap(staged) == platform_swap_kind::windows_exe
+                      ? "platform_swap: EXE requires Windows host"
+                      : "platform_swap: MSI/MSIX requires Windows host";
+      return false;
+#endif
+    }
+    case platform_swap_kind::linux_appimage: {
+      auto destination = current_appimage_destination_path();
+      if (!destination) {
+        error_out = "failed to resolve AppImage destination for staged swap";
+        return false;
+      }
+      const std::filesystem::path staged_final = weakly_canonical_or(staged);
+      const std::filesystem::path dest_final = weakly_canonical_or(*destination);
+      const std::string script =
+          std::format("while kill -0 {} 2>/dev/null; do /bin/sleep 0.1; done; /bin/mv -f {} {} && "
+                      "/bin/chmod +x {} && exec {}",
+                      static_cast<i64>(::getpid()), shell_quote(staged_final),
+                      shell_quote(dest_final), shell_quote(dest_final), shell_quote(dest_final));
+      argv_out = {"/bin/sh", "-c", script};
+      if (dry_run)
+        return true;
+#ifdef __linux__
+      return spawn_detached_posix_argv("/bin/sh", argv_out, error_out);
+#else
+      error_out = "platform_swap: AppImage requires Linux host";
+      return false;
+#endif
+    }
+    }
+    return true;
   }
 
   bool updater::apply_pending(std::string& error_out) {
@@ -1494,8 +1746,12 @@ namespace fxe::runtime {
             !perform_platform_swap(staged_payload.string(), error_out))
           return false;
 #else
-        // Windows/Linux keep the legacy marker-only path until their swap helpers land.
-        (void)staged_payload;
+        if ((path_looks_like_msi(staged_payload) || path_looks_like_msix(staged_payload) ||
+             path_looks_like_exe(staged_payload) || path_looks_like_appimage(staged_payload)) &&
+            staged_payload.parent_path() == entry.path() &&
+            !perform_platform_swap(staged_payload.string(), error_out)) {
+          return false;
+        }
 #endif
         return true;
       }

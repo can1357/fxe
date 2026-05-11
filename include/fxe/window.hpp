@@ -71,6 +71,12 @@ namespace fxe {
     custom_buttons,
   };
 
+  struct caption_button_layout {
+    math::ivec4 min_rect{};
+    math::ivec4 max_rect{};
+    math::ivec4 close_rect{};
+  };
+
   struct splash_options {
     u32 width = 1280;
     u32 height = 720;
@@ -300,6 +306,13 @@ namespace fxe {
     virtual void set_title_bar_style(title_bar_style style) {
       (void)style;
     }
+    virtual bool set_gtk_frame_extents(i32 left, i32 right, i32 top, i32 bottom) {
+      (void)left;
+      (void)right;
+      (void)top;
+      (void)bottom;
+      return false;
+    }
     virtual bool set_traffic_light_position(int x, int y) {
       (void)x;
       (void)y;
@@ -308,6 +321,12 @@ namespace fxe {
     virtual bool set_window_controls_overlay(bool enabled) {
       (void)enabled;
       return false;
+    }
+    virtual void set_resize_handle_thickness(i32 px) {
+      (void)px;
+    }
+    virtual void set_caption_button_layout(const caption_button_layout& layout) {
+      (void)layout;
     }
     virtual bool set_vibrancy(const char* kind) {
       (void)kind;

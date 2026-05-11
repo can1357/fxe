@@ -202,6 +202,8 @@ namespace fxe::os {
 #define FXE_OS_DBUS FXE_HAS_DBUS
 #endif
 
+  const char* ime_backend();
+
 #if defined(_WIN32)
   using win32_ime_emit_fn = void (*)(void* owner, const char* preedit, int cursor,
                                      const char* committed);

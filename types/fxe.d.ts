@@ -341,6 +341,12 @@ declare namespace FXE {
     darkMode: boolean;
     systemAccent: boolean;
   }
+  type WindowCaptionButtonRect = readonly [number, number, number, number];
+  interface WindowCaptionButtonLayout {
+    minimize: WindowCaptionButtonRect;
+    maximize: WindowCaptionButtonRect;
+    close: WindowCaptionButtonRect;
+  }
 
   interface KeyEvent {
     type: 'keydown' | 'keyup';
@@ -549,8 +555,17 @@ declare namespace FXE {
     setDecorated(enabled: boolean): void;
     isDecorated(): boolean;
     setTitleBarStyle(style: TitleBarStyle): void;
+    setGtkFrameExtents(extents: {
+      left: number;
+      right: number;
+      top: number;
+      bottom: number;
+    }): boolean;
     setTrafficLightPosition(x: number, y: number): boolean;
     setWindowControlsOverlay(enabled: boolean): boolean;
+    setResizeHandleThickness(px: number): void;
+    setCaptionButtonLayout(layout: WindowCaptionButtonLayout): void;
+
     setVibrancy(kind: VibrancyKind | null): boolean;
     vibrancyCapabilities(): VibrancyCapabilities;
 
@@ -1501,6 +1516,9 @@ declare module 'fxe' {
   export type TitleBarStyle = FXE.TitleBarStyle;
   export type VibrancyKind = FXE.VibrancyKind;
   export type VibrancyCapabilities = FXE.VibrancyCapabilities;
+  export type WindowCaptionButtonRect = FXE.WindowCaptionButtonRect;
+  export type WindowCaptionButtonLayout = FXE.WindowCaptionButtonLayout;
+
   export type WindowEventMap = FXE.WindowEventMap;
   export type WindowMessageEvent = FXE.WindowMessageEvent;
   export type ComposeEvent = FXE.ComposeEvent;

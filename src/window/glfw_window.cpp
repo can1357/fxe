@@ -744,6 +744,9 @@ namespace fxe {
       FXE_WARN("window", "{}", message);
     }
   }
+#if defined(__linux__) && !defined(__APPLE__)
+  bool linux_set_gtk_frame_extents(GLFWwindow* window, i32 left, i32 right, i32 top, i32 bottom);
+#endif
 
   // ----------------------------------------------------------------------------
   // GLFW init/terminate refcount. Multi-window phase 3 will create several
@@ -1235,18 +1238,39 @@ namespace fxe {
       return glfwGetWindowAttrib(handle_, GLFW_DECORATED) == GLFW_TRUE;
     }
     void set_title_bar_style(title_bar_style style) override {
+#if defined(__linux__) && !defined(__APPLE__)
+      if (style == title_bar_style::default_) {
+        (void)set_gtk_frame_extents(0, 0, 0, 0);
+        set_decorated(true);
+        return;
+      }
+      set_decorated(false);
+      (void)set_gtk_frame_extents(28, 28, 28, 28);
+#elif defined(__APPLE__)
       const bool native_decorated = (style == title_bar_style::default_);
       set_decorated(native_decorated);
-#if defined(__APPLE__)
       if (style == title_bar_style::hidden_inset || style == title_bar_style::custom_buttons) {
         warn_once(warned_title_bar_style_, "fxe.window: title-bar traffic-light layout is not "
                                            "implemented; using frameless GLFW window");
       }
 #else
+      const bool native_decorated = (style == title_bar_style::default_);
+      set_decorated(native_decorated);
       if (style == title_bar_style::hidden_inset || style == title_bar_style::custom_buttons) {
         warn_once(warned_title_bar_style_, "fxe.window: platform title-bar button layout is not "
                                            "implemented; using frameless GLFW window");
       }
+#endif
+    }
+    bool set_gtk_frame_extents(i32 left, i32 right, i32 top, i32 bottom) override {
+#if defined(__linux__) && !defined(__APPLE__)
+      return linux_set_gtk_frame_extents(handle_, left, right, top, bottom);
+#else
+      (void)left;
+      (void)right;
+      (void)top;
+      (void)bottom;
+      return false;
 #endif
     }
     bool set_traffic_light_position(int x, int y) override {
@@ -1292,6 +1316,27 @@ namespace fxe {
       return false;
 #endif
     }
+    void set_resize_handle_thickness(i32 px) override {
+#if defined(_WIN32)
+      resize_handle_thickness_ = px > 0 ? px : 0;
+      install_win32_subclass();
+#else
+      (void)px;
+      warn_once(warned_unsupported_resize_handle_thickness_,
+                "fxe.window: setResizeHandleThickness is unsupported on this GLFW backend");
+#endif
+    }
+    void set_caption_button_layout(const caption_button_layout& layout) override {
+#if defined(_WIN32)
+      caption_button_layout_ = layout;
+      install_win32_subclass();
+#else
+      (void)layout;
+      warn_once(warned_unsupported_caption_button_layout_,
+                "fxe.window: setCaptionButtonLayout is unsupported on this GLFW backend");
+#endif
+    }
+
     bool set_vibrancy(const char* kind) override {
       vibrancy_kind_ = kind ? std::string(kind) : std::string{};
 #if defined(__APPLE__)
@@ -1873,6 +1918,27 @@ namespace fxe {
         if (self->window_controls_overlay_)
           return TRUE;
         break;
+      case WM_NCLBUTTONDBLCLK:
+        if (self->window_controls_overlay_ && wp == HTCAPTION) {
+          ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+          return 0;
+        }
+        break;
+      case WM_GETMINMAXINFO:
+        if (self->window_controls_overlay_) {
+          auto* minmax = reinterpret_cast<MINMAXINFO*>(lp);
+          MONITORINFO monitor_info{};
+          monitor_info.cbSize = sizeof(monitor_info);
+          HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+          if (minmax && monitor && GetMonitorInfoW(monitor, &monitor_info)) {
+            minmax->ptMaxPosition.x = monitor_info.rcWork.left - monitor_info.rcMonitor.left;
+            minmax->ptMaxPosition.y = monitor_info.rcWork.top - monitor_info.rcMonitor.top;
+            minmax->ptMaxSize.x = monitor_info.rcWork.right - monitor_info.rcWork.left;
+            minmax->ptMaxSize.y = monitor_info.rcWork.bottom - monitor_info.rcWork.top;
+          }
+          return 0;
+        }
+        break;
       case WM_DESTROY: {
         LRESULT result = DefSubclassProc(hwnd, msg, wp, lp);
         self->win32_subclassed_ = false;
@@ -1886,13 +1952,96 @@ namespace fxe {
       return DefSubclassProc(hwnd, msg, wp, lp);
     }
 
+    [[nodiscard]] UINT win32_window_dpi(HWND hwnd) const {
+      const UINT dpi = hwnd ? GetDpiForWindow(hwnd) : 0;
+      return dpi == 0 ? USER_DEFAULT_SCREEN_DPI : dpi;
+    }
+
+    [[nodiscard]] i32 win32_scale_dip(HWND hwnd, i32 dip) const {
+      return static_cast<i32>(
+          MulDiv(dip, static_cast<int>(win32_window_dpi(hwnd)), USER_DEFAULT_SCREEN_DPI));
+    }
+
+    [[nodiscard]] RECT win32_scaled_rect(HWND hwnd, const math::ivec4& rect) const {
+      RECT out{};
+      out.left = win32_scale_dip(hwnd, rect.x);
+      out.top = win32_scale_dip(hwnd, rect.y);
+      out.right = out.left + win32_scale_dip(hwnd, rect.z);
+      out.bottom = out.top + win32_scale_dip(hwnd, rect.w);
+      return out;
+    }
+
+    [[nodiscard]] static bool win32_point_in_rect(POINT pt, const RECT& rect) {
+      return pt.x >= rect.left && pt.x < rect.right && pt.y >= rect.top && pt.y < rect.bottom;
+    }
+
+    [[nodiscard]] bool win32_is_maximized(HWND hwnd) const {
+      WINDOWPLACEMENT placement{};
+      placement.length = sizeof(placement);
+      return GetWindowPlacement(hwnd, &placement) != FALSE && placement.showCmd == SW_SHOWMAXIMIZED;
+    }
+
+    [[nodiscard]] std::optional<LRESULT> win32_hit_test_caption_buttons(HWND hwnd, POINT pt) const {
+      if (caption_button_layout_) {
+        if (win32_point_in_rect(pt, win32_scaled_rect(hwnd, caption_button_layout_->min_rect)))
+          return HTMINBUTTON;
+        if (win32_point_in_rect(pt, win32_scaled_rect(hwnd, caption_button_layout_->max_rect)))
+          return HTMAXBUTTON;
+        if (win32_point_in_rect(pt, win32_scaled_rect(hwnd, caption_button_layout_->close_rect)))
+          return HTCLOSE;
+        return std::nullopt;
+      }
+      if (win32_point_in_caption_buttons(hwnd, pt))
+        return HTCLIENT;
+      return std::nullopt;
+    }
+
+    [[nodiscard]] std::optional<LRESULT> win32_hit_test_resize_handle(HWND hwnd, POINT pt) const {
+      if (resize_handle_thickness_ <= 0 || win32_is_maximized(hwnd))
+        return std::nullopt;
+      const LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+      if ((style & WS_THICKFRAME) == 0)
+        return std::nullopt;
+      RECT client{};
+      if (!GetClientRect(hwnd, &client))
+        return std::nullopt;
+      const i32 thickness = win32_scale_dip(hwnd, resize_handle_thickness_);
+      if (thickness <= 0)
+        return std::nullopt;
+      const bool left = pt.x >= client.left && pt.x < client.left + thickness;
+      const bool right = pt.x >= client.right - thickness && pt.x < client.right;
+      const bool top = pt.y >= client.top && pt.y < client.top + thickness;
+      const bool bottom = pt.y >= client.bottom - thickness && pt.y < client.bottom;
+      if (top && left)
+        return HTTOPLEFT;
+      if (top && right)
+        return HTTOPRIGHT;
+      if (bottom && left)
+        return HTBOTTOMLEFT;
+      if (bottom && right)
+        return HTBOTTOMRIGHT;
+      if (left)
+        return HTLEFT;
+      if (right)
+        return HTRIGHT;
+      if (top)
+        return HTTOP;
+      if (bottom)
+        return HTBOTTOM;
+      return std::nullopt;
+    }
+
     LRESULT win32_hit_test(HWND hwnd, WPARAM wp, LPARAM lp) const {
       POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
       if (!ScreenToClient(hwnd, &pt))
         return DefSubclassProc(hwnd, WM_NCHITTEST, wp, lp);
 
-      if (window_controls_overlay_ && win32_point_in_caption_buttons(hwnd, pt))
-        return HTCLIENT;
+      if (window_controls_overlay_) {
+        if (auto hit = win32_hit_test_caption_buttons(hwnd, pt); hit)
+          return *hit;
+        if (auto hit = win32_hit_test_resize_handle(hwnd, pt); hit)
+          return *hit;
+      }
 
       for (const auto& r : drag_rects_) {
         if (pt.x >= r.x && pt.x < r.x + r.z && pt.y >= r.y && pt.y < r.y + r.w)
@@ -1911,8 +2060,8 @@ namespace fxe {
       const int button_w = GetSystemMetrics(SM_CXSIZE);
       const int button_h = GetSystemMetrics(SM_CYSIZE);
       const int group_w = button_w * 3;
-      const int left = client.right - group_w - caption_button_offset_.x;
-      const int top = caption_button_offset_.y;
+      const int left = client.right - group_w - win32_scale_dip(hwnd, caption_button_offset_.x);
+      const int top = win32_scale_dip(hwnd, caption_button_offset_.y);
       return pt.x >= left && pt.x < left + group_w && pt.y >= top && pt.y < top + button_h;
     }
 
@@ -2866,9 +3015,12 @@ namespace fxe {
     std::string vibrancy_kind_;
     bool blur_behind_ = false;
     bool warned_unsupported_window_controls_overlay_ = false;
+    bool warned_unsupported_resize_handle_thickness_ = false;
+    bool warned_unsupported_caption_button_layout_ = false;
+
     std::mutex input_mutex_;
     std::string title_;
-#if !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(_WIN32)
     bool warned_unsupported_vibrancy_ = false;
     bool warned_unsupported_blur_behind_ = false;
 #endif
@@ -2887,6 +3039,9 @@ namespace fxe {
     bool warned_win32_transparent_vibrancy_ = false;
     bool warned_win32_drop_target_ = false;
     math::ivec2 caption_button_offset_{0, 0};
+    i32 resize_handle_thickness_ = 8;
+    std::optional<caption_button_layout> caption_button_layout_;
+
     HICON win32_icon_ = nullptr;
     win32_drop_target* win32_drop_target_ = nullptr;
     bool win32_ole_initialized_ = false;

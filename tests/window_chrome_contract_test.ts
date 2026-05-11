@@ -32,6 +32,26 @@ test('invisible App window supports chrome API contract and closes normally', ()
     }
     assertEqual(win.setWindowControlsOverlay(false), supportsWindowControlsOverlay);
     assertEqual(win.setWindowControlsOverlay(true), supportsWindowControlsOverlay);
+    win.setResizeHandleThickness(12);
+    win.setCaptionButtonLayout({
+      minimize: [4, 4, 16, 16],
+      maximize: [24, 4, 16, 16],
+      close: [44, 4, 16, 16],
+    });
+    assertThrows(
+      () => win.setResizeHandleThickness('12' as unknown as number),
+      /setResizeHandleThickness: expected number/i,
+    );
+    assertThrows(
+      () =>
+        win.setCaptionButtonLayout({
+          minimize: [4, 4, 16] as unknown as readonly [number, number, number, number],
+          maximize: [24, 4, 16, 16],
+          close: [44, 4, 16, 16],
+        }),
+      /setCaptionButtonLayout: layout\.minimize must be \[x, y, width, height\]/i,
+    );
+
     assertEqual(win.setVibrancy('sidebar'), vibrancyCapabilities.supported);
     assertEqual(win.setVibrancy(null), vibrancyCapabilities.supported);
     assertEqual(

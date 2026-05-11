@@ -2,6 +2,7 @@ add_library(
     fxe_window
     STATIC
     src/window/glfw_window.cpp
+    src/window/ime_backend.cpp
     src/wgpu/renderer_wgpu.cpp
 )
 add_library(fxe::window ALIAS fxe_window)
@@ -32,7 +33,10 @@ endif()
 
 if(WIN32)
     target_sources(fxe_window PRIVATE src/window/ime_win32.cpp src/window/glfw_window_win32_pointer.cpp)
-    target_link_libraries(fxe_window PRIVATE imm32)
+    target_link_libraries(fxe_window PRIVATE imm32 ole32)
+endif()
+if(UNIX AND NOT APPLE)
+    target_sources(fxe_window PRIVATE src/window/glfw_window_linux_chrome.cpp)
 endif()
 if(UNIX AND NOT APPLE AND FXE_OS_DBUS)
     target_sources(fxe_window PRIVATE src/window/ime_linux.cpp)

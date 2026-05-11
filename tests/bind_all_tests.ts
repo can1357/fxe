@@ -4,6 +4,7 @@ import './bind_harness_test.ts';
 
 // === bind test imports begin ===
 import './bind_window_test.ts';
+import './bind_window_linux_chrome_test.ts';
 import './bind_renderer_test.ts';
 import './bind_renderer_multisample_test.ts';
 import './bind_command_buffer_test.ts';

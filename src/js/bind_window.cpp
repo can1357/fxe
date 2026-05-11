@@ -1289,6 +1289,46 @@ namespace fxe::js {
       }
       w->set_title_bar_style(style);
     }
+    void win_set_gtk_frame_extents(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* w = unwrap_win(info.This());
+      if (!w) {
+        info.GetReturnValue().Set(false);
+        return;
+      }
+      if (info.Length() < 1 || !info[0]->IsObject() || info[0]->IsArray()) {
+        (void)throw_type_error(iso, "setGtkFrameExtents({ left, right, top, bottom })");
+        return;
+      }
+      auto extents = info[0].As<Object>();
+      i32 left = 0;
+      i32 right = 0;
+      i32 top = 0;
+      i32 bottom = 0;
+      auto read_extent = [&](Local<String> key, const char* label, i32& out) -> bool {
+        auto value = get_prop<Local<Value>>(ctx, extents, key);
+        if (!value || !(*value)->IsNumber()) {
+          (void)throw_type_error(iso,
+                                 std::string("setGtkFrameExtents: ") + label + " must be a number");
+          return false;
+        }
+        out = (*value)->Int32Value(ctx).FromMaybe(0);
+        return true;
+      };
+      if (!read_extent("left"_v8(iso), "extents.left", left) ||
+          !read_extent("right"_v8(iso), "extents.right", right) ||
+          !read_extent("top"_v8(iso), "extents.top", top) ||
+          !read_extent("bottom"_v8(iso), "extents.bottom", bottom)) {
+        return;
+      }
+      try {
+        info.GetReturnValue().Set(w->set_gtk_frame_extents(left, right, top, bottom));
+      } catch (const std::exception& err) {
+        (void)throw_error(iso, err.what());
+      }
+    }
+
     void win_set_traffic_light_position(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
@@ -1317,6 +1357,76 @@ namespace fxe::js {
         (void)throw_error(iso, err.what());
       }
     }
+    void win_set_resize_handle_thickness(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      if (info.Length() < 1 || !info[0]->IsNumber()) {
+        (void)throw_type_error(iso, "setResizeHandleThickness: expected number");
+        return;
+      }
+      const double px = info[0]->NumberValue(ctx).FromMaybe(0.0);
+      if (!std::isfinite(px)) {
+        (void)throw_type_error(iso, "setResizeHandleThickness: expected finite number");
+        return;
+      }
+      w->set_resize_handle_thickness(static_cast<i32>(px));
+    }
+
+    bool read_window_chrome_rect4(Isolate* iso, Local<Context> ctx, Local<Object> object,
+                                  Local<String> key, const char* label, math::ivec4& out) {
+      auto value = get_prop<Local<Value>>(ctx, object, key);
+      if (!value || !(*value)->IsArray()) {
+        (void)throw_type_error(iso, std::string("setCaptionButtonLayout: ") + label +
+                                        " must be [x, y, width, height]");
+        return false;
+      }
+      auto rect = (*value).As<Array>();
+      if (rect->Length() != 4) {
+        (void)throw_type_error(iso, std::string("setCaptionButtonLayout: ") + label +
+                                        " must be [x, y, width, height]");
+        return false;
+      }
+      i32 values[4]{};
+      for (u32 i = 0; i < 4; ++i) {
+        auto field = get_index<Local<Value>>(ctx, rect, i);
+        if (!field || !(*field)->IsNumber()) {
+          (void)throw_type_error(iso, std::string("setCaptionButtonLayout: ") + label +
+                                          " must be [x, y, width, height]");
+          return false;
+        }
+        values[i] = (*field)->Int32Value(ctx).FromMaybe(0);
+      }
+      out = {values[0], values[1], values[2], values[3]};
+      return true;
+    }
+
+    void win_set_caption_button_layout(const FunctionCallbackInfo<Value>& info) {
+      auto* iso = info.GetIsolate();
+      auto ctx = iso->GetCurrentContext();
+      auto* w = unwrap_win(info.This());
+      if (!w)
+        return;
+      if (info.Length() < 1 || !info[0]->IsObject() || info[0]->IsArray()) {
+        (void)throw_type_error(
+            iso, "setCaptionButtonLayout: expected { minimize, maximize, close } object");
+        return;
+      }
+      auto object = info[0].As<Object>();
+      caption_button_layout layout;
+      if (!read_window_chrome_rect4(iso, ctx, object, "minimize"_v8(iso), "layout.minimize",
+                                    layout.min_rect) ||
+          !read_window_chrome_rect4(iso, ctx, object, "maximize"_v8(iso), "layout.maximize",
+                                    layout.max_rect) ||
+          !read_window_chrome_rect4(iso, ctx, object, "close"_v8(iso), "layout.close",
+                                    layout.close_rect)) {
+        return;
+      }
+      w->set_caption_button_layout(layout);
+    }
+
     void win_set_vibrancy(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto* w = unwrap_win(info.This());
@@ -1877,6 +1987,43 @@ namespace fxe::js {
       info.GetReturnValue().Set(w->set_clipboard_mime(to_std_string(iso, info[0]), bytes));
     }
 
+    bool read_window_drag_rect(Local<Context> ctx, Local<Value> el, Isolate* iso,
+                               math::ivec4& rect) {
+      i32 x = 0;
+      i32 y = 0;
+      i32 width = 0;
+      i32 height = 0;
+      if (el->IsArray()) {
+        auto array = el.As<Array>();
+        auto get_i = [&](u32 idx) -> i32 {
+          auto value = get_index<Local<Value>>(ctx, array, idx);
+          if (!value)
+            return 0;
+          return (*value)->Int32Value(ctx).FromMaybe(0);
+        };
+        x = get_i(0);
+        y = get_i(1);
+        width = get_i(2);
+        height = get_i(3);
+      } else if (el->IsObject()) {
+        auto object = el.As<Object>();
+        auto get_i = [&](Local<String> key) -> i32 {
+          auto value = get_prop<Local<Value>>(ctx, object, key);
+          if (!value)
+            return 0;
+          return (*value)->Int32Value(ctx).FromMaybe(0);
+        };
+        x = get_i("x"_v8(iso));
+        y = get_i("y"_v8(iso));
+        width = get_i("width"_v8(iso));
+        height = get_i("height"_v8(iso));
+      } else {
+        return false;
+      }
+      rect = {x, y, width, height};
+      return true;
+    }
+
     void win_set_drag_region(const FunctionCallbackInfo<Value>& info) {
       auto* iso = info.GetIsolate();
       auto ctx = iso->GetCurrentContext();
@@ -1892,36 +2039,10 @@ namespace fxe::js {
           auto el_value = get_index<Local<Value>>(ctx, arr, i);
           if (!el_value)
             continue;
-          auto el = *el_value;
-          int x = 0, y = 0, ww = 0, hh = 0;
-          if (el->IsArray()) {
-            auto a = el.As<Array>();
-            auto get_i = [&](u32 idx) -> int {
-              auto value = get_index<Local<Value>>(ctx, a, idx);
-              if (!value)
-                return 0;
-              return (*value)->Int32Value(ctx).FromMaybe(0);
-            };
-            x = get_i(0);
-            y = get_i(1);
-            ww = get_i(2);
-            hh = get_i(3);
-          } else if (el->IsObject()) {
-            auto o = el.As<Object>();
-            auto get_i = [&](Local<String> k) -> int {
-              auto value = get_prop<Local<Value>>(ctx, o, k);
-              if (!value)
-                return 0;
-              return (*value)->Int32Value(ctx).FromMaybe(0);
-            };
-            x = get_i("x"_v8(iso));
-            y = get_i("y"_v8(iso));
-            ww = get_i("width"_v8(iso));
-            hh = get_i("height"_v8(iso));
-          } else {
+          math::ivec4 rect{};
+          if (!read_window_drag_rect(ctx, *el_value, iso, rect))
             continue;
-          }
-          rects.emplace_back(x, y, ww, hh);
+          rects.push_back(rect);
         }
       }
       w->set_drag_region(rects);
@@ -2710,8 +2831,13 @@ namespace fxe::js {
     proto->Set(iso, "setTitleBarStyle", FunctionTemplate::New(iso, win_set_title_bar_style));
     proto->Set(iso, "setTrafficLightPosition",
                FunctionTemplate::New(iso, win_set_traffic_light_position));
+    proto->Set(iso, "setGtkFrameExtents", FunctionTemplate::New(iso, win_set_gtk_frame_extents));
     proto->Set(iso, "setWindowControlsOverlay",
                FunctionTemplate::New(iso, win_set_window_controls_overlay));
+    proto->Set(iso, "setResizeHandleThickness",
+               FunctionTemplate::New(iso, win_set_resize_handle_thickness));
+    proto->Set(iso, "setCaptionButtonLayout",
+               FunctionTemplate::New(iso, win_set_caption_button_layout));
     proto->Set(iso, "setVibrancy", FunctionTemplate::New(iso, win_set_vibrancy));
     proto->Set(iso, "vibrancyCapabilities", FunctionTemplate::New(iso, win_vibrancy_capabilities));
     proto->Set(iso, "setBlurBehind", FunctionTemplate::New(iso, win_set_blur_behind));
